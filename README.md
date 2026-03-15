@@ -1,0 +1,1090 @@
+# Project VoidRift
+
+**Local-first Agentic Development Framework**
+
+A local-first AI development lifecycle tool that routes work between a worker model (primary execution) and an optional architect model (escalation and design). The five phases — Gather → Plan → Develop → Automate → Verify — produce a deployable, tested project from requirements alone.
+
+## Setup & Configuration
+
+### Workstation Setup
+
+The workstation is where you (the operator) run `voidrift` commands. It orchestrates the workflow and communicates with the worker node.
+
+**Requirements:**
+- Linux, macOS, or WSL2
+- Bash shell
+- Git
+- SSH client (for local worker models)
+- Network access to worker node (if using local models)
+
+**Installation:**
+
+1. **Clone the framework:**
+   ```bash
+   git clone <repo-url> ~/.voidrift
+   # or copy from local path
+   cp -r /path/to/voidrift ~/.voidrift
+   ```
+
+2. **Source the voidrift loader in your shell profile:**
+   
+   Add to `~/.bashrc` or `~/.bash_profile`:
+   ```bash
+   source ~/.voidrift/dispatcher.sh
+   ```
+
+3. **Reload your shell:**
+   ```bash
+   source ~/.bashrc
+   ```
+
+4. **Verify installation:**
+   ```bash
+   voidrift
+   ```
+
+**Environment Variables:**
+
+Add to your shell profile (`~/.bashrc` or `~/.bash_profile`):
+
+```bash
+# Framework location
+export VOIDRIFT_HOME="$HOME/.voidrift"
+
+# Worker node connection (if using local models)
+export WORKER_USR="your-username"
+export WORKER_IP="192.168.x.x"
+export OPENAI_API_BASE="http://$WORKER_IP:8000/v1"
+export OPENAI_API_KEY="no-key-needed-here"
+
+# Cloud APIs (if using cloud models)
+export ANTHROPIC_API_KEY="your-key"
+export GEMINI_API_KEY="your-key"
+export HF_TOKEN="your-token"
+
+# Kiro Gateway (optional, for kiro-* models)
+export KIRO_GATEWAY_PORT="8000"
+export KIRO_API_KEY="your-proxy-api-key"  # PROXY_API_KEY from ~/opt/kiro-gateway/.env
+```
+
+### Worker Node Setup
+
+The worker node is a GPU server that runs local LLM containers. It's optional — you can use cloud models exclusively.
+
+**Hardware:**
+
+The default configuration is optimized for the ASUS Ascent GX10:
+- **Processor:** NVIDIA GB10 Grace Blackwell Superchip (20-core Arm CPU + Blackwell GPU)
+- **Memory:** 128GB unified LPDDR5x-8533 (shared CPU/GPU)
+- **AI Performance:** 1 petaFLOP (FP4), supports up to 200B parameter models
+- **Storage:** 1-4TB NVMe PCIe 4.0 SSD
+- **Network:** 10GbE (upgradeable to 200GbE with ConnectX-7)
+
+The unified memory architecture allows efficient model loading without CPU-GPU transfers. GPU memory utilization is set to 0.90 (90%) with FlashInfer attention backend, optimized for GB10's unified memory architecture.
+
+**Software Requirements:**
+- Linux (Ubuntu 22.04+ recommended)
+- Docker or Podman
+- NVIDIA drivers and container toolkit
+- SSH server
+- Python 3.10+ with `uv` (for model downloads)
+
+**Setup Steps:**
+
+1. **Install Docker and NVIDIA Container Toolkit:**
+   ```bash
+   # Install Docker
+   curl -fsSL https://get.docker.com | sh
+   
+   # Install NVIDIA Container Toolkit
+   distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
+   curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
+   curl -s -L https://nvidia.github.io/nvidia-docker/$distribution/nvidia-docker.list | \
+     sudo tee /etc/apt/sources.list.d/nvidia-docker.list
+   sudo apt-get update && sudo apt-get install -y nvidia-container-toolkit
+   sudo systemctl restart docker
+   ```
+
+2. **Configure SSH access:**
+   ```bash
+   # On workstation, copy SSH key to worker
+   ssh-copy-id $WORKER_USR@$WORKER_IP
+   
+   # Test connection
+   ssh $WORKER_USR@$WORKER_IP "echo 'Connection successful'"
+   ```
+
+3. **Install uv for model management:**
+   ```bash
+   ssh $WORKER_USR@$WORKER_IP
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+   ```
+
+4. **Download initial models:**
+   ```bash
+   ssh $WORKER_USR@$WORKER_IP
+   
+   # For gated models, login first
+   uvx huggingface-cli login
+   
+   # Download models
+   uvx hf download Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8
+   uvx hf download Qwen/Qwen3-32B-FP8
+   uvx hf download ibm-granite/granite-4.0-h-small-FP8
+   ```
+
+5. **Pull vLLM Docker image:**
+   ```bash
+   ssh $WORKER_USR@$WORKER_IP
+   docker pull scitrera/dgx-spark-vllm:0.17.0-t5
+   ```
+
+**Available Docker Images:**
+
+Three options are available for running vLLM on the GB10 Grace Blackwell Superchip:
+
+| Image | Tag | Size |
+|-------|-----|------|
+| `scitrera/dgx-spark-vllm` | `0.17.0-t5` | 8.46 GB |
+| `vllm/vllm-openai` | `latest-aarch64-cu130` | 8.73 GB |
+| `nvcr.io/nvidia/vllm` | `26.02-py3` | varies |
+
+**`scitrera/dgx-spark-vllm` (default, recommended)**
+A community image purpose-built for the NVIDIA DGX Spark / GB10 Grace Blackwell Superchip. This is an arm64-only image with a rapid release cadence that mirrors upstream vLLM versions. Use this as your default — it is the most tested option for this specific hardware and consistently produces the smallest image sizes. Update `docker_image` in `worker-models.yml` to pick up new releases.
+
+**`vllm/vllm-openai` (official upstream)**
+The official vLLM project image. The `cu130`-suffixed tags are built against CUDA 13.0 — Blackwell's native toolkit — and compile support for SM_100 (GB10) alongside older architectures. Use this when you need a pinned upstream vLLM version that `scitrera` has not yet published, or when troubleshooting to rule out image-specific issues. Pull the arm64-specific tag to avoid pulling the larger multi-arch manifest:
+```bash
+ssh $WORKER_USR@$WORKER_IP "docker pull vllm/vllm-openai:latest-aarch64-cu130"
+```
+
+**`nvcr.io/nvidia/vllm` (NVIDIA NGC)**
+NVIDIA's officially validated container, released monthly (e.g. `26.02-py3` = February 2026). Built on NVIDIA's own validated CUDA stack with enterprise-quality library combinations. May include TensorRT-LLM integration and hardware-specific optimizations not present in the community image. Use this when you want NVIDIA's official validation for the GB10 platform, are evaluating TensorRT-LLM-backed inference, or need enterprise support guarantees:
+```bash
+ssh $WORKER_USR@$WORKER_IP "docker pull nvcr.io/nvidia/vllm:26.02-py3"
+```
+
+**Worker Node Management:**
+
+```bash
+# List cached models and disk usage
+ssh $WORKER_USR@$WORKER_IP "uvx hf cache ls"
+
+# Delete a specific model by ID
+ssh $WORKER_USR@$WORKER_IP "uvx hf cache rm <ID>"
+
+# Clean broken/detached revisions
+ssh $WORKER_USR@$WORKER_IP "uvx hf cache prune"
+
+# Reset compiled kernel cache (if experiencing GPU issues)
+ssh $WORKER_USR@$WORKER_IP "rm -rf ~/.cache/flashinfer/*"
+
+# Check running containers
+ssh $WORKER_USR@$WORKER_IP "docker ps"
+
+# View container logs
+ssh $WORKER_USR@$WORKER_IP "docker logs worker-<model>"
+```
+
+**Note:** If you encounter "Permission denied" errors when removing models, fix folder permissions:
+```bash
+ssh $WORKER_USR@$WORKER_IP "chmod -R u+w ~/.cache/huggingface"
+```
+
+### Framework Configuration
+
+**Model Configuration:**
+
+Local models are defined in `$VOIDRIFT_HOME/worker-models.yml`:
+
+```yaml
+models:
+  qwen3-coder:
+    repository: Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8
+    served_model_name: qwen3-coder
+    docker_image: scitrera/dgx-spark-vllm:0.17.0-t5
+    gpu_memory_utilization: 0.90
+    max_model_len: 65536
+    vllm_args:
+      - --enable-prefix-caching
+      - --tool-call-parser qwen3_coder
+      - --enable-auto-tool-choice
+      - --attention-backend flashinfer
+    notes: Code-focused, 30B parameters, larger context
+
+worker:
+  port: 8000
+  container_prefix: worker-
+  cache_mounts:
+    - ~/.cache/huggingface:/root/.cache/huggingface
+    - ~/.cache/vllm:/root/.cache/vllm
+```
+
+**Container Lifecycle:**
+
+The framework automatically:
+- Stops other worker containers (single-worker constraint)
+- Reuses existing containers if configuration matches
+- Mounts cache directories to persist model weights and compiled kernels
+- Monitors container health during startup
+
+Use `--refresh` flag to force container recreation even if already running.
+
+**Performance Benchmarks:**
+
+All benchmarks run on ASUS Ascent GX10 with vLLM 0.17.0-t5, FlashInfer backend, 100 requests @ 1 req/s (ShareGPT dataset).
+
+**qwen3-8b (8B general-purpose) - FASTEST:**
+```
+Model:                   Qwen3-8B-FP8
+GPU utilization:         0.95
+Output throughput:       176 tok/s
+Mean TTFT:               307 ms
+Median TTFT:             149 ms
+P99 TTFT:                3288 ms
+Mean TPOT:               44 ms
+Median TPOT:             44 ms
+Mean ITL:                44 ms
+
+Startup:
+- Model loading:         ~2 minutes
+- CUDA graph capture:    ~15 seconds
+- Total ready:           ~2.5 minutes
+- Model memory:          ~8 GiB
+- KV cache available:    ~97 GiB (2.4M+ tokens)
+- Max concurrency:       Very high (huge KV cache)
+
+Best for: Interactive work (gather, chat), fastest generation
+Trade-offs: General-purpose model (not code-specialized)
+```
+
+**qwen3-instruct (30B MoE) - RECOMMENDED FOR GATHER/PLAN:**
+```
+Model:                   Qwen3-30B-A3B-Instruct-2507-FP8
+GPU utilization:         0.90
+Output throughput:       158 tok/s
+Mean TTFT:               318 ms
+Median TTFT:             253 ms
+P99 TTFT:                2279 ms
+Mean TPOT:               83 ms
+Median TPOT:             86 ms
+Mean ITL:                82 ms
+
+Startup:
+- Model loading:         ~3 minutes
+- CUDA graph capture:    ~7 seconds
+- Total ready:           ~4 minutes
+- Model memory:          29 GiB
+- KV cache available:    76 GiB (830k tokens)
+- Max concurrency:       12.67x
+
+Best for: General reasoning, requirements and architecture discussions
+Trade-offs: Nearly identical performance to qwen3-coder
+```
+
+**qwen3-coder (30B MoE) - RECOMMENDED FOR CODE:**
+```
+Model:                   Qwen3-Coder-30B-A3B-Instruct-FP8
+GPU utilization:         0.90
+Output throughput:       152 tok/s
+Mean TTFT:               273 ms
+Median TTFT:             249 ms
+P99 TTFT:                887 ms
+Mean TPOT:               82 ms
+Median TPOT:             84 ms
+Mean ITL:                80 ms
+
+Startup:
+- Model loading:         ~3 minutes
+- CUDA graph capture:    ~38 seconds
+- Total ready:           ~4.5 minutes
+- Model memory:          29 GiB
+- KV cache available:    76 GiB (900k+ tokens)
+- Max concurrency:       High (large KV cache)
+
+Best for: Code generation, development tasks, balanced performance
+```
+
+**qwen3-coder-next (80B MoE):**
+```
+Model:                   RedHatAI/Qwen3-Coder-Next-FP8-dynamic
+GPU utilization:         0.90
+Output throughput:       124 tok/s (-18% vs qwen3-coder)
+Mean TTFT:               1070 ms (+292% vs qwen3-coder)
+Median TTFT:             634 ms (+155% vs qwen3-coder)
+P99 TTFT:                5385 ms (+507% vs qwen3-coder)
+Mean TPOT:               166 ms (+102% vs qwen3-coder)
+Median TPOT:             171 ms (+104% vs qwen3-coder)
+Mean ITL:                157 ms (+96% vs qwen3-coder)
+
+Startup:
+- Model loading:         ~8.5 minutes
+- CUDA graph capture:    ~14 seconds
+- Total ready:           ~9.5 minutes
+- Model memory:          76 GiB
+- KV cache available:    29 GiB (318k tokens)
+- Max concurrency:       18.41x (limited by small KV cache)
+
+Best for: Complex reasoning, single-request workloads
+Trade-offs: 2x slower generation, much higher TTFT, lower concurrency
+```
+
+**Recommendations:**
+- **Gather / Plan:** Use **qwen3-instruct** - general-purpose reasoning, architecture and requirements discussions
+- **Code development:** Use **qwen3-coder** - best balance of speed and code quality
+- **Complex reasoning:** Use **qwen3-coder-next** - highest capability, slower generation
+- **Quick chat:** Use **qwen3-8b** - fastest generation (176 tok/s)
+
+Run benchmarks yourself:
+```bash
+voidrift bench 100 1  # 100 prompts at 1 req/s
+```
+
+**Kiro Gateway Setup:**
+
+For free Claude models via Kiro Gateway, see [Kiro Gateway Setup](#kiro-gateway-setup) section below.
+
+## Quick Start
+
+```bash
+# 1. Navigate to your project directory
+cd ~/Projects/my-project
+git init
+
+# 2. Gather requirements
+voidrift gather claude
+
+# 3. Plan architecture and tasks
+voidrift plan claude
+
+# 4. Develop implementation
+voidrift develop qwen3-coder claude
+
+# 5. Generate infrastructure
+voidrift automate qwen3-coder
+
+# 6. Verify quality
+voidrift verify qwen3-coder claude
+```
+
+## Commands
+
+### Phase Commands
+
+- **`voidrift gather <model> [<feature>] [--refresh] [--from <path>] [--reference <path>] [--force]`** - Gather requirements interactively
+  - `--from <path>` - Reverse engineer requirements from existing codebase (non-interactive, auto-generates)
+  - `--reference <path>` - Load reference codebase for lookup during interactive session
+  - `--force` - Overwrite existing requirements when using --from (default: error if file exists)
+  - `--refresh` - Force local model container recreation (if using local model)
+- **`voidrift plan <model> [<feature>] [--refresh] [--fresh-start]`** - Generate architecture and tasks
+  - `--refresh` - Force local model container recreation (if using local model)
+  - `--fresh-start` - Delete existing planning artifacts and start fresh
+- **`voidrift develop <worker> [<architect>] [flags]`** - Execute implementation tasks
+  - `--parallel` - Execute modules concurrently in git worktrees
+  - `--retry` - Resume from partial/failed parallel run
+  - `--overwrite` - Remove existing worktrees and start fresh
+  - `--refresh` - Force local model container recreation (if using local model)
+- **`voidrift automate <worker> [<architect>] [--refresh]`** - Generate infrastructure code
+  - `--refresh` - Force local model container recreation (if using local model)
+- **`voidrift verify <worker> [<architect>] [--refresh]`** - Run quality checks and validation
+  - `--refresh` - Force local model container recreation (if using local model)
+
+### Utility Commands
+
+- **`voidrift status`** - Show project phase status
+- **`voidrift chat <model> [--refresh]`** - Interactive aider session with any model
+- **`voidrift bench [<num>] [<rate>]`** - Benchmark worker model
+- **`voidrift unlock`** - Remove develop lock and kill running process
+- **`worker-compact`** - Summarize context to STATE.md
+- **`worker-insight`** - Monitor worker node (snapshot)
+- **`worker-watch`** - Monitor worker node (continuous)
+
+## Available Models
+
+### Local Models
+- `qwen3-8b` - [Qwen/Qwen3-8B-FP8](https://huggingface.co/Qwen/Qwen3-8B-FP8) (compact, fast)
+- `qwen3-instruct` - [Qwen/Qwen3-30B-A3B-Instruct-2507-FP8](https://huggingface.co/Qwen/Qwen3-30B-A3B-Instruct-2507-FP8) (general reasoning, gather and plan)
+- `qwen3-coder` - [Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8](https://huggingface.co/Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8) (code-focused, recommended)
+- `qwen3-coder-next` - [RedHatAI/Qwen3-Coder-Next-FP8-dynamic](https://huggingface.co/RedHatAI/Qwen3-Coder-Next-FP8-dynamic) (80B MoE, next-gen code model)
+
+### Tried Local Models
+Models evaluated on this hardware but retired. See [Tried Local Models](#tried-local-models) in the benchmarks section for details.
+- `qwen3-32b-dense` - [Qwen/Qwen3-32B-FP8](https://huggingface.co/Qwen/Qwen3-32B-FP8) — dense 32B, underperforms MoE on GB10
+- `granite-4-small` - [ibm-granite/granite-4.0-h-small-FP8](https://huggingface.co/ibm-granite/granite-4.0-h-small-FP8) — Mamba-2 hybrid, slow on SM_121
+
+### Cloud Models
+- `claude` - anthropic/claude-opus-4-6 (high capability)
+- `haiku` - anthropic/claude-haiku-4-5 (fast, cost-effective)
+- `gemini` - gemini/gemini-2.5-pro (high capability)
+- `gemini-flash` - gemini/gemini-2.5-flash (fast, cost-effective)
+
+### Kiro Gateway Models (Free)
+- `kiro-sonnet` - Claude Sonnet 4.5 (balanced performance)
+- `kiro-haiku` - Claude Haiku 4.5 (fast)
+- `kiro-deepseek` - DeepSeek R1 Distill Qwen 32B
+- `kiro-minimax` - MiniMax M2.1 (230B MoE)
+- `kiro-qwen` - Qwen3-Coder-Next (80B MoE)
+
+See [Kiro Gateway Setup](#kiro-gateway-setup) for configuration.
+
+## Project Structure
+
+After running phases, your project will have:
+
+```
+your-project/
+├── .voidrift/
+│   ├── REQUIREMENTS.md           # Project requirements
+│   ├── ARCHITECTURE.md           # Architecture reference
+│   ├── STATE.md                  # Project state summary
+│   ├── TASKS.md                  # Task list
+│   ├── spec/                     # Feature specifications
+│   ├── adr/                      # Architecture decision records
+│   ├── escalations/              # Developer escalation questions
+│   ├── architect_responses/      # Architect guidance
+│   └── *.log               # Phase logs
+├── src/                          # Your source code
+└── ...
+```
+
+## Workflow
+
+### 1. Gather Phase
+Produce requirements through interactive conversation:
+```bash
+voidrift gather claude
+voidrift gather claude authentication  # Feature spec
+```
+
+**Reverse Engineering from Existing Code:**
+Build requirements from an existing codebase (non-interactive):
+```bash
+# From new project directory
+cd ~/Projects/my-new-project
+git init
+
+# Auto-generate requirements from existing code
+voidrift gather claude --from /path/to/existing/project
+
+# Overwrite existing requirements (if needed)
+voidrift gather claude --from /path/to/existing/project --force
+
+# Then refine interactively if needed
+voidrift gather claude
+```
+
+The Analyst will automatically:
+- Analyze the codebase structure (read-only, respects .gitignore)
+- Infer what the system does and how it behaves
+- Generate REQUIREMENTS.md in your new project directory
+- Error if file exists (use --force to overwrite)
+
+**Reference Mode for Interactive Refinement:**
+Load a reference codebase during interactive requirements gathering:
+```bash
+# Interactive session with reference code available
+voidrift gather claude --reference /path/to/existing/project
+```
+
+The Analyst can examine the reference code to:
+- Look up existing functionality and patterns
+- Clarify technical constraints
+- Reference similar features during conversation
+
+### 2. Plan Phase
+Generate architecture and task breakdown:
+```bash
+voidrift plan claude
+```
+
+### 3. Develop Phase
+Execute tasks with worker model, escalate to architect when blocked:
+```bash
+# Sequential (single or multi-module)
+voidrift develop qwen3-coder claude
+
+# Parallel (multi-module only)
+voidrift develop qwen3-coder claude --parallel
+```
+
+### 4. Automate Phase
+Generate infrastructure-as-code:
+```bash
+voidrift automate qwen3-coder
+```
+
+### 5. Verify Phase
+Run tests and quality checks:
+```bash
+voidrift verify qwen3-coder claude
+```
+
+## Tips
+
+- **Use cheaper models for implementation:** `voidrift develop qwen3-coder claude` uses local model for bulk work, cloud model for hard problems
+- **Check status frequently:** `voidrift status` shows progress
+- **Compact context regularly:** `worker-compact` after every 10 turns to reduce context window usage
+- **Monitor worker node:** `worker-watch` for real-time metrics
+- **Review logs:** All phase output is in timestamped log files: `.voidrift/<phase>-YYYYMMDD-HHMMSS.log`
+
+## Maintenance
+
+### Updating Aider
+
+The framework uses aider for all AI interactions. Update it periodically:
+
+```bash
+# Check current version
+aider --version
+
+# Update aider
+pip install --upgrade aider-chat
+# or if installed with pipx
+pipx upgrade aider-chat
+
+# Verify update
+aider --version
+```
+
+**Check for updates:**
+```bash
+# Quick check without running aider
+aider --just-check-update
+
+# Enable/disable automatic update checks
+aider --check-update          # enable (default)
+aider --no-check-update       # disable
+```
+
+**Latest releases:** https://github.com/paul-gauthier/aider/releases
+
+The framework doesn't auto-update aider to avoid breaking changes. You control when to upgrade.
+
+## Troubleshooting
+
+### "REQUIREMENTS.md not found"
+Run `voidrift gather <model>` first to create project requirements.
+
+### "No task files found"
+Run `voidrift plan <model>` after gathering requirements.
+
+### "Developer node unreachable"
+Check `$WORKER_IP` and ensure SSH access: `ssh $WORKER_USR@$WORKER_IP`
+
+### "Invalid skill tags"
+Edit `.voidrift/TASKS.md` and use tags from `$VOIDRIFT_HOME/SKILLS.md`
+
+### Tasks marked `[!]` (blocked)
+Review `.voidrift/architect_responses/` for guidance, or re-run with architect model.
+
+### Container won't start or keeps crashing
+- Check worker node logs: `ssh $WORKER_USR@$WORKER_IP docker logs worker-<model>`
+- Verify GPU availability: `ssh $WORKER_USR@$WORKER_IP nvidia-smi`
+- Check disk space on worker: `ssh $WORKER_USR@$WORKER_IP df -h`
+- Force recreation: Add `--refresh` flag to command
+
+### Model configuration changes not taking effect
+Use `--refresh` to force container recreation after editing `worker-models.yml`
+
+### Kiro Gateway "Refresh token is not set" or credential errors
+Kiro Gateway credentials have expired. Fix:
+1. Run `kiro-cli logout && kiro-cli login` to refresh the token database
+2. Restart the gateway: `cd ~/opt/kiro-gateway && docker-compose restart`
+
+If the error persists, the gateway may not be able to read the database file (permissions):
+```bash
+chmod 644 ~/.local/share/kiro-cli/data.sqlite3
+cd ~/opt/kiro-gateway && docker-compose restart
+```
+
+## Kiro Gateway Setup
+
+[Kiro Gateway](https://github.com/jwadow/kiro-gateway) provides free access to Claude models (Sonnet, Haiku) and other AI models through Amazon Q Developer / AWS CodeWhisperer credentials.
+
+**The framework automatically manages the Kiro Gateway container** - it starts when you use kiro-* models and stops after the phase completes to free resources.
+
+### Prerequisites
+
+- [Kiro IDE](https://kiro.dev/) with logged in account, OR
+- [Kiro CLI](https://kiro.dev/cli/) with AWS SSO (free Builder ID or corporate account)
+- Docker installed and running
+
+### Installation
+
+1. **Clone the gateway:**
+   ```bash
+   git clone https://github.com/jwadow/kiro-gateway.git ~/opt/kiro-gateway
+   cd ~/opt/kiro-gateway
+   ```
+
+2. **Create virtual environment and install dependencies:**
+   ```bash
+   uv venv
+   uv pip install -r requirements.txt
+   ```
+
+3. **Configure credentials:**
+   ```bash
+   cp .env.example .env
+   ```
+   
+   Edit `.env` and choose one of these options:
+   
+   **Option A: Kiro IDE credentials (JSON file)**
+   ```bash
+   KIRO_CREDS_FILE="~/.aws/sso/cache/kiro-auth-token.json"
+   PROXY_API_KEY="your-secure-password"
+   ```
+   
+   **Option B: Kiro CLI database**
+   ```bash
+   KIRO_CLI_DB_FILE="~/.local/share/kiro-cli/data.sqlite3"
+   PROXY_API_KEY="your-secure-password"
+   ```
+   
+   **Note:** The Kiro CLI creates `data.sqlite3` with owner-only permissions (`600`). The framework automatically sets the file to `644` before starting the gateway container so it can read the database. This is safe on a single-user workstation.
+   
+   **Option C: Manual refresh token**
+   ```bash
+   REFRESH_TOKEN="your_kiro_refresh_token"
+   PROXY_API_KEY="your-secure-password"
+   ```
+
+4. **Start the gateway:**
+   ```bash
+   cd ~/opt/kiro-gateway
+   uv run main.py
+   # Or custom port: uv run main.py --port 9000
+   ```
+   
+   **Or run in background:**
+   ```bash
+   cd ~/opt/kiro-gateway
+   nohup uv run main.py > kiro-gateway.log 2>&1 &
+   ```
+   
+   **Note:** The framework can also manage the gateway via Docker (see Docker Deployment below). If using Docker, the framework will automatically start/stop the container when needed.
+
+5. **Configure framework:**
+   
+   Add to your shell profile:
+   ```bash
+   export KIRO_GATEWAY_PORT="8000"  # Or your custom port
+   ```
+
+### Automatic Container Management
+
+When using Docker deployment, the framework automatically:
+- Starts the kiro-gateway container when you use kiro-* models
+- Waits for health check before proceeding
+- Stops the container after the phase completes to free resources
+- Reuses existing container if already running
+
+No manual start/stop needed - just use kiro-* models and the framework handles the rest!
+
+### Available Models
+
+Once configured, you can use these models:
+- `kiro-sonnet` - Claude Sonnet 4.5 (balanced performance)
+- `kiro-haiku` - Claude Haiku 4.5 (fast)
+- `kiro-deepseek` - DeepSeek R1 Distill Qwen 32B
+- `kiro-minimax` - MiniMax M2.1 (230B MoE)
+- `kiro-qwen` - Qwen3-Coder-Next (80B MoE)
+
+### Usage
+
+```bash
+# Use in any phase
+voidrift gather kiro-sonnet
+voidrift plan kiro-sonnet
+voidrift develop qwen3-coder kiro-sonnet
+
+# Or as primary model
+voidrift develop kiro-sonnet
+```
+
+### Docker Deployment (Alternative)
+
+```bash
+cd ~/opt/kiro-gateway
+
+# Using docker-compose
+docker-compose up -d
+
+# Or docker run
+docker run -d \
+  -p 8000:8000 \
+  -v ~/.aws/sso/cache:/home/kiro/.aws/sso/cache:ro \
+  -e KIRO_CREDS_FILE=/home/kiro/.aws/sso/cache/kiro-auth-token.json \
+  -e PROXY_API_KEY="your-secure-password" \
+  --name kiro-gateway \
+  ghcr.io/jwadow/kiro-gateway:latest
+```
+
+For detailed configuration options (VPN/proxy support, AWS SSO, etc.), see the [Kiro Gateway documentation](https://github.com/jwadow/kiro-gateway).
+
+## How It Works
+
+### Architecture Overview
+
+The framework consists of three main components:
+
+1. **VoidRift Dispatcher** (`dispatcher.sh`) - Bash script providing the `voidrift` command and orchestrating the workflow
+2. **Guidance Files** (AGENT.md, CONVENTIONS.md, skills) - Define voidrift behavior and technical standards
+3. **Developer Infrastructure** - Local or cloud models executing the work
+
+### Two-Role System
+
+AI models operate in one of three roles, explicitly assigned at runtime:
+
+**Analyst Role:**
+- Elicits requirements through interactive conversation
+- Asks clarifying questions to understand user needs
+- Focuses on "what" the system must do, not "how"
+- Produces requirements documents and feature specifications
+- Does NOT make technology choices or design architecture
+- Receives: existing requirements (if revising), operator responses
+
+**Architect Role:**
+- Creates requirements, architecture, and task breakdowns
+- Answers design questions when Developer escalates
+- Provides guidance without writing implementation code
+- Receives: problem description, REQUIREMENTS.md, ARCHITECTURE.md, task text
+- Does NOT receive: source code files
+
+**Developer Role:**
+- Executes tasks from TASKS.md atomically
+- Writes code, tests, documentation, and boilerplate
+- Makes one fix attempt, then escalates when blocked
+- Receives: task description, source files, skill conventions, STATE.md
+- Does NOT: run shell commands during develop, make architectural decisions
+
+**Role Assignment:**
+The framework assigns roles via `[ROLE: X]` prefix in task messages. Models receive the full "playbook" (AGENT.md) but know their current "position" for each invocation.
+
+**Example:** `voidrift develop qwen3-coder claude`
+- `qwen3-coder` = Developer (implements tasks)
+- `claude` = Architect (answers escalations)
+
+**Example:** `voidrift gather claude`
+- `claude` = Analyst (elicits requirements)
+
+### Guidance Files
+
+**AGENT.md - The Playbook**
+- Agent identity and philosophy (SOLID, Clean Architecture, PoLP)
+- Five-phase lifecycle explained
+- Role definitions and boundaries
+- State management, skill system, escalation protocol
+- Loaded by: All aider sessions
+
+**CONVENTIONS.md - The Rulebook**
+- Planning-first directive (no code before docs)
+- Skill assignment and loading rules
+- State management protocol
+- Escalation protocol
+- Phase-specific behavior rules
+- Runtime environment constraints
+- Engineering standards (REST, BFF, versioning)
+- Loaded by: All aider sessions
+
+**EDIT-FORMAT.md - Editing Instructions**
+- File editing format and conventions
+- Loaded by: Develop, Automate, Verify phases
+
+**SKILLS.md - Skill Registry**
+- Maps skill tags to skill files
+- One-line descriptions of each skill
+- Loaded by: Plan phase
+
+**skills/*.md - Domain Conventions**
+- Technology-specific standards (BACKEND.md, FRONTEND.md, INFRA.md, etc.)
+- Canonical frameworks, libraries, and patterns
+- Loaded by: Develop phase (per task tag)
+
+### Local Developer Models
+
+**How Local Models Work:**
+
+1. **Container Management:**
+   - Models run in Docker containers on remote worker node
+   - Framework SSHs to `$WORKER_IP` and starts containers via docker
+   - Only one model container runs at a time (single-worker constraint)
+   - Containers are reused if configuration matches; `--refresh` forces recreation
+
+2. **Model Configuration** (`worker-models.yml`):
+   ```yaml
+   qwen3-coder:
+     repository: Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8
+     served_model_name: qwen3-coder
+     docker_image: scitrera/dgx-spark-vllm:0.17.0-t5
+     gpu_memory_utilization: 0.85
+     max_model_len: 65536
+     vllm_args:
+       - --enable-prefix-caching
+       - --tool-call-parser qwen3_coder
+       - --enable-auto-tool-choice
+     cache_mounts:
+       - ~/.cache/huggingface:/root/.cache/huggingface
+       - ~/.cache/vllm:/root/.cache/vllm
+   ```
+
+3. **Startup Process:**
+   - Framework stops other worker containers
+   - Starts new container with model configuration
+   - Polls `http://$WORKER_IP:8000/v1/models` every second
+   - Monitors container health during startup
+   - Exits immediately if container crashes
+
+4. **Performance Metrics** (qwen3-coder on ASUS Ascent GX10):
+   - Model loading: ~3 minutes
+   - CUDA graph compilation: ~1 minute
+   - Total startup: ~4.5 minutes
+   - Memory: 29.1 GiB model + 69.44 GiB KV cache available
+   - Context window: 65,536 tokens
+
+5. **Cache Persistence:**
+   - Model weights cached in `~/.cache/huggingface`
+   - vLLM compilation cache in `~/.cache/vllm`
+   - FlashInfer kernels in `~/.cache/flashinfer`
+   - Prevents re-downloading and recompiling on each start
+
+**Local Model Limitations:**
+
+- **No shell commands:** Developer cannot run bash commands during develop phase
+- **Single worker:** Only one model container at a time
+- **Network dependency:** Requires SSH access to worker node
+- **Startup time:** 4-5 minutes for 30B models
+- **Memory constraints:** Limited by worker node hardware (128GB for GB10)
+
+**Local Model Benefits:**
+
+- **Cost:** No API fees for bulk implementation work
+- **Privacy:** Code never leaves your infrastructure
+- **Speed:** Low latency for local network
+- **Control:** Full control over model versions and configuration
+
+### Cloud Models
+
+**How Cloud Models Work:**
+
+1. **No Infrastructure Required:**
+   - Models accessed via API endpoints
+   - No container management or SSH needed
+   - Authentication via environment variables
+
+2. **API Configuration:**
+   ```bash
+   export ANTHROPIC_API_KEY="your-key"
+   export GEMINI_API_KEY="your-key"
+   ```
+
+3. **Model Selection:**
+   - `claude` - High capability, best for architecture and complex problems
+   - `haiku` - Fast and cost-effective, good for simple tasks
+   - `gemini` - High capability alternative
+   - `gemini-flash` - Fast alternative
+   - `kiro-*` - Gateway models (requires `KIRO_GATEWAY_PORT`)
+
+4. **Performance:**
+   - No startup time (instant availability)
+   - Latency depends on internet connection
+   - Rate limits apply per provider
+
+**Cloud Model Limitations:**
+
+- **Cost:** API fees per token (input + output)
+- **Privacy:** Code sent to third-party APIs
+- **Rate limits:** Provider-specific throttling
+- **Network dependency:** Requires internet connection
+
+**Cloud Model Benefits:**
+
+- **No infrastructure:** No worker node required
+- **Instant availability:** No startup time
+- **High capability:** Access to latest models
+- **Scalability:** No hardware constraints
+
+### Hybrid Approach (Recommended)
+
+**Best practice:** Use local worker for bulk implementation, cloud architect for design:
+
+```bash
+voidrift develop qwen3-coder claude
+```
+
+- `qwen3-coder` (local) handles 90% of work: implementation, tests, docs
+- `claude` (cloud) handles 10% of work: escalations, design questions
+
+**Cost optimization:**
+- Local model: Free (after hardware investment)
+- Cloud model: Only pays for escalations (~5-10 per project)
+
+### Developer Do's and Don'ts
+
+**DO:**
+- ✅ Execute tasks atomically, one at a time
+- ✅ Mark tasks `[x]` after completion
+- ✅ Run tests after each task
+- ✅ Commit with task-specific messages
+- ✅ Make one fix attempt when errors occur
+- ✅ Escalate immediately if error persists
+- ✅ Reference STATE.md for context continuity
+- ✅ Run `worker-compact` after every 10 turns
+- ✅ Follow skill conventions without deviation
+- ✅ Write minimal responses (no narration)
+
+**DON'T:**
+- ❌ Run shell commands during develop phase
+- ❌ Retry failed fixes multiple times
+- ❌ Make architectural decisions
+- ❌ Deviate from task list or skill conventions
+- ❌ Skip escalation when blocked
+- ❌ Manually edit STATE.md during task execution
+- ❌ Load unnecessary skills (context window waste)
+- ❌ Write code before documentation is updated
+- ❌ Execute package managers during code generation
+- ❌ Start/stop/test running applications
+
+### Escalation Flow
+
+1. **Developer encounters problem:**
+   - Error persists after one fix attempt
+   - Uncertain about implementation approach
+   - Needs architectural guidance
+
+2. **Developer escalates:**
+   - Marks task `[!]` in TASKS.md
+   - Creates `.voidrift/escalations/<task_num>.md` with question
+
+3. **Framework consults Architect:**
+   - Starts architect model if local
+   - Provides: problem, REQUIREMENTS.md, ARCHITECTURE.md, task text
+   - Does NOT provide: source code files
+   - Uses plan config (`.aider.plan.yml`)
+
+4. **Architect responds:**
+   - Writes guidance to `.voidrift/architect_responses/<task_num>.md`
+   - Provides design direction, not implementation
+
+5. **Developer continues:**
+   - Loads architect's guidance
+   - Attempts fix with new direction
+   - Escalates again if still blocked (max 5 escalations per session)
+
+### State Management
+
+**STATE.md - Session Memory:**
+- Updated via `worker-compact` after every 10 turns
+- Provides context continuity across sessions
+- Single-module: `.voidrift/STATE.md`
+- Multi-module: `.voidrift/STATE.md` + `.voidrift/STATE-<module>.md`
+
+**When to compact:**
+- After every 10 turns
+- Upon task completion
+- When context window is getting full
+
+**After compaction:**
+- Exit and restart
+- Fresh session picks up STATE.md automatically
+
+### Skill System
+
+**How skills work:**
+- **Plan time:** All skills loaded so planner knows available conventions
+- **Develop time:** Only tagged skills loaded per task (minimizes context)
+- Skills are **read-only** and **authoritative** (must follow without deviation)
+
+**Available skills:**
+- `backend` - Backend services, APIs, databases
+- `frontend` - UI components, state management
+- `infra` - Infrastructure-as-code, deployment
+- `native` - Native applications, system programming
+- `design` - UI/UX design, accessibility
+- `branding` - Brand guidelines, visual identity
+- `security` - Security patterns, authentication
+- `tdd` - Test-driven development
+- `debugging` - Debugging strategies
+- `verification` - Quality assurance, testing
+- `worktrees` - Git worktree management
+
+**Skill tagging:**
+- Tasks in TASKS.md include `[skill1, skill2]` tags
+- Tag only skills genuinely required (context window optimization)
+- Framework deduplicates and loads matching skill files
+
+---
+
+## Documentation
+
+- **Full Requirements:** `$VOIDRIFT_HOME/REQUIREMENTS.md` — Complete acceptance criteria for all framework components
+- **Role-Specific Guidance:**
+  - `$VOIDRIFT_HOME/AGENT-ANALYST.md` — Analyst role (gather phase): Requirements elicitation, collaborative mode
+  - `$VOIDRIFT_HOME/AGENT-ARCHITECT.md` — Architect role (plan phase, escalations): Design and planning
+  - `$VOIDRIFT_HOME/AGENT-DEVELOPER.md` — Developer role (develop/automate/verify): Implementation and execution
+- **Operational Rules:** `$VOIDRIFT_HOME/CONVENTIONS.md` — Mandatory protocols and constraints (the rulebook)
+- **Skill Files:** `$VOIDRIFT_HOME/skills/*.md` — Domain-specific technology stacks and conventions
+
+Each role file is loaded only during relevant phases to prevent role confusion and minimize context window usage.
+
+## Tried Local Models
+
+Models evaluated on this hardware and retired. Preserved for reference.
+
+**qwen3-32b (32B dense) — retired:**
+```
+Model:                   Qwen3-32B-FP8
+GPU utilization:         0.90
+Output throughput:       102 tok/s (-33% vs qwen3-coder)
+Mean TTFT:               562 ms (+106% vs qwen3-coder)
+Median TTFT:             508 ms (+104% vs qwen3-coder)
+P99 TTFT:                2194 ms (+147% vs qwen3-coder)
+Mean TPOT:               183 ms (+123% vs qwen3-coder)
+Median TPOT:             183 ms (+118% vs qwen3-coder)
+Mean ITL:                182 ms (+128% vs qwen3-coder)
+```
+Decision: Dense 32B significantly underperforms the MoE 30B-A3B at the same parameter count on GB10. Blackwell's architecture favors MoE routing — activating only 3B parameters per token versus loading all 32B each forward pass makes a measurable difference. No use case justifies the penalty when qwen3-coder is faster and code-specialized, and qwen3-instruct is the same MoE architecture for general reasoning.
+
+**granite-4-small (Mamba-2 hybrid) — retired:**
+```
+Model:                   ibm-granite/granite-4.0-h-small-FP8
+Architecture:            MoE + Mamba-2 hybrid (32B total / ~9B active)
+```
+Decision: Unacceptable latency in practice on this system. Granite 4.0-H-Small uses a Mamba-2 SSM hybrid architecture that is not yet well-optimized for SM_121 (GB10) in the current scitrera vLLM image. Despite strong quality benchmarks (Arena Hard 46.48, IF-Eval 87.55 — best open-weight under 400B), the real-world throughput on this hardware made it unsuitable for interactive use. Worth revisiting when Mamba kernel support for SM_121 matures.
+
+---
+
+## Looking Forward
+
+### MCP-Native Agent Runtime
+
+The current architecture uses aider as the execution engine — context is front-loaded via `--read` flags and config files, and the model operates within whatever was pre-loaded. This works but creates context window pressure, especially during develop with multiple skill files loaded.
+
+A future evolution would replace aider with a custom MCP-native agent runtime where the model pulls context on demand via tool calls:
+
+- **On-demand context:** Instead of loading full files upfront, the model calls tools like `get_conventions(section)` or `get_skill("backend", "api_patterns")` to retrieve only what it needs mid-conversation
+- **Precise file access:** `read_file_section(path, start, end)` instead of loading entire source files
+- **Structured state:** `get_project_status()` returns structured data instead of parsing STATE.md as raw text
+- **Self-managing context:** The model decides what context it needs, eliminating manual `worker-compact` cycles
+- **Smaller context windows per turn:** Faster inference on local models, lower cost on cloud models
+
+**What this requires building:**
+- Custom agent loop: send messages to model API (local vLLM or cloud), handle tool calls, apply file edits
+- File editing engine: parse model output, apply diffs/whole-file writes, handle malformed responses
+- Git integration: auto-commits, dirty-commit checks, worktree management
+- Model compatibility layer: local OpenAI-compatible APIs and cloud provider APIs
+
+**What this replaces:**
+- Aider's file editing (SEARCH/REPLACE, whole-file, diff formats)
+- Aider's repo map (token-budgeted codebase overview)
+- Aider's auto-commit and git integration
+- Aider's model compatibility layer (litellm)
+
+This is a significant undertaking — aider's file editing and edge case handling represent years of development. The intermediate step (MCP context server that curates context before passing to aider) provides most of the context management benefits without replacing the execution engine.
+
+---
+
+## License
+
+[Your License Here]

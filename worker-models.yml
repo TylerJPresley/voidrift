@@ -1,0 +1,99 @@
+# Worker Model Configurations
+# Optimized for ASUS Ascent GX10 (NVIDIA GB10 Grace Blackwell Superchip)
+# - 128GB unified LPDDR5x memory (shared CPU/GPU)
+# - 0.90 GPU utilization = ~115GB available for models
+# - Unified memory eliminates CPU-GPU transfer overhead
+
+models:
+  qwen3-8b:
+    repository: Qwen/Qwen3-8B-FP8
+    served_model_name: qwen3-8b
+    docker_image: scitrera/dgx-spark-vllm:0.17.0-t5
+    gpu_memory_utilization: 0.95
+    max_model_len: 40960
+    vllm_args:
+      - --enable-prefix-caching
+      - --tool-call-parser qwen3_xml
+      - --enable-auto-tool-choice
+      - --attention-backend flashinfer
+    notes: Qwen3 8B general-purpose, compact and fast
+
+  qwen3-instruct:
+    repository: Qwen/Qwen3-30B-A3B-Instruct-2507-FP8
+    served_model_name: qwen3-instruct
+    docker_image: scitrera/dgx-spark-vllm:0.17.0-t5
+    gpu_memory_utilization: 0.90
+    max_model_len: 65536
+    vllm_args:
+      - --enable-prefix-caching
+      - --tool-call-parser qwen3_xml
+      - --enable-auto-tool-choice
+      - --attention-backend flashinfer
+    notes: General-purpose reasoning, 30B MoE (3B active), gather and plan phases
+
+  qwen3-coder:
+    repository: Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8
+    served_model_name: qwen3-coder
+    docker_image: scitrera/dgx-spark-vllm:0.17.0-t5
+    gpu_memory_utilization: 0.90
+    max_model_len: 65536
+    vllm_args:
+      - --enable-prefix-caching
+      - --tool-call-parser qwen3_coder
+      - --enable-auto-tool-choice
+      - --attention-backend flashinfer
+    notes: Code-focused, 30B parameters, larger context
+
+  qwen3-coder-next:
+    repository: RedHatAI/Qwen3-Coder-Next-FP8-dynamic
+    served_model_name: qwen3-coder-next
+    docker_image: scitrera/dgx-spark-vllm:0.17.0-t5
+    gpu_memory_utilization: 0.90
+    max_model_len: 65536
+    vllm_args:
+      - --enable-prefix-caching
+      - --tool-call-parser qwen3_coder
+      - --enable-auto-tool-choice
+      - --attention-backend flashinfer
+    notes: Next-gen code model, 80B MoE, FP8 dynamic quantization
+
+# Retired models — preserved for reference, not actively used
+retired_models:
+  qwen3-32b-dense:
+    repository: Qwen/Qwen3-32B-FP8
+    docker_image: scitrera/dgx-spark-vllm:0.17.0-t5
+    gpu_memory_utilization: 0.90
+    max_model_len: 40960
+    vllm_args:
+      - --enable-prefix-caching
+      - --tool-call-parser qwen3_coder
+      - --enable-auto-tool-choice
+      - --attention-backend flashinfer
+    notes: Retired — dense 32B underperforms MoE equivalent on GB10; 33% slower throughput than qwen3-coder
+
+  granite-4-small:
+    repository: ibm-granite/granite-4.0-h-small-FP8
+    docker_image: scitrera/dgx-spark-vllm:0.17.0-t5
+    gpu_memory_utilization: 0.95
+    max_model_len: 65536
+    vllm_args:
+      - --enable-prefix-caching
+      - --tool-call-parser granite
+      - --enable-auto-tool-choice
+      - --attention-backend flashinfer
+    notes: Retired — Mamba-2 hybrid architecture not well-optimized for SM_121 on current vLLM image; unacceptable latency in practice
+
+# Worker node configuration
+worker:
+  port: 8000
+  container_prefix: worker-
+  cache_mounts:
+    - ~/.cache/huggingface:/root/.cache/huggingface
+    - ~/.cache/vllm:/root/.cache/vllm
+    - ~/.cache/flashinfer:/root/.cache/flashinfer
+  docker_options:
+    - --privileged
+    - --gpus all
+    - --network host
+  startup_timeout: 60  # seconds
+  poll_interval: 1     # seconds
