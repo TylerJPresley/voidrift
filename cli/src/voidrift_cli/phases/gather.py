@@ -131,20 +131,23 @@ def run_gather(
     console.print("[dim]Type 'quit' or Ctrl+C to exit[/dim]\n")
 
     # Interactive loop (AC-G3)
-    BLUE = "\033[34m"
-    BOLD = "\033[1m"
+    BB = "\033[1;34m"  # bold blue
     RESET = "\033[0m"
     try:
         while True:
             # Multi-line input: trailing \ continues, plain Enter submits
             lines = []
             try:
-                first = input(f"\n\n{BLUE}{BOLD}> {RESET}")
+                first = input(f"\n\n{BB}> ")
+                sys.stdout.write(RESET)
+                sys.stdout.flush()
                 if not first.strip():
                     continue
                 while first.endswith("\\"):
                     lines.append(first[:-1])
-                    first = input(f"{BLUE}{BOLD}  {RESET}")
+                    first = input(f"{BB}  ")
+                    sys.stdout.write(RESET)
+                    sys.stdout.flush()
                 lines.append(first)
             except EOFError:
                 break
