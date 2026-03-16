@@ -272,9 +272,9 @@ class TestModelsCheck:
 
 class TestWorkerLogs:
     @patch("voidrift_worker.models.get_status")
-    def test_no_container_raises(self, mock_status):
+    def test_no_active_raises_sentinel(self, mock_status):
         mock_status.return_value = {"active": False}
-        with pytest.raises(RuntimeError, match="No active"):
+        with pytest.raises(RuntimeError, match="NO_ACTIVE"):
             worker_logs()
 
     @patch("voidrift_worker.models.ssh_stream")
@@ -292,6 +292,22 @@ class TestWorkerLogs:
         mock_stream.return_value = 0
         worker_logs()
         assert "--tail 200" in mock_stream.call_args[0][0]
+
+    @patch("voidrift_worker.models.ssh_stream")
+    def test_explicit_container(self, mock_stream):
+        mock_stream.return_value = 0
+        worker_logs(container="worker-old")
+        assert "worker-old" in mock_stream.call_args[0][0]
+
+    @patch("voidrift_worker.models.ssh_cmd")
+    def test_list_stopped(self, mock_ssh):
+        mock_ssh.return_value = MagicMock(
+            stdout="worker-qwen3-coder|Exited (1) 5 minutes ago\nworker-qwen3-8b|Exited (0) 2 hours ago\n"
+        )
+        from voidrift_worker.models import _list_stopped_containers
+        result = _list_stopped_containers()
+        assert len(result) == 2
+        assert result[0]["name"] == "worker-qwen3-coder"
 
 
 class TestWorkerInfo:

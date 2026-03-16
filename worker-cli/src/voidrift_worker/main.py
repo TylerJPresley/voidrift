@@ -26,6 +26,7 @@ from .models import (
     stop_model,
     worker_check,
     worker_info,
+    _list_stopped_containers,
     worker_logs,
 )
 
@@ -192,8 +193,23 @@ def logs(follow: bool) -> None:
         rc = worker_logs(follow=follow)
         sys.exit(rc)
     except RuntimeError as e:
-        err_console.print(f"[red]{e}[/red]")
-        sys.exit(1)
+        if str(e) != "NO_ACTIVE":
+            err_console.print(f"[red]{e}[/red]")
+            sys.exit(1)
+
+        stopped = _list_stopped_containers()
+        if not stopped:
+            err_console.print("[red]No model containers found (running or stopped).[/red]")
+            sys.exit(1)
+
+        console.print("No active container. Stopped containers:")
+        for i, c in enumerate(stopped, 1):
+            console.print(f"  {i}. {c['name']}  ({c['status']})")
+
+        choice = click.prompt("Select", type=click.IntRange(1, len(stopped)))
+        selected = stopped[choice - 1]["name"]
+        rc = worker_logs(follow=follow, container=selected)
+        sys.exit(rc)
 
 
 @cli.command()
