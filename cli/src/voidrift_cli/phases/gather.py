@@ -136,7 +136,7 @@ def run_gather(
     RESET = "\033[0m"
     try:
         while True:
-            # Multi-line input: blank line submits
+            # Multi-line input: trailing \ continues, plain Enter submits
             lines = []
             try:
                 first = input(f"\n\n{BLUE}> ")
@@ -144,14 +144,12 @@ def run_gather(
                 sys.stdout.flush()
                 if not first.strip():
                     continue
-                lines.append(first)
-                while True:
-                    line = input(f"{BLUE}  ")
+                while first.endswith("\\"):
+                    lines.append(first[:-1])
+                    first = input(f"{BLUE}  ")
                     sys.stdout.write(RESET)
                     sys.stdout.flush()
-                    if not line.strip():
-                        break
-                    lines.append(line)
+                lines.append(first)
             except EOFError:
                 break
             user_input = "\n".join(lines).strip()
@@ -161,7 +159,7 @@ def run_gather(
                 break
 
             # Re-display as bold blue
-            sys.stdout.write(f"\033[{len(lines) + 1}A\033[J")  # move up and clear
+            sys.stdout.write(f"\033[{len(lines)}A\033[J")  # move up and clear
             sys.stdout.write(f"{BOLD_BLUE}> {user_input}{RESET}\n")
             sys.stdout.flush()
 
