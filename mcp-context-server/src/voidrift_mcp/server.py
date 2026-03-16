@@ -27,7 +27,7 @@ VOIDRIFT_DIR = PROJECT_DIR / ".voidrift"
 # Shared state
 # ---------------------------------------------------------------------------
 index = MarkdownIndex()
-artifacts = ArtifactStore()
+artifacts = ArtifactStore(voidrift_dir=VOIDRIFT_DIR)
 session_store = SessionStore()  # in-memory by default
 session_id: int = 0
 
@@ -126,16 +126,7 @@ def get_requirements(key: str = "project") -> str:
     """
     result = artifacts.get("requirements", key)
     if result is None:
-        # Try reading from disk
-        if key == "project":
-            p = VOIDRIFT_DIR / "REQUIREMENTS.md"
-        else:
-            p = VOIDRIFT_DIR / "spec" / f"{key}.md"
-        if p.exists():
-            result = p.read_text(encoding="utf-8")
-            artifacts.store("requirements", key, result)
-        else:
-            return f"No requirements found for '{key}'"
+        return f"No requirements found for '{key}'"
     session_store.log_action(session_id, "get", "requirements", key)
     return result
 

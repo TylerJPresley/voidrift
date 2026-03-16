@@ -41,7 +41,7 @@ Python MCP server that stores, retrieves, and exports project artifacts and fram
 
 **AC-MCP2 — Framework Resources:** The server loads framework files from `~/opt/voidrift/resources/` (agents/*.md, skills/*.md, templates/*.md), indexes them by markdown header, and serves targeted sections on demand.
 
-**AC-MCP3 — Project Artifacts:** The server reads/writes project artifacts in `<project>/.voidrift/`. Stores analysis results, requirements, tasks, and state in memory during a session. Exports to disk on phase completion.
+**AC-MCP3 — Project Artifacts:** The server reads/writes project artifacts in `<project>/.voidrift/`. Uses write-through storage: `store_*` tools write to both in-memory cache and disk simultaneously. Memory serves as a read cache; disk is the source of truth. No data is lost if the server process exits unexpectedly.
 
 **AC-MCP4 — Tools:** The server exposes tools including: `store_file_analysis()`, `get_file_analysis()`, `get_all_analyses()`, `store_requirements()`, `get_requirements()`, `get_agent(role, topic)`, `get_skill(name, topic)`, `get_template(name)`, `read_source_file(path)`, `write_file(path, content)`, `export_to_file(type, path)`.
 
