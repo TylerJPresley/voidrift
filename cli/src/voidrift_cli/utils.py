@@ -12,6 +12,7 @@ from pathlib import Path
 from rich.console import Console
 
 console = Console()
+err_console = Console(stderr=True)
 
 VOIDRIFT_HOME = Path(os.environ.get("VOIDRIFT_HOME", Path.home() / "opt" / "voidrift"))
 
@@ -54,7 +55,7 @@ def check_disk_space() -> None:
     st = os.statvfs(".")
     avail_gb = (st.f_bavail * st.f_frsize) / (1024**3)
     if avail_gb < 1.0:
-        console.print(f"[yellow]⚠ Low disk space: {avail_gb:.1f} GB available[/yellow]")
+        err_console.print(f"[yellow]⚠ Low disk space: {avail_gb:.1f} GB available[/yellow]")
 
 
 def check_requirements_exist() -> bool:

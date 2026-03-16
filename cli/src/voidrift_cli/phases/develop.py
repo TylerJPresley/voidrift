@@ -17,7 +17,7 @@ from ..models import ModelConfig, ensure_model_ready, cleanup_model, resolve_mod
 from ..utils import (
     ensure_voidrift_dir, voidrift_dir, log_path, check_disk_space,
     check_requirements_exist, check_task_files, count_tasks,
-    truncate_task_label, console,
+    truncate_task_label, console, err_console,
 )
 
 DEVELOPER_PROMPT = """[ROLE: Developer]
@@ -58,17 +58,17 @@ def run_develop(
 
     # Pre-flight checks (REQ-D-1)
     if not check_requirements_exist():
-        console.print("[red]REQUIREMENTS.md not found. Run 'voidrift gather <model>' first.[/red]")
+        err_console.print("[red]REQUIREMENTS.md not found. Run 'voidrift gather <model>' first.[/red]")
         return 1
 
     task_file, is_multi = check_task_files()
     if not task_file:
-        console.print("[red]No task files found. Run 'voidrift plan <model>' first.[/red]")
+        err_console.print("[red]No task files found. Run 'voidrift plan <model>' first.[/red]")
         return 1
 
     # REQ-D-12
     if workers != 1 and not is_multi:
-        console.print("[yellow]No module headers found. Falling back to single worker.[/yellow]")
+        err_console.print("[yellow]No module headers found. Falling back to single worker.[/yellow]")
         workers = 1
 
     # REQ-D-2
@@ -84,7 +84,7 @@ def run_develop(
             parts = lock.read_text().strip().split("\n")
             pid = int(parts[0])
             os.kill(pid, 0)
-            console.print(f"[red]Develop session already running (PID {pid}, started {parts[1] if len(parts) > 1 else 'unknown'})[/red]")
+            err_console.print(f"[red]Develop session already running (PID {pid}, started {parts[1] if len(parts) > 1 else 'unknown'})[/red]")
             return 1
         except (ProcessLookupError, ValueError, IndexError):
             lock.unlink()
@@ -99,7 +99,7 @@ def run_develop(
     try:
         ensure_model_ready(worker)
     except RuntimeError as e:
-        console.print(f"[red]Error: {e}[/red]")
+        err_console.print(f"[red]Error: {e}[/red]")
         lock.unlink(missing_ok=True)
         return 1
 
@@ -122,7 +122,7 @@ def run_develop(
     try:
         if is_multi and workers != 1:
             # TODO: concurrent worker pool (REQ-D-10, REQ-D-11)
-            console.print("[yellow]Multi-worker mode not yet implemented. Running sequentially.[/yellow]")
+            err_console.print("[yellow]Multi-worker mode not yet implemented. Running sequentially.[/yellow]")
 
         for module in modules:
             label = f"[{module}] " if is_multi else ""
@@ -130,7 +130,7 @@ def run_develop(
             if result != 0:
                 break
     except KeyboardInterrupt:
-        console.print("\n[yellow]Interrupted.[/yellow]")
+        err_console.print("\n[yellow]Interrupted.[/yellow]")
     finally:
         signal.signal(signal.SIGTERM, prev_handler)
         lock.unlink(missing_ok=True)
@@ -208,8 +208,8 @@ def _develop_module(
                 elapsed = time.time() - start_time
                 with open(log, "a") as f:
                     f.write(f"\n--- Task {task_num}: {label} ({elapsed:.1f}s) ---\n{response}\n")
-            except Exception as e:
-                console.print(f"[red]Task failed: {e}[/red]")
+            except (RuntimeError, OSError, ValueError) as e:
+                err_console.print(f"[red]Task failed: {e}[/red]")
                 with open(log, "a") as f:
                     f.write(f"ERROR on task {task_num}: {e}\n")
                 return 1
@@ -224,14 +224,14 @@ def _develop_module(
             if escalation_count > MAX_ESCALATIONS:  # REQ-D-7
                 mcp_mod.tasks.block(mod_arg)
                 blocked_tasks += 1
-                console.print(f"[yellow]Task blocked (max escalations reached)[/yellow]")
+                err_console.print(f"[yellow]Task blocked (max escalations reached)[/yellow]")
                 continue
 
             question = esc_file.read_text()
-            console.print(f"[yellow]Escalation: {question[:200]}[/yellow]")
+            err_console.print(f"[yellow]Escalation: {question[:200]}[/yellow]")
 
             if not architect:
-                console.print("[red]No architect configured. Re-run with an architect model.[/red]")
+                err_console.print("[red]No architect configured. Re-run with an architect model.[/red]")
                 return 1
 
             guidance = _consult_architect(architect, question, task.text, tools, handlers, log, mod_arg or None)
@@ -248,7 +248,7 @@ def _develop_module(
         console.print(f"  [green]✓[/green] {label} ({elapsed:.1f}s)")
 
     if blocked_tasks > 0:
-        console.print(f"\n[yellow]{blocked_tasks} task(s) blocked — marked [!] in TASKS.md[/yellow]")
+        err_console.print(f"\n[yellow]{blocked_tasks} task(s) blocked — marked [!] in TASKS.md[/yellow]")
         return 1
 
     mod_label = module if module != "_default" else "all"
@@ -282,7 +282,7 @@ def _consult_architect(
     try:
         ensure_model_ready(architect)
     except RuntimeError as e:
-        console.print(f"[red]Cannot reach architect: {e}[/red]")
+        err_console.print(f"[red]Cannot reach architect: {e}[/red]")
         return None
 
     d = voidrift_dir()
@@ -313,6 +313,6 @@ def _consult_architect(
             with open(log, "a") as f:
                 f.write(f"\n--- Architect consultation ---\n{response}\n")
             return response
-        except Exception as e:
-            console.print(f"[red]Architect consultation failed: {e}[/red]")
+        except (RuntimeError, OSError, ValueError) as e:
+            err_console.print(f"[red]Architect consultation failed: {e}[/red]")
             return None

@@ -88,9 +88,17 @@ class AgentLoop(BaseModel):
 
         Returns:
             Final assistant response text.
+
+        Raises:
+            RuntimeError: If the API call fails (wraps OpenAI/network errors).
         """
         self.messages.append({"role": "user", "content": user_message})
-        return self._run_loop()
+        try:
+            return self._run_loop()
+        except RuntimeError:
+            raise
+        except Exception as e:  # Wrap API/network errors for callers
+            raise RuntimeError(str(e)) from e
 
     def _run_loop(self) -> str:
         """Run the agent loop until a final text response (no more tool calls).
@@ -225,7 +233,7 @@ class AgentLoop(BaseModel):
 
         try:
             return str(handler(**args))
-        except Exception as e:
+        except Exception as e:  # Broad: tool handlers may raise any exception
             return f"Error calling {name}: {e}"
 
     def _handle_tool_call(self, tool_call: Any) -> str:

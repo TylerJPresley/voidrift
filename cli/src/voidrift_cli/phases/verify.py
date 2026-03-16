@@ -11,7 +11,7 @@ from rich.status import Status
 
 from ..agent import AgentLoop, build_mcp_tools
 from ..models import ModelConfig, ensure_model_ready, cleanup_model
-from ..utils import ensure_voidrift_dir, voidrift_dir, log_path, check_disk_space, console
+from ..utils import ensure_voidrift_dir, voidrift_dir, log_path, check_disk_space, console, err_console
 
 
 def _run_checks() -> tuple[str, int]:
@@ -117,7 +117,7 @@ def run_verify(worker: ModelConfig, architect: ModelConfig | None = None) -> int
     try:
         ensure_model_ready(worker)
     except RuntimeError as e:
-        console.print(f"[red]Error: {e}[/red]")
+        err_console.print(f"[red]Error: {e}[/red]")
         return 1
 
     log = log_path("verify")
@@ -157,8 +157,8 @@ def run_verify(worker: ModelConfig, architect: ModelConfig | None = None) -> int
             response = agent.send("\n\n".join(context_parts))
             with open(log, "a") as f:
                 f.write(f"\n=== Verify: {datetime.now().isoformat()} ===\n{response}\n")
-        except Exception as e:
-            console.print(f"[red]Analysis failed: {e}[/red]")
+        except (RuntimeError, OSError, ValueError) as e:
+            err_console.print(f"[red]Analysis failed: {e}[/red]")
             cleanup_model(worker)
             return 1
 
@@ -186,17 +186,17 @@ def run_verify(worker: ModelConfig, architect: ModelConfig | None = None) -> int
 
     # FAIL path
     if not architect:  # AC-V8
-        console.print("[red]❌ Verification failed.[/red]")
-        console.print("Re-run with an architect model to generate fix tasks.")
+        err_console.print("[red]❌ Verification failed.[/red]")
+        err_console.print("Re-run with an architect model to generate fix tasks.")
         cleanup_model(worker)
         return 1
 
     # Fix planning (AC-V9 through AC-V12)
-    console.print("[yellow]Verification failed — consulting architect for fix plan...[/yellow]")
+    err_console.print("[yellow]Verification failed — consulting architect for fix plan...[/yellow]")
     try:
         ensure_model_ready(architect)
     except RuntimeError as e:
-        console.print(f"[red]Cannot reach architect: {e}[/red]")
+        err_console.print(f"[red]Cannot reach architect: {e}[/red]")
         cleanup_model(worker)
         return 1
 
@@ -220,8 +220,8 @@ def run_verify(worker: ModelConfig, architect: ModelConfig | None = None) -> int
             arch_response = arch_agent.send(verify_content)
             with open(log, "a") as f:
                 f.write(f"\n--- Architect fix plan ---\n{arch_response}\n")
-        except Exception as e:
-            console.print(f"[red]Architect consultation failed: {e}[/red]")
+        except (RuntimeError, OSError, ValueError) as e:
+            err_console.print(f"[red]Architect consultation failed: {e}[/red]")
 
     # Generate fix tasks (AC-V11)
     arch_verify = d / "ARCHITECT_VERIFY.md"
@@ -243,16 +243,16 @@ def run_verify(worker: ModelConfig, architect: ModelConfig | None = None) -> int
                 fix_response = fix_agent.send(arch_verify.read_text())
                 with open(log, "a") as f:
                     f.write(f"\n--- Fix tasks ---\n{fix_response}\n")
-            except Exception as e:
-                console.print(f"[red]Fix task generation failed: {e}[/red]")
+            except (RuntimeError, OSError, ValueError) as e:
+                err_console.print(f"[red]Fix task generation failed: {e}[/red]")
 
     cleanup_model(worker)
     cleanup_model(architect)
 
     if (d / "TASKS-fixes.md").exists():
-        console.print("[yellow]❌ Verification failed — fix tasks generated.[/yellow]")
+        err_console.print("[yellow]❌ Verification failed — fix tasks generated.[/yellow]")
         console.print("Run 'voidrift develop <worker> <architect>' to address fixes.")
     else:
-        console.print("[red]❌ Verification failed.[/red]")
+        err_console.print("[red]❌ Verification failed.[/red]")
 
     return 1

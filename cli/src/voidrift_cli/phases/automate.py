@@ -10,7 +10,7 @@ from rich.status import Status
 
 from ..agent import AgentLoop, build_mcp_tools
 from ..models import ModelConfig, ensure_model_ready, cleanup_model
-from ..utils import ensure_voidrift_dir, voidrift_dir, log_path, check_disk_space, console
+from ..utils import ensure_voidrift_dir, voidrift_dir, log_path, check_disk_space, console, err_console
 
 
 def _detect_iac() -> bool:
@@ -47,13 +47,13 @@ def run_automate(worker: ModelConfig, architect: ModelConfig | None = None) -> i
     d = ensure_voidrift_dir()
 
     if not (d / "REQUIREMENTS.md").exists():
-        console.print("[red]REQUIREMENTS.md not found. Run 'voidrift gather <model>' first.[/red]")
+        err_console.print("[red]REQUIREMENTS.md not found. Run 'voidrift gather <model>' first.[/red]")
         return 1
 
     try:
         ensure_model_ready(worker)
     except RuntimeError as e:
-        console.print(f"[red]Error: {e}[/red]")
+        err_console.print(f"[red]Error: {e}[/red]")
         return 1
 
     log = log_path("automate")
@@ -111,8 +111,8 @@ def run_automate(worker: ModelConfig, architect: ModelConfig | None = None) -> i
             response = agent.send("\n".join(prompt_parts))
             with open(log, "a") as f:
                 f.write(f"\n=== Automate {mode}: {datetime.now().isoformat()} ===\n{response}\n")
-        except Exception as e:
-            console.print(f"[red]Automate failed: {e}[/red]")
+        except (RuntimeError, OSError, ValueError) as e:
+            err_console.print(f"[red]Automate failed: {e}[/red]")
             cleanup_model(worker)
             return 1
 
@@ -120,7 +120,7 @@ def run_automate(worker: ModelConfig, architect: ModelConfig | None = None) -> i
 
     # Verify IaC was created (AC-A8)
     if mode == "Generate" and not _detect_iac():
-        console.print("[yellow]⚠ No IaC files detected after generation. Check REQUIREMENTS.md ## Deployment.[/yellow]")
+        err_console.print("[yellow]⚠ No IaC files detected after generation. Check REQUIREMENTS.md ## Deployment.[/yellow]")
         return 1
 
     console.print(f"[green]✅ Automate ({mode.lower()}) complete.[/green]")

@@ -13,7 +13,7 @@ from ..agent import AgentLoop, build_mcp_tools
 from ..models import ModelConfig, ensure_model_ready, cleanup_model
 from ..utils import (
     ensure_voidrift_dir, voidrift_dir, log_path, check_disk_space,
-    console,
+    console, err_console,
 )
 
 ARCHITECT_PROMPT = """[ROLE: Architect]
@@ -60,7 +60,7 @@ def run_plan(
 
     # Check prerequisites
     if not (d / "REQUIREMENTS.md").exists():
-        console.print("[red]REQUIREMENTS.md not found. Run 'voidrift gather <model>' first.[/red]")
+        err_console.print("[red]REQUIREMENTS.md not found. Run 'voidrift gather <model>' first.[/red]")
         return 1
 
     # Fresh start (AC-P3a)
@@ -84,7 +84,7 @@ def run_plan(
     try:
         ensure_model_ready(model)
     except RuntimeError as e:
-        console.print(f"[red]Error: {e}[/red]")
+        err_console.print(f"[red]Error: {e}[/red]")
         return 1
 
     log = log_path("plan")
@@ -134,8 +134,8 @@ def run_plan(
             response = agent.send(prompt)
             with open(log, "a") as f:
                 f.write(response + "\n")
-        except Exception as e:
-            console.print(f"[red]Plan failed: {e}[/red]")
+        except (RuntimeError, OSError, ValueError) as e:
+            err_console.print(f"[red]Plan failed: {e}[/red]")
             with open(log, "a") as f:
                 f.write(f"ERROR: {e}\n")
             cleanup_model(model)
@@ -151,7 +151,7 @@ def run_plan(
             missing.append("ARCHITECTURE.md")
         if not has_tasks:
             missing.append("TASKS.md")
-        console.print(f"[yellow]Missing: {', '.join(missing)} — retrying...[/yellow]")
+        err_console.print(f"[yellow]Missing: {', '.join(missing)} — retrying...[/yellow]")
 
         retry_msg = (
             f"You did not produce all required artifacts. Missing: {', '.join(missing)}. "
@@ -162,8 +162,8 @@ def run_plan(
                 response = agent.send(retry_msg)
                 with open(log, "a") as f:
                     f.write(f"\n=== RETRY ===\n{response}\n")
-            except Exception as e:
-                console.print(f"[red]Retry failed: {e}[/red]")
+            except (RuntimeError, OSError, ValueError) as e:
+                err_console.print(f"[red]Retry failed: {e}[/red]")
 
         has_arch = (d / "ARCHITECTURE.md").exists()
         has_tasks = (d / "TASKS.md").exists()
@@ -174,7 +174,7 @@ def run_plan(
                 missing.append("ARCHITECTURE.md")
             if not has_tasks:
                 missing.append("TASKS.md")
-            console.print(f"[red]Plan failed: still missing {', '.join(missing)}[/red]")
+            err_console.print(f"[red]Plan failed: still missing {', '.join(missing)}[/red]")
             cleanup_model(model)
             return 1
 

@@ -40,6 +40,7 @@ class SessionStore:
         self._conn.commit()
 
     def start_session(self, phase: str = "", project_dir: str = "") -> int:
+        """Start a new session and return its ID."""
         cur = self._conn.execute(
             "INSERT INTO sessions (started_at, phase, project_dir) VALUES (?, ?, ?)",
             (datetime.now(timezone.utc).isoformat(), phase, project_dir),
@@ -55,6 +56,7 @@ class SessionStore:
         resource_key: str = "",
         detail: str = "",
     ) -> None:
+        """Record an action in the context log for a session."""
         self._conn.execute(
             "INSERT INTO context_log (session_id, timestamp, action, resource_type, resource_key, detail) VALUES (?, ?, ?, ?, ?, ?)",
             (
@@ -69,6 +71,7 @@ class SessionStore:
         self._conn.commit()
 
     def get_session_log(self, session_id: int) -> list[dict]:
+        """Return all context log entries for a session."""
         rows = self._conn.execute(
             "SELECT * FROM context_log WHERE session_id = ? ORDER BY id",
             (session_id,),
@@ -76,4 +79,5 @@ class SessionStore:
         return [dict(r) for r in rows]
 
     def close(self) -> None:
+        """Close the database connection."""
         self._conn.close()

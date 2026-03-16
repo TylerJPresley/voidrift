@@ -145,4 +145,5 @@ class MarkdownIndex(BaseModel):
 
     @property
     def section_count(self) -> int:
+        """Return the total number of indexed sections."""
         return len(self._sections)

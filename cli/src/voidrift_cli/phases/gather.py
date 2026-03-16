@@ -11,7 +11,7 @@ from rich.console import Console
 from ..agent import AgentLoop, build_mcp_tools
 from ..models import ModelConfig, ensure_model_ready, cleanup_model
 from ..utils import (
-    ensure_voidrift_dir, voidrift_dir, log_path, check_disk_space, console,
+    ensure_voidrift_dir, voidrift_dir, log_path, check_disk_space, console, err_console,
 )
 
 # System prompt for the Analyst role
@@ -72,7 +72,7 @@ def run_gather(
     if feature:
         # Feature gather requires REQUIREMENTS.md to exist (AC-G2)
         if not (d / "REQUIREMENTS.md").exists():
-            console.print(
+            err_console.print(
                 "[red]REQUIREMENTS.md not found. Run 'voidrift gather <model>' "
                 "first to create project requirements.[/red]"
             )
@@ -90,7 +90,7 @@ def run_gather(
     try:
         ensure_model_ready(model)
     except RuntimeError as e:
-        console.print(f"[red]Error: {e}[/red]")
+        err_console.print(f"[red]Error: {e}[/red]")
         return 1
 
     # Build system prompt
@@ -187,7 +187,7 @@ def _gather_from(
         return 1
 
     if not from_path.is_dir():
-        console.print(f"[red]Error: {from_path} is not a directory[/red]")
+        err_console.print(f"[red]Error: {from_path} is not a directory[/red]")
         return 1
 
     if force and target.exists():
@@ -196,7 +196,7 @@ def _gather_from(
     try:
         ensure_model_ready(model)
     except RuntimeError as e:
-        console.print(f"[red]Error: {e}[/red]")
+        err_console.print(f"[red]Error: {e}[/red]")
         return 1
 
     try:
@@ -251,7 +251,7 @@ def _gather_from(
         console.print(f"\n[green]✅ Requirements written to {target.relative_to(Path.cwd())}[/green]")
         return 0
     else:
-        console.print("[yellow]⚠ Requirements file was not created.[/yellow]")
+        err_console.print("[yellow]⚠ Requirements file was not created.[/yellow]")
         return 1
 
 

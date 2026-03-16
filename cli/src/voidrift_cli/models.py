@@ -183,14 +183,14 @@ def start_local_model(model: ModelConfig, refresh: bool = False) -> None:
             r = _ssh_cmd(f"docker ps --filter name={container_name} --format '{{{{.Names}}}}'")
             if container_name in r.stdout:
                 return  # Already running
-        except Exception:
+        except (subprocess.SubprocessError, OSError):
             pass
 
     # Stop existing worker containers (AC-MC9)
     try:
         _ssh_cmd(f"docker ps --filter 'name={prefix}' -q | xargs -r docker stop")
         _ssh_cmd(f"docker ps -a --filter 'name={prefix}' -q | xargs -r docker rm")
-    except Exception:
+    except (subprocess.SubprocessError, OSError):
         pass
 
     # Build docker run command

@@ -14,6 +14,7 @@ from rich.prompt import Prompt, IntPrompt
 from .models import resolve_model, is_local_model, is_kiro_model, CLOUD_MODELS, KIRO_MODELS, load_worker_models
 
 console = Console()
+err_console = Console(stderr=True)
 
 
 def _all_model_names() -> list[str]:
@@ -27,7 +28,7 @@ def _all_model_names() -> list[str]:
 
 @click.group(invoke_without_command=True)
 @click.pass_context
-def cli(ctx):
+def cli(ctx) -> None:
     """VoidRift — Local-first Agentic Development Framework.
 
     Five phases: gather → plan → develop → automate → verify
@@ -91,7 +92,7 @@ def _interactive_mode():
 @click.option("--reference", help="Path to reference codebase for interactive lookup")
 @click.option("--force", is_flag=True, help="Overwrite existing requirements when using --from")
 @click.option("--refresh", is_flag=True, help="Force local model container recreation")
-def gather(model, feature, from_path, reference, force, refresh):
+def gather(model, feature, from_path, reference, force, refresh) -> None:
     """Phase 1: Gather requirements interactively."""
     from .phases.gather import run_gather
     mc = resolve_model(model)
@@ -103,7 +104,7 @@ def gather(model, feature, from_path, reference, force, refresh):
 @click.argument("feature", required=False)
 @click.option("--fresh-start", is_flag=True, help="Delete existing planning artifacts")
 @click.option("--refresh", is_flag=True, help="Force local model container recreation")
-def plan(model, feature, fresh_start, refresh):
+def plan(model, feature, fresh_start, refresh) -> None:
     """Phase 2: Generate architecture and task breakdown."""
     from .phases.plan import run_plan
     mc = resolve_model(model)
@@ -115,7 +116,7 @@ def plan(model, feature, fresh_start, refresh):
 @click.argument("architect", required=False)
 @click.option("--workers", default=1, help="Number of concurrent module workers (0 = one per module)")
 @click.option("--refresh", is_flag=True, help="Force local model container recreation")
-def develop(worker, architect, workers, refresh):
+def develop(worker, architect, workers, refresh) -> None:
     """Phase 3: Execute implementation tasks."""
     from .phases.develop import run_develop
     wm = resolve_model(worker)
@@ -127,7 +128,7 @@ def develop(worker, architect, workers, refresh):
 @click.argument("worker")
 @click.argument("architect", required=False)
 @click.option("--refresh", is_flag=True, help="Force local model container recreation")
-def automate(worker, architect, refresh):
+def automate(worker, architect, refresh) -> None:
     """Phase 4: Generate infrastructure-as-code."""
     from .phases.automate import run_automate
     wm = resolve_model(worker)
@@ -139,7 +140,7 @@ def automate(worker, architect, refresh):
 @click.argument("worker")
 @click.argument("architect", required=False)
 @click.option("--refresh", is_flag=True, help="Force local model container recreation")
-def verify(worker, architect, refresh):
+def verify(worker, architect, refresh) -> None:
     """Phase 5: Run quality checks and validation."""
     from .phases.verify import run_verify
     wm = resolve_model(worker)
@@ -155,7 +156,7 @@ def verify(worker, architect, refresh):
 @cli.command()
 @click.argument("model")
 @click.option("--refresh", is_flag=True, help="Force local model container recreation")
-def chat(model, refresh):
+def chat(model, refresh) -> None:
     """Interactive chat session with a model (AC-U3)."""
     from .phases.gather import run_gather
     mc = resolve_model(model)
@@ -166,7 +167,7 @@ def chat(model, refresh):
     try:
         ensure_model_ready(mc)
     except RuntimeError as e:
-        console.print(f"[red]Error: {e}[/red]")
+        err_console.print(f"[red]Error: {e}[/red]")
         sys.exit(1)
 
     try:
@@ -203,7 +204,7 @@ def chat(model, refresh):
 
 
 @cli.command()
-def status():
+def status() -> None:
     """Show project phase status (AC-U1)."""
     _status()
 
@@ -276,7 +277,7 @@ def _status():
 @cli.command()
 @click.argument("phase", required=False)
 @click.option("--prune", is_flag=True, help="Delete log files")
-def log(phase, prune):
+def log(phase, prune) -> None:
     """View or manage phase log files (AC-U4b)."""
     from .utils import voidrift_dir
 
@@ -297,12 +298,12 @@ def log(phase, prune):
         sys.exit(1)
 
     if phase not in valid_phases:
-        console.print(f"[red]Invalid phase: {phase}. Must be one of: {', '.join(valid_phases)}[/red]")
+        err_console.print(f"[red]Invalid phase: {phase}. Must be one of: {', '.join(valid_phases)}[/red]")
         sys.exit(1)
 
     logs = sorted(d.glob(f"{phase}-*.log"))
     if not logs:
-        console.print(f"[red]No log files found for phase: {phase}[/red]")
+        err_console.print(f"[red]No log files found for phase: {phase}[/red]")
         sys.exit(1)
 
     latest = logs[-1]
@@ -312,7 +313,7 @@ def log(phase, prune):
 
 
 @cli.command()
-def unlock():
+def unlock() -> None:
     """Remove develop lock and kill running process (AC-U4a)."""
     from .utils import voidrift_dir
 
@@ -346,14 +347,14 @@ def unlock():
 @cli.command()
 @click.argument("num_prompts", default=100, type=int)
 @click.argument("req_rate", default=0, type=float)
-def bench(num_prompts, req_rate):
+def bench(num_prompts, req_rate) -> None:
     """Benchmark the active worker model (AC-U4)."""
     import subprocess
 
     worker_usr = os.environ.get("WORKER_USR", "")
     worker_ip = os.environ.get("WORKER_IP", "")
     if not worker_usr or not worker_ip:
-        console.print("[red]WORKER_USR and WORKER_IP must be set[/red]")
+        err_console.print("[red]WORKER_USR and WORKER_IP must be set[/red]")
         sys.exit(1)
 
     console.print(f"[bold cyan]VoidRift Bench[/bold cyan] — {num_prompts} prompts")
@@ -366,7 +367,7 @@ def bench(num_prompts, req_rate):
         )
         container = r.stdout.strip().split("\n")[0]
         if not container:
-            console.print("[red]No active worker container found[/red]")
+            err_console.print("[red]No active worker container found[/red]")
             sys.exit(1)
 
         console.print(f"Container: {container}")
@@ -390,10 +391,10 @@ def bench(num_prompts, req_rate):
             timeout=600,
         )
     except subprocess.TimeoutExpired:
-        console.print("[red]Benchmark timed out[/red]")
+        err_console.print("[red]Benchmark timed out[/red]")
         sys.exit(1)
-    except Exception as e:
-        console.print(f"[red]Benchmark failed: {e}[/red]")
+    except (subprocess.SubprocessError, OSError) as e:
+        err_console.print(f"[red]Benchmark failed: {e}[/red]")
         sys.exit(1)
 
 
