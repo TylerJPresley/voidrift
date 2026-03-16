@@ -211,6 +211,15 @@ def _gather_from(
     console.print(f"Source: {from_path}")
     console.print(f"Target: {target}")
 
+    # Load requirements template
+    template = ""
+    try:
+        t = Path.home() / ".voidrift" / "resources" / "templates" / "REQUIREMENTS-TEMPLATE.md"
+        if t.exists():
+            template = t.read_text()
+    except OSError:
+        pass
+
     agent = AgentLoop(
         model=model,
         system_prompt=(
@@ -218,7 +227,9 @@ def _gather_from(
             "You are reverse-engineering requirements from an existing codebase.\n"
             "The codebase is read-only. Treat code as ground truth, documentation as claims to verify.\n"
             "Analyze the codebase structure, then produce requirements.\n"
-            "Use write_file() to write the requirements when ready.\n"
+            "Use write_file() to write the requirements when ready.\n\n"
+            "You MUST follow this template structure exactly:\n\n"
+            f"{template}\n"
         ),
         tools=tools,
         tool_handlers=handlers,
