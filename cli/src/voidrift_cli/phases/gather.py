@@ -132,23 +132,19 @@ def run_gather(
 
     # Interactive loop (AC-G3)
     BLUE = "\033[34m"
-    BOLD_BLUE = "\033[1;34m"
+    BOLD = "\033[1m"
     RESET = "\033[0m"
     try:
         while True:
             # Multi-line input: trailing \ continues, plain Enter submits
             lines = []
             try:
-                first = input(f"\n\n{BLUE}> ")
-                sys.stdout.write(RESET)
-                sys.stdout.flush()
+                first = input(f"\n\n{BLUE}{BOLD}> {RESET}")
                 if not first.strip():
                     continue
                 while first.endswith("\\"):
                     lines.append(first[:-1])
-                    first = input(f"{BLUE}  ")
-                    sys.stdout.write(RESET)
-                    sys.stdout.flush()
+                    first = input(f"{BLUE}{BOLD}  {RESET}")
                 lines.append(first)
             except EOFError:
                 break
@@ -157,12 +153,6 @@ def run_gather(
                 continue
             if user_input.lower() in ("quit", "exit", "/quit"):
                 break
-
-            # Re-display as bold blue
-            sys.stdout.write(f"\033[{len(lines)}A\033[J")  # move up and clear
-            display = f"\n  ".join(lines)
-            sys.stdout.write(f"{BOLD_BLUE}> {display}{RESET}\n")
-            sys.stdout.flush()
 
             with open(log, "a") as f:
                 f.write(f"\n> {user_input}\n")
