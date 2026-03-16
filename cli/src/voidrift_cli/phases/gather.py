@@ -136,7 +136,9 @@ def run_gather(
     try:
         while True:
             try:
-                user_input = input(f"\n\n{BLUE}> {RESET}").strip()
+                user_input = input(f"\n\n{BLUE}> ").strip()
+                sys.stdout.write(RESET)
+                sys.stdout.flush()
             except EOFError:
                 break
             if not user_input:
