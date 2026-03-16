@@ -141,6 +141,46 @@ def get_requirements(key: str = "project") -> str:
 
 
 @mcp.tool()
+def get_agent(role: str, topic: str = "") -> str:
+    """Retrieve a role-specific agent file, optionally filtered to a topic.
+
+    Args:
+        role: Role name ('analyst', 'architect', or 'developer').
+        topic: Optional heading within the agent file to retrieve.
+    """
+    file_filter = f"agents/{role.upper()}"
+    if topic:
+        results = index.search(topic, file_filter=file_filter)
+        if results:
+            session_store.log_action(session_id, "get", "agent", f"{role}/{topic}")
+            return "\n\n---\n\n".join(r.content for r in results)
+        return f"No section matching '{topic}' in agent '{role}'"
+    all_secs = [s for s in index._sections if file_filter in s.file_path]
+    if all_secs:
+        session_store.log_action(session_id, "get", "agent", role)
+        return "\n\n".join(s.content for s in all_secs)
+    available = [p.stem.lower() for p in sorted((RESOURCES_DIR / "agents").glob("*.md"))]
+    return f"Agent '{role}' not found. Available roles: {', '.join(available)}"
+
+
+@mcp.tool()
+def get_template(name: str) -> str:
+    """Retrieve a template file by name.
+
+    Args:
+        name: Template name (e.g. 'adr-template', 'architecture-template').
+    """
+    templates_dir = RESOURCES_DIR / "templates"
+    p = templates_dir / f"{name.upper()}.md"
+    if not p.exists():
+        candidates = list(templates_dir.glob("*.md"))
+        available = [c.stem.lower() for c in sorted(candidates)]
+        return f"Template '{name}' not found. Available: {', '.join(available)}"
+    session_store.log_action(session_id, "get", "template", name)
+    return p.read_text(encoding="utf-8")
+
+
+@mcp.tool()
 def get_skill(name: str, topic: str = "") -> str:
     """Retrieve a skill file's content, optionally filtered to a specific topic.
 

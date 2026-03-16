@@ -270,7 +270,9 @@ def build_mcp_tools(mcp_server_module: Any) -> tuple[list[dict], dict[str, Calla
         get_all_analyses,
         store_requirements,
         get_requirements,
+        get_agent,
         get_skill,
+        get_template,
         read_source_file,
         write_file,
         export_to_file,
@@ -311,11 +313,26 @@ def build_mcp_tools(mcp_server_module: Any) -> tuple[list[dict], dict[str, Calla
                 "key": {"type": "string", "description": "'project' or feature name", "default": "project"},
             },
         }),
+        "get_agent": (get_agent, {
+            "type": "object",
+            "properties": {
+                "role": {"type": "string", "description": "Role name ('analyst', 'architect', or 'developer')"},
+                "topic": {"type": "string", "description": "Optional heading within the agent file", "default": ""},
+            },
+            "required": ["role"],
+        }),
         "get_skill": (get_skill, {
             "type": "object",
             "properties": {
                 "name": {"type": "string", "description": "Skill name (e.g. 'backend')"},
                 "topic": {"type": "string", "description": "Optional heading within the skill", "default": ""},
+            },
+            "required": ["name"],
+        }),
+        "get_template": (get_template, {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Template name (e.g. 'adr-template')"},
             },
             "required": ["name"],
         }),
