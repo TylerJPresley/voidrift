@@ -29,7 +29,21 @@ models:
       - --tool-call-parser qwen3_xml
       - --enable-auto-tool-choice
       - --attention-backend flashinfer
-    notes: General-purpose reasoning, 30B MoE (3B active), gather and plan phases
+      - --chat-template-kwargs '{"enable_thinking": false}'
+    notes: General-purpose, thinking disabled — fast for gather and chat
+
+  qwen3-instruct-think:
+    repository: Qwen/Qwen3-30B-A3B-Instruct-2507-FP8
+    served_model_name: qwen3-instruct
+    docker_image: scitrera/dgx-spark-vllm:0.17.0-t5
+    gpu_memory_utilization: 0.90
+    max_model_len: 65536
+    vllm_args:
+      - --enable-prefix-caching
+      - --tool-call-parser qwen3_xml
+      - --enable-auto-tool-choice
+      - --attention-backend flashinfer
+    notes: General-purpose with thinking enabled — for plan and complex reasoning
 
   qwen3-coder:
     repository: Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8
