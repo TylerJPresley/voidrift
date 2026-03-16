@@ -16,6 +16,7 @@ from .models import (
     images_pull,
     list_models,
     load_worker_models,
+    models_add,
     models_fix_perms,
     models_list_cached,
     models_prune,
@@ -55,6 +56,7 @@ Commands:
 Model Weights:
   models list                 Cached models + disk usage
   models aliases              Configured aliases
+  models add <alias> <repo>   Add a new model to config
   models pull <alias>         Download weights
   models remove <id>          Delete a cached revision
   models prune                Clean broken revisions
@@ -310,6 +312,22 @@ def models_fix_perms_cmd() -> None:
         else:
             sys.exit(rc)
     except RuntimeError as e:
+        err_console.print(f"[red]Error: {e}[/red]")
+        sys.exit(1)
+
+
+@models_group.command("add")
+@click.argument("alias")
+@click.argument("repo")
+def models_add_cmd(alias: str, repo: str) -> None:
+    """Add a new model to worker-models.yml with defaults.
+
+    Edit worker-models.yml afterwards to customize vllm_args.
+    """
+    try:
+        models_add(alias, repo)
+        console.print(f"✅ Added {alias} → {repo}")
+    except ValueError as e:
         err_console.print(f"[red]Error: {e}[/red]")
         sys.exit(1)
 

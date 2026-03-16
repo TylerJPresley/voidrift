@@ -381,6 +381,48 @@ def models_fix_perms() -> int:
     return ssh_stream("chmod -R u+w ~/.cache/huggingface")
 
 
+def models_add(alias: str, repo: str) -> None:
+    """Add a new model to worker-models.yml (REQ-WK-6e).
+
+    Args:
+        alias: Short name for the model.
+        repo: HuggingFace repository (e.g. Qwen/Qwen3-8B-FP8).
+
+    Raises:
+        ValueError: If alias already exists.
+    """
+    config = load_worker_models()
+    models = config.get("models", {})
+
+    if alias in models:
+        raise ValueError(f"Alias '{alias}' already exists in worker-models.yml")
+
+    # Get defaults from first existing model or use hardcoded defaults
+    if models:
+        first = next(iter(models.values()))
+        docker_image = first.get("docker_image", "scitrera/dgx-spark-vllm:0.17.0-t5")
+        gpu_util = first.get("gpu_memory_utilization", 0.90)
+        max_len = first.get("max_model_len", 65536)
+    else:
+        docker_image = "scitrera/dgx-spark-vllm:0.17.0-t5"
+        gpu_util = 0.90
+        max_len = 65536
+
+    models[alias] = {
+        "repository": repo,
+        "served_model_name": alias,
+        "docker_image": docker_image,
+        "gpu_memory_utilization": gpu_util,
+        "max_model_len": max_len,
+        "vllm_args": [],
+    }
+
+    config["models"] = models
+    p = _worker_models_path()
+    with open(p, "w") as f:
+        yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+
+
 def worker_logs(follow: bool = False) -> int:
     """Show active container logs (REQ-WK-11)."""
     s = get_status()

@@ -15,6 +15,7 @@ from voidrift_worker.models import (
     images_pull,
     list_models,
     load_worker_models,
+    models_add,
     models_fix_perms,
     models_list_cached,
     models_prune,
@@ -220,6 +221,27 @@ class TestModelsFixPerms:
         rc = models_fix_perms()
         assert rc == 0
         assert "chmod" in mock_stream.call_args[0][0]
+
+
+class TestModelsAdd:
+    def test_adds_to_config(self, tmp_path, monkeypatch):
+        yml = tmp_path / "worker-models.yml"
+        yml.write_text("models:\n  existing:\n    repository: Some/Model\n    docker_image: img:1\n    gpu_memory_utilization: 0.85\n    max_model_len: 32768\n")
+        monkeypatch.setattr("voidrift_worker.models._worker_models_path", lambda: yml)
+        models_add("new-model", "Org/New-Model")
+        import yaml
+        config = yaml.safe_load(yml.read_text())
+        assert "new-model" in config["models"]
+        assert config["models"]["new-model"]["repository"] == "Org/New-Model"
+        assert config["models"]["new-model"]["docker_image"] == "img:1"
+        assert config["models"]["new-model"]["gpu_memory_utilization"] == 0.85
+
+    def test_duplicate_alias_raises(self, tmp_path, monkeypatch):
+        yml = tmp_path / "worker-models.yml"
+        yml.write_text("models:\n  qwen:\n    repository: Qwen/Qwen3\n")
+        monkeypatch.setattr("voidrift_worker.models._worker_models_path", lambda: yml)
+        with pytest.raises(ValueError, match="already exists"):
+            models_add("qwen", "Qwen/Other")
 
 
 class TestWorkerLogs:

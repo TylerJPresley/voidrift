@@ -417,6 +417,7 @@ voidrift verify qwen3-coder claude
 - **`worker bench [<num>] [<rate>]`** - Benchmark active model
 - **`worker models list`** - List cached models and disk usage
 - **`worker models aliases`** - List configured aliases from worker-models.yml
+- **`worker models add <alias> <repo>`** - Add a new model to config with defaults
 - **`worker models pull <alias>`** - Download model weights
 - **`worker models remove <id>`** - Remove a cached model revision
 - **`worker models prune`** - Clean broken/detached revisions
