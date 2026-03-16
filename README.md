@@ -129,17 +129,9 @@ The unified memory architecture allows efficient model loading without CPU-GPU t
 
 4. **Download initial models:**
    ```bash
-   ssh <user>@<ip>
-   
-   # For gated models, login first
-   uvx --from huggingface_hub hf login
-   ```
-
-   Then download models using the worker CLI:
-   ```bash
-   worker models pull qwen3-coder
-   worker models pull qwen3-instruct
-   worker models pull qwen3-8b
+   worker models add qwen3-coder Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8
+   worker models add qwen3-instruct Qwen/Qwen3-30B-A3B-Instruct-2507-FP8
+   worker models add qwen3-8b Qwen/Qwen3-8B-FP8
    ```
 
 5. **Pull vLLM Docker image:**
@@ -181,17 +173,18 @@ ssh <user>@<ip> "docker pull nvcr.io/nvidia/vllm:26.02-py3"
 **Worker Node Management:**
 
 ```bash
-# List cached models and disk usage
+# List configured and cached models with status
 worker models list
 
-# Download model weights by alias
-worker models pull qwen3-coder
+# Add a model (downloads weights + adds to config)
+worker models add <alias> <repo>
 
-# Delete a specific model by revision ID
-worker models remove <ID>
+# Remove a model (deletes weights + retires config)
+worker models remove <alias>
 
-# Clean broken/detached revisions
-worker models prune
+# Audit models, download missing, report unconfigured
+worker models check
+worker models check --prune  # remove unconfigured cached models
 
 # Reset compiled kernel caches (if experiencing GPU issues)
 worker cache clear
@@ -201,7 +194,7 @@ worker status
 
 # View container logs
 worker logs
-worker logs --follow
+worker logs -f
 
 # Worker node GPU, disk, and memory
 worker info
@@ -211,11 +204,10 @@ worker images pull
 
 # Pull a specific image
 worker images pull vllm/vllm-openai:latest-aarch64-cu130
-```
 
-**Note:** If you encounter "Permission denied" errors when removing models:
-```bash
-worker models fix-perms
+# Shell completions
+worker completions bash > ~/.local/share/bash-completion/completions/worker
+voidrift completions bash > ~/.local/share/bash-completion/completions/voidrift
 ```
 
 ### Framework Configuration

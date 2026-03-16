@@ -10,7 +10,12 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 - `worker-cli/` package — manages local model containers and Kiro Gateway (`worker` command)
 - `models.yml` — unified model endpoint config (alias → base_url, api_key, model_id)
-- Worker CLI commands: `worker start`, `stop`, `status`, `check`, `logs`, `info`, `models list/pull/remove/prune/fix-perms`, `images pull/list`, `cache clear`, `bench`, `kiro start/stop/status`
+- Worker CLI commands: `worker start`, `stop`, `status`, `check`, `logs`, `info`, `models list/add/remove/check`, `images pull/list`, `cache clear`, `bench`, `kiro start/stop/status`
+- `worker completions <shell>` and `voidrift completions <shell>` — tab completion for bash/zsh/fish
+- Model alias tab completion on all model/worker/architect arguments in both CLIs
+- Thinking spinner while waiting for model responses (clears on first token)
+- Interactive gather: bold blue operator text, multi-line input (trailing `\`), line editing via readline
+- Phase log path displayed after title in all phase commands
 - `TaskStore` — parses single TASKS.md with `## Module:` headers into per-module queues with write-through to disk
 - MCP tools: `load_tasks`, `get_next_task`, `complete_task`, `get_task_status` for task management
 - MCP tools: `get_agent(role, topic)`, `get_template(name)` for targeted resource retrieval
@@ -21,6 +26,18 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Changed
 - CLI is now model-agnostic — resolves aliases to endpoint URLs, no SSH/docker/gateway management
 - `models.py` rewritten: pure alias→URL resolution from `models.yml` (was: SSH, docker, container lifecycle)
+- Worker model commands simplified: `list`, `add`, `remove`, `check` (was 8 commands)
+- `worker stop` accepts optional alias argument (ignored — always stops active container)
+- `worker logs [-f]` always shows interactive container picker with status
+- `gather --from` loads REQUIREMENTS-TEMPLATE and skills (PROD-STRATEGY, QUALITY-QA) into system prompt
+- Interactive gather loads existing requirements into system prompt (was: user message causing tool-call loops)
+- Interactive gather limited to `write_file` tool only (was: all 16 MCP tools causing infinite loops)
+- Interactive gather capped at 2048 max_tokens (was: 16384 causing multi-minute responses)
+- Analyst prompt instructs concise responses — few questions per turn
+- Docker run command includes `vllm serve` and `-e HF_TOKEN` for gated models
+- Phase logs moved to `.voidrift/logs/` subdirectory
+- `huggingface-cli` references updated to `uvx --from huggingface_hub hf`
+- Kiro model IDs fixed: dots not dashes (`claude-sonnet-4.5` not `claude-sonnet-4-5`)
 - `bench` command moved from `voidrift` to `worker` CLI
 - `--refresh` flag moved from phase commands to `worker start --refresh`
 - REQUIREMENTS.md migrated to IEEE 29148 / EARS notation (1027 → 248 lines)
@@ -32,6 +49,18 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Module system generalized — no hardcoded module names, file ownership constraint
 - "subproject" terminology replaced with "module" throughout
 - Resources reorganized: `resources/agents/`, `resources/skills/`, `resources/templates/`
+
+### Fixed
+- Both CLIs catch all exceptions — no Python tracebacks ever shown to user
+- Unknown commands show error + help text instead of traceback
+- Connection errors in interactive gather return to prompt instead of killing session
+- Spinner always stops on error (try/finally cleanup)
+- Newline between streamed text chunks before tool call handling
+- Empty `KIRO_API_KEY` caught before request with clean error message
+- Gateway health check catches `ReadError` during startup
+- `gather --from` reads files from source codebase (was: resolving relative to project dir)
+- Removed stale env var references from README (`$WORKER_USR`, `$WORKER_IP`, etc.)
+- Removed `VOIDRIFT_PROJECT_DIR` from MCP server — always uses `Path.cwd()`
 
 ### Removed
 - `ensure_model_ready()` / `cleanup_model()` from CLI and all phase files — worker-cli handles this
