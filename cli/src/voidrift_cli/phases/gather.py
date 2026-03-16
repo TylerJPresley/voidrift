@@ -160,7 +160,8 @@ def run_gather(
 
             # Re-display as bold blue
             sys.stdout.write(f"\033[{len(lines)}A\033[J")  # move up and clear
-            sys.stdout.write(f"{BOLD_BLUE}> {user_input}{RESET}\n")
+            display = f"\n  ".join(lines)
+            sys.stdout.write(f"{BOLD_BLUE}> {display}{RESET}\n")
             sys.stdout.flush()
 
             with open(log, "a") as f:
