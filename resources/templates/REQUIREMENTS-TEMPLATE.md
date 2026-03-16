@@ -20,6 +20,7 @@
 
 - **REQ-1:** WHEN [user action], THE SYSTEM SHALL [expected behavior].
 - **REQ-2:** IF [precondition] AND [user action], THE SYSTEM SHALL [expected behavior].
+  - *Rationale:* [Why this requirement exists or why this approach was chosen — use for non-obvious decisions]
 - **REQ-3:** WHILE [state], THE SYSTEM SHALL [expected behavior].
 
 ## 5. Non-Functional Requirements
