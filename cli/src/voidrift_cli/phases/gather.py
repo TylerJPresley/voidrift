@@ -118,7 +118,6 @@ def run_gather(
         tools=tools,
         tool_handlers=handlers,
         stream=True,
-        max_tokens=4096,
     )
 
     # Start conversation
