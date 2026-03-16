@@ -673,9 +673,16 @@ cd ~/opt/kiro-gateway && docker-compose restart
 
 5. **Configure framework:**
    
-   Add to your shell profile:
+   Set `kiro.port` and `kiro.api_key` in `~/.voidrift/config.yml`:
+   ```yaml
+   kiro:
+     port: 8000        # Or your custom port
+     api_key: ${KIRO_API_KEY}
+   ```
+   
+   And set the env var in your shell profile:
    ```bash
-   export KIRO_GATEWAY_PORT="8000"  # Or your custom port
+   export KIRO_API_KEY="your-secure-password"  # matches PROXY_API_KEY from .env
    ```
 
 ### Automatic Container Management
@@ -901,7 +908,7 @@ The MCP server provides 16 tools that the model calls on demand:
    - `haiku` - Fast and cost-effective, good for simple tasks
    - `gemini` - High capability alternative
    - `gemini-flash` - Fast alternative
-   - `kiro-*` - Gateway models (requires `KIRO_GATEWAY_PORT`)
+   - `kiro-*` - Gateway models (requires `kiro.port` in config.yml)
 
 4. **Performance:**
    - No startup time (instant availability)
