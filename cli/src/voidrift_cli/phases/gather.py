@@ -140,7 +140,11 @@ def run_gather(
             with open(log, "a") as f:
                 f.write(f"\n> {user_input}\n")
 
-            response = agent.send(user_input)
+            try:
+                response = agent.send(user_input)
+            except RuntimeError as e:
+                err_console.print(f"\n[red]Error: {e}[/red]")
+                continue
 
             with open(log, "a") as f:
                 f.write(f"\n{response}\n")

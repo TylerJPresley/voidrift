@@ -176,46 +176,46 @@ class AgentLoop(BaseModel):
         spinner = threading.Thread(target=_spin, daemon=True)
         spinner.start()
 
-        stream = client.chat.completions.create(**kwargs)
-        for chunk in stream:
-            if not chunk.choices:
-                continue
-            delta = chunk.choices[0].delta
+        try:
+            stream = client.chat.completions.create(**kwargs)
+            for chunk in stream:
+                if not chunk.choices:
+                    continue
+                delta = chunk.choices[0].delta
 
-            # Accumulate text
-            if delta.content:
-                if not stop_spinner.is_set():
-                    stop_spinner.set()
-                    spinner.join()
-                sys.stdout.write(delta.content)
-                sys.stdout.flush()
-                collected_text += delta.content
+                # Accumulate text
+                if delta.content:
+                    if not stop_spinner.is_set():
+                        stop_spinner.set()
+                        spinner.join()
+                    sys.stdout.write(delta.content)
+                    sys.stdout.flush()
+                    collected_text += delta.content
 
-            # Accumulate tool calls
-            if delta.tool_calls:
-                if not stop_spinner.is_set():
-                    stop_spinner.set()
-                    spinner.join()
-                for tc_delta in delta.tool_calls:
-                    idx = tc_delta.index
-                    if idx not in collected_tool_calls:
-                        collected_tool_calls[idx] = {
-                            "id": tc_delta.id or "",
-                            "type": "function",
-                            "function": {"name": "", "arguments": ""},
-                        }
-                    tc = collected_tool_calls[idx]
-                    if tc_delta.id:
-                        tc["id"] = tc_delta.id
-                    if tc_delta.function:
-                        if tc_delta.function.name:
-                            tc["function"]["name"] = tc_delta.function.name
-                        if tc_delta.function.arguments:
-                            tc["function"]["arguments"] += tc_delta.function.arguments
-
-        # Ensure spinner is stopped
-        if not stop_spinner.is_set():
-            stop_spinner.set()
+                # Accumulate tool calls
+                if delta.tool_calls:
+                    if not stop_spinner.is_set():
+                        stop_spinner.set()
+                        spinner.join()
+                    for tc_delta in delta.tool_calls:
+                        idx = tc_delta.index
+                        if idx not in collected_tool_calls:
+                            collected_tool_calls[idx] = {
+                                "id": tc_delta.id or "",
+                                "type": "function",
+                                "function": {"name": "", "arguments": ""},
+                            }
+                        tc = collected_tool_calls[idx]
+                        if tc_delta.id:
+                            tc["id"] = tc_delta.id
+                        if tc_delta.function:
+                            if tc_delta.function.name:
+                                tc["function"]["name"] = tc_delta.function.name
+                            if tc_delta.function.arguments:
+                                tc["function"]["arguments"] += tc_delta.function.arguments
+        finally:
+            if not stop_spinner.is_set():
+                stop_spinner.set()
             spinner.join()
 
         # If we got tool calls, handle them and loop
