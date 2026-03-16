@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import itertools
 import json
 import os
 import sys
+import threading
 from pathlib import Path
 from typing import Any, Callable
 
@@ -161,6 +163,19 @@ class AgentLoop(BaseModel):
         collected_text = ""
         collected_tool_calls: dict[int, dict] = {}
 
+        # Spinner until first token arrives
+        stop_spinner = threading.Event()
+        def _spin():
+            for ch in itertools.cycle("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"):
+                if stop_spinner.wait(0.1):
+                    break
+                sys.stderr.write(f"\r\033[2m{ch} Thinking...\033[0m")
+                sys.stderr.flush()
+            sys.stderr.write("\r\033[K")
+            sys.stderr.flush()
+        spinner = threading.Thread(target=_spin, daemon=True)
+        spinner.start()
+
         stream = client.chat.completions.create(**kwargs)
         for chunk in stream:
             if not chunk.choices:
@@ -169,12 +184,18 @@ class AgentLoop(BaseModel):
 
             # Accumulate text
             if delta.content:
+                if not stop_spinner.is_set():
+                    stop_spinner.set()
+                    spinner.join()
                 sys.stdout.write(delta.content)
                 sys.stdout.flush()
                 collected_text += delta.content
 
             # Accumulate tool calls
             if delta.tool_calls:
+                if not stop_spinner.is_set():
+                    stop_spinner.set()
+                    spinner.join()
                 for tc_delta in delta.tool_calls:
                     idx = tc_delta.index
                     if idx not in collected_tool_calls:
@@ -191,6 +212,11 @@ class AgentLoop(BaseModel):
                             tc["function"]["name"] = tc_delta.function.name
                         if tc_delta.function.arguments:
                             tc["function"]["arguments"] += tc_delta.function.arguments
+
+        # Ensure spinner is stopped
+        if not stop_spinner.is_set():
+            stop_spinner.set()
+            spinner.join()
 
         # If we got tool calls, handle them and loop
         if collected_tool_calls:
