@@ -47,6 +47,8 @@ Python MCP server that stores, retrieves, and exports project artifacts and fram
 
 **AC-MCP5 — Storage:** In-memory index for content (parsed markdown sections). SQLite for session metadata (context tracking, what was loaded, what changed).
 
+**AC-MCP6 — Context Boundary:** The CLI never reads framework resource files (`resources/`, skills, AGENT*.md, CONVENTIONS.md, templates) directly. All framework context is served exclusively through MCP server tool calls. The CLI's role is orchestration: phase sequencing, model lifecycle, agent loop, and git operations. In-flight session state (analyses, drafts, intermediate artifacts) is held by the MCP server. Final compiled artifacts are written to `<project>/.voidrift/`.
+
 ### 3. Framework Reference Files (`resources/`)
 
 Core documents that define voidrift identity, operational rules, and editing conventions. Loaded as read-only context in aider sessions to guide model behavior.
@@ -1105,6 +1107,20 @@ This prevents re-downloading models and recompiling kernels on each container st
 - Communication style and behavioral rules
 - Context available during that role's phases
 - Specific workflows (e.g., TODO comments for Analyst, escalation for Developer)
+
+---
+
+## Cross-Cutting: Change Management
+
+**AC-CM1 — Changelog:** A `CHANGELOG.md` at the repo root tracks all notable changes using [Keep a Changelog](https://keepachangelog.com/) format. Sections: Added, Changed, Fixed, Removed. Each release has a version header and date.
+
+**AC-CM2 — Versioning:** Both packages use the same version number, following [Semantic Versioning](https://semver.org/). The version is defined in a `VERSION` file at the repo root (single source of truth). Each package's `pyproject.toml` reads from this file via `hatchling`'s version source.
+
+**AC-CM3 — Build Targets:** A `Makefile` at the repo root provides:
+- `make test` — run full test suite
+- `make install` — editable install of both packages
+- `make build` — build wheels for both packages
+- `make release VERSION=x.y.z` — bump version, update changelog header, build
 
 ---
 

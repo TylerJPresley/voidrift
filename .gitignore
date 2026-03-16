@@ -1,2 +1,7 @@
 .claude-flow/
 .aider.chat.history.md
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+.pytest_cache/

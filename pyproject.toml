@@ -1,0 +1,4 @@
+[tool.pytest.ini_options]
+testpaths = ["cli/tests", "mcp-context-server/tests", "tests"]
+pythonpath = ["cli/tests", "mcp-context-server/tests"]
+addopts = "-v --tb=short"

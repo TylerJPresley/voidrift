@@ -1,0 +1,33 @@
+[project]
+name = "voidrift-cli"
+dynamic = ["version"]
+description = "VoidRift CLI — local-first agentic development framework"
+requires-python = ">=3.11"
+dependencies = [
+    "click>=8.1",
+    "rich>=13.0",
+    "httpx>=0.27",
+    "pydantic>=2.0",
+    "pyyaml>=6.0",
+    "openai>=1.0",
+    "anthropic>=0.40",
+    "mcp[cli]>=1.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "../VERSION"
+pattern = "(?P<version>.+)"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/voidrift_cli"]
+
+[project.scripts]
+voidrift = "voidrift_cli.main:cli"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v --tb=short"
