@@ -183,6 +183,13 @@
 - **REQ-LOG-1:** All phase logs SHALL use timestamped filenames: `<phase>-YYYYMMDD-HHMMSS.log`.
 - **REQ-LOG-2:** Log files SHALL accumulate indefinitely. The operator is responsible for cleanup.
 
+### 4.15 Framework Configuration
+
+- **REQ-CFG-1:** All framework configuration SHALL be read from `~/.voidrift/config.yml`. The file SHALL support `${VAR}` and `${VAR:-default}` environment variable expansion.
+- **REQ-CFG-2:** `config.yml` SHALL contain sections for: `worker` (user, ip), `kiro` (port, api_key), and `api_keys` (anthropic, gemini, openai). Connection settings are literal values; API keys use env var references.
+- **REQ-CFG-3:** Framework resources (agents, skills, templates), `models.yml`, and `worker-models.yml` SHALL be read from `~/.voidrift/`. The repo is the source of truth; `make sync` copies to `~/.voidrift/`.
+- **REQ-CFG-4:** `VOIDRIFT_HOME` env var MAY override `~/.voidrift/` for testing and CI. IF not set, `~/.voidrift/` is used.
+
 ## 5. Non-Functional Requirements
 
 - **Reliability:** The MCP server SHALL use write-through storage so no data is lost on unexpected exit. The develop phase SHALL use a lock file to prevent concurrent sessions. SIGTERM SHALL trigger graceful shutdown with cleanup.
@@ -244,16 +251,14 @@
 
 ## Appendix B: Environment Variables
 
-| Variable | Required | Default | Used By | Purpose |
-|----------|----------|---------|---------|---------|
-| `VOIDRIFT_HOME` | No | `$HOME/.voidrift` | CLI | Framework installation directory |
-| `ANTHROPIC_API_KEY` | Claude models | — | CLI | Anthropic API key |
-| `GEMINI_API_KEY` | Gemini models | — | CLI | Google AI API key |
-| `WORKER_USR` | Local models | — | Worker CLI | SSH username for worker node |
-| `WORKER_IP` | Local models | — | Worker CLI | Worker node IP address |
-| `HF_TOKEN` | Model downloads | — | Worker CLI | Hugging Face token |
-| `KIRO_GATEWAY_PORT` | Kiro models | `8000` | Worker CLI | Kiro Gateway port |
-| `KIRO_API_KEY` | Kiro models | — | Worker CLI | Kiro Gateway authentication |
+| Variable | Required | Default | Purpose |
+|----------|----------|---------|---------|
+| `VOIDRIFT_HOME` | No | `~/.voidrift` | Override config directory for testing/CI |
+| `ANTHROPIC_API_KEY` | Claude models | — | Referenced via `${ANTHROPIC_API_KEY}` in config.yml |
+| `GEMINI_API_KEY` | Gemini models | — | Referenced via `${GEMINI_API_KEY}` in config.yml |
+| `OPENAI_API_KEY` | Local models | `no-key` | Referenced via `${OPENAI_API_KEY:-no-key}` in config.yml |
+| `KIRO_API_KEY` | Kiro models | — | Referenced via `${KIRO_API_KEY}` in config.yml |
+| `HF_TOKEN` | Model downloads | — | Hugging Face token for gated models |
 
 ## Appendix C: Model Registry
 

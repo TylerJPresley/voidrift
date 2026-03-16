@@ -50,20 +50,21 @@ class AgentLoop(BaseModel):
         Returns:
             Configured OpenAI client instance.
         """
+        from .config import get_api_key
+
         kwargs: dict[str, Any] = {}
         if self.model.api_base:
             kwargs["base_url"] = self.model.api_base
         if self.model.api_key:
             kwargs["api_key"] = self.model.api_key
         elif self.model.provider == "anthropic":
-            # Use Anthropic's OpenAI-compatible endpoint
-            kwargs["api_key"] = os.environ.get("ANTHROPIC_API_KEY", "")
+            kwargs["api_key"] = get_api_key("anthropic") or ""
             kwargs["base_url"] = "https://api.anthropic.com/v1/"
         elif self.model.provider == "gemini":
-            kwargs["api_key"] = os.environ.get("GEMINI_API_KEY", "")
+            kwargs["api_key"] = get_api_key("gemini") or ""
             kwargs["base_url"] = "https://generativelanguage.googleapis.com/v1beta/openai/"
         else:
-            kwargs["api_key"] = os.environ.get("OPENAI_API_KEY", "no-key")
+            kwargs["api_key"] = get_api_key("openai") or "no-key"
         return OpenAI(**kwargs)
 
     def _model_name(self) -> str:

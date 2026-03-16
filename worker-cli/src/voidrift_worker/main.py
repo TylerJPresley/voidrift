@@ -74,9 +74,8 @@ Kiro Gateway:
   kiro stop                   Stop gateway
   kiro status                 Health check
 
-Environment:
-  WORKER_USR                  SSH username for worker node
-  WORKER_IP                   Worker node IP address
+Configuration:
+  ~/.voidrift/config.yml      Worker, Kiro, and API key settings
 
 Run 'worker COMMAND --help' for details."""
 

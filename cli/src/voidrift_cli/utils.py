@@ -14,7 +14,7 @@ from rich.console import Console
 console = Console()
 err_console = Console(stderr=True)
 
-VOIDRIFT_HOME = Path(os.environ.get("VOIDRIFT_HOME", Path.home() / "opt" / "voidrift"))
+VOIDRIFT_HOME = Path(os.environ.get("VOIDRIFT_HOME", Path.home() / ".voidrift"))
 
 
 def voidrift_dir() -> Path:

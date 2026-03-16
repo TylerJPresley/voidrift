@@ -55,31 +55,27 @@ class TestLoadWorkerModels:
 
 
 class TestSshTarget:
-    def test_missing_env_raises(self, monkeypatch):
-        monkeypatch.delenv("WORKER_USR", raising=False)
-        monkeypatch.delenv("WORKER_IP", raising=False)
-        with pytest.raises(RuntimeError, match="WORKER_USR"):
+    @patch("voidrift_worker.config.get_worker_config", return_value={})
+    def test_missing_config_raises(self, _mock):
+        with pytest.raises(RuntimeError, match="config.yml"):
             _ssh_target()
 
-    def test_returns_user_at_ip(self, monkeypatch):
-        monkeypatch.setenv("WORKER_USR", "testuser")
-        monkeypatch.setenv("WORKER_IP", "10.0.0.1")
+    @patch("voidrift_worker.config.get_worker_config", return_value={"user": "testuser", "ip": "10.0.0.1"})
+    def test_returns_user_at_ip(self, _mock):
         assert _ssh_target() == "testuser@10.0.0.1"
 
 
 class TestSshCmd:
-    def test_missing_env_raises(self, monkeypatch):
-        monkeypatch.delenv("WORKER_USR", raising=False)
-        monkeypatch.delenv("WORKER_IP", raising=False)
-        with pytest.raises(RuntimeError, match="WORKER_USR"):
+    @patch("voidrift_worker.config.get_worker_config", return_value={})
+    def test_missing_config_raises(self, _mock):
+        with pytest.raises(RuntimeError, match="config.yml"):
             ssh_cmd("test")
 
 
 class TestSshStream:
     @patch("voidrift_worker.models.subprocess.run")
-    def test_returns_exit_code(self, mock_run, monkeypatch):
-        monkeypatch.setenv("WORKER_USR", "u")
-        monkeypatch.setenv("WORKER_IP", "1.2.3.4")
+    @patch("voidrift_worker.config.get_worker_config", return_value={"user": "u", "ip": "1.2.3.4"})
+    def test_returns_exit_code(self, _mock_cfg, mock_run):
         mock_run.return_value = MagicMock(returncode=0)
         assert ssh_stream("echo hi") == 0
 
@@ -116,16 +112,17 @@ class TestStopModel:
 
 
 class TestGetStatus:
+    @patch("voidrift_worker.config.get_worker_config", return_value={"ip": "192.168.50.100"})
     @patch("voidrift_worker.models.ssh_cmd")
-    def test_active(self, mock_ssh, monkeypatch):
-        monkeypatch.setenv("WORKER_IP", "192.168.50.100")
+    def test_active(self, mock_ssh, _mock_cfg):
         mock_ssh.return_value = MagicMock(stdout="worker-qwen3-coder\n", returncode=0)
         s = get_status()
         assert s["active"]
         assert s["model"] == "qwen3-coder"
 
+    @patch("voidrift_worker.config.get_worker_config", return_value={"ip": "192.168.50.100"})
     @patch("voidrift_worker.models.ssh_cmd")
-    def test_inactive(self, mock_ssh):
+    def test_inactive(self, mock_ssh, _mock_cfg):
         mock_ssh.return_value = MagicMock(stdout="", returncode=0)
         s = get_status()
         assert not s["active"]

@@ -11,6 +11,15 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 os.environ["VOIDRIFT_HOME"] = str(REPO_ROOT)
 
 
+@pytest.fixture(autouse=True)
+def _clear_config_cache():
+    """Clear config cache before each test so env var changes take effect."""
+    from voidrift_cli.config import clear_config_cache
+    clear_config_cache()
+    yield
+    clear_config_cache()
+
+
 @pytest.fixture
 def tmp_project(tmp_path, monkeypatch):
     """Create a temporary project directory with .voidrift/ and chdir into it."""

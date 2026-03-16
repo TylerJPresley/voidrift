@@ -39,28 +39,38 @@ The workstation is where you (the operator) run `voidrift` commands. It orchestr
    voidrift
    ```
 
-**Environment Variables:**
+**Configuration:**
 
-Add to your shell profile (`~/.bashrc` or `~/.bash_profile`):
+All settings live in `~/.voidrift/config.yml`. Sync from the repo:
 
 ```bash
-# Framework location
-export VOIDRIFT_HOME="$HOME/.voidrift"
+make sync
+```
 
-# Worker node connection (if using local models)
-export WORKER_USR="your-username"
-export WORKER_IP="192.168.x.x"
-export OPENAI_API_BASE="http://$WORKER_IP:8000/v1"
-export OPENAI_API_KEY="no-key-needed-here"
+Edit `~/.voidrift/config.yml` with your settings:
 
-# Cloud APIs (if using cloud models)
+```yaml
+worker:
+  user: your-username
+  ip: 192.168.x.x
+
+kiro:
+  port: 8000
+  api_key: ${KIRO_API_KEY}
+
+api_keys:
+  anthropic: ${ANTHROPIC_API_KEY}
+  gemini: ${GEMINI_API_KEY}
+  openai: ${OPENAI_API_KEY:-no-key}
+```
+
+API keys are set as environment variables in your shell profile (`~/.bashrc`):
+
+```bash
 export ANTHROPIC_API_KEY="your-key"
 export GEMINI_API_KEY="your-key"
+export KIRO_API_KEY="your-proxy-api-key"
 export HF_TOKEN="your-token"
-
-# Kiro Gateway (optional, for kiro-* models)
-export KIRO_GATEWAY_PORT="8000"
-export KIRO_API_KEY="your-proxy-api-key"  # PROXY_API_KEY from ~/opt/kiro-gateway/.env
 ```
 
 ### Worker Node Setup

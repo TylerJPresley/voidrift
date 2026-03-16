@@ -14,7 +14,8 @@ from pydantic import BaseModel, Field
 
 def _worker_models_path() -> Path:
     """Return path to worker-models.yml."""
-    return Path(os.environ.get("VOIDRIFT_HOME", Path.home() / ".voidrift")) / "worker-models.yml"
+    from .config import voidrift_home
+    return voidrift_home() / "worker-models.yml"
 
 
 def load_worker_models() -> dict:
@@ -68,12 +69,14 @@ def _ssh_target() -> str:
     """Return user@ip SSH target string.
 
     Raises:
-        RuntimeError: If WORKER_USR or WORKER_IP are not set.
+        RuntimeError: If worker user/ip are not configured.
     """
-    user = os.environ.get("WORKER_USR", "")
-    ip = os.environ.get("WORKER_IP", "")
+    from .config import get_worker_config
+    wc = get_worker_config()
+    user = wc.get("user", "")
+    ip = wc.get("ip", "")
     if not user or not ip:
-        raise RuntimeError("WORKER_USR and WORKER_IP must be set for local models")
+        raise RuntimeError("Worker user and ip must be set in config.yml")
     return f"{user}@{ip}"
 
 
@@ -184,7 +187,8 @@ def start_model(alias: str, refresh: bool = False) -> None:
         raise RuntimeError("SSH timeout starting container")
 
     # Wait for API ready
-    worker_ip = os.environ.get("WORKER_IP", "")
+    from .config import get_worker_config
+    worker_ip = get_worker_config().get("ip", "")
     url = f"http://{worker_ip}:{port}/v1/models"
     start_time = time.time()
     while time.time() - start_time < 300:
@@ -215,11 +219,12 @@ def get_status() -> dict:
     Returns:
         Dict with keys: active (bool), container (str|None), model (str|None), url (str|None).
     """
+    from .config import get_worker_config
     config = load_worker_models()
     worker = config.get("worker", {})
     prefix = worker.get("container_prefix", "worker-")
     port = worker.get("port", 8000)
-    worker_ip = os.environ.get("WORKER_IP", "")
+    worker_ip = get_worker_config().get("ip", "")
 
     try:
         r = ssh_cmd(f"docker ps --filter 'name={prefix}' --format '{{{{.Names}}}}'")
@@ -243,7 +248,8 @@ def start_gateway() -> None:
     Raises:
         RuntimeError: If the gateway does not become healthy or credentials are invalid.
     """
-    port = os.environ.get("KIRO_GATEWAY_PORT", "8000")
+    from .config import get_kiro_config
+    port = str(get_kiro_config().get("port", 8000))
 
     # Fix database permissions
     db_path = Path.home() / ".local" / "share" / "kiro-cli" / "data.sqlite3"
@@ -303,7 +309,8 @@ def validate_gateway_credentials(port: str) -> None:
     Raises:
         RuntimeError: If credentials are expired, database is unreadable, or connection fails.
     """
-    api_key = os.environ.get("KIRO_API_KEY", "")
+    from .config import get_kiro_config
+    api_key = get_kiro_config().get("api_key", "")
     try:
         r = httpx.post(
             f"http://localhost:{port}/v1/chat/completions",
@@ -338,7 +345,8 @@ def get_gateway_status() -> dict:
     Returns:
         Dict with keys: active (bool), url (str|None).
     """
-    port = os.environ.get("KIRO_GATEWAY_PORT", "8000")
+    from .config import get_kiro_config
+    port = str(get_kiro_config().get("port", 8000))
     try:
         r = httpx.get(f"http://localhost:{port}/health", timeout=3)
         if r.status_code == 200:

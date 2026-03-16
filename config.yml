@@ -1,0 +1,16 @@
+# VoidRift Framework Configuration
+# Source of truth: ~/Projects/voidrift/config.yml
+# Runtime location: ~/.voidrift/config.yml (synced via make sync)
+
+worker:
+  user: tjpresley
+  ip: 192.168.50.100
+
+kiro:
+  port: 8000
+  api_key: ${KIRO_API_KEY}
+
+api_keys:
+  anthropic: ${ANTHROPIC_API_KEY}
+  gemini: ${GEMINI_API_KEY}
+  openai: ${OPENAI_API_KEY:-no-key}
