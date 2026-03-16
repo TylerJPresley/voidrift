@@ -47,7 +47,7 @@ models:
     provider: anthropic
 
   haiku:
-    model_id: "anthropic/claude-haiku-4-5-20251001"
+    model_id: "anthropic/claude-haiku-4.5-20251001"
     type: cloud
     provider: anthropic
 
@@ -63,13 +63,13 @@ models:
 
   # Kiro Gateway models (start with: worker kiro start)
   kiro-sonnet:
-    model_id: "openai/claude-sonnet-4-5"
+    model_id: "openai/claude-sonnet-4.5"
     base_url: "http://localhost:${kiro.port}/v1"
     api_key: "${kiro.api_key}"
     type: gateway
 
   kiro-haiku:
-    model_id: "openai/claude-haiku-4-5"
+    model_id: "openai/claude-haiku-4.5"
     base_url: "http://localhost:${kiro.port}/v1"
     api_key: "${kiro.api_key}"
     type: gateway
