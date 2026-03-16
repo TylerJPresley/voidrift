@@ -93,10 +93,9 @@ def run_gather(
     if reference_path:
         system += f"\n\nA reference codebase is available at {reference_path}. You can use read_source_file() to examine it."
 
-    # Load existing file for revision (AC-G1)
-    initial_context = ""
+    # Load existing file into system prompt for revision (AC-G1)
     if target.exists():
-        initial_context = f"Here is the existing file for revision:\n\n{target.read_text()}"
+        system += f"\n\nHere is the existing requirements file for revision:\n\n{target.read_text()}"
 
     # Set up MCP tools (AC-CLI4)
     try:
@@ -124,9 +123,6 @@ def run_gather(
     else:
         console.print(f"[dim]Creating new: {target.relative_to(Path.cwd())}[/dim]")
     console.print("[dim]Type 'quit' or Ctrl+C to exit[/dim]\n")
-
-    if initial_context:
-        agent.send(initial_context)
 
     # Interactive loop (AC-G3)
     try:
