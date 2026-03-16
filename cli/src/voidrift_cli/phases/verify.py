@@ -10,7 +10,7 @@ from rich.console import Console
 from rich.status import Status
 
 from ..agent import AgentLoop, build_mcp_tools
-from ..models import ModelConfig, ensure_model_ready, cleanup_model
+from ..models import ModelConfig
 from ..utils import ensure_voidrift_dir, voidrift_dir, log_path, check_disk_space, console, err_console
 
 
@@ -114,12 +114,6 @@ def run_verify(worker: ModelConfig, architect: ModelConfig | None = None) -> int
     raw_file = d / "VERIFY-RAW.md"
     raw_file.write_text(raw_output)
 
-    try:
-        ensure_model_ready(worker)
-    except RuntimeError as e:
-        err_console.print(f"[red]Error: {e}[/red]")
-        return 1
-
     log = log_path("verify")
 
     try:
@@ -159,7 +153,6 @@ def run_verify(worker: ModelConfig, architect: ModelConfig | None = None) -> int
                 f.write(f"\n=== Verify: {datetime.now().isoformat()} ===\n{response}\n")
         except (RuntimeError, OSError, ValueError) as e:
             err_console.print(f"[red]Analysis failed: {e}[/red]")
-            cleanup_model(worker)
             return 1
 
     # Delete raw output (AC-V5)
@@ -181,24 +174,16 @@ def run_verify(worker: ModelConfig, architect: ModelConfig | None = None) -> int
 
     if passed:  # AC-V7
         console.print("[green]✅ Verification passed.[/green]")
-        cleanup_model(worker)
         return 0
 
     # FAIL path
     if not architect:  # AC-V8
         err_console.print("[red]❌ Verification failed.[/red]")
         err_console.print("Re-run with an architect model to generate fix tasks.")
-        cleanup_model(worker)
         return 1
 
     # Fix planning (AC-V9 through AC-V12)
     err_console.print("[yellow]Verification failed — consulting architect for fix plan...[/yellow]")
-    try:
-        ensure_model_ready(architect)
-    except RuntimeError as e:
-        err_console.print(f"[red]Cannot reach architect: {e}[/red]")
-        cleanup_model(worker)
-        return 1
 
     verify_content = verify_file.read_text() if verify_file.exists() else "No VERIFY.md produced"
 
@@ -246,8 +231,6 @@ def run_verify(worker: ModelConfig, architect: ModelConfig | None = None) -> int
             except (RuntimeError, OSError, ValueError) as e:
                 err_console.print(f"[red]Fix task generation failed: {e}[/red]")
 
-    cleanup_model(worker)
-    cleanup_model(architect)
 
     if (d / "TASKS-fixes.md").exists():
         err_console.print("[yellow]❌ Verification failed — fix tasks generated.[/yellow]")

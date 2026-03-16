@@ -31,6 +31,7 @@ The workstation is where you (the operator) run `voidrift` commands. It orchestr
    # Or manually:
    pip install -e cli/
    pip install -e mcp-context-server/
+   pip install -e worker-cli/
    ```
 
 3. **Verify installation:**
@@ -223,7 +224,7 @@ The framework automatically:
 - Mounts cache directories to persist model weights and compiled kernels
 - Monitors container health during startup
 
-Use `--refresh` flag to force container recreation even if already running.
+Use `worker start <alias> --refresh` to force container recreation even if already running.
 
 **Performance Benchmarks:**
 
@@ -332,7 +333,7 @@ Trade-offs: 2x slower generation, much higher TTFT, lower concurrency
 
 Run benchmarks yourself:
 ```bash
-voidrift bench 100 1  # 100 prompts at 1 req/s
+worker bench 100 1  # 100 prompts at 1 req/s
 ```
 
 **Kiro Gateway Setup:**
@@ -352,7 +353,8 @@ voidrift gather claude
 # 3. Plan architecture and tasks
 voidrift plan claude
 
-# 4. Develop implementation
+# 4. Start local model and develop
+worker start qwen3-coder
 voidrift develop qwen3-coder claude
 
 # 5. Generate infrastructure
@@ -366,29 +368,34 @@ voidrift verify qwen3-coder claude
 
 ### Phase Commands
 
-- **`voidrift gather <model> [<feature>] [--refresh] [--from <path>] [--reference <path>] [--force]`** - Gather requirements interactively
+- **`voidrift gather <model> [<feature>] [--from <path>] [--reference <path>] [--force]`** - Gather requirements interactively
   - `--from <path>` - Reverse engineer requirements from existing codebase (non-interactive, auto-generates)
   - `--reference <path>` - Load reference codebase for lookup during interactive session
   - `--force` - Overwrite existing requirements when using --from (default: error if file exists)
-  - `--refresh` - Force local model container recreation (if using local model)
-- **`voidrift plan <model> [<feature>] [--refresh] [--fresh-start]`** - Generate architecture and tasks
-  - `--refresh` - Force local model container recreation (if using local model)
+- **`voidrift plan <model> [<feature>] [--fresh-start]`** - Generate architecture and tasks
   - `--fresh-start` - Delete existing planning artifacts and start fresh
-- **`voidrift develop <worker> [<architect>] [flags]`** - Execute implementation tasks
+- **`voidrift develop <worker> [<architect>] [--workers N]`** - Execute implementation tasks
   - `--workers N` - Number of concurrent module workers (0 = one per module, default: 1)
-  - `--refresh` - Force local model container recreation (if using local model)
-- **`voidrift automate <worker> [<architect>] [--refresh]`** - Generate infrastructure code
-  - `--refresh` - Force local model container recreation (if using local model)
-- **`voidrift verify <worker> [<architect>] [--refresh]`** - Run quality checks and validation
-  - `--refresh` - Force local model container recreation (if using local model)
+- **`voidrift automate <worker> [<architect>]`** - Generate infrastructure code
+- **`voidrift verify <worker> [<architect>]`** - Run quality checks and validation
 
 ### Utility Commands
 
 - **`voidrift status`** - Show project phase status
-- **`voidrift chat <model> [--refresh]`** - Interactive chat session with any model
-- **`voidrift bench [<num>] [<rate>]`** - Benchmark worker model
+- **`voidrift chat <model>`** - Interactive chat session with any model
 - **`voidrift log <phase> [--prune]`** - View or manage phase log files
 - **`voidrift unlock`** - Remove develop lock and kill running process
+
+### Worker Commands
+
+- **`worker start <alias> [--refresh]`** - Start a local model container
+- **`worker stop`** - Stop the active model container
+- **`worker status`** - Show active model and gateway status
+- **`worker models`** - List available model aliases
+- **`worker bench [<num>] [<rate>]`** - Benchmark active model
+- **`worker gateway start`** - Start Kiro Gateway
+- **`worker gateway stop`** - Stop Kiro Gateway
+- **`worker gateway status`** - Check gateway health
 
 ## Available Models
 
@@ -537,10 +544,10 @@ Review `.voidrift/architect_responses/` for guidance, or re-run with architect m
 - Check worker node logs: `ssh $WORKER_USR@$WORKER_IP docker logs worker-<model>`
 - Verify GPU availability: `ssh $WORKER_USR@$WORKER_IP nvidia-smi`
 - Check disk space on worker: `ssh $WORKER_USR@$WORKER_IP df -h`
-- Force recreation: Add `--refresh` flag to command
+- Force recreation: `worker start <alias> --refresh`
 
 ### Model configuration changes not taking effect
-Use `--refresh` to force container recreation after editing `worker-models.yml`
+Use `worker start <alias> --refresh` to force container recreation after editing `worker-models.yml`
 
 ### Kiro Gateway "Refresh token is not set" or credential errors
 Kiro Gateway credentials have expired. Fix:
@@ -683,11 +690,12 @@ For detailed configuration options (VPN/proxy support, AWS SSO, etc.), see the [
 
 ### Architecture Overview
 
-The framework consists of three main components:
+The framework consists of four components:
 
-1. **VoidRift CLI** (`cli/`) - Python Click-based CLI providing the `voidrift` command with an agent loop that sends messages to model APIs, handles MCP tool calls, and streams responses
-2. **MCP Context Server** (`mcp-context-server/`) - FastMCP server that stores, retrieves, and exports project artifacts and framework resources. The model pulls context on demand via tool calls instead of loading full files
-3. **Framework Resources** (`resources/`) - Role-specific agent files, skill conventions, and document templates
+1. **VoidRift CLI** (`cli/`) — Model-agnostic phase orchestrator. Resolves model aliases to endpoint URLs from `models.yml`, runs the agent loop, handles MCP tool calls. Does NOT manage containers, SSH, or gateway processes.
+2. **MCP Context Server** (`mcp-context-server/`) — FastMCP server that stores, retrieves, and exports project artifacts and framework resources. The model pulls context on demand via tool calls instead of loading full files.
+3. **Worker CLI** (`worker-cli/`) — Manages local model containers and Kiro Gateway. SSH to worker node, docker lifecycle, benchmarks, health checks. Provides the `worker` command.
+4. **Framework Resources** (`resources/`) — Role-specific agent files, skill conventions, and document templates.
 
 ### Three-Role System
 
@@ -776,7 +784,7 @@ The MCP server provides 16 tools that the model calls on demand:
    - Models run in Docker containers on remote worker node
    - Framework SSHs to `$WORKER_IP` and starts containers via docker
    - Only one model container runs at a time (single-worker constraint)
-   - Containers are reused if configuration matches; `--refresh` forces recreation
+   - Containers are reused if configuration matches; `worker start <alias> --refresh` forces recreation
 
 2. **Model Configuration** (`worker-models.yml`):
    ```yaml

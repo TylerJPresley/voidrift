@@ -13,7 +13,7 @@ from rich.console import Console
 from rich.status import Status
 
 from ..agent import AgentLoop, build_mcp_tools
-from ..models import ModelConfig, ensure_model_ready, cleanup_model, resolve_model
+from ..models import ModelConfig
 from ..utils import (
     ensure_voidrift_dir, voidrift_dir, log_path, check_disk_space,
     check_requirements_exist, check_task_files, count_tasks,
@@ -96,13 +96,6 @@ def run_develop(
 
     prev_handler = signal.signal(signal.SIGTERM, _handle_sigterm)
 
-    try:
-        ensure_model_ready(worker)
-    except RuntimeError as e:
-        err_console.print(f"[red]Error: {e}[/red]")
-        lock.unlink(missing_ok=True)
-        return 1
-
     log = log_path("develop")
     with open(log, "a") as f:
         f.write(f"\n=== Develop session: {datetime.now().isoformat()} ===\n")
@@ -134,9 +127,6 @@ def run_develop(
     finally:
         signal.signal(signal.SIGTERM, prev_handler)
         lock.unlink(missing_ok=True)
-        cleanup_model(worker)
-        if architect and architect.model_type == "kiro":
-            cleanup_model(architect)
 
     return result
 
@@ -279,12 +269,6 @@ def _consult_architect(
     Returns:
         Architect's guidance text, or None on failure.
     """
-    try:
-        ensure_model_ready(architect)
-    except RuntimeError as e:
-        err_console.print(f"[red]Cannot reach architect: {e}[/red]")
-        return None
-
     d = voidrift_dir()
     context_parts = [f"Question from developer:\n{question}\n\nTask:\n{task_text}"]
     req = d / "REQUIREMENTS.md"

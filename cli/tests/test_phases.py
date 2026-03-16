@@ -9,38 +9,16 @@ from voidrift_cli.models import ModelConfig
 from helpers import make_openai_response
 
 
-@pytest.fixture
-def mock_model_ready():
-    """Patch ensure_model_ready and cleanup_model to be no-ops."""
-    # Import the modules first so patch targets resolve
-    import voidrift_cli.phases.gather
-    import voidrift_cli.phases.plan
-    import voidrift_cli.phases.develop
-    import voidrift_cli.phases.automate
-    import voidrift_cli.phases.verify
-    with patch("voidrift_cli.phases.gather.ensure_model_ready"), \
-         patch("voidrift_cli.phases.gather.cleanup_model"), \
-         patch("voidrift_cli.phases.plan.ensure_model_ready"), \
-         patch("voidrift_cli.phases.plan.cleanup_model"), \
-         patch("voidrift_cli.phases.develop.ensure_model_ready"), \
-         patch("voidrift_cli.phases.develop.cleanup_model"), \
-         patch("voidrift_cli.phases.automate.ensure_model_ready"), \
-         patch("voidrift_cli.phases.automate.cleanup_model"), \
-         patch("voidrift_cli.phases.verify.ensure_model_ready"), \
-         patch("voidrift_cli.phases.verify.cleanup_model"):
-        yield
-
-
 # ── Gather ──────────────────────────────────────────────────────────────
 
 
 class TestGatherPreflightChecks:
-    def test_feature_without_requirements(self, tmp_project, cloud_model, mock_model_ready):
+    def test_feature_without_requirements(self, tmp_project, cloud_model):
         from voidrift_cli.phases.gather import run_gather
         result = run_gather(cloud_model, feature="auth")
         assert result == 1
 
-    def test_feature_with_requirements(self, tmp_project, cloud_model, sample_requirements, mock_model_ready):
+    def test_feature_with_requirements(self, tmp_project, cloud_model, sample_requirements):
         from voidrift_cli.phases.gather import run_gather
         # This will try to start interactive mode — we just verify it gets past preflight
         with patch("voidrift_cli.phases.gather.AgentLoop") as MockAgent:
@@ -50,12 +28,12 @@ class TestGatherPreflightChecks:
         # Verify spec dir was created
         assert (tmp_project / ".voidrift" / "spec").is_dir()
 
-    def test_from_nonexistent_dir(self, tmp_project, cloud_model, mock_model_ready):
+    def test_from_nonexistent_dir(self, tmp_project, cloud_model):
         from voidrift_cli.phases.gather import run_gather
         result = run_gather(cloud_model, from_path="/nonexistent/path")
         assert result == 1
 
-    def test_from_existing_target_no_force(self, tmp_project, cloud_model, sample_requirements, mock_model_ready):
+    def test_from_existing_target_no_force(self, tmp_project, cloud_model, sample_requirements):
         from voidrift_cli.phases.gather import run_gather
         result = run_gather(cloud_model, from_path=str(tmp_project), force=False)
         assert result == 1  # Target exists, no --force
@@ -65,13 +43,13 @@ class TestGatherPreflightChecks:
 
 
 class TestPlanPreflightChecks:
-    def test_missing_requirements(self, tmp_project, cloud_model, mock_model_ready):
+    def test_missing_requirements(self, tmp_project, cloud_model):
         from voidrift_cli.phases.plan import run_plan
         result = run_plan(cloud_model)
         assert result == 1
 
     @patch("voidrift_cli.phases.plan.AgentLoop")
-    def test_produces_artifacts(self, MockAgent, tmp_project, cloud_model, sample_requirements, mock_model_ready):
+    def test_produces_artifacts(self, MockAgent, tmp_project, cloud_model, sample_requirements):
         """Simulate a model that creates the required artifacts via tool calls."""
         vd = tmp_project / ".voidrift"
 
@@ -92,7 +70,7 @@ class TestPlanPreflightChecks:
         assert (vd / "TASKS.md").exists()
 
     @patch("voidrift_cli.phases.plan.AgentLoop")
-    def test_retries_on_missing_artifacts(self, MockAgent, tmp_project, cloud_model, sample_requirements, mock_model_ready):
+    def test_retries_on_missing_artifacts(self, MockAgent, tmp_project, cloud_model, sample_requirements):
         vd = tmp_project / ".voidrift"
         call_count = 0
 
@@ -118,7 +96,7 @@ class TestPlanPreflightChecks:
         assert call_count == 2
 
     @patch("voidrift_cli.phases.plan.AgentLoop")
-    def test_fails_after_retry(self, MockAgent, tmp_project, cloud_model, sample_requirements, mock_model_ready):
+    def test_fails_after_retry(self, MockAgent, tmp_project, cloud_model, sample_requirements):
         mock_instance = MagicMock()
         mock_instance.send.return_value = "I didn't create anything."
         MockAgent.return_value = mock_instance
@@ -127,7 +105,7 @@ class TestPlanPreflightChecks:
         result = run_plan(cloud_model)
         assert result == 1
 
-    def test_fresh_start_clears_artifacts(self, tmp_project, cloud_model, sample_requirements, mock_model_ready):
+    def test_fresh_start_clears_artifacts(self, tmp_project, cloud_model, sample_requirements):
         vd = tmp_project / ".voidrift"
         (vd / "ARCHITECTURE.md").write_text("old arch")
         (vd / "TASKS.md").write_text("old tasks")
@@ -151,24 +129,24 @@ class TestPlanPreflightChecks:
 
 
 class TestDevelopPreflightChecks:
-    def test_missing_requirements(self, tmp_project, cloud_model, mock_model_ready):
+    def test_missing_requirements(self, tmp_project, cloud_model):
         from voidrift_cli.phases.develop import run_develop
         result = run_develop(cloud_model)
         assert result == 1
 
-    def test_missing_tasks(self, tmp_project, cloud_model, sample_requirements, mock_model_ready):
+    def test_missing_tasks(self, tmp_project, cloud_model, sample_requirements):
         from voidrift_cli.phases.develop import run_develop
         result = run_develop(cloud_model)
         assert result == 1
 
-    def test_all_tasks_complete(self, tmp_project, cloud_model, sample_requirements, mock_model_ready):
+    def test_all_tasks_complete(self, tmp_project, cloud_model, sample_requirements):
         vd = tmp_project / ".voidrift"
         (vd / "TASKS.md").write_text("- [x] Done 1\n- [x] Done 2\n")
         from voidrift_cli.phases.develop import run_develop
         result = run_develop(cloud_model)
         assert result == 0
 
-    def test_workers_without_modules(self, tmp_project, cloud_model, sample_requirements, mock_model_ready):
+    def test_workers_without_modules(self, tmp_project, cloud_model, sample_requirements):
         vd = tmp_project / ".voidrift"
         (vd / "TASKS.md").write_text("- [ ] Task [backend]\n")
         from voidrift_cli.phases.develop import run_develop
@@ -176,7 +154,7 @@ class TestDevelopPreflightChecks:
         # Falls back to single worker, doesn't error
         assert result in (0, 1)
 
-    def test_lock_file_stale(self, tmp_project, cloud_model, sample_requirements, sample_tasks, mock_model_ready):
+    def test_lock_file_stale(self, tmp_project, cloud_model, sample_requirements, sample_tasks):
         """Stale lock (dead PID) should be cleaned up."""
         lock = tmp_project / ".voidrift" / ".develop.lock"
         lock.write_text("99999999\n2020-01-01T00:00:00")  # Dead PID
@@ -194,7 +172,7 @@ class TestDevelopPreflightChecks:
         assert not lock.exists()
 
     @patch("voidrift_cli.phases.develop.AgentLoop")
-    def test_develop_loop_marks_tasks(self, MockAgent, tmp_project, cloud_model, sample_requirements, mock_model_ready):
+    def test_develop_loop_marks_tasks(self, MockAgent, tmp_project, cloud_model, sample_requirements):
         vd = tmp_project / ".voidrift"
         (vd / "TASKS.md").write_text("- [ ] Create src/main.py: entry [backend]\n")
 
@@ -208,7 +186,7 @@ class TestDevelopPreflightChecks:
         assert "[x]" in (vd / "TASKS.md").read_text()
 
     @patch("voidrift_cli.phases.develop.AgentLoop")
-    def test_sequential_multi_module(self, MockAgent, tmp_project, cloud_model, sample_requirements, mock_model_ready):
+    def test_sequential_multi_module(self, MockAgent, tmp_project, cloud_model, sample_requirements):
         vd = tmp_project / ".voidrift"
         (vd / "TASKS.md").write_text(
             "## Module: backend\n- [ ] Task A [backend]\n"
@@ -231,13 +209,13 @@ class TestDevelopPreflightChecks:
 
 
 class TestAutomatePreflightChecks:
-    def test_missing_requirements(self, tmp_project, cloud_model, mock_model_ready):
+    def test_missing_requirements(self, tmp_project, cloud_model):
         from voidrift_cli.phases.automate import run_automate
         result = run_automate(cloud_model)
         assert result == 1
 
     @patch("voidrift_cli.phases.automate.AgentLoop")
-    def test_generate_mode(self, MockAgent, tmp_project, cloud_model, sample_requirements, mock_model_ready):
+    def test_generate_mode(self, MockAgent, tmp_project, cloud_model, sample_requirements):
         def fake_send(msg):
             # Simulate creating a compose file
             (tmp_project / "docker-compose.yml").write_text("version: '3'\nservices:\n  app:\n    build: .")
@@ -252,7 +230,7 @@ class TestAutomatePreflightChecks:
         assert result == 0
 
     @patch("voidrift_cli.phases.automate.AgentLoop")
-    def test_generate_fails_no_iac(self, MockAgent, tmp_project, cloud_model, sample_requirements, mock_model_ready):
+    def test_generate_fails_no_iac(self, MockAgent, tmp_project, cloud_model, sample_requirements):
         mock_instance = MagicMock()
         mock_instance.send.return_value = "I described the infrastructure but didn't create files."
         MockAgent.return_value = mock_instance
@@ -262,7 +240,7 @@ class TestAutomatePreflightChecks:
         assert result == 1
 
     @patch("voidrift_cli.phases.automate.AgentLoop")
-    def test_review_mode(self, MockAgent, tmp_project, cloud_model, sample_requirements, mock_model_ready):
+    def test_review_mode(self, MockAgent, tmp_project, cloud_model, sample_requirements):
         # Pre-existing IaC
         (tmp_project / "docker-compose.yml").write_text("version: '3'")
 
@@ -281,7 +259,7 @@ class TestAutomatePreflightChecks:
 class TestVerify:
     @patch("voidrift_cli.phases.verify._run_checks")
     @patch("voidrift_cli.phases.verify.AgentLoop")
-    def test_pass_verdict(self, MockAgent, mock_checks, tmp_project, cloud_model, mock_model_ready):
+    def test_pass_verdict(self, MockAgent, mock_checks, tmp_project, cloud_model):
         vd = tmp_project / ".voidrift"
         mock_checks.return_value = ("All tests passed", 0)
 
@@ -299,7 +277,7 @@ class TestVerify:
 
     @patch("voidrift_cli.phases.verify._run_checks")
     @patch("voidrift_cli.phases.verify.AgentLoop")
-    def test_fail_no_architect(self, MockAgent, mock_checks, tmp_project, cloud_model, mock_model_ready):
+    def test_fail_no_architect(self, MockAgent, mock_checks, tmp_project, cloud_model):
         vd = tmp_project / ".voidrift"
         mock_checks.return_value = ("Tests failed", 2)
 
@@ -317,7 +295,7 @@ class TestVerify:
 
     @patch("voidrift_cli.phases.verify._run_checks")
     @patch("voidrift_cli.phases.verify.AgentLoop")
-    def test_fail_with_architect_generates_fixes(self, MockAgent, mock_checks, tmp_project, cloud_model, mock_model_ready):
+    def test_fail_with_architect_generates_fixes(self, MockAgent, mock_checks, tmp_project, cloud_model):
         vd = tmp_project / ".voidrift"
         mock_checks.return_value = ("Tests failed", 1)
         call_count = 0
@@ -353,7 +331,7 @@ class TestVerify:
 
     @patch("voidrift_cli.phases.verify._run_checks")
     @patch("voidrift_cli.phases.verify.AgentLoop")
-    def test_pass_requires_zero_failed_checks(self, MockAgent, mock_checks, tmp_project, cloud_model, mock_model_ready):
+    def test_pass_requires_zero_failed_checks(self, MockAgent, mock_checks, tmp_project, cloud_model):
         """Even if model says PASS, failed_checks > 0 means FAIL (AC-V6)."""
         vd = tmp_project / ".voidrift"
         mock_checks.return_value = ("Some output", 1)  # 1 failed check

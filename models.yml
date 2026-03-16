@@ -1,0 +1,88 @@
+# Model endpoint configuration for VoidRift CLI (REQ-MC-1, REQ-MC-3)
+#
+# Each entry maps a model alias to its endpoint. The CLI resolves
+# aliases to (base_url, api_key, model_id) tuples — it never manages
+# containers, SSH, or gateway processes.
+#
+# Endpoint types:
+#   local   — Worker node vLLM (managed by worker-cli)
+#   cloud   — Provider APIs (Anthropic, Google)
+#   gateway — Kiro Gateway (managed by worker-cli)
+
+models:
+  # Local models (start with: worker start <alias>)
+  qwen3-8b:
+    model_id: "openai/qwen3-8b"
+    base_url: "http://${WORKER_IP}:8000/v1"
+    api_key: "no-key-needed-here"
+    type: local
+
+  qwen3-instruct:
+    model_id: "openai/qwen3-instruct"
+    base_url: "http://${WORKER_IP}:8000/v1"
+    api_key: "no-key-needed-here"
+    type: local
+
+  qwen3-coder:
+    model_id: "openai/qwen3-coder"
+    base_url: "http://${WORKER_IP}:8000/v1"
+    api_key: "no-key-needed-here"
+    type: local
+
+  qwen3-coder-next:
+    model_id: "openai/qwen3-coder-next"
+    base_url: "http://${WORKER_IP}:8000/v1"
+    api_key: "no-key-needed-here"
+    type: local
+
+  # Cloud models
+  claude:
+    model_id: "anthropic/claude-opus-4-6"
+    type: cloud
+    provider: anthropic
+
+  haiku:
+    model_id: "anthropic/claude-haiku-4-5-20251001"
+    type: cloud
+    provider: anthropic
+
+  gemini:
+    model_id: "gemini/gemini-2.5-pro"
+    type: cloud
+    provider: gemini
+
+  gemini-flash:
+    model_id: "gemini/gemini-2.5-flash"
+    type: cloud
+    provider: gemini
+
+  # Kiro Gateway models (start with: worker gateway start)
+  kiro-sonnet:
+    model_id: "openai/claude-sonnet-4-5"
+    base_url: "http://localhost:${KIRO_GATEWAY_PORT:-8000}/v1"
+    api_key: "${KIRO_API_KEY}"
+    type: gateway
+
+  kiro-haiku:
+    model_id: "openai/claude-haiku-4-5"
+    base_url: "http://localhost:${KIRO_GATEWAY_PORT:-8000}/v1"
+    api_key: "${KIRO_API_KEY}"
+    type: gateway
+
+  kiro-deepseek:
+    model_id: "openai/deepseek-v3-2"
+    base_url: "http://localhost:${KIRO_GATEWAY_PORT:-8000}/v1"
+    api_key: "${KIRO_API_KEY}"
+    type: gateway
+
+  kiro-minimax:
+    model_id: "openai/minimax-m2-1"
+    base_url: "http://localhost:${KIRO_GATEWAY_PORT:-8000}/v1"
+    api_key: "${KIRO_API_KEY}"
+    type: gateway
+
+  kiro-qwen:
+    model_id: "openai/qwen3-coder-next"
+    base_url: "http://localhost:${KIRO_GATEWAY_PORT:-8000}/v1"
+    api_key: "${KIRO_API_KEY}"
+    type: gateway

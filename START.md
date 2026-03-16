@@ -70,7 +70,7 @@ Python monorepo with two packages:
 - Runtime role assignment via [ROLE: X]
 - Pydantic models, Google-style docstrings, src/ layout
 - Build: hatchling, VERSION file (shared), Makefile
-- Tests: pytest, 180 tests across cli/tests/ and mcp-context-server/tests/
+- Tests: pytest, 177 tests across cli/tests/, mcp-context-server/tests/, and worker-cli/tests/
 
 ## When User Requests a Feature
 
@@ -84,5 +84,5 @@ Python monorepo with two packages:
 After implementing, explicitly check:
 - Does this affect REQUIREMENTS.md, README.md, AGENT.md, or CONVENTIONS.md?
 - Update CHANGELOG.md with the change
-- Run `make test` to verify 180 tests pass
+- Run `make test` to verify 177 tests pass
 - Don't consider work complete until documentation is updated

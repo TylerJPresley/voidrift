@@ -9,7 +9,7 @@ import click
 from rich.console import Console
 
 from ..agent import AgentLoop, build_mcp_tools
-from ..models import ModelConfig, ensure_model_ready, cleanup_model
+from ..models import ModelConfig
 from ..utils import (
     ensure_voidrift_dir, voidrift_dir, log_path, check_disk_space, console, err_console,
 )
@@ -87,11 +87,6 @@ def run_gather(
         return _gather_from(model, target, Path(from_path), feature, force)
 
     # Interactive mode (AC-G3, AC-G4)
-    try:
-        ensure_model_ready(model)
-    except RuntimeError as e:
-        err_console.print(f"[red]Error: {e}[/red]")
-        return 1
 
     # Build system prompt
     system = ANALYST_PROMPT
@@ -153,8 +148,6 @@ def run_gather(
                 f.write(f"\n{response}\n")
     except KeyboardInterrupt:
         console.print("\n[dim]Session ended.[/dim]")
-    finally:
-        cleanup_model(model)
 
     return 0
 
@@ -192,12 +185,6 @@ def _gather_from(
 
     if force and target.exists():
         target.unlink()
-
-    try:
-        ensure_model_ready(model)
-    except RuntimeError as e:
-        err_console.print(f"[red]Error: {e}[/red]")
-        return 1
 
     try:
         import voidrift_mcp.server as mcp_mod
@@ -244,8 +231,6 @@ def _gather_from(
             f.write(response + "\n")
     except KeyboardInterrupt:
         console.print("\n[dim]Interrupted.[/dim]")
-    finally:
-        cleanup_model(model)
 
     if target.exists():
         console.print(f"\n[green]✅ Requirements written to {target.relative_to(Path.cwd())}[/green]")

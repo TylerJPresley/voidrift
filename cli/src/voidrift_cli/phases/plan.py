@@ -10,7 +10,7 @@ from rich.console import Console
 from rich.status import Status
 
 from ..agent import AgentLoop, build_mcp_tools
-from ..models import ModelConfig, ensure_model_ready, cleanup_model
+from ..models import ModelConfig
 from ..utils import (
     ensure_voidrift_dir, voidrift_dir, log_path, check_disk_space,
     console, err_console,
@@ -79,12 +79,6 @@ def run_plan(
             else:
                 cache.unlink()
 
-    try:
-        ensure_model_ready(model)
-    except RuntimeError as e:
-        err_console.print(f"[red]Error: {e}[/red]")
-        return 1
-
     log = log_path("plan")
     with open(log, "a") as f:
         f.write(f"\n=== Plan run: {datetime.now().isoformat()} ===\n")
@@ -136,7 +130,6 @@ def run_plan(
             err_console.print(f"[red]Plan failed: {e}[/red]")
             with open(log, "a") as f:
                 f.write(f"ERROR: {e}\n")
-            cleanup_model(model)
             return 1
 
     # Validate outputs (REQ-P-1)
@@ -173,10 +166,8 @@ def run_plan(
             if not has_tasks:
                 missing.append("TASKS.md")
             err_console.print(f"[red]Plan failed: still missing {', '.join(missing)}[/red]")
-            cleanup_model(model)
             return 1
 
-    cleanup_model(model)
     console.print("[green]✅ Plan complete.[/green]")
 
     # Summary

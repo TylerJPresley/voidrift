@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-os.environ.setdefault("VOIDRIFT_HOME", str(REPO_ROOT))
+os.environ["VOIDRIFT_HOME"] = str(REPO_ROOT)
 
 
 @pytest.fixture
@@ -75,20 +75,17 @@ def local_model():
         model_type="local",
         api_base="http://192.168.50.100:8000/v1",
         api_key="no-key",
-        repository="Test/Model",
-        served_model_name="test-local",
-        docker_image="test:latest",
     )
 
 
 @pytest.fixture
 def kiro_model():
-    """A kiro ModelConfig."""
+    """A kiro gateway ModelConfig."""
     from voidrift_cli.models import ModelConfig
     return ModelConfig(
         alias="kiro-sonnet",
         model_id="openai/claude-sonnet-4-5",
-        model_type="kiro",
+        model_type="gateway",
         api_base="http://localhost:8000/v1",
         api_key="test-kiro-key",
         provider="openai",

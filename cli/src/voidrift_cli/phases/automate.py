@@ -9,7 +9,7 @@ from rich.console import Console
 from rich.status import Status
 
 from ..agent import AgentLoop, build_mcp_tools
-from ..models import ModelConfig, ensure_model_ready, cleanup_model
+from ..models import ModelConfig
 from ..utils import ensure_voidrift_dir, voidrift_dir, log_path, check_disk_space, console, err_console
 
 
@@ -48,12 +48,6 @@ def run_automate(worker: ModelConfig, architect: ModelConfig | None = None) -> i
 
     if not (d / "REQUIREMENTS.md").exists():
         err_console.print("[red]REQUIREMENTS.md not found. Run 'voidrift gather <model>' first.[/red]")
-        return 1
-
-    try:
-        ensure_model_ready(worker)
-    except RuntimeError as e:
-        err_console.print(f"[red]Error: {e}[/red]")
         return 1
 
     log = log_path("automate")
@@ -113,10 +107,8 @@ def run_automate(worker: ModelConfig, architect: ModelConfig | None = None) -> i
                 f.write(f"\n=== Automate {mode}: {datetime.now().isoformat()} ===\n{response}\n")
         except (RuntimeError, OSError, ValueError) as e:
             err_console.print(f"[red]Automate failed: {e}[/red]")
-            cleanup_model(worker)
             return 1
 
-    cleanup_model(worker)
 
     # Verify IaC was created (AC-A8)
     if mode == "Generate" and not _detect_iac():

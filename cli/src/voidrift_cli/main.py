@@ -1,4 +1,4 @@
-"""VoidRift CLI — main entry point (AC-CLI1, AC-CLI2)."""
+"""VoidRift CLI — main entry point (REQ-ARCH-2, REQ-ARCH-3)."""
 
 from __future__ import annotations
 
@@ -11,19 +11,10 @@ import click
 from rich.console import Console
 from rich.prompt import Prompt, IntPrompt
 
-from .models import resolve_model, is_local_model, is_kiro_model, CLOUD_MODELS, KIRO_MODELS, load_worker_models
+from .models import resolve_model, list_models
 
 console = Console()
 err_console = Console(stderr=True)
-
-
-def _all_model_names() -> list[str]:
-    """List all available model aliases."""
-    config = load_worker_models()
-    local = list(config.get("models", {}).keys())
-    cloud = list(CLOUD_MODELS.keys())
-    kiro = list(KIRO_MODELS.keys())
-    return sorted(local + cloud + kiro)
 
 
 @click.group(invoke_without_command=True)
@@ -38,7 +29,7 @@ def cli(ctx) -> None:
 
 
 def _interactive_mode():
-    """Interactive guided flow when no subcommand given (AC-CLI2)."""
+    """Interactive guided flow when no subcommand given (REQ-ARCH-3)."""
     console.print("[bold cyan]VoidRift[/bold cyan] — Local-first Agentic Development Framework\n")
 
     actions = ["gather", "plan", "develop", "automate", "verify", "chat", "status"]
@@ -56,7 +47,7 @@ def _interactive_mode():
         return
 
     # Model selection
-    models = _all_model_names()
+    models = list_models()
     console.print(f"\nAvailable models: {', '.join(models)}")
     try:
         model_name = Prompt.ask("Model", default="qwen3-coder")
@@ -74,7 +65,6 @@ def _interactive_mode():
         except (KeyboardInterrupt, EOFError):
             return
 
-    # Invoke the subcommand
     ctx = cli.make_context("voidrift", args)
     with ctx:
         cli.invoke(ctx)
@@ -91,8 +81,7 @@ def _interactive_mode():
 @click.option("--from", "from_path", help="Path to existing codebase for reverse engineering")
 @click.option("--reference", help="Path to reference codebase for interactive lookup")
 @click.option("--force", is_flag=True, help="Overwrite existing requirements when using --from")
-@click.option("--refresh", is_flag=True, help="Force local model container recreation")
-def gather(model, feature, from_path, reference, force, refresh) -> None:
+def gather(model, feature, from_path, reference, force) -> None:
     """Phase 1: Gather requirements interactively."""
     from .phases.gather import run_gather
     mc = resolve_model(model)
@@ -103,8 +92,7 @@ def gather(model, feature, from_path, reference, force, refresh) -> None:
 @click.argument("model")
 @click.argument("feature", required=False)
 @click.option("--fresh-start", is_flag=True, help="Delete existing planning artifacts")
-@click.option("--refresh", is_flag=True, help="Force local model container recreation")
-def plan(model, feature, fresh_start, refresh) -> None:
+def plan(model, feature, fresh_start) -> None:
     """Phase 2: Generate architecture and task breakdown."""
     from .phases.plan import run_plan
     mc = resolve_model(model)
@@ -115,8 +103,7 @@ def plan(model, feature, fresh_start, refresh) -> None:
 @click.argument("worker")
 @click.argument("architect", required=False)
 @click.option("--workers", default=1, help="Number of concurrent module workers (0 = one per module)")
-@click.option("--refresh", is_flag=True, help="Force local model container recreation")
-def develop(worker, architect, workers, refresh) -> None:
+def develop(worker, architect, workers) -> None:
     """Phase 3: Execute implementation tasks."""
     from .phases.develop import run_develop
     wm = resolve_model(worker)
@@ -127,8 +114,7 @@ def develop(worker, architect, workers, refresh) -> None:
 @cli.command()
 @click.argument("worker")
 @click.argument("architect", required=False)
-@click.option("--refresh", is_flag=True, help="Force local model container recreation")
-def automate(worker, architect, refresh) -> None:
+def automate(worker, architect) -> None:
     """Phase 4: Generate infrastructure-as-code."""
     from .phases.automate import run_automate
     wm = resolve_model(worker)
@@ -139,8 +125,7 @@ def automate(worker, architect, refresh) -> None:
 @cli.command()
 @click.argument("worker")
 @click.argument("architect", required=False)
-@click.option("--refresh", is_flag=True, help="Force local model container recreation")
-def verify(worker, architect, refresh) -> None:
+def verify(worker, architect) -> None:
     """Phase 5: Run quality checks and validation."""
     from .phases.verify import run_verify
     wm = resolve_model(worker)
@@ -155,20 +140,10 @@ def verify(worker, architect, refresh) -> None:
 
 @cli.command()
 @click.argument("model")
-@click.option("--refresh", is_flag=True, help="Force local model container recreation")
-def chat(model, refresh) -> None:
-    """Interactive chat session with a model (AC-U3)."""
-    from .phases.gather import run_gather
+def chat(model) -> None:
+    """Interactive chat session with a model (REQ-U-2)."""
     mc = resolve_model(model)
-    # Chat is basically gather without requirements constraints
     from .agent import AgentLoop, build_mcp_tools
-    from .models import ensure_model_ready, cleanup_model
-
-    try:
-        ensure_model_ready(mc)
-    except RuntimeError as e:
-        err_console.print(f"[red]Error: {e}[/red]")
-        sys.exit(1)
 
     try:
         import voidrift_mcp.server as mcp_mod
@@ -199,13 +174,11 @@ def chat(model, refresh) -> None:
             agent.send(user_input)
     except KeyboardInterrupt:
         console.print("\n[dim]Session ended.[/dim]")
-    finally:
-        cleanup_model(mc)
 
 
 @cli.command()
 def status() -> None:
-    """Show project phase status (AC-U1)."""
+    """Show project phase status (REQ-U-1)."""
     _status()
 
 
@@ -264,7 +237,7 @@ def _status():
     else:
         console.print("  ⬜ Phase 5 (Verify): Run 'voidrift verify <model>'")
 
-    # Feature specs (AC-U2)
+    # Feature specs
     spec_dir = d / "spec"
     if spec_dir.is_dir():
         specs = list(spec_dir.glob("*.md"))
@@ -278,7 +251,7 @@ def _status():
 @click.argument("phase", required=False)
 @click.option("--prune", is_flag=True, help="Delete log files")
 def log(phase, prune) -> None:
-    """View or manage phase log files (AC-U4b)."""
+    """View or manage phase log files (REQ-U-3)."""
     from .utils import voidrift_dir
 
     d = voidrift_dir()
@@ -314,7 +287,7 @@ def log(phase, prune) -> None:
 
 @cli.command()
 def unlock() -> None:
-    """Remove develop lock and kill running process (AC-U4a)."""
+    """Remove develop lock and kill running process (REQ-U-4)."""
     from .utils import voidrift_dir
 
     lock = voidrift_dir() / ".develop.lock"
@@ -327,7 +300,6 @@ def unlock() -> None:
         pid = int(parts[0])
         try:
             os.kill(pid, 0)
-            # Process alive — kill it
             os.kill(pid, signal.SIGTERM)
             import time
             time.sleep(2)
@@ -342,60 +314,6 @@ def unlock() -> None:
         console.print("Removed invalid lock file")
 
     lock.unlink()
-
-
-@cli.command()
-@click.argument("num_prompts", default=100, type=int)
-@click.argument("req_rate", default=0, type=float)
-def bench(num_prompts, req_rate) -> None:
-    """Benchmark the active worker model (AC-U4)."""
-    import subprocess
-
-    worker_usr = os.environ.get("WORKER_USR", "")
-    worker_ip = os.environ.get("WORKER_IP", "")
-    if not worker_usr or not worker_ip:
-        err_console.print("[red]WORKER_USR and WORKER_IP must be set[/red]")
-        sys.exit(1)
-
-    console.print(f"[bold cyan]VoidRift Bench[/bold cyan] — {num_prompts} prompts")
-
-    try:
-        # Find active container
-        r = subprocess.run(
-            ["ssh", f"{worker_usr}@{worker_ip}", "docker ps --filter 'name=worker-' --format '{{.Names}}'"],
-            capture_output=True, text=True, timeout=10,
-        )
-        container = r.stdout.strip().split("\n")[0]
-        if not container:
-            err_console.print("[red]No active worker container found[/red]")
-            sys.exit(1)
-
-        console.print(f"Container: {container}")
-
-        # Get model name
-        r = subprocess.run(
-            ["ssh", f"{worker_usr}@{worker_ip}", f"curl -s http://localhost:8000/v1/models"],
-            capture_output=True, text=True, timeout=10,
-        )
-        console.print(f"Models API: {r.stdout[:200]}")
-
-        # Run benchmark
-        rate_arg = f"--request-rate {req_rate}" if req_rate > 0 else "--request-rate inf"
-        bench_cmd = (
-            f"docker exec {container} python -m vllm.entrypoints.openai.api_server "
-            f"--benchmark --num-prompts {num_prompts} {rate_arg}"
-        )
-        console.print(f"[dim]Running benchmark...[/dim]")
-        subprocess.run(
-            ["ssh", f"{worker_usr}@{worker_ip}", bench_cmd],
-            timeout=600,
-        )
-    except subprocess.TimeoutExpired:
-        err_console.print("[red]Benchmark timed out[/red]")
-        sys.exit(1)
-    except (subprocess.SubprocessError, OSError) as e:
-        err_console.print(f"[red]Benchmark failed: {e}[/red]")
-        sys.exit(1)
 
 
 if __name__ == "__main__":
