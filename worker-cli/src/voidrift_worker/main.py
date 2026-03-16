@@ -54,8 +54,8 @@ Commands:
   bench [<num>] [<rate>]      Run vLLM benchmark
 
 Model Weights:
-  models list                 Cached models + disk usage
-  models aliases              Configured aliases
+  models list                 Available models from config
+  models cache                Cached models + disk usage
   models add <alias> <repo>   Add a new model to config
   models pull <alias>         Download weights
   models remove <id>          Delete a cached revision
@@ -225,26 +225,15 @@ def models_group() -> None:
 
     \b
     Examples:
-      worker models list                # what's cached + disk usage
+      worker models list                # available models from config
       worker models pull <alias>        # download by alias
-      worker models prune               # clean broken revisions
+      worker models cache               # what's cached + disk usage
     """
 
 
 @models_group.command("list")
 def models_list_cmd() -> None:
-    """Show cached models and disk usage."""
-    try:
-        output = models_list_cached()
-        console.print(output)
-    except RuntimeError as e:
-        err_console.print(f"[red]Error: {e}[/red]")
-        sys.exit(1)
-
-
-@models_group.command("aliases")
-def models_aliases_cmd() -> None:
-    """Show configured aliases from worker-models.yml."""
+    """Show available models from worker-models.yml."""
     available = list_models()
     if not available:
         console.print("No models configured. Check worker-models.yml.")
@@ -254,6 +243,17 @@ def models_aliases_cmd() -> None:
     for alias, m in sorted(available.items()):
         marker = " ✅" if alias == active_alias else ""
         console.print(f"  {alias:<20} {m.repository}{marker}")
+
+
+@models_group.command("cache")
+def models_cache_cmd() -> None:
+    """Show cached models and disk usage."""
+    try:
+        output = models_list_cached()
+        console.print(output)
+    except RuntimeError as e:
+        err_console.print(f"[red]Error: {e}[/red]")
+        sys.exit(1)
 
 
 @models_group.command("pull")
