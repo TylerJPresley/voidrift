@@ -85,6 +85,11 @@ def main() -> None:
         cli(standalone_mode=False)
     except SystemExit:
         raise
+    except click.UsageError as e:
+        err_console.print(f"[red]Error: {e.format_message()}[/red]")
+        if e.ctx:
+            err_console.print(e.ctx.get_help())
+        sys.exit(2)
     except RuntimeError as e:
         err_console.print(f"[red]Error: {e}[/red]")
         sys.exit(1)
