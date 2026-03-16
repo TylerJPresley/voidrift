@@ -114,22 +114,22 @@ The unified memory architecture allows efficient model loading without CPU-GPU t
 
 2. **Configure SSH access:**
    ```bash
-   # On workstation, copy SSH key to worker
-   ssh-copy-id $WORKER_USR@$WORKER_IP
+   # On workstation, copy SSH key to worker (use values from config.yml)
+   ssh-copy-id <user>@<ip>
    
    # Test connection
-   ssh $WORKER_USR@$WORKER_IP "echo 'Connection successful'"
+   ssh <user>@<ip> "echo 'Connection successful'"
    ```
 
 3. **Install uv for model management:**
    ```bash
-   ssh $WORKER_USR@$WORKER_IP
+   ssh <user>@<ip>
    curl -LsSf https://astral.sh/uv/install.sh | sh
    ```
 
 4. **Download initial models:**
    ```bash
-   ssh $WORKER_USR@$WORKER_IP
+   ssh <user>@<ip>
    
    # For gated models, login first
    uvx huggingface-cli login
@@ -169,13 +169,13 @@ A community image purpose-built for the NVIDIA DGX Spark / GB10 Grace Blackwell 
 **`vllm/vllm-openai` (official upstream)**
 The official vLLM project image. The `cu130`-suffixed tags are built against CUDA 13.0 — Blackwell's native toolkit — and compile support for SM_100 (GB10) alongside older architectures. Use this when you need a pinned upstream vLLM version that `scitrera` has not yet published, or when troubleshooting to rule out image-specific issues. Pull the arm64-specific tag to avoid pulling the larger multi-arch manifest:
 ```bash
-ssh $WORKER_USR@$WORKER_IP "docker pull vllm/vllm-openai:latest-aarch64-cu130"
+ssh <user>@<ip> "docker pull vllm/vllm-openai:latest-aarch64-cu130"
 ```
 
 **`nvcr.io/nvidia/vllm` (NVIDIA NGC)**
 NVIDIA's officially validated container, released monthly (e.g. `26.02-py3` = February 2026). Built on NVIDIA's own validated CUDA stack with enterprise-quality library combinations. May include TensorRT-LLM integration and hardware-specific optimizations not present in the community image. Use this when you want NVIDIA's official validation for the GB10 platform, are evaluating TensorRT-LLM-backed inference, or need enterprise support guarantees:
 ```bash
-ssh $WORKER_USR@$WORKER_IP "docker pull nvcr.io/nvidia/vllm:26.02-py3"
+ssh <user>@<ip> "docker pull nvcr.io/nvidia/vllm:26.02-py3"
 ```
 
 **Worker Node Management:**
@@ -222,7 +222,7 @@ worker models fix-perms
 
 **Model Configuration:**
 
-Local models are defined in `$VOIDRIFT_HOME/worker-models.yml`:
+Local models are defined in `~/.voidrift/worker-models.yml`:
 
 ```yaml
 models:
@@ -575,7 +575,7 @@ Run `voidrift gather <model>` first to create project requirements.
 Run `voidrift plan <model>` after gathering requirements.
 
 ### "Developer node unreachable"
-Check `$WORKER_IP` and ensure SSH access: `ssh $WORKER_USR@$WORKER_IP`
+Check worker connection: `worker check`
 
 ### "Invalid skill tags"
 Edit `.voidrift/TASKS.md` and use tags from `resources/skills/`
@@ -825,7 +825,7 @@ The MCP server provides 16 tools that the model calls on demand:
 
 1. **Container Management:**
    - Models run in Docker containers on remote worker node
-   - Framework SSHs to `$WORKER_IP` and starts containers via docker
+   - Framework SSHs to the worker node and starts containers via docker
    - Only one model container runs at a time (single-worker constraint)
    - Containers are reused if configuration matches; `worker start <alias> --refresh` forces recreation
 
@@ -849,7 +849,7 @@ The MCP server provides 16 tools that the model calls on demand:
 3. **Startup Process:**
    - Framework stops other worker containers
    - Starts new container with model configuration
-   - Polls `http://$WORKER_IP:8000/v1/models` every second
+   - Polls `http://<worker-ip>:8000/v1/models` every second
    - Monitors container health during startup
    - Exits immediately if container crashes
 
