@@ -1,4 +1,4 @@
-"""VoidRift CLI — main entry point (REQ-ARCH-2, REQ-ARCH-3)."""
+"""VoidRift CLI — main entry point."""
 
 from __future__ import annotations
 
@@ -16,14 +16,53 @@ from .models import resolve_model, list_models
 console = Console()
 err_console = Console(stderr=True)
 
+HELP_TEXT = """Local-first Agentic Development Framework.
 
-@click.group(invoke_without_command=True)
+Getting started:
+  voidrift gather <model>                 Gather requirements
+  voidrift plan <model>                   Generate architecture and tasks
+  voidrift develop <worker> [<architect>] Execute implementation tasks
+  voidrift verify <worker> [<architect>]  Run quality checks
+
+Phases:
+  gather <model> [<feature>] [--from <path>] [--reference <path>] [--force]
+  plan <model> [<feature>] [--fresh-start]
+  develop <worker> [<architect>] [--workers <n>]
+  automate <worker> [<architect>]
+  verify <worker> [<architect>]
+
+Utility:
+  status                      Show project phase status
+  chat <model>                Interactive chat session
+  log <phase> [--prune]       View or manage phase logs
+  unlock                      Remove develop lock
+
+Run 'voidrift COMMAND --help' for details."""
+
+
+class OrderedGroup(click.Group):
+    """Click group that preserves command insertion order."""
+
+    def list_commands(self, ctx: click.Context) -> list[str]:
+        return list(self.commands)
+
+
+class TopGroup(OrderedGroup):
+    """Top-level group with custom help layout."""
+
+    def format_usage(self, ctx: click.Context, formatter: click.HelpFormatter) -> None:
+        formatter.write("Usage: voidrift [COMMAND]\n")
+
+    def format_help(self, ctx: click.Context, formatter: click.HelpFormatter) -> None:
+        self.format_usage(ctx, formatter)
+        formatter.write("\n")
+        formatter.write(self.help or "")
+        formatter.write("\n")
+
+
+@click.group(cls=TopGroup, invoke_without_command=True, help=HELP_TEXT)
 @click.pass_context
 def cli(ctx) -> None:
-    """VoidRift — Local-first Agentic Development Framework.
-
-    Five phases: gather → plan → develop → automate → verify
-    """
     if ctx.invoked_subcommand is None:
         _interactive_mode()
 
@@ -141,7 +180,7 @@ def verify(worker, architect) -> None:
 @cli.command()
 @click.argument("model")
 def chat(model) -> None:
-    """Interactive chat session with a model (REQ-U-2)."""
+    """Interactive chat session with a model."""
     mc = resolve_model(model)
     from .agent import AgentLoop, build_mcp_tools
 
@@ -178,7 +217,7 @@ def chat(model) -> None:
 
 @cli.command()
 def status() -> None:
-    """Show project phase status (REQ-U-1)."""
+    """Show project phase status."""
     _status()
 
 
@@ -251,7 +290,7 @@ def _status():
 @click.argument("phase", required=False)
 @click.option("--prune", is_flag=True, help="Delete log files")
 def log(phase, prune) -> None:
-    """View or manage phase log files (REQ-U-3)."""
+    """View or manage phase log files."""
     from .utils import voidrift_dir
 
     d = voidrift_dir()
@@ -287,7 +326,7 @@ def log(phase, prune) -> None:
 
 @cli.command()
 def unlock() -> None:
-    """Remove develop lock and kill running process (REQ-U-4)."""
+    """Remove develop lock and kill running process."""
     from .utils import voidrift_dir
 
     lock = voidrift_dir() / ".develop.lock"
