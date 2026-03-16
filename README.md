@@ -21,24 +21,19 @@ The workstation is where you (the operator) run `voidrift` commands. It orchestr
 
 1. **Clone the framework:**
    ```bash
-   git clone <repo-url> ~/.voidrift
-   # or copy from local path
-   cp -r /path/to/voidrift ~/.voidrift
+   git clone <repo-url> ~/Projects/voidrift
    ```
 
-2. **Source the voidrift loader in your shell profile:**
-   
-   Add to `~/.bashrc` or `~/.bash_profile`:
+2. **Install both packages (editable):**
    ```bash
-   source ~/.voidrift/dispatcher.sh
+   cd ~/Projects/voidrift
+   make install
+   # Or manually:
+   pip install -e cli/
+   pip install -e mcp-context-server/
    ```
 
-3. **Reload your shell:**
-   ```bash
-   source ~/.bashrc
-   ```
-
-4. **Verify installation:**
+3. **Verify installation:**
    ```bash
    voidrift
    ```
@@ -380,9 +375,7 @@ voidrift verify qwen3-coder claude
   - `--refresh` - Force local model container recreation (if using local model)
   - `--fresh-start` - Delete existing planning artifacts and start fresh
 - **`voidrift develop <worker> [<architect>] [flags]`** - Execute implementation tasks
-  - `--parallel` - Execute modules concurrently in git worktrees
-  - `--retry` - Resume from partial/failed parallel run
-  - `--overwrite` - Remove existing worktrees and start fresh
+  - `--workers N` - Number of concurrent module workers (0 = one per module, default: 1)
   - `--refresh` - Force local model container recreation (if using local model)
 - **`voidrift automate <worker> [<architect>] [--refresh]`** - Generate infrastructure code
   - `--refresh` - Force local model container recreation (if using local model)
@@ -392,12 +385,10 @@ voidrift verify qwen3-coder claude
 ### Utility Commands
 
 - **`voidrift status`** - Show project phase status
-- **`voidrift chat <model> [--refresh]`** - Interactive aider session with any model
+- **`voidrift chat <model> [--refresh]`** - Interactive chat session with any model
 - **`voidrift bench [<num>] [<rate>]`** - Benchmark worker model
+- **`voidrift log <phase> [--prune]`** - View or manage phase log files
 - **`voidrift unlock`** - Remove develop lock and kill running process
-- **`worker-compact`** - Summarize context to STATE.md
-- **`worker-insight`** - Monitor worker node (snapshot)
-- **`worker-watch`** - Monitor worker node (continuous)
 
 ## Available Models
 
@@ -500,11 +491,11 @@ voidrift plan claude
 ### 3. Develop Phase
 Execute tasks with worker model, escalate to architect when blocked:
 ```bash
-# Sequential (single or multi-module)
+# Sequential (default)
 voidrift develop qwen3-coder claude
 
-# Parallel (multi-module only)
-voidrift develop qwen3-coder claude --parallel
+# Multi-module concurrent
+voidrift develop qwen3-coder claude --workers 0
 ```
 
 ### 4. Automate Phase
@@ -523,42 +514,8 @@ voidrift verify qwen3-coder claude
 
 - **Use cheaper models for implementation:** `voidrift develop qwen3-coder claude` uses local model for bulk work, cloud model for hard problems
 - **Check status frequently:** `voidrift status` shows progress
-- **Compact context regularly:** `worker-compact` after every 10 turns to reduce context window usage
-- **Monitor worker node:** `worker-watch` for real-time metrics
-- **Review logs:** All phase output is in timestamped log files: `.voidrift/<phase>-YYYYMMDD-HHMMSS.log`
-
-## Maintenance
-
-### Updating Aider
-
-The framework uses aider for all AI interactions. Update it periodically:
-
-```bash
-# Check current version
-aider --version
-
-# Update aider
-pip install --upgrade aider-chat
-# or if installed with pipx
-pipx upgrade aider-chat
-
-# Verify update
-aider --version
-```
-
-**Check for updates:**
-```bash
-# Quick check without running aider
-aider --just-check-update
-
-# Enable/disable automatic update checks
-aider --check-update          # enable (default)
-aider --no-check-update       # disable
-```
-
-**Latest releases:** https://github.com/paul-gauthier/aider/releases
-
-The framework doesn't auto-update aider to avoid breaking changes. You control when to upgrade.
+- **Review logs:** `voidrift log develop` shows the latest develop session output
+- **Prune old logs:** `voidrift log --prune` cleans up all phase logs
 
 ## Troubleshooting
 
@@ -572,7 +529,7 @@ Run `voidrift plan <model>` after gathering requirements.
 Check `$WORKER_IP` and ensure SSH access: `ssh $WORKER_USR@$WORKER_IP`
 
 ### "Invalid skill tags"
-Edit `.voidrift/TASKS.md` and use tags from `$VOIDRIFT_HOME/SKILLS.md`
+Edit `.voidrift/TASKS.md` and use tags from `resources/skills/`
 
 ### Tasks marked `[!]` (blocked)
 Review `.voidrift/architect_responses/` for guidance, or re-run with architect model.
@@ -729,11 +686,11 @@ For detailed configuration options (VPN/proxy support, AWS SSO, etc.), see the [
 
 The framework consists of three main components:
 
-1. **VoidRift Dispatcher** (`dispatcher.sh`) - Bash script providing the `voidrift` command and orchestrating the workflow
-2. **Guidance Files** (AGENT.md, CONVENTIONS.md, skills) - Define voidrift behavior and technical standards
-3. **Developer Infrastructure** - Local or cloud models executing the work
+1. **VoidRift CLI** (`cli/`) - Python Click-based CLI providing the `voidrift` command with an agent loop that sends messages to model APIs, handles MCP tool calls, and streams responses
+2. **MCP Context Server** (`mcp-context-server/`) - FastMCP server that stores, retrieves, and exports project artifacts and framework resources. The model pulls context on demand via tool calls instead of loading full files
+3. **Framework Resources** (`resources/`) - Role-specific agent files, skill conventions, and document templates
 
-### Two-Role System
+### Three-Role System
 
 AI models operate in one of three roles, explicitly assigned at runtime:
 
@@ -769,38 +726,49 @@ The framework assigns roles via `[ROLE: X]` prefix in task messages. Models rece
 **Example:** `voidrift gather claude`
 - `claude` = Analyst (elicits requirements)
 
-### Guidance Files
+### Framework Resources
 
-**AGENT.md - The Playbook**
-- Agent identity and philosophy (SOLID, Clean Architecture, PoLP)
-- Five-phase lifecycle explained
-- Role definitions and boundaries
-- State management, skill system, escalation protocol
-- Loaded by: All aider sessions
+**`resources/agents/` — Role-Specific Guidance**
+- `ANALYST.md` — Analyst role: requirements elicitation, collaborative mode
+- `ARCHITECT.md` — Architect role: design, planning, escalation guidance
+- `DEVELOPER.md` — Developer role: implementation, task execution
+- Each role file is loaded only during relevant phases to prevent role confusion
 
-**CONVENTIONS.md - The Rulebook**
-- Planning-first directive (no code before docs)
-- Skill assignment and loading rules
-- State management protocol
-- Escalation protocol
-- Phase-specific behavior rules
-- Runtime environment constraints
-- Engineering standards (REST, BFF, versioning)
-- Loaded by: All aider sessions
+**`resources/skills/` — Domain Conventions**
+- 15 skill files covering specialized domains
+- Technology-specific standards and canonical patterns
+- Loaded contextually per task tag during develop phase
+- Available skills: `AI-ETHICS`, `ARCH-DESIGN`, `CLOUD-OPS`, `DATA-ENG`, `EMBEDDED-ENG`, `GAME-ENG`, `ML-ENG`, `MOBILE-ENG`, `PROD-STRATEGY`, `QUALITY-QA`, `RELIABILITY-ENG`, `SECURITY-TRUST`, `SYSTEMS-ENG`, `WEB-ENG`, `WORKFLOW`
 
-**EDIT-FORMAT.md - Editing Instructions**
-- File editing format and conventions
-- Loaded by: Develop, Automate, Verify phases
+**`resources/templates/` — Document Scaffolding**
+- `ADR-TEMPLATE.md` — Architecture Decision Record template
+- `ARCHITECTURE-TEMPLATE.md` — Architecture document template
+- `DESIGN-TEMPLATE.md` — Feature design template
+- `EDIT-FORMAT.md` — File editing format instructions
+- `REQUIREMENTS-TEMPLATE.md` — Requirements document template
 
-**SKILLS.md - Skill Registry**
-- Maps skill tags to skill files
-- One-line descriptions of each skill
-- Loaded by: Plan phase
+### MCP Context Server
 
-**skills/*.md - Domain Conventions**
-- Technology-specific standards (BACKEND.md, FRONTEND.md, INFRA.md, etc.)
-- Canonical frameworks, libraries, and patterns
-- Loaded by: Develop phase (per task tag)
+The MCP server provides 16 tools that the model calls on demand:
+
+| Tool | Description |
+|------|-------------|
+| `store_file_analysis` | Store analysis results for a source file |
+| `get_file_analysis` | Retrieve stored analysis for a file |
+| `get_all_analyses` | Retrieve all stored analyses |
+| `store_requirements` | Store requirements content in memory |
+| `get_requirements` | Retrieve stored or on-disk requirements |
+| `load_tasks` | Load TASKS.md, parse module headers into per-module queues |
+| `get_next_task` | Return the next unchecked task for a module |
+| `complete_task` | Mark next task done, write through to disk |
+| `get_task_status` | Return done/blocked/remaining counts |
+| `get_agent` | Retrieve role-specific agent file by role and optional topic |
+| `get_skill` | Retrieve skill file content by name and optional topic |
+| `get_template` | Retrieve template file by name |
+| `read_source_file` | Read a source file from the project directory |
+| `write_file` | Write content to a file in the project directory |
+| `export_to_file` | Export a stored artifact to disk |
+| `list_project_artifacts` | List all files in .voidrift/ |
 
 ### Local Developer Models
 
@@ -930,7 +898,6 @@ voidrift develop qwen3-coder claude
 - ✅ Make one fix attempt when errors occur
 - ✅ Escalate immediately if error persists
 - ✅ Reference STATE.md for context continuity
-- ✅ Run `worker-compact` after every 10 turns
 - ✅ Follow skill conventions without deviation
 - ✅ Write minimal responses (no narration)
 
@@ -961,7 +928,6 @@ voidrift develop qwen3-coder claude
    - Starts architect model if local
    - Provides: problem, REQUIREMENTS.md, ARCHITECTURE.md, task text
    - Does NOT provide: source code files
-   - Uses plan config (`.aider.plan.yml`)
 
 4. **Architect responds:**
    - Writes guidance to `.voidrift/architect_responses/<task_num>.md`
@@ -975,19 +941,15 @@ voidrift develop qwen3-coder claude
 ### State Management
 
 **STATE.md - Session Memory:**
-- Updated via `worker-compact` after every 10 turns
 - Provides context continuity across sessions
 - Single-module: `.voidrift/STATE.md`
 - Multi-module: `.voidrift/STATE.md` + `.voidrift/STATE-<module>.md`
 
-**When to compact:**
-- After every 10 turns
-- Upon task completion
-- When context window is getting full
-
-**After compaction:**
-- Exit and restart
-- Fresh session picks up STATE.md automatically
+**TASKS.md - Task Tracking:**
+- Single file with `## Module:` headers for multi-module projects
+- MCP server parses into per-module queues
+- Tasks marked `[x]` (done), `[!]` (blocked), or `[ ]` (pending)
+- Write-through: all state changes persist to disk immediately
 
 ### Skill System
 
@@ -997,17 +959,21 @@ voidrift develop qwen3-coder claude
 - Skills are **read-only** and **authoritative** (must follow without deviation)
 
 **Available skills:**
-- `backend` - Backend services, APIs, databases
-- `frontend` - UI components, state management
-- `infra` - Infrastructure-as-code, deployment
-- `native` - Native applications, system programming
-- `design` - UI/UX design, accessibility
-- `branding` - Brand guidelines, visual identity
-- `security` - Security patterns, authentication
-- `tdd` - Test-driven development
-- `debugging` - Debugging strategies
-- `verification` - Quality assurance, testing
-- `worktrees` - Git worktree management
+- `ai-ethics` - AI safety, ethics, bias mitigation
+- `arch-design` - Architecture patterns, API standards, DDD
+- `cloud-ops` - Cloud infrastructure, IaC, CI/CD
+- `data-eng` - Data modeling, persistence, schema evolution
+- `embedded-eng` - Embedded systems, RTOS, hardware interfaces
+- `game-eng` - Game loops, physics, asset pipelines
+- `ml-eng` - ML pipelines, training, inference optimization
+- `mobile-eng` - Mobile platforms, offline-first, lifecycle management
+- `prod-strategy` - Product strategy, refactoring, tech writing
+- `quality-qa` - TDD, test pyramid, systematic debugging
+- `reliability-eng` - SRE, SLOs, observability, error budgets
+- `security-trust` - Security hardening, authentication, compliance
+- `systems-eng` - POSIX, packaging, signal handling, SemVer
+- `web-eng` - Web performance, SEO, accessibility, atomic design
+- `workflow` - Git workflow, conventional commits, task isolation
 
 **Skill tagging:**
 - Tasks in TASKS.md include `[skill1, skill2]` tags
@@ -1018,13 +984,13 @@ voidrift develop qwen3-coder claude
 
 ## Documentation
 
-- **Full Requirements:** `$VOIDRIFT_HOME/REQUIREMENTS.md` — Complete acceptance criteria for all framework components
+- **Requirements:** `REQUIREMENTS.md` — IEEE 29148 / EARS format requirements for all framework components
 - **Role-Specific Guidance:**
-  - `$VOIDRIFT_HOME/AGENT-ANALYST.md` — Analyst role (gather phase): Requirements elicitation, collaborative mode
-  - `$VOIDRIFT_HOME/AGENT-ARCHITECT.md` — Architect role (plan phase, escalations): Design and planning
-  - `$VOIDRIFT_HOME/AGENT-DEVELOPER.md` — Developer role (develop/automate/verify): Implementation and execution
-- **Operational Rules:** `$VOIDRIFT_HOME/CONVENTIONS.md` — Mandatory protocols and constraints (the rulebook)
-- **Skill Files:** `$VOIDRIFT_HOME/skills/*.md` — Domain-specific technology stacks and conventions
+  - `resources/agents/ANALYST.md` — Analyst role (gather phase): Requirements elicitation, collaborative mode
+  - `resources/agents/ARCHITECT.md` — Architect role (plan phase, escalations): Design and planning
+  - `resources/agents/DEVELOPER.md` — Developer role (develop/automate/verify): Implementation and execution
+- **Skill Files:** `resources/skills/*.md` — 15 domain-specific technology stacks and conventions
+- **Templates:** `resources/templates/*.md` — Document scaffolding for requirements, architecture, design, and ADRs
 
 Each role file is loaded only during relevant phases to prevent role confusion and minimize context window usage.
 
@@ -1055,33 +1021,50 @@ Decision: Unacceptable latency in practice on this system. Granite 4.0-H-Small u
 
 ---
 
-## Looking Forward
+## Development
 
-### MCP-Native Agent Runtime
+### Building & Testing
 
-The current architecture uses aider as the execution engine — context is front-loaded via `--read` flags and config files, and the model operates within whatever was pre-loaded. This works but creates context window pressure, especially during develop with multiple skill files loaded.
+```bash
+make install    # Install both packages (editable)
+make test       # Run all 180 tests
+make build      # Build distribution packages
+```
 
-A future evolution would replace aider with a custom MCP-native agent runtime where the model pulls context on demand via tool calls:
+### Project Layout
 
-- **On-demand context:** Instead of loading full files upfront, the model calls tools like `get_conventions(section)` or `get_skill("backend", "api_patterns")` to retrieve only what it needs mid-conversation
-- **Precise file access:** `read_file_section(path, start, end)` instead of loading entire source files
-- **Structured state:** `get_project_status()` returns structured data instead of parsing STATE.md as raw text
-- **Self-managing context:** The model decides what context it needs, eliminating manual `worker-compact` cycles
-- **Smaller context windows per turn:** Faster inference on local models, lower cost on cloud models
-
-**What this requires building:**
-- Custom agent loop: send messages to model API (local vLLM or cloud), handle tool calls, apply file edits
-- File editing engine: parse model output, apply diffs/whole-file writes, handle malformed responses
-- Git integration: auto-commits, dirty-commit checks, worktree management
-- Model compatibility layer: local OpenAI-compatible APIs and cloud provider APIs
-
-**What this replaces:**
-- Aider's file editing (SEARCH/REPLACE, whole-file, diff formats)
-- Aider's repo map (token-budgeted codebase overview)
-- Aider's auto-commit and git integration
-- Aider's model compatibility layer (litellm)
-
-This is a significant undertaking — aider's file editing and edge case handling represent years of development. The intermediate step (MCP context server that curates context before passing to aider) provides most of the context management benefits without replacing the execution engine.
+```
+voidrift/
+├── cli/                          # VoidRift CLI package
+│   ├── src/voidrift_cli/
+│   │   ├── main.py              # Click commands and entry point
+│   │   ├── agent.py             # Agent loop (API calls, tool handling, streaming)
+│   │   ├── models.py            # Model config, container lifecycle, Kiro gateway
+│   │   ├── utils.py             # Shared utilities
+│   │   └── phases/              # Phase implementations
+│   │       ├── gather.py        # Requirements elicitation
+│   │       ├── plan.py          # Architecture and task breakdown
+│   │       ├── develop.py       # Task execution loop
+│   │       ├── automate.py      # IaC generation
+│   │       └── verify.py        # Quality checks and reporting
+│   └── tests/                   # CLI tests (pytest)
+├── mcp-context-server/           # MCP Context Server package
+│   ├── src/voidrift_mcp/
+│   │   ├── server.py            # FastMCP server with 16 tools
+│   │   ├── markdown_parser.py   # Markdown indexing by header
+│   │   ├── artifact_store.py    # Write-through key-value store
+│   │   ├── task_store.py        # TASKS.md parser with per-module queues
+│   │   └── session_store.py     # SQLite session metadata
+│   └── tests/                   # MCP server tests (pytest)
+├── resources/                    # Framework reference files
+│   ├── agents/                  # Role-specific guidance (3 files)
+│   ├── skills/                  # Domain conventions (15 files)
+│   └── templates/               # Document scaffolding (5 files)
+├── REQUIREMENTS.md              # IEEE 29148 / EARS format requirements
+├── CHANGELOG.md                 # Keep a Changelog format
+├── VERSION                      # Shared version (0.1.0)
+└── Makefile                     # Build, test, install targets
+```
 
 ---
 
