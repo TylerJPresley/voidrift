@@ -91,7 +91,7 @@ Relevant skills for framework development:
 - **RELIABILITY-ENG** — Eliminate toil, observability, error budgets
 - **CLOUD-OPS** — IaC standards, secrets management, environment parity
 
-Skills are authoritative. Don't just reference them — follow them. If a skill says "use stdout for results, stderr for errors", do it. If the skill is wrong or incomplete, fix the skill.
+Skills are authoritative. Don't just reference them — follow them. If a skill says "use stdout for results, stderr for errors", do it. If a skill seems wrong or incomplete, raise it with the operator before changing anything.
 
 ## Change Management
 
