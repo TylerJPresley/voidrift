@@ -35,55 +35,48 @@ from .models import (
 console = Console()
 err_console = Console(stderr=True)
 
-HELP_TEXT = """\
-Manage local model containers, images, and Kiro Gateway.
+HELP_TEXT = """Manage local model containers, images, and Kiro Gateway.
 
-\b
-Quick start:
+Getting started:
   worker check                    Verify worker node is ready
-  worker models pull qwen3-coder  Download model weights
-  worker start qwen3-coder        Start serving the model
+  worker models pull <alias>      Download model weights
+  worker start <alias>            Start serving the model
   worker status                   Confirm it's running
 
-\b
-Container lifecycle:
-  worker start <alias> [--refresh]  Start a model container
-  worker stop                       Stop the active container
-  worker status                     Show what's running
-  worker logs [-f]                  View container output
-  worker bench [num] [rate]         Run vLLM benchmark
+Commands:
+  start <alias> [--refresh]   Start a model container
+  stop                        Stop the active container
+  status                      Show what's running
+  logs [-f]                   View container output
+  check                       Verify prerequisites
+  info                        GPU, disk, memory
+  bench [<num>] [<rate>]      Run vLLM benchmark
 
-\b
-Model weights:
-  worker models list                Cached models + disk usage
-  worker models aliases             Configured aliases
-  worker models pull <alias>        Download weights
-  worker models remove <id>         Delete a cached revision
-  worker models prune               Clean broken revisions
-  worker models fix-perms           Fix cache permissions
+Model Weights:
+  models list                 Cached models + disk usage
+  models aliases              Configured aliases
+  models pull <alias>         Download weights
+  models remove <id>          Delete a cached revision
+  models prune                Clean broken revisions
+  models fix-perms            Fix cache permissions
 
-\b
-Docker images:
-  worker images pull [<image>]      Pull vLLM image (default from config)
-  worker images list                List images on worker
+Docker Images:
+  images pull [<image>]       Pull vLLM image
+  images list                 List images
 
-\b
-Worker node:
-  worker check                      Verify prerequisites
-  worker info                       GPU, disk, memory
-  worker cache clear                Wipe kernel caches
+Kernel Caches:
+  cache clear                 Wipe flashinfer/vllm caches
 
-\b
 Kiro Gateway:
-  worker kiro start                 Start gateway
-  worker kiro stop                  Stop gateway
-  worker kiro status                Health check
+  kiro start                  Start gateway
+  kiro stop                   Stop gateway
+  kiro status                 Health check
 
-\b
 Environment:
-  WORKER_USR    SSH username for worker node
-  WORKER_IP     Worker node IP address
-"""
+  WORKER_USR                  SSH username for worker node
+  WORKER_IP                   Worker node IP address
+
+Run 'worker COMMAND --help' for details."""
 
 
 class OrderedGroup(click.Group):
@@ -93,7 +86,20 @@ class OrderedGroup(click.Group):
         return list(self.commands)
 
 
-@click.group(cls=OrderedGroup, invoke_without_command=True, help=HELP_TEXT)
+class TopGroup(OrderedGroup):
+    """Top-level group with custom help layout."""
+
+    def format_usage(self, ctx: click.Context, formatter: click.HelpFormatter) -> None:
+        formatter.write("Usage: worker [COMMAND]\n")
+
+    def format_help(self, ctx: click.Context, formatter: click.HelpFormatter) -> None:
+        self.format_usage(ctx, formatter)
+        formatter.write("\n")
+        formatter.write(self.help or "")
+        formatter.write("\n")
+
+
+@click.group(cls=TopGroup, invoke_without_command=True, help=HELP_TEXT)
 @click.pass_context
 def cli(ctx: click.Context) -> None:
     if ctx.invoked_subcommand is None:
@@ -109,7 +115,7 @@ def cli(ctx: click.Context) -> None:
 def start(alias: str, refresh: bool) -> None:
     """Start a model container.
 
-    ALIAS is the model name from worker-models.yml (e.g. qwen3-coder).
+    ALIAS is the model name from worker-models.yml.
     Use --refresh to force-restart if the container is already running.
     """
     try:
@@ -219,7 +225,7 @@ def models_group() -> None:
     \b
     Examples:
       worker models list                # what's cached + disk usage
-      worker models pull qwen3-coder    # download by alias
+      worker models pull <alias>        # download by alias
       worker models prune               # clean broken revisions
     """
 

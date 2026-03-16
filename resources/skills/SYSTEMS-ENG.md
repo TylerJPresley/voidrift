@@ -14,3 +14,10 @@
 ## Distribution
 - **Registry Standards:** Strictly follow SemVer and registry-specific standards (NPM, PyPI, Cargo, Maven).
 - **Integration:** Ensure CLI tools are compatible with shell pipes, redirections, and environment-based configuration.
+
+## CLI Help Convention
+- **Structure:** Top-level `--help` uses grouped layout: Getting started (workflow examples with placeholders), Commands (inline options/args visible), subcommand groups (noun-based), environment variables, and a footer pointing to per-command help.
+- **Placeholders:** Use angle-bracket placeholders (e.g., `<name>`, `<path>`) — never hardcode concrete values that can change.
+- **Descriptions:** One line, operator-facing, no internal references (requirement IDs, implementation details).
+- **Ordering:** Commands ordered by workflow, not alphabetically. Subcommands within groups ordered by frequency of use.
+- **Subcommand help:** Each command's `--help` shows full description, all options with defaults, and examples where non-obvious.
