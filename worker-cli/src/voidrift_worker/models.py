@@ -172,6 +172,9 @@ def start_model(alias: str, refresh: bool = False) -> None:
     docker_opts = worker.get("docker_options", ["--privileged", "--gpus all", "--network host"])
     cache_mounts = worker.get("cache_mounts", [])
 
+    # Remove any stale container with the same name
+    ssh_cmd(f"docker rm -f {container_name} 2>/dev/null || true")
+
     cmd_parts = ["docker", "run", "-d", f"--name {container_name}"]
     for opt in docker_opts:
         cmd_parts.append(opt)
