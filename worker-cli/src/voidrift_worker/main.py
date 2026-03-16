@@ -36,12 +36,22 @@ console = Console()
 err_console = Console(stderr=True)
 
 
-@click.group()
-def cli() -> None:
+@click.group(invoke_without_command=True)
+@click.pass_context
+def cli(ctx: click.Context) -> None:
     """Manage local model containers, images, and Kiro Gateway on the worker node."""
+    if ctx.invoked_subcommand is None:
+        click.echo(ctx.get_help())
 
 
 # --- Top-level commands ---
+
+
+@cli.command("help", hidden=True)
+@click.pass_context
+def help_cmd(ctx: click.Context) -> None:
+    """Show this help message."""
+    click.echo(ctx.parent.get_help())
 
 
 @cli.command()
