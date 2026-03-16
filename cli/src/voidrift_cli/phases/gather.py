@@ -116,6 +116,8 @@ def run_gather(
 
     # Start conversation
     console.print(f"[bold cyan]VoidRift Gather[/bold cyan] — {'Feature: ' + feature if feature else 'Full Project'}")
+    log = log_path("gather")
+    console.print(f"[dim]Log: {log}[/dim]")
     console.print(f"Model: {model.alias} ({model.model_id})")
     if target.exists():
         console.print(f"[dim]Revising existing: {target.relative_to(Path.cwd())}[/dim]")
@@ -127,8 +129,6 @@ def run_gather(
         agent.send(initial_context)
 
     # Interactive loop (AC-G3)
-    log = log_path("gather")
-    console.print(f"[dim]Log: {log}[/dim]")
     try:
         while True:
             try:
@@ -206,8 +206,8 @@ def _gather_from(
     handlers["read_source_file"] = read_from_source
 
     log = log_path("gather")
-    console.print(f"[dim]Log: {log}[/dim]")
     console.print(f"[bold cyan]VoidRift Gather (Reverse Engineering)[/bold cyan]")
+    console.print(f"[dim]Log: {log}[/dim]")
     console.print(f"Source: {from_path}")
     console.print(f"Target: {target}")
 

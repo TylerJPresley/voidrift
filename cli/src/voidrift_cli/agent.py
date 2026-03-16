@@ -194,6 +194,9 @@ class AgentLoop(BaseModel):
 
         # If we got tool calls, handle them and loop
         if collected_tool_calls:
+            if collected_text:
+                sys.stdout.write("\n")
+                sys.stdout.flush()
             tool_calls_list = [collected_tool_calls[i] for i in sorted(collected_tool_calls)]
             self.messages.append({
                 "role": "assistant",
