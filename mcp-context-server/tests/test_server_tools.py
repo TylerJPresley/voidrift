@@ -65,21 +65,6 @@ class TestRequirements:
         assert "No requirements" in result
 
 
-class TestConventions:
-    def test_get_toc(self, _reset_server):
-        result = _reset_server.get_conventions("")
-        assert "Available conventions sections" in result
-        assert "Escalation Protocol" in result
-
-    def test_get_specific_section(self, _reset_server):
-        result = _reset_server.get_conventions("Escalation Protocol")
-        assert "escalat" in result.lower()
-
-    def test_get_missing_section(self, _reset_server):
-        result = _reset_server.get_conventions("Nonexistent Section XYZ")
-        assert "No conventions section" in result
-
-
 class TestSkills:
     def test_get_backend(self, _reset_server):
         result = _reset_server.get_skill("backend")
@@ -152,8 +137,8 @@ class TestListArtifacts:
 
 class TestFrameworkResource:
     def test_get_existing(self, _reset_server):
-        result = _reset_server.get_framework_resource("CONVENTIONS.md")
-        assert "Conventions" in result or "conventions" in result
+        result = _reset_server.get_framework_resource("ANALYST.md")
+        assert "Analyst" in result
 
     def test_get_nested(self, _reset_server):
         result = _reset_server.get_framework_resource("WEB-ENG.md")

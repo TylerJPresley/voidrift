@@ -201,7 +201,7 @@ class TestBuildMcpTools:
         tools, handlers = build_mcp_tools(mcp_mod)
         expected = [
             "store_file_analysis", "get_file_analysis", "get_all_analyses",
-            "store_requirements", "get_requirements", "get_conventions",
+            "store_requirements", "get_requirements",
             "get_skill", "read_source_file", "write_file", "export_to_file",
             "list_project_artifacts", "get_framework_resource",
         ]

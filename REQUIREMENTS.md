@@ -39,15 +39,15 @@ Python MCP server that stores, retrieves, and exports project artifacts and fram
 
 **AC-MCP1 — Server:** An MCP server at `~/opt/voidrift/mcp-context-server/` built with Python/FastMCP, communicates via stdio. Source at `~/Projects/voidrift/mcp-context-server/`.
 
-**AC-MCP2 — Framework Resources:** The server loads framework files from `~/opt/voidrift/resources/` (agents/*.md, CONVENTIONS.md, skills/*.md, templates/*.md), indexes them by markdown header, and serves targeted sections on demand.
+**AC-MCP2 — Framework Resources:** The server loads framework files from `~/opt/voidrift/resources/` (agents/*.md, skills/*.md, templates/*.md), indexes them by markdown header, and serves targeted sections on demand.
 
 **AC-MCP3 — Project Artifacts:** The server reads/writes project artifacts in `<project>/.voidrift/`. Stores analysis results, requirements, tasks, and state in memory during a session. Exports to disk on phase completion.
 
-**AC-MCP4 — Tools:** The server exposes tools including: `store_file_analysis()`, `get_file_analysis()`, `get_all_analyses()`, `store_requirements()`, `get_requirements()`, `get_conventions(section)`, `get_skill(name, topic)`, `read_source_file(path)`, `write_file(path, content)`, `export_to_file(type, path)`.
+**AC-MCP4 — Tools:** The server exposes tools including: `store_file_analysis()`, `get_file_analysis()`, `get_all_analyses()`, `store_requirements()`, `get_requirements()`, `get_skill(name, topic)`, `read_source_file(path)`, `write_file(path, content)`, `export_to_file(type, path)`, `get_framework_resource(name)`.
 
 **AC-MCP5 — Storage:** In-memory index for content (parsed markdown sections). SQLite for session metadata (context tracking, what was loaded, what changed).
 
-**AC-MCP6 — Context Boundary:** The CLI never reads framework resource files (`resources/`, skills, AGENT*.md, CONVENTIONS.md, templates) directly. All framework context is served exclusively through MCP server tool calls. The CLI's role is orchestration: phase sequencing, model lifecycle, agent loop, and git operations. In-flight session state (analyses, drafts, intermediate artifacts) is held by the MCP server. Final compiled artifacts are written to `<project>/.voidrift/`.
+**AC-MCP6 — Context Boundary:** The CLI never reads framework resource files (`resources/`, skills, agents, templates) directly. All framework context is served exclusively through MCP server tool calls. The CLI's role is orchestration: phase sequencing, model lifecycle, agent loop, and git operations. In-flight session state (analyses, drafts, intermediate artifacts) is held by the MCP server. Final compiled artifacts are written to `<project>/.voidrift/`.
 
 ### 3. Framework Reference Files (`resources/`)
 
@@ -119,91 +119,9 @@ Core documents that define voidrift identity, operational rules, and editing con
 
 **AC-AGENT11:** AGENT.md tone is identity-focused: "This is who you are and what you believe in." It provides philosophical foundation, not operational procedures.
 
-#### 2b. CONVENTIONS.md — Operational Rules & Protocols
+#### 2b. Other Shared Infrastructure
 
-**Purpose:** Defines mandatory operational rules, constraints, and protocols that govern voidrift behavior. Provides the "rulebook" for how to operate within the framework.
-
-**Loaded by:** All aider sessions (all phases)
-
-**Acceptance Criteria:**
-
-**AC-CONV1:** CONVENTIONS.md opens with purpose statement: "These are the rules you must follow when operating within the framework." Includes note that role is assigned at runtime via `[ROLE: X]` prefix in task messages. Lists three roles: Analyst, Architect, Developer.
-
-**AC-CONV2:** CONVENTIONS.md documents Planning-First Directive (HARD GATE):
-- No code before documentation is updated
-- Every feature/fix starts with Gather and Plan
-- Architect verifies docs before delegation
-- Documentation commits precede or bundle with implementation
-
-**AC-CONV3:** CONVENTIONS.md documents Skill Assignment & Loading:
-- Skills live in `<VOIDRIFT_HOME>/skills/` (flat, uppercase)
-- Plan: Architect tags skills on each task line
-- Develop: Framework loads tagged skills as read-only context
-- Only tag genuinely required skills (context window optimization)
-- Available skills list
-
-**AC-CONV4:** CONVENTIONS.md documents State Management Protocol:
-- STATE.md is session memory — reference it for continuity
-- Developer updates during compaction, not manually
-- Multi-module: project-level and module-level state files
-- When to run `worker-compact` (every 10 turns, task completion, context full)
-- After compaction: exit and restart
-
-**AC-CONV5:** CONVENTIONS.md documents Escalation Protocol:
-- When to escalate (blocked, error persists, needs guidance, verification failure)
-- How to escalate (mark `[!]`, create escalation file)
-- Framework handles architect consultation
-- Two-model system: Developer and Architect may be different models with different context (Architect receives REQUIREMENTS.md, ARCHITECTURE.md, task text, problem — NOT source code; uses plan config not dev config)
-- What NOT to do (no retries, no guessing, no skipping)
-
-**AC-CONV6:** CONVENTIONS.md documents Phase-Specific Behavior rules for each phase:
-- **Gather:** Ask questions, focus on "what" not "how", no tech choices unless requested, don't write until sufficient info
-- **Plan:** All skills loaded, atomic tasks, tag selectively, verify before delegating
-- **Develop:** Execute atomically, one fix attempt then escalate, mark/test/commit, no shell commands, skills per-task
-- **Automate:** Generate IaC from Runtime Environment, reconcile existing, follow infra conventions
-- **Verify:** Analyze results, structured report, escalate if design changes needed
-
-**AC-CONV7:** CONVENTIONS.md documents Cost & Token Optimization:
-- Maximize local compute, minimize cloud ingress
-- Architect: high-level only; Developer: boilerplate/DTOs/repos/tests/docs
-- Minimal responses, no narration
-- Context caching (AGENT.md and CONVENTIONS.md at top)
-- One fix attempt, escalate immediately
-
-**AC-CONV8:** CONVENTIONS.md documents Runtime Environment rules:
-- Follow Runtime Environment in REQUIREMENTS.md without deviation
-- Containers: no host installs, dependencies in image
-- Native: use documented toolchain
-- No package manager execution during code generation
-- Declare dependencies in manifests
-- Do not start/stop/test running application
-
-**AC-CONV9:** CONVENTIONS.md documents Engineering Standards:
-- SOLID principles
-- RESTful patterns (RFC 7807, GlobalExceptionHandler, ProblemDetail)
-- BFF pattern (no direct internal service calls from frontend)
-- API versioning in URI
-
-**AC-CONV10:** CONVENTIONS.md documents Documentation & Metadata requirements:
-- Mandatory Javadoc/TSDoc for services, repositories, components
-- Maintain OpenAPI v3 definitions
-- ADR for every major change
-- docs/ structure (adr/, spec/, guides/)
-
-**AC-CONV11:** CONVENTIONS.md documents Context Compaction:
-- When to run (every 10 turns, task completion)
-- What it does (writes STATE.md, exits)
-- What to do after (restart, fresh session picks up STATE.md)
-
-**AC-CONV12:** CONVENTIONS.md ends with summary explaining relationship to AGENT.md:
-- AGENT.md = who you are, what you believe
-- CONVENTIONS.md = what you must do, what you must not do
-
-**AC-CONV13:** CONVENTIONS.md tone is rule-focused: "These are the rules you must follow." It provides operational constraints and protocols, not philosophical foundation.
-
-#### 2c. Other Shared Infrastructure
-
-- **EDIT-FORMAT.md** — File editing instructions (loaded during Develop, Automate, Verify)
+- **templates/EDIT-FORMAT.md** — File editing instructions (loaded during Develop, Automate, Verify)
 - **Skill files** (`skills/*.md`) — Domain-specific conventions (loaded contextually during Develop)
 - **Aider configurations** (`.aider.*.yml`) — Phase-specific aider settings
 - **Templates** (`templates/*.md`) — Document scaffolding for requirements, design, and ADRs
@@ -369,7 +287,7 @@ voidrift gather <model> <feature> --reference <path>    # interactive feature sp
      - Summary covers: what the code does, tech stack, features, architecture, users, issues, constraints
 - **Requirements generation** uses the completed analysis as input to produce `.voidrift/REQUIREMENTS.md` following AC-G6 format
 - All aider calls use `--no-git` to prevent any commits
-- Does NOT load framework config (AGENT.md, CONVENTIONS.md) during analysis phases
+- Does NOT load framework config during analysis phases
 - Treats **code as ground truth, documentation as claims to verify**
 - The `--from` flag works with feature mode: `voidrift gather <model> <feature> --from <path>` produces `.voidrift/spec/<feature>.md`
 - **Full output visible** to operator during analysis and logged to `gather-*.log`
@@ -411,7 +329,7 @@ The planner reads all of the following before generating output:
 4. ADR template (`<VOIDRIFT_HOME>/templates/ADR-TEMPLATE.md`)
 5. Design template (`<VOIDRIFT_HOME>/templates/DESIGN-TEMPLATE.md`)
 6. Architecture template (`<VOIDRIFT_HOME>/templates/ARCHITECTURE-TEMPLATE.md`)
-7. `AGENT.md` and `CONVENTIONS.md` (loaded via `.aider.plan.yml` `read:` list)
+7. Role-specific agent file (loaded via `.aider.plan.yml` `read:` list)
 
 ### Acceptance Criteria
 
@@ -555,7 +473,7 @@ A header with timestamp and command invocation is appended to `develop-*.log` to
 
 **AC-D7:** Background job notifications (e.g., `[n] pid`, `[n]+ Done`) are suppressed during the develop loop to keep terminal output clean. Task progress is shown via the framework's own status messages.
 
-**AC-D8:** A PATH shim directory is created at a temp location containing stub executables for: `sudo`, `apt-get`, `apt`, `yum`, `dnf`, `brew`, `pip`, `pip3`. Each stub prints an error referencing CONVENTIONS.md §4 and exits with code 1. This directory is prepended to `$PATH` for the duration of the session to prevent the worker from installing packages on the host. The directory is removed on session exit.
+**AC-D8:** A PATH shim directory is created at a temp location containing stub executables for: `sudo`, `apt-get`, `apt`, `yum`, `dnf`, `brew`, `pip`, `pip3`. Each stub prints an error and exits with code 1. This directory is prepended to `$PATH` for the duration of the session to prevent the worker from installing packages on the host. The directory is removed on session exit.
 
 ### Task Loop (per task)
 
@@ -1084,7 +1002,6 @@ This prevents re-downloading models and recompiling kernels on each container st
 | `agents/ANALYST.md` | Analyst role definition and guidelines | Gather phase |
 | `agents/ARCHITECT.md` | Architect role definition and guidelines | Plan phase, escalations |
 | `agents/DEVELOPER.md` | Developer role definition and guidelines | Develop, automate, verify phases |
-| `CONVENTIONS.md` | Operational conventions (planning-first gate, skill loading rules, cost optimization) | All aider sessions |
 | `templates/EDIT-FORMAT.md` | Instructions for formatting file edits | Develop, automate, verify sessions |
 | `skills/*.md` | Skill files loaded contextually per task tag | Develop phase (per task) |
 | `templates/*.md` | Document scaffolding for requirements, design, and ADRs | Plan phase |
@@ -1095,9 +1012,7 @@ This prevents re-downloading models and recompiling kernels on each container st
 - Develop/automate/verify phases load only `agents/DEVELOPER.md`
 - Escalations during develop load `agents/ARCHITECT.md` for architect consultations
 
-**AC-FR3:** `CONVENTIONS.md` is loaded into every aider session via the `read:` list in aider config files. It applies to all roles and phases.
-
-**AC-FR4:** `templates/EDIT-FORMAT.md` is loaded only during develop, automate, and verify phases to guide file editing behavior.
+**AC-FR3:** `templates/EDIT-FORMAT.md` is loaded only during develop, automate, and verify phases to guide file editing behavior.
 
 **AC-FR5:** Each role-specific AGENT file contains:
 - Role identity and responsibilities

@@ -1,23 +1,27 @@
 # Design: [Feature/Bug Name]
 
-## 1. Architectural Blueprint
-- **BFF Strategy:** [Shaping for UI, token exchange, etc.]
-- **Service Mesh/Gateway:** [Routing, Auth]
+## 1. Context & Linkage
+- **ADR Reference:** [Link to corresponding ADR]
+- **Requirement Reference:** [Link to REQUIREMENTS.md section]
 
-## 2. Data Model & State
-- **Entities/Models:** [Schema changes, Pydantic/JSR-380 DTOs]
-- **Persistence:** [PostgreSQL/SQLAlchemy, Redis, S3]
+## 2. Component View (C4 Level 3/4)
+- **Internal Components:** [Description of internal services/modules]
+- **Data Models:** [Schema changes, DTO shapes, Validation logic]
 
-## 3. Interface Contracts (API/CLI)
-- **Endpoints:** [URI, Verb, Request/Response shapes]
-- **CLI Commands:** [Args, Flags, Output format]
+## 3. Interface Contracts
+- **API (REST/gRPC):** [URIs, Verbs, Payload schemas]
+- **CLI:** [Commands, Args, Flags, Output formats]
 
 ## 4. Interaction Flows
-- **Sequence Diagram:** [Mermaid syntax for flow]
-- **Failure Modes:** [Error handling, Retry logic, Fallbacks]
+- **Sequence Diagram:** [Mermaid syntax for critical paths]
+- **Failure Modes:** [Error codes, Retry strategies, Fallbacks]
 
-## 5. Definition of Done
+## 5. Risks & Technical Debt
+- **Potential Issues:** [Complexity, performance risks]
+- **Trade-offs:** [Intentional shortcuts taken for this feature]
+
+## 6. Definition of Done
 - [ ] Unit tests pass (TDD)
 - [ ] Integration tests pass (httpx/AssertJ)
 - [ ] Documentation updated (Javadoc/TSDoc)
-- [ ] Linting/Formatting clean (ShellCheck/Clippy/vLLM)
+- [ ] Verification Evidence attached (Logs/Test Output)

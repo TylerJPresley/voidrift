@@ -38,7 +38,7 @@ mcp = FastMCP(
     "voidrift-context",
     instructions=(
         "VoidRift MCP Context Server. Provides tools to store, retrieve, and "
-        "export project artifacts and framework resources. Use get_conventions() "
+        "export project artifacts and framework resources. Use get_skill() "
         "and get_skill() to pull targeted context on demand instead of loading "
         "full files."
     ),
@@ -138,30 +138,6 @@ def get_requirements(key: str = "project") -> str:
             return f"No requirements found for '{key}'"
     session_store.log_action(session_id, "get", "requirements", key)
     return result
-
-
-@mcp.tool()
-def get_conventions(section: str = "") -> str:
-    """Retrieve operational conventions, optionally filtered to a specific section.
-
-    Args:
-        section: Heading name to retrieve (e.g. 'Escalation Protocol'). Empty returns all.
-    """
-    if section:
-        s = index.get_section(section, file_filter="CONVENTIONS")
-        if s:
-            session_store.log_action(session_id, "get", "conventions", section)
-            return s.content
-        # Try fuzzy search
-        results = index.search(section, file_filter="CONVENTIONS")
-        if results:
-            session_store.log_action(session_id, "get", "conventions", section)
-            return "\n\n---\n\n".join(r.content for r in results)
-        return f"No conventions section matching '{section}'"
-    # Return all conventions headings as a table of contents
-    headings = index.list_headings(file_filter="CONVENTIONS")
-    session_store.log_action(session_id, "get", "conventions", "toc")
-    return "Available conventions sections:\n" + "\n".join(f"- {h}" for h in headings)
 
 
 @mcp.tool()

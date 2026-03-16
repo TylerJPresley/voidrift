@@ -270,7 +270,6 @@ def build_mcp_tools(mcp_server_module: Any) -> tuple[list[dict], dict[str, Calla
         get_all_analyses,
         store_requirements,
         get_requirements,
-        get_conventions,
         get_skill,
         read_source_file,
         write_file,
@@ -310,12 +309,6 @@ def build_mcp_tools(mcp_server_module: Any) -> tuple[list[dict], dict[str, Calla
             "type": "object",
             "properties": {
                 "key": {"type": "string", "description": "'project' or feature name", "default": "project"},
-            },
-        }),
-        "get_conventions": (get_conventions, {
-            "type": "object",
-            "properties": {
-                "section": {"type": "string", "description": "Section heading to retrieve", "default": ""},
             },
         }),
         "get_skill": (get_skill, {
