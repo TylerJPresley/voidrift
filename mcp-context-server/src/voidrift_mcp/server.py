@@ -14,6 +14,7 @@ from mcp.server.fastmcp import FastMCP
 from .artifact_store import ArtifactStore
 from .markdown_parser import MarkdownIndex
 from .session_store import SessionStore
+from .task_store import TaskStore
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -28,6 +29,7 @@ VOIDRIFT_DIR = PROJECT_DIR / ".voidrift"
 # ---------------------------------------------------------------------------
 index = MarkdownIndex()
 artifacts = ArtifactStore(voidrift_dir=VOIDRIFT_DIR)
+tasks = TaskStore()
 session_store = SessionStore()  # in-memory by default
 session_id: int = 0
 
@@ -129,6 +131,83 @@ def get_requirements(key: str = "project") -> str:
         return f"No requirements found for '{key}'"
     session_store.log_action(session_id, "get", "requirements", key)
     return result
+
+
+# ---------------------------------------------------------------------------
+# Task management tools (AC-MCP4c)
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def load_tasks(path: str = ".voidrift/TASKS.md") -> str:
+    """Load a TASKS.md file into the server, parsing module headers.
+
+    Args:
+        path: Relative path to the task file.
+    """
+    full = PROJECT_DIR / path
+    if not full.exists():
+        return f"Task file not found: {path}"
+    counts = tasks.load(full)
+    session_store.log_action(session_id, "load", "tasks", path)
+    lines = [f"Loaded {sum(counts.values())} tasks from {path}"]
+    for mod, count in counts.items():
+        label = mod if mod != "_default" else "(default)"
+        lines.append(f"  {label}: {count} tasks")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def get_next_task(module: str = "") -> str:
+    """Return the next unchecked task for a module.
+
+    Args:
+        module: Module name. Empty for single-module projects.
+    """
+    task = tasks.get_next(module)
+    if not task:
+        return f"No tasks remaining for module '{module or '_default'}'"
+    session_store.log_action(session_id, "get", "task", f"{module or '_default'}")
+    result = f"Task: {task.text}"
+    if task.skills:
+        result += f"\nSkills: {', '.join(task.skills)}"
+    return result
+
+
+@mcp.tool()
+def complete_task(module: str = "") -> str:
+    """Mark the next unchecked task as complete and write through to disk.
+
+    Args:
+        module: Module name. Empty for single-module projects.
+    """
+    task = tasks.complete(module)
+    if not task:
+        return f"No pending tasks to complete for module '{module or '_default'}'"
+    session_store.log_action(session_id, "complete", "task", f"{module or '_default'}")
+    status = tasks.status(module)
+    return f"Completed: {task.text}\nRemaining: {status['remaining']}, Done: {status['done']}, Blocked: {status['blocked']}"
+
+
+@mcp.tool()
+def get_task_status(module: str = "") -> str:
+    """Return task counts for a module or all modules.
+
+    Args:
+        module: Module name. Empty returns counts for all modules.
+    """
+    session_store.log_action(session_id, "get", "task_status", module or "all")
+    if module:
+        s = tasks.status(module)
+        return f"Module '{module}': {s['done']} done, {s['blocked']} blocked, {s['remaining']} remaining"
+    lines = []
+    for mod in tasks.modules():
+        s = tasks.status(mod)
+        label = mod if mod != "_default" else "(default)"
+        lines.append(f"{label}: {s['done']} done, {s['blocked']} blocked, {s['remaining']} remaining")
+    if not lines:
+        return "No tasks loaded. Use load_tasks() first."
+    return "\n".join(lines)
 
 
 @mcp.tool()

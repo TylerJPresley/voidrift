@@ -43,11 +43,21 @@ Python MCP server that stores, retrieves, and exports project artifacts and fram
 
 **AC-MCP3 — Project Artifacts:** The server reads/writes project artifacts in `<project>/.voidrift/`. Uses write-through storage: `store_*` tools write to both in-memory cache and disk simultaneously. Memory serves as a read cache; disk is the source of truth. No data is lost if the server process exits unexpectedly.
 
-**AC-MCP4 — Tools:** The server exposes tools including: `store_file_analysis()`, `get_file_analysis()`, `get_all_analyses()`, `store_requirements()`, `get_requirements()`, `get_agent(role, topic)`, `get_skill(name, topic)`, `get_template(name)`, `read_source_file(path)`, `write_file(path, content)`, `export_to_file(type, path)`.
+**AC-MCP4 — Tools:** The server exposes tools including: `store_file_analysis()`, `get_file_analysis()`, `get_all_analyses()`, `store_requirements()`, `get_requirements()`, `get_agent(role, topic)`, `get_skill(name, topic)`, `get_template(name)`, `load_tasks(path)`, `get_next_task(module)`, `complete_task(module)`, `get_task_status(module)`, `read_source_file(path)`, `write_file(path, content)`, `export_to_file(type, path)`.
 
 **AC-MCP4a — `get_agent(role, topic)`:** Retrieves a role-specific agent file from `resources/agents/`. The `role` parameter accepts `analyst`, `architect`, or `developer` (case-insensitive). When `topic` is provided, returns only matching sections from the indexed markdown. When empty, returns the full file content. Returns an error listing available roles if the role is not found.
 
 **AC-MCP4b — `get_template(name)`:** Retrieves a template file from `resources/templates/`. The `name` parameter accepts the template name without path or extension (e.g. `adr-template`, `architecture-template`). Returns the full file content. Returns an error listing available templates if the name is not found.
+
+**AC-MCP4c — Task management tools:**
+
+`load_tasks(path)` — Loads a TASKS.md file from disk into the server. Parses `## Module: <name>` headers to split tasks into per-module queues. Tasks without a module header are assigned to a default module. Each task line (`- [ ]` or `- [x]` or `- [!]`) is parsed with its skill tags. Returns module names and task counts. Write-through: all state changes are persisted back to the single TASKS.md file on disk.
+
+`get_next_task(module)` — Returns the first unchecked (`- [ ]`) task for the given module, including its skill tags. If `module` is empty, uses the default module. Returns a "no tasks remaining" message if all tasks are complete. The agent only ever sees one task at a time.
+
+`complete_task(module)` — Marks the first unchecked task in the given module as `- [x]`. Writes through to disk. Returns the completed task text and remaining count.
+
+`get_task_status(module)` — Returns done/blocked/remaining counts for a module. If `module` is empty, returns counts for all modules.
 
 **AC-MCP5 — Storage:** In-memory index for content (parsed markdown sections). SQLite for session metadata (context tracking, what was loaded, what changed).
 
@@ -337,7 +347,7 @@ The planner reads all of the following before generating output:
 
 ### Acceptance Criteria
 
-**AC-P1:** Plan always produces at minimum: `.voidrift/ARCHITECTURE.md` and at least one task file (`.voidrift/TASKS.md` or one or more `.voidrift/TASKS-<module>.md`). If either is missing after the first run, one retry is issued with an explicit correction message. If the retry also fails to produce required artifacts, the command exits with code 1 and an error message indicating which artifacts are missing.
+**AC-P1:** Plan always produces at minimum: `.voidrift/ARCHITECTURE.md` and `.voidrift/TASKS.md`. If either is missing after the first run, one retry is issued with an explicit correction message. If the retry also fails to produce required artifacts, the command exits with code 1 and an error message indicating which artifacts are missing.
 
 **AC-P2:** Planner output is fully hidden from the terminal. Only a spinner and a brief status line are shown while planning runs. All model output, including thinking and intermediate steps, is written exclusively to `plan-*.log`.
 
@@ -345,7 +355,7 @@ The planner reads all of the following before generating output:
 
 **AC-P3a:** When `--fresh-start` flag is specified, the following files are deleted before planning begins:
 - `.voidrift/ARCHITECTURE.md`
-- `.voidrift/TASKS*.md` (all task files)
+- `.voidrift/TASKS.md`
 - `.voidrift/adr/` (entire directory)
 - `.voidrift/spec/*.md` (all feature spec files)
 
@@ -355,22 +365,21 @@ This allows regenerating the plan from scratch without manually deleting files.
 
 **AC-P5:** Only known planning artifacts are staged and committed after a successful run:
 - `.voidrift/TASKS.md`
-- `.voidrift/TASKS-<module>.md` files
 - `.voidrift/ARCHITECTURE.md`
 - `.voidrift/adr/*.md`
 - `.voidrift/spec/*.md`
 
   Any file with a language-keyword name (e.g., a file literally named `python`, `typescript`, `code`) or other artifact files created by misformatted model output are left untracked and never committed.
 
-**AC-P6:** The `edit-format: whole` setting is used for planning. This prevents SEARCH/REPLACE failures that occur when aider commits `.voidrift/ARCHITECTURE.md` mid-response, which would cause subsequent SEARCH blocks to fail to match and reject the entire response including new `.voidrift/TASKS-*.md` files.
+**AC-P6:** The `edit-format: whole` setting is used for planning. This prevents SEARCH/REPLACE failures that occur when aider commits `.voidrift/ARCHITECTURE.md` mid-response, which would cause subsequent SEARCH blocks to fail to match and reject the entire response including `.voidrift/TASKS.md`.
 
 **AC-P7 — Module identification:** A module is an independently deployable unit with its own source tree (e.g., a backend API and a frontend SPA, or an engine and an editor). The planner:
 1. Identifies all deployable units implied by requirements
-2. Creates a single `.voidrift/TASKS.md` when there is only one deployable unit
-3. Creates one `.voidrift/TASKS-<module>.md` per module when there are two or more, with module names chosen by the architect to reflect the project's structure
+2. For single-module projects, writes tasks directly under a `## Tasks` header in `.voidrift/TASKS.md`
+3. For multi-module projects, groups tasks under `## Module: <name>` headers in `.voidrift/TASKS.md`, with module names chosen by the architect to reflect the project's structure
 4. Infrastructure, build, and deployment tasks may be placed in their own module if they touch files not owned by any other module
 
-**AC-P8 — File ownership constraint:** Each file path must appear in exactly one module's task file. No file may be created or modified by tasks in more than one module. Shared files (e.g., root config, docker-compose, CI workflows) must be assigned to a single module. This ensures parallel execution is safe by construction — modules cannot overwrite each other's work.
+**AC-P8 — File ownership constraint:** In multi-module projects, each file path must appear in exactly one module's task group. No file may be created or modified by tasks in more than one module. Shared files (e.g., root config, docker-compose, CI workflows) must be assigned to a single module. This ensures parallel execution is safe by construction — modules cannot overwrite each other's work.
 
 **AC-P9 — Task format requirements:** Each task line must be a single atomic file operation with this exact format:
 
@@ -414,7 +423,7 @@ These are not tasks - they're categories. Each must be broken into specific file
 **AC-P15:** `.voidrift/ARCHITECTURE.md` is the shared technical reference for all workers during develop. It contains: Components table, Data Models, API Surface, Configuration, Dependencies, Decisions (ADR references), Constraints & Limitations, Glossary. If it already exists, only the affected sections are updated; all other content is preserved.
 
 ### Artifacts
-- `.voidrift/TASKS.md` (single module) or `.voidrift/TASKS-<module>.md` files (multiple modules)
+- `.voidrift/TASKS.md`
 - `.voidrift/ARCHITECTURE.md`
 - `.voidrift/adr/ADR-NNN-<title>.md`
 - `plan-*.log`
@@ -443,9 +452,9 @@ voidrift develop <worker> [<architect>] [--parallel] [--retry | --overwrite]
 2. With `--retry`: Resume execution in existing worktrees, skipping already-completed tasks per module.
 3. With `--overwrite`: Remove all worktrees, delete voidrift branches, and start fresh.
 
-**AC-D2:** If `--parallel` is specified but no `.voidrift/TASKS-<module>.md` files exist, the command exits with an error and a prompt to run `voidrift plan` or omit `--parallel`.
+**AC-D2:** If `--parallel` is specified but `.voidrift/TASKS.md` contains no `## Module:` headers, the command exits with an error and a prompt to run `voidrift plan` with multi-module structure or omit `--parallel`.
 
-**AC-D3:** If no task files exist at all (`.voidrift/TASKS.md` or `.voidrift/TASKS-*.md`), the command exits with an error prompting the user to run `voidrift plan`.
+**AC-D3:** If `.voidrift/TASKS.md` does not exist, the command exits with an error prompting the user to run `voidrift plan`.
 
 **AC-D4:** If all tasks are already marked `[x]`, the command exits cleanly with a "all tasks complete" message and returns 0.
 
@@ -493,7 +502,7 @@ This is required because aider output is redirected to log files. Implementation
 - `AGENT.md` and `CONVENTIONS.md` (always loaded via dev config)
 - `EDIT-FORMAT.md` (always loaded via dev config, mandatory format specification)
 
-The `[module/]` path segment is included only for multi-module projects (when `TASKS-<module>.md` files exist); for single-module projects, the path is `.voidrift/architect_responses/<task_num>-<N>.md`.
+The `[module/]` path segment is included only for multi-module projects (when `TASKS.md` contains `## Module:` headers); for single-module projects, the path is `.voidrift/architect_responses/<task_num>-<N>.md`.
 
 **AC-D13:** The worker must strictly follow the edit format specified in `EDIT-FORMAT.md`. All file edits must include the complete file path before code blocks. The framework does not attempt to detect or correct format errors; the worker is responsible for proper formatting.
 
@@ -593,23 +602,21 @@ For single-module projects (only `TASKS.md` exists), only `.voidrift/STATE.md` i
 
 ### Sequential Mode (multiple modules)
 
-**AC-D33:** When `.voidrift/TASKS-<module>.md` files are present and `--parallel` is not specified, modules are processed in alphabetical order, one at a time.
+**AC-D33:** When `.voidrift/TASKS.md` contains `## Module:` headers and `--parallel` is not specified, modules are processed in alphabetical order, one at a time. The MCP server's `load_tasks()` parses the file and the CLI iterates modules via `get_next_task(module)`.
 
-**AC-D34:** Before each module, its `.voidrift/TASKS-<module>.md` is copied to `.voidrift/TASKS.md`. After the module's loop completes, `.voidrift/TASKS.md` is copied back to `.voidrift/TASKS-<module>.md` to sync completion state.
+**AC-D34:** Task completion state is managed by the MCP server and written through to the single `.voidrift/TASKS.md` file on disk. No file copying between module-specific and shared task files is needed.
 
 **AC-D35:** Each progress line is prefixed with `[module]` to identify which module is active.
 
-**AC-D36:** `.voidrift/TASKS.md` is deleted after all sequential modules complete.
-
 ### Parallel Mode (`--parallel`)
 
-**AC-D37:** Parallel mode assumes modules are independent (non-overlapping source files) and a single operator. The base branch should not be modified during parallel execution. Modules are designed by the planner to avoid file conflicts.
+**AC-D37:** Parallel mode assumes modules are independent (non-overlapping source files, enforced by AC-P8) and a single operator. The base branch should not be modified during parallel execution.
 
-**AC-D38:** Each `.voidrift/TASKS-<module>.md` file gets its own git worktree in `.worktrees/<module>/` on a branch named `voidrift/<module>`. Each worker runs concurrently and independently in its worktree.
+**AC-D38:** Each module gets its own git worktree in `.worktrees/<module>/` on a branch named `voidrift/<module>`. Each worker runs concurrently with its own MCP server instance, receiving tasks via `get_next_task(module)`.
 
 **AC-D39:** If `git worktree add` fails for any module (disk space, permissions, path conflicts, branch conflicts), the command aborts immediately, prints the git error, and exits with code 1. Any successfully created worktrees from the same invocation are cleaned up before exit.
 
-**AC-D40:** The task file for each module is copied into its worktree as `.voidrift/TASKS.md` before the worker starts.
+**AC-D40:** Each worktree's MCP server loads the same `.voidrift/TASKS.md` but only serves tasks for its assigned module.
 
 **AC-D41:** The poll loop checks all workers every 30 seconds and reports which modules are still running with elapsed time.
 
@@ -843,8 +850,7 @@ Returns exit code 0 on success, 1 on error.
 ├── ARCHITECTURE.md           # Architecture reference
 ├── STATE.md                  # Project-level state summary
 ├── STATE-<module>.md         # Module-level state (multi-module projects)
-├── TASKS.md                  # Task list (single module)
-├── TASKS-<module>.md         # Task lists (multiple modules)
+├── TASKS.md                  # Task list (single file, module headers for multi-module)
 ├── spec/                     # Feature specifications
 │   └── <feature>.md
 ├── adr/                      # Architecture decision records

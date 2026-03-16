@@ -270,6 +270,10 @@ def build_mcp_tools(mcp_server_module: Any) -> tuple[list[dict], dict[str, Calla
         get_all_analyses,
         store_requirements,
         get_requirements,
+        load_tasks,
+        get_next_task,
+        complete_task,
+        get_task_status,
         get_agent,
         get_skill,
         get_template,
@@ -310,6 +314,30 @@ def build_mcp_tools(mcp_server_module: Any) -> tuple[list[dict], dict[str, Calla
             "type": "object",
             "properties": {
                 "key": {"type": "string", "description": "'project' or feature name", "default": "project"},
+            },
+        }),
+        "load_tasks": (load_tasks, {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "Path to TASKS.md", "default": ".voidrift/TASKS.md"},
+            },
+        }),
+        "get_next_task": (get_next_task, {
+            "type": "object",
+            "properties": {
+                "module": {"type": "string", "description": "Module name (empty for single-module)", "default": ""},
+            },
+        }),
+        "complete_task": (complete_task, {
+            "type": "object",
+            "properties": {
+                "module": {"type": "string", "description": "Module name (empty for single-module)", "default": ""},
+            },
+        }),
+        "get_task_status": (get_task_status, {
+            "type": "object",
+            "properties": {
+                "module": {"type": "string", "description": "Module name (empty for all modules)", "default": ""},
             },
         }),
         "get_agent": (get_agent, {

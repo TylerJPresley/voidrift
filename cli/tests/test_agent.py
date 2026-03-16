@@ -202,6 +202,7 @@ class TestBuildMcpTools:
         expected = [
             "store_file_analysis", "get_file_analysis", "get_all_analyses",
             "store_requirements", "get_requirements",
+            "load_tasks", "get_next_task", "complete_task", "get_task_status",
             "get_agent", "get_skill", "get_template",
             "read_source_file", "write_file", "export_to_file",
             "list_project_artifacts",

@@ -27,6 +27,10 @@ voidrift-mcp
 | `get_all_analyses` | Retrieve all stored analyses |
 | `store_requirements` | Store requirements content in memory |
 | `get_requirements` | Retrieve stored or on-disk requirements |
+| `load_tasks` | Load TASKS.md, parse module headers into per-module queues |
+| `get_next_task` | Return the next unchecked task for a module |
+| `complete_task` | Mark next task done, write through to disk |
+| `get_task_status` | Return done/blocked/remaining counts |
 | `get_agent` | Retrieve role-specific agent file by role and optional topic |
 | `get_skill` | Retrieve skill file content by name and optional topic |
 | `get_template` | Retrieve template file by name |
@@ -39,9 +43,10 @@ voidrift-mcp
 
 ```
 src/voidrift_mcp/
-├── server.py          # FastMCP server with 12 tools
+├── server.py          # FastMCP server with 16 tools
 ├── markdown_parser.py # Markdown indexing by header
-├── artifact_store.py  # In-memory key-value store with disk export
+├── artifact_store.py  # Write-through key-value store (memory + disk)
+├── task_store.py      # TASKS.md parser with per-module queues
 └── session_store.py   # SQLite session metadata tracking
 ```
 
