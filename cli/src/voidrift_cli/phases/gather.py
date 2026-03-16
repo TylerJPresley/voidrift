@@ -211,12 +211,18 @@ def _gather_from(
     console.print(f"Source: {from_path}")
     console.print(f"Target: {target}")
 
-    # Load requirements template
+    # Load requirements template and skills
+    resources = Path.home() / ".voidrift" / "resources"
     template = ""
+    skills = ""
     try:
-        t = Path.home() / ".voidrift" / "resources" / "templates" / "REQUIREMENTS-TEMPLATE.md"
+        t = resources / "templates" / "REQUIREMENTS-TEMPLATE.md"
         if t.exists():
             template = t.read_text()
+        for name in ("PROD-STRATEGY.md", "QUALITY-QA.md"):
+            s = resources / "skills" / name
+            if s.exists():
+                skills += s.read_text() + "\n\n"
     except OSError:
         pass
 
@@ -229,7 +235,8 @@ def _gather_from(
             "Analyze the codebase structure, then produce requirements.\n"
             "Use write_file() to write the requirements when ready.\n\n"
             "You MUST follow this template structure exactly:\n\n"
-            f"{template}\n"
+            f"{template}\n\n"
+            f"Follow these skills:\n\n{skills}"
         ),
         tools=tools,
         tool_handlers=handlers,
