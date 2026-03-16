@@ -26,7 +26,7 @@ from .models import (
     stop_model,
     worker_check,
     worker_info,
-    _list_stopped_containers,
+    _list_containers,
     worker_logs,
 )
 
@@ -190,26 +190,26 @@ def status() -> None:
 def logs(follow: bool) -> None:
     """View container output. Shows last 200 lines, or stream with -f."""
     try:
-        rc = worker_logs(follow=follow)
-        sys.exit(rc)
-    except RuntimeError as e:
-        if str(e) != "NO_ACTIVE":
-            err_console.print(f"[red]{e}[/red]")
+        containers = _list_containers()
+        if not containers:
+            err_console.print("[red]No model containers found.[/red]")
             sys.exit(1)
 
-        stopped = _list_stopped_containers()
-        if not stopped:
-            err_console.print("[red]No model containers found (running or stopped).[/red]")
-            sys.exit(1)
+        s = get_status()
+        active_name = s["container"] if s["active"] else None
 
-        console.print("No active container. Stopped containers:")
-        for i, c in enumerate(stopped, 1):
-            console.print(f"  {i}. {c['name']}  ({c['status']})")
+        console.print("Containers:")
+        for i, c in enumerate(containers, 1):
+            marker = " ✅ active" if c["name"] == active_name else ""
+            console.print(f"  {i}. {c['name']}  ({c['status']}){marker}")
 
-        choice = click.prompt("Select", type=click.IntRange(1, len(stopped)))
-        selected = stopped[choice - 1]["name"]
+        choice = click.prompt("Select", type=click.IntRange(1, len(containers)), default=1)
+        selected = containers[choice - 1]["name"]
         rc = worker_logs(follow=follow, container=selected)
         sys.exit(rc)
+    except RuntimeError as e:
+        err_console.print(f"[red]{e}[/red]")
+        sys.exit(1)
 
 
 @cli.command()

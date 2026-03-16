@@ -501,12 +501,12 @@ def models_check(prune: bool = False) -> tuple[list[tuple[str, bool, str]], list
     return results, unconfigured
 
 
-def _list_stopped_containers() -> list[dict]:
-    """List stopped worker containers with status and age."""
+def _list_containers() -> list[dict]:
+    """List all worker containers (running and stopped) with status."""
     config = load_worker_models()
     prefix = config.get("worker", {}).get("container_prefix", "worker-")
     r = ssh_cmd(
-        f"docker ps -a --filter 'name={prefix}' --filter 'status=exited' "
+        f"docker ps -a --filter 'name={prefix}' "
         f"--format '{{{{.Names}}}}|{{{{.Status}}}}'"
     )
     containers = []
@@ -519,17 +519,10 @@ def _list_stopped_containers() -> list[dict]:
 
 def worker_logs(follow: bool = False, container: str | None = None) -> int:
     """Show container logs (REQ-WK-11)."""
-    if container:
-        flag = "-f" if follow else "--tail 200"
-        return ssh_stream(f"docker logs {flag} {container}", timeout=3600 if follow else 30)
-
-    s = get_status()
-    if s["active"]:
-        flag = "-f" if follow else "--tail 200"
-        return ssh_stream(f"docker logs {flag} {s['container']}", timeout=3600 if follow else 30)
-
-    # No active container — caller should prompt
-    raise RuntimeError("NO_ACTIVE")
+    if not container:
+        raise RuntimeError("NO_CONTAINER")
+    flag = "-f" if follow else "--tail 200"
+    return ssh_stream(f"docker logs {flag} {container}", timeout=3600 if follow else 30)
 
 
 def worker_info() -> str:

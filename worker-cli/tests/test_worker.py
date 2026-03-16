@@ -271,43 +271,33 @@ class TestModelsCheck:
 
 
 class TestWorkerLogs:
-    @patch("voidrift_worker.models.get_status")
-    def test_no_active_raises_sentinel(self, mock_status):
-        mock_status.return_value = {"active": False}
-        with pytest.raises(RuntimeError, match="NO_ACTIVE"):
-            worker_logs()
-
     @patch("voidrift_worker.models.ssh_stream")
-    @patch("voidrift_worker.models.get_status")
-    def test_follow_flag(self, mock_status, mock_stream):
-        mock_status.return_value = {"active": True, "container": "worker-qwen3-coder"}
+    def test_shows_logs_for_container(self, mock_stream):
         mock_stream.return_value = 0
-        worker_logs(follow=True)
-        assert "-f" in mock_stream.call_args[0][0]
-
-    @patch("voidrift_worker.models.ssh_stream")
-    @patch("voidrift_worker.models.get_status")
-    def test_tail_default(self, mock_status, mock_stream):
-        mock_status.return_value = {"active": True, "container": "worker-qwen3-coder"}
-        mock_stream.return_value = 0
-        worker_logs()
+        worker_logs(container="worker-qwen3-coder")
+        assert "worker-qwen3-coder" in mock_stream.call_args[0][0]
         assert "--tail 200" in mock_stream.call_args[0][0]
 
     @patch("voidrift_worker.models.ssh_stream")
-    def test_explicit_container(self, mock_stream):
+    def test_follow_flag(self, mock_stream):
         mock_stream.return_value = 0
-        worker_logs(container="worker-old")
-        assert "worker-old" in mock_stream.call_args[0][0]
+        worker_logs(follow=True, container="worker-qwen3-coder")
+        assert "-f" in mock_stream.call_args[0][0]
+
+    def test_no_container_raises(self):
+        with pytest.raises(RuntimeError, match="NO_CONTAINER"):
+            worker_logs()
 
     @patch("voidrift_worker.models.ssh_cmd")
-    def test_list_stopped(self, mock_ssh):
+    def test_list_containers(self, mock_ssh):
         mock_ssh.return_value = MagicMock(
-            stdout="worker-qwen3-coder|Exited (1) 5 minutes ago\nworker-qwen3-8b|Exited (0) 2 hours ago\n"
+            stdout="worker-qwen3-coder|Up 5 minutes\nworker-qwen3-8b|Exited (0) 2 hours ago\n"
         )
-        from voidrift_worker.models import _list_stopped_containers
-        result = _list_stopped_containers()
+        from voidrift_worker.models import _list_containers
+        result = _list_containers()
         assert len(result) == 2
         assert result[0]["name"] == "worker-qwen3-coder"
+        assert "Up" in result[0]["status"]
 
 
 class TestWorkerInfo:
