@@ -67,6 +67,19 @@ def cli(ctx) -> None:
         _interactive_mode()
 
 
+def main() -> None:
+    """Entry point with clean error handling."""
+    try:
+        cli(standalone_mode=False)
+    except click.exceptions.SystemExit:
+        raise
+    except RuntimeError as e:
+        err_console.print(f"[red]Error: {e}[/red]")
+        sys.exit(1)
+    except click.Abort:
+        sys.exit(130)
+
+
 def _interactive_mode():
     """Interactive guided flow when no subcommand given (REQ-ARCH-3)."""
     console.print("[bold cyan]VoidRift[/bold cyan] — Local-first Agentic Development Framework\n")

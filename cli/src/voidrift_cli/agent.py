@@ -98,8 +98,12 @@ class AgentLoop(BaseModel):
             return self._run_loop()
         except RuntimeError:
             raise
-        except Exception as e:  # Wrap API/network errors for callers
-            raise RuntimeError(str(e)) from e
+        except Exception as e:
+            msg = str(e)
+            if "Connection" in msg:
+                base = self.model.api_base or "unknown"
+                msg = f"Cannot connect to {base} — is the model/gateway running?"
+            raise RuntimeError(msg) from e
 
     def _run_loop(self) -> str:
         """Run the agent loop until a final text response (no more tool calls).

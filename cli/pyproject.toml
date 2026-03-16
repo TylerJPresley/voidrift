@@ -26,7 +26,7 @@ pattern = "(?P<version>.+)"
 packages = ["src/voidrift_cli"]
 
 [project.scripts]
-voidrift = "voidrift_cli.main:cli"
+voidrift = "voidrift_cli.main:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
