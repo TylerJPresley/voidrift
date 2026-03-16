@@ -71,6 +71,14 @@ def cli(ctx) -> None:
         _interactive_mode()
 
 
+def _complete_model(ctx, param, incomplete):
+    """Shell completion for model aliases."""
+    try:
+        return [a for a in list_models() if a.startswith(incomplete)]
+    except Exception:
+        return []
+
+
 def main() -> None:
     """Entry point with clean error handling."""
     try:
@@ -132,7 +140,7 @@ def _interactive_mode():
 
 
 @cli.command()
-@click.argument("model")
+@click.argument("model", shell_complete=_complete_model)
 @click.argument("feature", required=False)
 @click.option("--from", "from_path", help="Path to existing codebase for reverse engineering")
 @click.option("--reference", help="Path to reference codebase for interactive lookup")
@@ -145,7 +153,7 @@ def gather(model, feature, from_path, reference, force) -> None:
 
 
 @cli.command()
-@click.argument("model")
+@click.argument("model", shell_complete=_complete_model)
 @click.argument("feature", required=False)
 @click.option("--fresh-start", is_flag=True, help="Delete existing planning artifacts")
 def plan(model, feature, fresh_start) -> None:
@@ -156,8 +164,8 @@ def plan(model, feature, fresh_start) -> None:
 
 
 @cli.command()
-@click.argument("worker")
-@click.argument("architect", required=False)
+@click.argument("worker", shell_complete=_complete_model)
+@click.argument("architect", required=False, shell_complete=_complete_model)
 @click.option("--workers", default=1, help="Number of concurrent module workers (0 = one per module)")
 def develop(worker, architect, workers) -> None:
     """Phase 3: Execute implementation tasks."""
@@ -168,8 +176,8 @@ def develop(worker, architect, workers) -> None:
 
 
 @cli.command()
-@click.argument("worker")
-@click.argument("architect", required=False)
+@click.argument("worker", shell_complete=_complete_model)
+@click.argument("architect", required=False, shell_complete=_complete_model)
 def automate(worker, architect) -> None:
     """Phase 4: Generate infrastructure-as-code."""
     from .phases.automate import run_automate
@@ -179,8 +187,8 @@ def automate(worker, architect) -> None:
 
 
 @cli.command()
-@click.argument("worker")
-@click.argument("architect", required=False)
+@click.argument("worker", shell_complete=_complete_model)
+@click.argument("architect", required=False, shell_complete=_complete_model)
 def verify(worker, architect) -> None:
     """Phase 5: Run quality checks and validation."""
     from .phases.verify import run_verify
@@ -195,7 +203,7 @@ def verify(worker, architect) -> None:
 
 
 @cli.command()
-@click.argument("model")
+@click.argument("model", shell_complete=_complete_model)
 def chat(model) -> None:
     """Interactive chat session with a model."""
     mc = resolve_model(model)
@@ -370,6 +378,22 @@ def unlock() -> None:
         console.print("Removed invalid lock file")
 
     lock.unlink()
+
+
+@cli.command("completions")
+@click.argument("shell", type=click.Choice(["bash", "zsh", "fish"]))
+def completions_cmd(shell: str) -> None:
+    """Generate shell completion script.
+
+    \b
+    Install once:
+      voidrift completions bash > ~/.local/share/bash-completion/completions/voidrift
+      voidrift completions zsh > ~/.zfunc/_voidrift
+      voidrift completions fish > ~/.config/fish/completions/voidrift.fish
+    """
+    env_var = "_VOIDRIFT_COMPLETE"
+    script = os.popen(f"{env_var}={shell}_source voidrift").read()
+    click.echo(script)
 
 
 if __name__ == "__main__":
