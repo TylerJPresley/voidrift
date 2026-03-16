@@ -1086,7 +1086,7 @@ This prevents re-downloading models and recompiling kernels on each container st
 | `agents/ARCHITECT.md` | Architect role definition and guidelines | Plan phase, escalations |
 | `agents/DEVELOPER.md` | Developer role definition and guidelines | Develop, automate, verify phases |
 | `CONVENTIONS.md` | Operational conventions (planning-first gate, skill loading rules, cost optimization) | All aider sessions |
-| `EDIT-FORMAT.md` | Instructions for formatting file edits | Develop, automate, verify sessions |
+| `templates/EDIT-FORMAT.md` | Instructions for formatting file edits | Develop, automate, verify sessions |
 | `SKILLS.md` | Skill registry with one-line summaries and file paths | Plan phase |
 | `skills/*.md` | Skill files loaded contextually per task tag | Develop phase (per task) |
 | `templates/*.md` | Document scaffolding for requirements, design, and ADRs | Plan phase |
@@ -1099,7 +1099,7 @@ This prevents re-downloading models and recompiling kernels on each container st
 
 **AC-FR3:** `CONVENTIONS.md` is loaded into every aider session via the `read:` list in aider config files. It applies to all roles and phases.
 
-**AC-FR4:** `EDIT-FORMAT.md` is loaded only during develop, automate, and verify phases to guide file editing behavior.
+**AC-FR4:** `templates/EDIT-FORMAT.md` is loaded only during develop, automate, and verify phases to guide file editing behavior.
 
 **AC-FR5:** Each role-specific AGENT file contains:
 - Role identity and responsibilities
