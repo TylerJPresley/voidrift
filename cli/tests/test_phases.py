@@ -385,8 +385,10 @@ class TestCLICommands:
         assert result.exit_code == 1
 
     def test_log_prune(self, tmp_project, voidrift_dir):
-        (voidrift_dir / "gather-20260101-000000.log").write_text("log content")
-        (voidrift_dir / "plan-20260101-000000.log").write_text("log content")
+        log_dir = voidrift_dir / "logs"
+        log_dir.mkdir(exist_ok=True)
+        (log_dir / "gather-20260101-000000.log").write_text("log content")
+        (log_dir / "plan-20260101-000000.log").write_text("log content")
         from click.testing import CliRunner
         from voidrift_cli.main import cli
         runner = CliRunner()
@@ -394,7 +396,9 @@ class TestCLICommands:
         assert "Deleted 2" in result.output
 
     def test_log_view(self, tmp_project, voidrift_dir):
-        (voidrift_dir / "gather-20260101-000000.log").write_text("line1\nline2\nline3")
+        log_dir = voidrift_dir / "logs"
+        log_dir.mkdir(exist_ok=True)
+        (log_dir / "gather-20260101-000000.log").write_text("line1\nline2\nline3")
         from click.testing import CliRunner
         from voidrift_cli.main import cli
         runner = CliRunner()

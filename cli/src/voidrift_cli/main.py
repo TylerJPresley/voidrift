@@ -310,7 +310,7 @@ def log(phase, prune) -> None:
     """View or manage phase log files."""
     from .utils import voidrift_dir
 
-    d = voidrift_dir()
+    d = voidrift_dir() / "logs"
     valid_phases = ["gather", "plan", "develop", "automate", "verify"]
 
     if prune:

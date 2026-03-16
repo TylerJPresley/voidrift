@@ -113,7 +113,8 @@ class TestProjectDirHelpers:
         p = log_path("gather")
         assert "gather-" in p.name
         assert p.name.endswith(".log")
-        assert p.parent.name == ".voidrift"
+        assert p.parent.name == "logs"
+        assert p.parent.parent.name == ".voidrift"
 
     def test_check_disk_space_no_crash(self, tmp_project):
         # Should not raise regardless of disk space

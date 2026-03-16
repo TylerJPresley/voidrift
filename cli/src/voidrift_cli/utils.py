@@ -47,7 +47,9 @@ def log_path(phase: str) -> Path:
         Path to the new log file.
     """
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-    return ensure_voidrift_dir() / f"{phase}-{ts}.log"
+    log_dir = ensure_voidrift_dir() / "logs"
+    log_dir.mkdir(exist_ok=True)
+    return log_dir / f"{phase}-{ts}.log"
 
 
 def check_disk_space() -> None:
