@@ -75,7 +75,7 @@
 
 - **REQ-G-1:** WHEN `voidrift gather <model>` is run AND the target file exists, THE SYSTEM SHALL include it in the system prompt as context for revision. IF the file does not exist, THE SYSTEM SHALL create a new file.
 - **REQ-G-2:** WHEN `voidrift gather <model> <feature>` is run AND `.voidrift/REQUIREMENTS.md` does not exist, THE SYSTEM SHALL exit with error code 1.
-- **REQ-G-3:** The gather phase SHALL always be interactive with model output streaming to the terminal in real time.
+- **REQ-G-3:** The gather phase SHALL always be interactive with model output streaming to the terminal in real time. The input prompt SHALL support line editing (arrow keys, backspace, history).
 - **REQ-G-4:** The model SHALL ask clarifying questions before writing the output file and SHALL NOT write until it has sufficient information.
 - **REQ-G-5:** The model SHALL NOT focus on technology choices unless the operator explicitly requests them.
 - **REQ-G-6:** Full project gather SHALL produce `.voidrift/REQUIREMENTS.md` with sections: Goal, Users, Features, Runtime Environment, Constraints, Out of Scope.
