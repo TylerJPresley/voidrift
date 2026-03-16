@@ -67,8 +67,6 @@ def run_plan(
     if fresh_start:
         for f in [d / "ARCHITECTURE.md"] + list(d.glob("TASKS*.md")):
             f.unlink(missing_ok=True)
-        if (d / "adr").is_dir():
-            shutil.rmtree(d / "adr")
         for f in (d / "spec").glob("*.md"):
             f.unlink()
         console.print("[dim]Cleared existing planning artifacts.[/dim]")
@@ -115,7 +113,7 @@ def run_plan(
     prompt += (
         "\n\nUse get_skill() to load skill conventions. "
         "Use get_template() to load templates. "
-        "Use write_file() to create ARCHITECTURE.md, TASKS files, and ADRs."
+        "Use write_file() to create ARCHITECTURE.md and TASKS.md."
     )
 
     agent = AgentLoop(

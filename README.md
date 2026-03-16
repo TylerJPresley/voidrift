@@ -430,7 +430,6 @@ your-project/
 │   ├── STATE.md                  # Project state summary
 │   ├── TASKS.md                  # Task list
 │   ├── spec/                     # Feature specifications
-│   ├── adr/                      # Architecture decision records
 │   ├── escalations/              # Developer escalation questions
 │   ├── architect_responses/      # Architect guidance
 │   └── *.log               # Phase logs
@@ -741,7 +740,6 @@ The framework assigns roles via `[ROLE: X]` prefix in task messages. Models rece
 - Available skills: `AI-ETHICS`, `ARCH-DESIGN`, `CLOUD-OPS`, `DATA-ENG`, `EMBEDDED-ENG`, `GAME-ENG`, `ML-ENG`, `MOBILE-ENG`, `PROD-STRATEGY`, `QUALITY-QA`, `RELIABILITY-ENG`, `SECURITY-TRUST`, `SYSTEMS-ENG`, `WEB-ENG`, `WORKFLOW`
 
 **`resources/templates/` — Document Scaffolding**
-- `ADR-TEMPLATE.md` — Architecture Decision Record template
 - `ARCHITECTURE-TEMPLATE.md` — Architecture document template
 - `DESIGN-TEMPLATE.md` — Feature design template
 - `EDIT-FORMAT.md` — File editing format instructions
@@ -990,7 +988,7 @@ voidrift develop qwen3-coder claude
   - `resources/agents/ARCHITECT.md` — Architect role (plan phase, escalations): Design and planning
   - `resources/agents/DEVELOPER.md` — Developer role (develop/automate/verify): Implementation and execution
 - **Skill Files:** `resources/skills/*.md` — 15 domain-specific technology stacks and conventions
-- **Templates:** `resources/templates/*.md` — Document scaffolding for requirements, architecture, design, and ADRs
+- **Templates:** `resources/templates/*.md` — Document scaffolding for requirements, architecture, and design
 
 Each role file is loaded only during relevant phases to prevent role confusion and minimize context window usage.
 

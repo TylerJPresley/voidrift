@@ -79,8 +79,6 @@ class TestPlanPreflightChecks:
         def fake_send(msg):
             (vd / "ARCHITECTURE.md").write_text("# Architecture\n\n## Overview\nTest arch")
             (vd / "TASKS.md").write_text("- [ ] Create src/main.py: entry point [backend]\n")
-            (vd / "adr").mkdir(exist_ok=True)
-            (vd / "adr" / "ADR-001-architecture.md").write_text("# ADR 001")
             return "Plan complete."
 
         mock_instance = MagicMock()
@@ -133,8 +131,8 @@ class TestPlanPreflightChecks:
         vd = tmp_project / ".voidrift"
         (vd / "ARCHITECTURE.md").write_text("old arch")
         (vd / "TASKS.md").write_text("old tasks")
-        (vd / "adr").mkdir()
-        (vd / "adr" / "ADR-001.md").write_text("old adr")
+        (vd / "spec").mkdir(exist_ok=True)
+        (vd / "spec" / "auth.md").write_text("old spec")
 
         with patch("voidrift_cli.phases.plan.AgentLoop") as MockAgent:
             mock_instance = MagicMock()
@@ -146,7 +144,7 @@ class TestPlanPreflightChecks:
 
         assert not (vd / "ARCHITECTURE.md").exists()
         assert not (vd / "TASKS.md").exists()
-        assert not (vd / "adr").exists()
+        assert not (vd / "spec" / "auth.md").exists()
 
 
 # ── Develop ─────────────────────────────────────────────────────────────

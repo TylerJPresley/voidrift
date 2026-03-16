@@ -226,11 +226,11 @@ def _status():
 
     # Phase 2: Plan
     has_tasks = (d / "TASKS.md").exists()
-    has_adr = (d / "adr").is_dir() and list((d / "adr").glob("*.md"))
-    if has_tasks and has_adr:
-        console.print("  ✅ Phase 2 (Plan): Tasks and ADRs exist")
+    has_arch = (d / "ARCHITECTURE.md").exists()
+    if has_tasks and has_arch:
+        console.print("  ✅ Phase 2 (Plan): Tasks and architecture exist")
     elif has_tasks:
-        console.print("  🔄 Phase 2 (Plan): Tasks exist, no ADRs")
+        console.print("  🔄 Phase 2 (Plan): Tasks exist, no architecture")
     else:
         console.print("  ⬜ Phase 2 (Plan): Run 'voidrift plan <model>'")
 

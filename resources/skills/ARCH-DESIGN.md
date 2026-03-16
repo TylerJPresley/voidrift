@@ -14,4 +14,4 @@
 
 ## Observability
 - **Traceability:** Distributed `X-Correlation-ID` must be present across all service-to-service communication.
-- **Documentation:** Every major architectural shift requires an ADR and an updated Components Table in `ARCHITECTURE.md`.
+- **Documentation:** Every major architectural shift requires a Decision Rationale entry in `ARCHITECTURE.md` and an updated Components Table.

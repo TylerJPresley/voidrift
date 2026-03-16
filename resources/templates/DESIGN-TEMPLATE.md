@@ -1,8 +1,8 @@
 # Design: [Feature/Bug Name]
 
 ## 1. Context & Linkage
-- **ADR Reference:** [Link to corresponding ADR]
 - **Requirement Reference:** [Link to REQUIREMENTS.md section]
+- **Decision Rationale:** [Why this approach was chosen]
 
 ## 2. Component View (C4 Level 3/4)
 - **Internal Components:** [Description of internal services/modules]

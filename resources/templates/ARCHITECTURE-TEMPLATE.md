@@ -84,6 +84,6 @@ sequenceDiagram
 ---
 
 ## Decision Log
-[Summary of major ADRs]
-1. [ADR-001: Description]
-2. [ADR-002: Description]
+[Summary of major design decisions and their rationale.]
+1. [Decision: Rationale]
+2. [Decision: Rationale]

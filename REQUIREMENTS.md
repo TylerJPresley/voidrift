@@ -43,17 +43,21 @@
 - **REQ-ARCH-4:** The CLI SHALL implement an agent loop that sends messages to model APIs (OpenAI-compatible for local/kiro, native for cloud), handles MCP tool calls, and streams responses to the terminal.
 - **REQ-ARCH-5:** The CLI SHALL manage model lifecycle: start/stop local containers via SSH, start/stop Kiro Gateway, validate credentials, and map model aliases to API endpoints.
 - **REQ-ARCH-6:** The CLI SHALL never read framework resource files (agents, skills, templates) directly. All framework context SHALL be served exclusively through MCP server tool calls.
+  - *Rationale:* On-demand retrieval via MCP tools keeps context windows small. Models pull only the sections they need instead of loading full files upfront.
 
 ### 4.2 MCP Context Server
 
 - **REQ-MCP-1:** The MCP server SHALL communicate via stdio using the MCP protocol, built with Python/FastMCP.
 - **REQ-MCP-2:** WHEN the server starts, THE SYSTEM SHALL load all framework files from `resources/` (agents, skills, templates), index them by markdown header, and serve targeted sections on demand.
 - **REQ-MCP-3:** The server SHALL use write-through storage: `store_*` tools write to both in-memory cache and disk simultaneously. Memory serves as read cache; disk is the source of truth.
+  - *Rationale:* Write-through ensures no data loss on unexpected exit while keeping reads fast via memory cache.
 - **REQ-MCP-4:** The server SHALL expose these tools: `store_file_analysis()`, `get_file_analysis()`, `get_all_analyses()`, `store_requirements()`, `get_requirements()`, `get_agent(role, topic)`, `get_skill(name, topic)`, `get_template(name)`, `load_tasks(path)`, `get_next_task(module)`, `complete_task(module)`, `get_task_status(module)`, `read_source_file(path)`, `write_file(path, content)`, `export_to_file(type, path)`.
 - **REQ-MCP-5:** WHEN `get_agent(role, topic)` is called, THE SYSTEM SHALL retrieve the role-specific agent file from `resources/agents/`, filtered by topic if provided. IF the role is not found, THE SYSTEM SHALL return an error listing available roles.
 - **REQ-MCP-6:** WHEN `get_template(name)` is called, THE SYSTEM SHALL retrieve the template from the in-memory index. IF the name is not found, THE SYSTEM SHALL return an error listing available templates.
 - **REQ-MCP-7:** WHEN `load_tasks(path)` is called, THE SYSTEM SHALL parse `## Module: <name>` headers to split tasks into per-module queues. Tasks without a module header SHALL be assigned to a default module. All state changes SHALL be persisted back to the single TASKS.md file on disk.
+  - *Rationale:* A single file with module headers is simpler to manage than multiple files per module — no glob discovery, no file copying, and atomic write-through updates all module state at once.
 - **REQ-MCP-8:** WHEN `get_next_task(module)` is called, THE SYSTEM SHALL return the first unchecked (`- [ ]`) task for the given module, including its skill tags. The agent SHALL only ever see one task at a time.
+  - *Rationale:* One task at a time keeps the agent's context window focused and prevents it from skipping ahead or reordering work.
 - **REQ-MCP-9:** WHEN `complete_task(module)` is called, THE SYSTEM SHALL mark the first unchecked task as `- [x]` and write through to disk.
 - **REQ-MCP-10:** The server SHALL use in-memory index for content (parsed markdown sections) and SQLite for session metadata.
 
@@ -80,16 +84,15 @@
 
 ### 4.5 Phase 2 — Plan
 
-- **REQ-P-1:** Plan SHALL always produce `.voidrift/ARCHITECTURE.md` and `.voidrift/TASKS.md`. IF either is missing after the first run, one retry SHALL be issued. IF the retry also fails, THE SYSTEM SHALL exit with code 1.
-- **REQ-P-2:** Planner output SHALL be fully hidden from the terminal. Only a spinner and status line SHALL be shown.
-- **REQ-P-3:** WHEN `--fresh-start` is specified, THE SYSTEM SHALL delete ARCHITECTURE.md, TASKS.md, adr/, and spec/*.md before planning.
+- **REQ-P-1:** Plan SHALL always produce `.voidrift/ARCHITECTURE.md` and `.voidrift/TASKS.md`. IF either is missing after the first run, one retry SHALL be issued. IF the retry also fails, THE SYSTEM SHALL exit with code 1.- **REQ-P-2:** Planner output SHALL be fully hidden from the terminal. Only a spinner and status line SHALL be shown.
+- **REQ-P-3:** WHEN `--fresh-start` is specified, THE SYSTEM SHALL delete ARCHITECTURE.md, TASKS.md, and spec/*.md before planning.
 - **REQ-P-4:** `auto-commits: false` SHALL be set for the plan phase.
 - **REQ-P-5:** For single-module projects, tasks SHALL be written under a `## Tasks` header. For multi-module projects, tasks SHALL be grouped under `## Module: <name>` headers in a single TASKS.md.
 - **REQ-P-6:** In multi-module projects, each file path SHALL appear in exactly one module's task group. No file SHALL be created or modified by tasks in more than one module.
 - **REQ-P-7:** Each task line SHALL be a single atomic file operation: `- [ ] <Action verb> <file path>: <exact behavior> [skill1, skill2]`.
 - **REQ-P-8:** Tasks SHALL NOT contain shell commands. Tasks describe file content only.
 - **REQ-P-9:** WHEN the architect writes task files, all skill tags SHALL be validated against available skill files. IF invalid tags are found, THE SYSTEM SHALL fail with an error listing invalid and valid tags.
-- **REQ-P-10:** `.voidrift/ARCHITECTURE.md` SHALL contain: Components table, Data Models, API Surface, Configuration, Dependencies, Decisions (ADR references), Constraints & Limitations, Glossary.
+- **REQ-P-10:** `.voidrift/ARCHITECTURE.md` SHALL contain: Components table, Data Models, API Surface, Configuration, Dependencies, Constraints & Limitations, Glossary.
 
 ### 4.6 Phase 3 — Develop
 
@@ -103,6 +106,7 @@
 - **REQ-D-8:** WHEN architect is consulted, THE SYSTEM SHALL provide: problem description, REQUIREMENTS.md, ARCHITECTURE.md, and task text. Source code files SHALL NOT be loaded.
 - **REQ-D-9:** Task completion SHALL be managed by the MCP server's `complete_task()` tool, which marks `- [ ]` as `- [x]` and writes through to disk.
 - **REQ-D-10:** WHEN `.voidrift/TASKS.md` contains `## Module:` headers, THE SYSTEM SHALL spawn up to `--workers N` concurrent agent loops, each assigned a module. With `--workers 1` (default), modules SHALL be processed sequentially. With `--workers 0`, one worker SHALL be spawned per module.
+  - *Rationale:* Single-branch execution avoids merge complexity. File ownership constraints (REQ-P-6) prevent cross-module conflicts. A commit lock (REQ-D-11) serializes git operations.
 - **REQ-D-11:** WHEN multiple workers are active, git commits SHALL be serialized through a lock to prevent index conflicts.
 - **REQ-D-12:** WHEN `--workers` is greater than 1 AND no module headers exist, THE SYSTEM SHALL print a warning and fall back to single-worker mode.
 - **REQ-D-13:** WHEN Ctrl+C or SIGTERM is received, THE SYSTEM SHALL set an interrupted flag, send SIGTERM to active workers, allow a 2-second grace period, then SIGKILL.
@@ -202,8 +206,6 @@
 ├── TASKS.md                  # Task list (single file, module headers for multi-module)
 ├── spec/                     # Feature specifications
 │   └── <feature>.md
-├── adr/                      # Architecture decision records
-│   └── ADR-NNN-<title>.md
 ├── analyses/                 # Per-file analysis (write-through from MCP)
 │   └── <sanitized_path>.md
 ├── escalations/              # Developer escalation questions

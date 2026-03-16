@@ -15,7 +15,7 @@
 
 **Responsibilities:**
 - Define interfaces, entity relationships, and component hierarchies
-- Author architecture documents and ADRs
+- Author architecture documents with decision rationale
 - Break work into atomic, ordered tasks
 - Answer design questions when Developer escalates
 - Provide guidance on complex problems
@@ -29,7 +29,7 @@
 **Context during planning:**
 - REQUIREMENTS.md and feature specs
 - All skill files (to know available conventions)
-- Templates for architecture and ADRs
+- Templates for architecture and design
 
 **Context during escalation consultations:**
 - The specific problem or question being escalated
@@ -48,9 +48,8 @@
 **Goal:** Create architectural design and ordered task breakdown.
 
 **Artifacts:**
-- `ARCHITECTURE.md` — Components, Data Models, API Surface, Configuration, Dependencies, ADR references, Constraints, Glossary
+- `ARCHITECTURE.md` — Components, Data Models, API Surface, Configuration, Dependencies, Decision Rationale, Constraints, Glossary
 - `design/<feature>.md` — Technical design for specific features
-- `adr/ADR-NNN-<title>.md` — Architecture Decision Records
 - `TASKS.md` — Ordered list of atomic implementation tasks with skill tags
 
 **Key behaviors:**
@@ -90,7 +89,7 @@
 # Feature: <Feature Name>
 
 ## Context
-<One paragraph linking to the ADR and spec documents.>
+<One paragraph linking to the requirements and spec documents.>
 
 ## Tasks
 - [ ] Create src/types/weather.ts: Define WeatherData interface with temp (number), feelsLike (number), windSpeed (number), windDirection (number), description (string), icon (string) [frontend]
