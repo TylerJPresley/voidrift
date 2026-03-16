@@ -161,6 +161,8 @@ def start_model(alias: str, refresh: bool = False) -> None:
         pass
 
     # Build docker run command
+    from .config import get_worker_config
+    worker_cfg = get_worker_config()
     port = worker.get("port", 8000)
     docker_opts = worker.get("docker_options", ["--privileged", "--gpus all", "--network host"])
     cache_mounts = worker.get("cache_mounts", [])
@@ -168,10 +170,13 @@ def start_model(alias: str, refresh: bool = False) -> None:
     cmd_parts = ["docker", "run", "-d", f"--name {container_name}"]
     for opt in docker_opts:
         cmd_parts.append(opt)
+    hf_token = worker_cfg.get("hf_token", "")
+    if hf_token:
+        cmd_parts.append(f"-e HF_TOKEN={hf_token}")
     for mount in cache_mounts:
         cmd_parts.append(f"-v {mount}")
     cmd_parts.append(model.docker_image)
-    cmd_parts.append(f"--model {model.repository}")
+    cmd_parts.append(f"vllm serve {model.repository}")
     cmd_parts.append(f"--served-model-name {model.served_model_name}")
     cmd_parts.append(f"--gpu-memory-utilization {model.gpu_memory_utilization}")
     cmd_parts.append(f"--max-model-len {model.max_model_len}")
@@ -187,8 +192,7 @@ def start_model(alias: str, refresh: bool = False) -> None:
         raise RuntimeError("SSH timeout starting container")
 
     # Wait for API ready
-    from .config import get_worker_config
-    worker_ip = get_worker_config().get("ip", "")
+    worker_ip = worker_cfg.get("ip", "")
     url = f"http://{worker_ip}:{port}/v1/models"
     start_time = time.time()
     while time.time() - start_time < 300:
