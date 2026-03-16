@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -155,8 +156,12 @@ def start_model(alias: str, refresh: bool = False) -> None:
 
     # Stop existing worker containers (REQ-WK-7)
     try:
-        ssh_cmd(f"docker ps --filter 'name={prefix}' -q | xargs -r docker stop")
-        ssh_cmd(f"docker ps -a --filter 'name={prefix}' -q | xargs -r docker rm")
+        running = ssh_cmd(f"docker ps --filter 'name={prefix}' --format '{{{{.Names}}}}'")
+        if running.stdout.strip():
+            old = running.stdout.strip()
+            sys.stderr.write(f"Stopping {old}...\n")
+            ssh_cmd(f"docker ps --filter 'name={prefix}' -q | xargs -r docker stop")
+            ssh_cmd(f"docker ps -a --filter 'name={prefix}' -q | xargs -r docker rm")
     except (subprocess.SubprocessError, OSError):
         pass
 
