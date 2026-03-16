@@ -19,7 +19,6 @@ from voidrift_worker.models import (
     models_check,
     models_list,
     models_remove,
-    models_use,
     ssh_cmd,
     ssh_stream,
     start_gateway,
@@ -226,21 +225,6 @@ class TestModelsRemove:
         monkeypatch.setattr("voidrift_worker.models._worker_models_path", lambda: yml)
         with pytest.raises(ValueError, match="not found"):
             models_remove("nonexistent")
-
-
-class TestModelsUse:
-    @patch("voidrift_worker.models.start_model")
-    @patch("voidrift_worker.models.stop_model")
-    @patch("voidrift_worker.models.get_status")
-    def test_stops_running_and_starts(self, mock_status, mock_stop, mock_start):
-        mock_status.return_value = {"active": True, "model": "other"}
-        models_use("qwen3-coder")
-        mock_stop.assert_called_once()
-        mock_start.assert_called_once_with("qwen3-coder")
-
-    def test_unknown_alias_raises(self):
-        with pytest.raises(ValueError, match="Unknown alias"):
-            models_use("nonexistent")
 
 
 class TestModelsCheck:

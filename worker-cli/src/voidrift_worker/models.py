@@ -467,19 +467,6 @@ def models_remove(alias: str) -> int:
     return ssh_stream(f"{HF_CLI} cache rm {repo} --yes 2>&1")
 
 
-def models_use(alias: str) -> None:
-    """Start a model (REQ-WK-6c). Stops any running model first."""
-    available = list_models()
-    if alias not in available:
-        raise ValueError(f"Unknown alias: {alias}. Available: {', '.join(sorted(available))}")
-
-    s = get_status()
-    if s["active"]:
-        stop_model()
-
-    start_model(alias)
-
-
 def models_check(prune: bool = False) -> tuple[list[tuple[str, bool, str]], list[tuple[str, str]]]:
     """Audit models and fix missing weights (REQ-WK-6d).
     

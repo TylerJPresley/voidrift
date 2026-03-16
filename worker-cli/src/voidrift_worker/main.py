@@ -18,7 +18,6 @@ from .models import (
     models_check,
     models_list,
     models_remove,
-    models_use,
     ssh_cmd,
     ssh_stream,
     start_gateway,
@@ -48,7 +47,7 @@ HELP_TEXT = """Manage local model containers, images, and Kiro Gateway.
 Getting started:
   worker check                    Verify worker node is ready
   worker models list              See available models
-  worker models use <alias>       Start serving a model
+  worker start <alias>            Start serving a model
   worker status                   Confirm it's running
 
 Commands:
@@ -64,7 +63,6 @@ Models:
   models list                 Configured + cached models
   models add <alias> <repo>   Add and download a model
   models remove <alias>       Remove model and free disk
-  models use <alias>          Start a model
   models check [--prune]      Audit and fix missing weights
 
 Docker Images:
@@ -250,7 +248,7 @@ def models_group() -> None:
     Examples:
       worker models list              # show configured + cached models
       worker models add <alias> <repo>  # add and download a model
-      worker models use <alias>       # start a model
+      worker start <alias>            # start serving a model
       worker models remove <alias>    # remove model and free disk
       worker models check             # audit and fix missing weights
     """
@@ -297,19 +295,6 @@ def models_remove_cmd(alias: str) -> None:
         else:
             console.print(f"⚠ {alias} retired but cache removal failed.")
     except ValueError as e:
-        err_console.print(f"[red]Error: {e}[/red]")
-        sys.exit(1)
-
-
-@models_group.command("use")
-@click.argument("alias", shell_complete=_complete_alias)
-def models_use_cmd(alias: str) -> None:
-    """Start a model. Stops any running model first."""
-    try:
-        console.print(f"Starting {alias}...")
-        models_use(alias)
-        console.print(f"✅ {alias} is running.")
-    except (RuntimeError, ValueError) as e:
         err_console.print(f"[red]Error: {e}[/red]")
         sys.exit(1)
 
