@@ -27,13 +27,13 @@ voidrift-mcp
 | `get_all_analyses` | Retrieve all stored analyses |
 | `store_requirements` | Store requirements content in memory |
 | `get_requirements` | Retrieve stored or on-disk requirements |
-| `get_conventions` | Retrieve CONVENTIONS.md sections by heading |
-| `get_skill` | Retrieve skill file content by name and topic |
+| `get_agent` | Retrieve role-specific agent file by role and optional topic |
+| `get_skill` | Retrieve skill file content by name and optional topic |
+| `get_template` | Retrieve template file by name |
 | `read_source_file` | Read a source file from the project directory |
 | `write_file` | Write content to a file in the project directory |
 | `export_to_file` | Export a stored artifact to disk |
 | `list_project_artifacts` | List all files in .voidrift/ |
-| `get_framework_resource` | Retrieve a framework resource file by name |
 
 ## Structure
 

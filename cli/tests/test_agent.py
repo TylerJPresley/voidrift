@@ -204,7 +204,7 @@ class TestBuildMcpTools:
             "store_requirements", "get_requirements",
             "get_agent", "get_skill", "get_template",
             "read_source_file", "write_file", "export_to_file",
-            "list_project_artifacts", "get_framework_resource",
+            "list_project_artifacts",
         ]
         tool_names = {t["function"]["name"] for t in tools}
         for name in expected:

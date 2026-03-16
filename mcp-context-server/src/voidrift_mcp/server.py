@@ -297,26 +297,6 @@ def list_project_artifacts() -> str:
     return f"Project artifacts ({len(result)} files):\n" + "\n".join(result)
 
 
-@mcp.tool()
-def get_framework_resource(name: str) -> str:
-    """Retrieve a framework resource file by name.
-
-    Args:
-        name: File name (e.g. 'ANALYST.md', 'CONVENTIONS.md', 'SKILLS.md').
-    """
-    p = RESOURCES_DIR / name
-    if not p.exists():
-        # Try in subdirectories
-        candidates = list(RESOURCES_DIR.rglob(name))
-        if candidates:
-            p = candidates[0]
-        else:
-            available = [f.name for f in RESOURCES_DIR.rglob("*.md")]
-            return f"Resource '{name}' not found. Available: {', '.join(sorted(available))}"
-    session_store.log_action(session_id, "get", "resource", name)
-    return p.read_text(encoding="utf-8")
-
-
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------

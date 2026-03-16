@@ -135,16 +135,26 @@ class TestListArtifacts:
         assert "2 files" in result
 
 
-class TestFrameworkResource:
+class TestGetAgent:
     def test_get_existing(self, _reset_server):
-        result = _reset_server.get_framework_resource("ANALYST.md")
+        result = _reset_server.get_agent("analyst")
         assert "Analyst" in result
 
-    def test_get_nested(self, _reset_server):
-        result = _reset_server.get_framework_resource("WEB-ENG.md")
-        assert "web" in result.lower()
+    def test_get_with_topic(self, _reset_server):
+        result = _reset_server.get_agent("analyst", "Your Role")
+        assert "Analyst" in result
 
     def test_get_missing(self, _reset_server):
-        result = _reset_server.get_framework_resource("NONEXISTENT.md")
+        result = _reset_server.get_agent("nonexistent")
+        assert "not found" in result.lower()
+
+
+class TestGetTemplate:
+    def test_get_existing(self, _reset_server):
+        result = _reset_server.get_template("adr-template")
+        assert len(result) > 0
+
+    def test_get_missing(self, _reset_server):
+        result = _reset_server.get_template("nonexistent")
         assert "not found" in result.lower()
         assert "Available" in result

@@ -114,7 +114,7 @@ def run_plan(
         prompt += f"\n\nFocus on feature: {feature}"
     prompt += (
         "\n\nUse get_skill() to load skill conventions. "
-        "Use get_framework_resource() to load templates. "
+        "Use get_template() to load templates. "
         "Use write_file() to create ARCHITECTURE.md, TASKS files, and ADRs."
     )
 

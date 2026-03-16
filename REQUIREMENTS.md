@@ -43,7 +43,7 @@ Python MCP server that stores, retrieves, and exports project artifacts and fram
 
 **AC-MCP3 — Project Artifacts:** The server reads/writes project artifacts in `<project>/.voidrift/`. Stores analysis results, requirements, tasks, and state in memory during a session. Exports to disk on phase completion.
 
-**AC-MCP4 — Tools:** The server exposes tools including: `store_file_analysis()`, `get_file_analysis()`, `get_all_analyses()`, `store_requirements()`, `get_requirements()`, `get_agent(role, topic)`, `get_skill(name, topic)`, `get_template(name)`, `read_source_file(path)`, `write_file(path, content)`, `export_to_file(type, path)`, `get_framework_resource(name)`.
+**AC-MCP4 — Tools:** The server exposes tools including: `store_file_analysis()`, `get_file_analysis()`, `get_all_analyses()`, `store_requirements()`, `get_requirements()`, `get_agent(role, topic)`, `get_skill(name, topic)`, `get_template(name)`, `read_source_file(path)`, `write_file(path, content)`, `export_to_file(type, path)`.
 
 **AC-MCP4a — `get_agent(role, topic)`:** Retrieves a role-specific agent file from `resources/agents/`. The `role` parameter accepts `analyst`, `architect`, or `developer` (case-insensitive). When `topic` is provided, returns only matching sections from the indexed markdown. When empty, returns the full file content. Returns an error listing available roles if the role is not found.
 

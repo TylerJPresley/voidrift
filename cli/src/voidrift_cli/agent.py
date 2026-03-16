@@ -277,7 +277,6 @@ def build_mcp_tools(mcp_server_module: Any) -> tuple[list[dict], dict[str, Calla
         write_file,
         export_to_file,
         list_project_artifacts,
-        get_framework_resource,
     )
 
     tool_map = {
@@ -361,13 +360,6 @@ def build_mcp_tools(mcp_server_module: Any) -> tuple[list[dict], dict[str, Calla
         }),
         "list_project_artifacts": (list_project_artifacts, {
             "type": "object", "properties": {},
-        }),
-        "get_framework_resource": (get_framework_resource, {
-            "type": "object",
-            "properties": {
-                "name": {"type": "string", "description": "Resource file name"},
-            },
-            "required": ["name"],
         }),
     }
 
