@@ -132,7 +132,7 @@ The unified memory architecture allows efficient model loading without CPU-GPU t
    ssh <user>@<ip>
    
    # For gated models, login first
-   uvx huggingface-cli login
+   uvx --from huggingface_hub hf login
    ```
 
    Then download models using the worker CLI:

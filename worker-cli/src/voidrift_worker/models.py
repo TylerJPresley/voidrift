@@ -359,9 +359,12 @@ def get_gateway_status() -> dict:
 # --- Worker node management (REQ-WK-6a..14) ---
 
 
+HF_CLI = "uvx --from huggingface_hub hf"
+
+
 def models_list_cached() -> str:
     """List cached models on worker node (REQ-WK-6)."""
-    r = ssh_cmd("uvx huggingface-cli cache ls 2>&1")
+    r = ssh_cmd(f"{HF_CLI} cache ls 2>&1")
     return r.stdout or r.stderr
 
 
@@ -371,17 +374,17 @@ def models_pull(alias: str) -> int:
     if alias not in available:
         raise ValueError(f"Unknown alias: {alias}. Available: {', '.join(sorted(available))}")
     repo = available[alias].repository
-    return ssh_stream(f"uvx huggingface-cli download {repo}", timeout=1800)
+    return ssh_stream(f"{HF_CLI} download {repo}", timeout=1800)
 
 
 def models_remove(revision_id: str) -> int:
     """Remove a cached model revision (REQ-WK-6b)."""
-    return ssh_stream(f"uvx huggingface-cli cache rm {revision_id}")
+    return ssh_stream(f"{HF_CLI} cache rm {revision_id}")
 
 
 def models_prune() -> int:
     """Clean broken/detached revisions (REQ-WK-6c)."""
-    return ssh_stream("uvx huggingface-cli cache prune --yes")
+    return ssh_stream(f"{HF_CLI} cache prune --yes")
 
 
 def models_fix_perms() -> int:
