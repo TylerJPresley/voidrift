@@ -79,6 +79,20 @@ Python monorepo with two packages:
 3. "Now I'll implement to satisfy these ACs"
 4. "Let's verify: does this satisfy AC-X, AC-Y, AC-Z?"
 
+## Eat Your Own Dogfood
+
+When building the framework itself, consult `resources/skills/` and follow them. This validates the skills work in practice.
+
+Relevant skills for framework development:
+- **SYSTEMS-ENG** — CLI conventions (stdout/stderr, signals, POSIX, packaging)
+- **PROD-STRATEGY** — Documentation as code, user-centric docs, onboarding, conventional commits
+- **QUALITY-QA** — TDD, no completion claims without evidence, regression tests
+- **ARCH-DESIGN** — API standards, health checks, state management, decision rationale
+- **RELIABILITY-ENG** — Eliminate toil, observability, error budgets
+- **CLOUD-OPS** — IaC standards, secrets management, environment parity
+
+Skills are authoritative. Don't just reference them — follow them. If a skill says "use stdout for results, stderr for errors", do it. If the skill is wrong or incomplete, fix the skill.
+
 ## Change Management
 
 After implementing, explicitly check:
