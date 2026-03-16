@@ -38,6 +38,7 @@ class AgentLoop(BaseModel):
     messages: list[dict] = Field(default_factory=list)
     stream: bool = True
     max_tokens: int = 16384
+    extra_body: dict | None = None
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -124,6 +125,8 @@ class AgentLoop(BaseModel):
             }
             if self.tools:
                 kwargs["tools"] = self.tools
+            if self.extra_body:
+                kwargs["extra_body"] = self.extra_body
 
             if self.stream:
                 return self._stream_response(client, kwargs)

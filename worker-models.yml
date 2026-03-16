@@ -31,8 +31,6 @@ models:
       - --enable-auto-tool-choice
       - --attention-backend
       - flashinfer
-      - --chat-template-kwargs
-      - '{"enable_thinking": false}'
     notes: General-purpose, thinking disabled — fast for gather and chat
 
   qwen3-instruct-think:
