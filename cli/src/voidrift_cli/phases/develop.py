@@ -39,18 +39,14 @@ MAX_ESCALATIONS = 5
 def run_develop(
     worker: ModelConfig,
     architect: ModelConfig | None = None,
-    parallel: bool = False,
-    retry: bool = False,
-    overwrite: bool = False,
+    workers: int = 1,
 ) -> int:
     """Execute the develop phase.
 
     Args:
         worker: Model configuration for the developer role.
         architect: Optional model for escalation consultations.
-        parallel: Run modules concurrently in git worktrees.
-        retry: Resume from a partial parallel run.
-        overwrite: Remove existing worktrees and start fresh.
+        workers: Number of concurrent module workers (0 = one per module).
 
     Returns:
         Exit code (0 for success, 1 for failure).
@@ -64,15 +60,15 @@ def run_develop(
         return 1
 
     task_files, is_multi = check_task_files()
-    if not task_files:  # AC-D3
+    if not task_files:  # AC-D2
         console.print("[red]No task files found. Run 'voidrift plan <model>' first.[/red]")
         return 1
 
-    if parallel and not is_multi:  # AC-D2
-        console.print("[red]No TASKS-<module>.md files found. Run 'voidrift plan' or omit --parallel.[/red]")
-        return 1
+    if workers != 1 and not is_multi:  # AC-D1
+        console.print("[yellow]No module headers found. Falling back to single worker.[/yellow]")
+        workers = 1
 
-    # Check all tasks complete (AC-D4)
+    # Check all tasks complete (AC-D3)
     all_done = True
     for tf in task_files:
         done, blocked, total = count_tasks(tf)
@@ -124,9 +120,7 @@ def run_develop(
 
     result = 1
     try:
-        if parallel:
-            result = _develop_parallel(worker, architect, task_files, tools, handlers, log, retry, overwrite)
-        elif is_multi:
+        if is_multi:
             result = _develop_sequential(worker, architect, task_files, tools, handlers, log)
         else:
             result = _develop_loop(worker, architect, task_files[0], tools, handlers, log)
@@ -304,61 +298,6 @@ def _develop_sequential(
     # Clean up (AC-D36)
     tasks_md.unlink(missing_ok=True)
     return 0
-
-
-def _develop_parallel(
-    worker: ModelConfig,
-    architect: ModelConfig | None,
-    task_files: list[Path],
-    tools: list,
-    handlers: dict,
-    log: Path,
-    retry: bool = False,
-    overwrite: bool = False,
-) -> int:
-    """Process modules in parallel using git worktrees (AC-D37 through AC-D53).
-
-    Note: Full parallel implementation with worktrees is pending.
-    Currently falls back to sequential execution.
-
-    Args:
-        worker: Developer model configuration.
-        architect: Optional architect model for escalations.
-        task_files: List of TASKS-<module>.md file paths.
-        tools: MCP tool definitions.
-        handlers: MCP tool handler functions.
-        log: Path to the develop log file.
-        retry: Resume from a partial run.
-        overwrite: Remove existing worktrees and start fresh.
-
-    Returns:
-        Exit code (0 for success, 1 for failure).
-    """
-    worktrees_dir = Path(".worktrees")
-
-    if worktrees_dir.exists():
-        if not retry and not overwrite:  # AC-D1
-            console.print("[red]Worktrees directory exists from a previous run.[/red]")
-            console.print("Use --retry to resume or --overwrite to start fresh.")
-            return 1
-        if overwrite:
-            import shutil
-            shutil.rmtree(worktrees_dir)
-            # Clean up branches
-            for tf in task_files:
-                module = tf.stem.replace("TASKS-", "")
-                subprocess.run(
-                    ["git", "worktree", "remove", f".worktrees/{module}", "--force"],
-                    capture_output=True,
-                )
-                subprocess.run(
-                    ["git", "branch", "-D", f"voidrift/{module}"],
-                    capture_output=True,
-                )
-
-    # For now, fall back to sequential with a note
-    console.print("[yellow]Parallel mode: running modules sequentially (full worktree support coming soon)[/yellow]")
-    return _develop_sequential(worker, architect, task_files, tools, handlers, log)
 
 
 def _consult_architect(

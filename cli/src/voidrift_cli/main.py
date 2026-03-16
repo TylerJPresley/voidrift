@@ -113,16 +113,14 @@ def plan(model, feature, fresh_start, refresh):
 @cli.command()
 @click.argument("worker")
 @click.argument("architect", required=False)
-@click.option("--parallel", is_flag=True, help="Execute modules concurrently in git worktrees")
-@click.option("--retry", is_flag=True, help="Resume from partial/failed parallel run")
-@click.option("--overwrite", is_flag=True, help="Remove existing worktrees and start fresh")
+@click.option("--workers", default=1, help="Number of concurrent module workers (0 = one per module)")
 @click.option("--refresh", is_flag=True, help="Force local model container recreation")
-def develop(worker, architect, parallel, retry, overwrite, refresh):
+def develop(worker, architect, workers, refresh):
     """Phase 3: Execute implementation tasks."""
     from .phases.develop import run_develop
     wm = resolve_model(worker)
     am = resolve_model(architect) if architect else None
-    sys.exit(run_develop(wm, architect=am, parallel=parallel, retry=retry, overwrite=overwrite))
+    sys.exit(run_develop(wm, architect=am, workers=workers))
 
 
 @cli.command()

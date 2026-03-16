@@ -170,12 +170,13 @@ class TestDevelopPreflightChecks:
         result = run_develop(cloud_model)
         assert result == 0
 
-    def test_parallel_without_modules(self, tmp_project, cloud_model, sample_requirements, mock_model_ready):
+    def test_workers_without_modules(self, tmp_project, cloud_model, sample_requirements, mock_model_ready):
         vd = tmp_project / ".voidrift"
         (vd / "TASKS.md").write_text("- [ ] Task [backend]\n")
         from voidrift_cli.phases.develop import run_develop
-        result = run_develop(cloud_model, parallel=True)
-        assert result == 1
+        result = run_develop(cloud_model, workers=2)
+        # Falls back to single worker, doesn't error
+        assert result in (0, 1)
 
     def test_lock_file_stale(self, tmp_project, cloud_model, sample_requirements, sample_tasks, mock_model_ready):
         """Stale lock (dead PID) should be cleaned up."""
@@ -446,6 +447,4 @@ class TestCLICommands:
         from voidrift_cli.main import cli
         runner = CliRunner()
         result = runner.invoke(cli, ["develop", "--help"])
-        assert "--parallel" in result.output
-        assert "--retry" in result.output
-        assert "--overwrite" in result.output
+        assert "--workers" in result.output

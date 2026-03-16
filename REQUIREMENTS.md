@@ -437,26 +437,20 @@ The worker executes tasks from .voidrift/TASKS.md atomically, one at a time, top
 
 ### Command Signatures
 ```
-voidrift develop <worker> [<architect>] [--parallel] [--retry | --overwrite]
+voidrift develop <worker> [<architect>] [--workers N]
     <worker>      Model that executes implementation tasks
     [<architect>] Optional model consulted when worker is blocked (default: none)
-    --parallel    Execute modules concurrently in git worktrees
-    --retry       Resume from partial/failed run (only with --parallel)
-    --overwrite   Remove existing worktrees and start fresh (only with --parallel)
+    --workers N   Number of concurrent module workers (default: 1)
+                  0 = one worker per module (max parallelism)
 ```
 
 ### Pre-flight Checks
 
-**AC-D1:** If `.worktrees/` directory exists when `--parallel` is specified:
-1. Without `--retry` or `--overwrite`: Exit with error message showing task completion state (done/remaining counts per module) and prompt user to run with `--retry` to resume or `--overwrite` to start fresh. Return exit code 1.
-2. With `--retry`: Resume execution in existing worktrees, skipping already-completed tasks per module.
-3. With `--overwrite`: Remove all worktrees, delete voidrift branches, and start fresh.
+**AC-D1:** The CLI loads `.voidrift/TASKS.md` via the MCP server's `load_tasks()` tool. If the file contains `## Module:` headers, modules are identified. If `--workers` is greater than 1 (or 0) and no module headers exist, the command prints a warning and falls back to single-worker mode.
 
-**AC-D2:** If `--parallel` is specified but `.voidrift/TASKS.md` contains no `## Module:` headers, the command exits with an error and a prompt to run `voidrift plan` with multi-module structure or omit `--parallel`.
+**AC-D2:** If `.voidrift/TASKS.md` does not exist, the command exits with an error prompting the user to run `voidrift plan`.
 
-**AC-D3:** If `.voidrift/TASKS.md` does not exist, the command exits with an error prompting the user to run `voidrift plan`.
-
-**AC-D4:** If all tasks are already marked `[x]`, the command exits cleanly with a "all tasks complete" message and returns 0.
+**AC-D3:** If all tasks are already marked `[x]`, the command exits cleanly with a "all tasks complete" message and returns 0.
 
 **AC-D4a:** If `.voidrift/REQUIREMENTS.md` does not exist, the command exits with an error message: "REQUIREMENTS.md not found. Run 'voidrift gather <model>' first." Returns exit code 1.
 
@@ -546,7 +540,7 @@ The escalation file is kept as an artifact (not deleted) for traceability.
 
 ### Escalation Counter and Blocked Tasks
 
-**AC-D25:** Each develop session (or each parallel worker) maintains an escalation counter starting at 0 with a maximum of 5. It increments on every escalation event (no-output escalation, escalation file, VERIFY-FAIL.md escalation). The counter is NOT reset between tasks — it accumulates across the session. In parallel mode, each worktree has its own independent escalation counter.
+**AC-D25:** Each develop session (or each worker in multi-worker mode) maintains an escalation counter starting at 0 with a maximum of 5. It increments on every escalation event (no-output escalation, escalation file, VERIFY-FAIL.md escalation). The counter is NOT reset between tasks — it accumulates across the session. Each worker has its own independent escalation counter.
 
 **AC-D25a:** Escalation and architect response files are numbered sequentially per task. For a task's first escalation: `<task_num>-1.md`, second: `<task_num>-2.md`, etc. The worker loads only the latest (highest numbered) architect response for the current task.
 
@@ -581,79 +575,39 @@ Escalation and architect response files are kept as artifacts for review.
 ### State Tracking
 
 **AC-D29:** The framework maintains two levels of state:
-- **Module state** (`.voidrift/STATE-<module>.md`): Detailed task-by-task progress for a specific module
-- **Project state** (`.voidrift/STATE.md`): High-level summary of overall project status, which modules are complete, cross-module issues
+- **Project state** (`.voidrift/STATE.md`): Task-by-task progress and overall project status
 
 For single-module projects (only `TASKS.md` exists), only `.voidrift/STATE.md` is used.
 
-**AC-D30:** After each successfully verified and committed task, a module state update runs. The worker reads `.voidrift/STATE-<module>.md` (or `.voidrift/STATE.md` for single-module projects) and writes a summary of what was just completed and the current status of remaining tasks in that module. The update is committed automatically via aider's auto-commit.
+**AC-D30:** After each successfully verified and committed task, a state update runs. The worker reads `.voidrift/STATE.md` and writes a summary of what was just completed and the current status of remaining tasks. The update is committed automatically.
 
 **AC-D31:** The state update uses the same worker model with dev config. It does not load skill files or TASKS.md as editable targets.
 
-**AC-D32:** In sequential mode, after all tasks in a module complete, the project state (`.voidrift/STATE.md`) is updated with a high-level summary of that module's completion and committed separately.
-
-**AC-D33:** In parallel mode, each worktree maintains its own `STATE-<module>.md`. On successful merge of a module branch, the project state (`.voidrift/STATE.md`) is updated with a section header `## Module: <module>` followed by a high-level completion summary, and the module's `STATE-<module>.md` is merged into root.
+**AC-D32:** After all tasks in a module complete, the project state (`.voidrift/STATE.md`) is updated with a high-level summary of that module's completion and committed separately.
 
 ### Task Completion Marking
 
-**AC-D34:** `_mark_next_complete` marks the first `- [ ]` in `.voidrift/TASKS.md` as `- [x]` using an awk replacement. This is done by the framework, not by the worker model.
+**AC-D32a:** Task completion is managed by the MCP server's `complete_task()` tool, which marks the first `- [ ]` as `- [x]` and writes through to disk. This is done by the framework, not by the worker model.
 
-**AC-D32:** `_guard_complete` is available to re-mark a task `[x]` if a subsequent aider call reverts it back to `[ ]` (models sometimes undo checkboxes when editing files they were given as context).
+### Worker Pool (multiple modules)
 
-### Sequential Mode (multiple modules)
+**AC-D33:** When `.voidrift/TASKS.md` contains `## Module:` headers, the CLI spawns up to `--workers N` concurrent agent loops, each assigned a module. With `--workers 1` (default), modules are processed sequentially in alphabetical order. With `--workers 0`, one worker is spawned per module.
 
-**AC-D33:** When `.voidrift/TASKS.md` contains `## Module:` headers and `--parallel` is not specified, modules are processed in alphabetical order, one at a time. The MCP server's `load_tasks()` parses the file and the CLI iterates modules via `get_next_task(module)`.
-
-**AC-D34:** Task completion state is managed by the MCP server and written through to the single `.voidrift/TASKS.md` file on disk. No file copying between module-specific and shared task files is needed.
+**AC-D34:** Task state is managed by the MCP server and written through to `.voidrift/TASKS.md` on disk. All workers share the same branch — AC-P8 guarantees non-overlapping files.
 
 **AC-D35:** Each progress line is prefixed with `[module]` to identify which module is active.
 
-### Parallel Mode (`--parallel`)
-
-**AC-D37:** Parallel mode assumes modules are independent (non-overlapping source files, enforced by AC-P8) and a single operator. The base branch should not be modified during parallel execution.
-
-**AC-D38:** Each module gets its own git worktree in `.worktrees/<module>/` on a branch named `voidrift/<module>`. Each worker runs concurrently with its own MCP server instance, receiving tasks via `get_next_task(module)`.
-
-**AC-D39:** If `git worktree add` fails for any module (disk space, permissions, path conflicts, branch conflicts), the command aborts immediately, prints the git error, and exits with code 1. Any successfully created worktrees from the same invocation are cleaned up before exit.
-
-**AC-D40:** Each worktree's MCP server loads the same `.voidrift/TASKS.md` but only serves tasks for its assigned module.
-
-**AC-D41:** The poll loop checks all workers every 30 seconds and reports which modules are still running with elapsed time.
-
-**AC-D42:** Developer output in parallel mode is silent (no spinner, no per-task lines). Completion is indicated by the final merge summary.
+**AC-D36:** When multiple workers are active, git commits are serialized through a lock to prevent index conflicts. Each worker queues its commit and waits for the lock.
 
 ### Signal Handling
 
-**AC-D43:** Ctrl+C or SIGTERM sent to `_develop_parallel` sets an `_interrupted` flag, prints a stop message, and sends SIGTERM to each worker process tree using `_kill_tree`.
-
-**AC-D44:** `_kill_tree` recursively kills depth-first: it kills all children of a PID before killing the PID itself. This ensures aider (grandchild of the worker subshell) is killed before its parent wrapper subshell, preventing orphan processes.
-
-**AC-D45:** After SIGTERM, a 2-second grace period is allowed. Any surviving processes in each worker tree are then sent SIGKILL.
-
-**AC-D46:** Each worker's `_develop_loop` sets a TERM trap that kills the currently-running aider child (`$_develop_child_pid`) and its children before exiting. `_develop_child_pid` is updated by `_spinner_wait` at the start of each aider call and cleared on completion.
-
-**AC-D47:** Background subshells (workers) ignore SIGINT by default in bash. Only SIGTERM (sent by `_develop_parallel`'s trap) triggers the worker's cleanup logic.
-
-### Parallel Merge
-
-**AC-D48:** After all workers finish, each `voidrift/<module>` branch is merged into the base branch in completion order (first worker to finish is merged first). Merges are performed sequentially with `git merge --no-edit`.
-
-**AC-D49:** Before merging, files added only by the voidrift branch (not present in the base) are explicitly checked out from the voidrift branch and staged. This prevents new files from being silently dropped during a merge that proceeds without conflicts but lacks explicit checkout.
-
-**AC-D50:** After successful merge of a module branch, the project state (`.voidrift/STATE.md`) is updated with a section header `## Module: <module>` followed by a high-level summary of that module's completion. The module's `STATE-<module>.md` from the worktree is merged into root `.voidrift/STATE-<module>.md`. Both updates are committed.
-
-**AC-D51:** If a merge conflict occurs, the architect is consulted. The architect analyzes the conflict diff and provides a resolution. The worker then applies the fix to the conflicted files. After the fix, the merge is completed with `git merge --continue --no-edit` if `MERGE_HEAD` is present, or via `git commit` if the merge state was already cleared.
-
-**AC-D52:** If conflict resolution fails (worker fix didn't resolve all markers), the merge is aborted with `git merge --abort` and an error is printed. The user must resolve manually.
-
-**AC-D53:** After each successful merge and state update, the worktree and voidrift branch are cleaned up (`git worktree remove`, `git branch -D`).
+**AC-D37:** Ctrl+C or SIGTERM sets an interrupted flag, prints a stop message, and sends SIGTERM to each active worker agent loop. A 2-second grace period is allowed before SIGKILL.
 
 ### Artifacts
 - Source code files (committed per task)
 - `.voidrift/STATE.md` (project-level state, updated per module completion)
-- `.voidrift/STATE-<module>.md` (module-level state, updated per task)
-- `.voidrift/escalations/[module/]<task_num>-<N>.md` (worker questions, numbered per escalation attempt)
-- `.voidrift/architect_responses/[module/]<task_num>-<N>.md` (architect guidance, numbered per escalation attempt)
+- `.voidrift/escalations/[module/]<task_num>-<N>.md` (worker questions)
+- `.voidrift/architect_responses/[module/]<task_num>-<N>.md` (architect guidance)
 - `develop-*.log`
 - `.voidrift/TASKS.md` with tasks marked `[x]` (complete) or `[!]` (blocked)
 
@@ -832,7 +786,7 @@ Returns exit code 0 on success, 1 on error.
 
 ### `worker-compact`
 
-**AC-U6:** Summarizes current conversation context into project state files, allowing the operator to start a fresh session with reduced context window usage. For single-module projects, updates `.voidrift/STATE.md`. For multi-module projects, updates both `.voidrift/STATE.md` (project-level) and the current module's `.voidrift/STATE-<module>.md`. Intended to be run manually after every 10 turns or on task completion. Uses the worker model with dev config.
+**AC-U6:** Summarizes current conversation context into `.voidrift/STATE.md`, allowing the operator to start a fresh session with reduced context window usage. Intended to be run manually after every 10 turns or on task completion. Uses the worker model with dev config.
 
 ### `worker-insight` / `worker-watch` / `worker-report`
 
@@ -848,8 +802,7 @@ Returns exit code 0 on success, 1 on error.
 .voidrift/
 ├── REQUIREMENTS.md           # Project requirements
 ├── ARCHITECTURE.md           # Architecture reference
-├── STATE.md                  # Project-level state summary
-├── STATE-<module>.md         # Module-level state (multi-module projects)
+├── STATE.md                  # Project state summary
 ├── TASKS.md                  # Task list (single file, module headers for multi-module)
 ├── spec/                     # Feature specifications
 │   └── <feature>.md
@@ -874,7 +827,7 @@ Returns exit code 0 on success, 1 on error.
 
 **AC-PS2:** The `.voidrift/` directory is created automatically on first phase run if it does not exist.
 
-**AC-PS3:** `.voidrift/STATE.md` is created automatically on first develop run if it does not exist. For multi-module projects, `.voidrift/STATE-<module>.md` files are created per module. Single-module projects use only `.voidrift/STATE.md`.
+**AC-PS3:** `.voidrift/STATE.md` is created automatically on first develop run if it does not exist.
 
 **AC-PS4:** The `.voidrift/escalations/` and `.voidrift/architect_responses/` directories are created automatically when needed. For multi-module projects, module subdirectories are created as needed.
 
@@ -963,17 +916,13 @@ This prevents re-downloading models and recompiling kernels on each container st
 
 ## Cross-Cutting: Git & Worktrees
 
-**AC-GW1:** The `.worktrees/` directory is gitignored. Worktrees are always ephemeral and are cleaned up on merge or interrupted-run startup.
+## Cross-Cutting: Git
 
-**AC-GW2:** Agent branches follow the naming convention `voidrift/<module>`.
+**AC-GW1:** Planning artifacts (`.voidrift/TASKS.md`, `.voidrift/ARCHITECTURE.md`, ADRs, specs) are committed in a single commit with message `"docs: add planning artifacts"` after plan validation.
 
-**AC-GW3:** Planning artifacts (`.voidrift/TASKS.md`, `.voidrift/TASKS-*.md`, `.voidrift/ARCHITECTURE.md`, ADRs, specs) are committed in a single commit with message `"docs: add planning artifacts"` after plan validation.
+**AC-GW2:** During develop, source code is committed per task with task-specific commit messages. When multiple workers are active, commits are serialized through a lock.
 
-**AC-GW4:** During develop, aider auto-commits source code per task with task-specific commit messages. The framework does not commit manually during develop.
-
-**AC-GW5:** Before creating worktrees for parallel mode, available disk space is checked. If insufficient space is available (less than estimated repo size × number of modules), the command fails with an error message indicating required vs available space.
-
-**AC-GW6:** `auto-commits: false` is set only for the plan phase. Develop, automate, and verify phases use aider's default auto-commit behavior.
+**AC-GW3:** `auto-commits: false` is set only for the plan phase. Develop, automate, and verify phases commit per task.
 
 ---
 
@@ -981,7 +930,7 @@ This prevents re-downloading models and recompiling kernels on each container st
 
 **AC-SK1:** Skill files live in `<VOIDRIFT_HOME>/skills/` with uppercase filenames (e.g., `FRONTEND.md`, `BACKEND.md`, `INFRA.md`).
 
-**AC-SK2:** Available skills: `backend`, `frontend`, `infra`, `native`, `design`, `branding`, `security`, `tdd`, `debugging`, `verification`, `worktrees`.
+**AC-SK2:** Available skills are determined dynamically from the files in `<VOIDRIFT_HOME>/skills/`. The MCP server's `get_skill()` tool lists available skills when a requested skill is not found.
 
 **AC-SK3:** At plan time, all skill files are loaded as read-only context so the planner knows the canonical tech stack, required frameworks, libraries, and conventions per domain before writing tasks.
 
