@@ -162,7 +162,7 @@
 - **REQ-WK-13:** `worker images pull [<image>]` SHALL pull a vLLM docker image on the worker node. IF no image is specified, THE SYSTEM SHALL pull the default image from `worker-models.yml`. `worker images list` SHALL list docker images on the worker node.
 - **REQ-WK-14:** `worker cache clear` SHALL remove compiled kernel caches (flashinfer, vllm) on the worker node over SSH.
 - **REQ-WK-15:** `worker check` SHALL verify worker node prerequisites over SSH: Docker available, NVIDIA GPU accessible (`nvidia-smi`), `uvx` on PATH, and SSH connectivity. Each check SHALL report pass/fail. IF any check fails, THE SYSTEM SHALL exit with code 1.
-- **REQ-WK-16:** All `worker` CLI help strings SHALL be written for the operator audience. Help text SHALL NOT contain internal requirement IDs or implementation references.
+- **REQ-WK-16:** All `worker` CLI help strings SHALL be written for the operator audience. Help text SHALL NOT contain internal requirement IDs or implementation references. The top-level `worker --help` SHALL include: a quick start section showing the typical workflow, commands grouped by purpose (container lifecycle, model weights, docker images, worker node, Kiro Gateway), and required environment variables (`WORKER_USR`, `WORKER_IP`). Commands SHALL be ordered by workflow, not alphabetically.
 
 ### 4.12 Git
 
