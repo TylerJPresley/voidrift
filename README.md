@@ -393,9 +393,9 @@ voidrift verify qwen3-coder claude
 - **`worker status`** - Show active model and gateway status
 - **`worker models`** - List available model aliases
 - **`worker bench [<num>] [<rate>]`** - Benchmark active model
-- **`worker gateway start`** - Start Kiro Gateway
-- **`worker gateway stop`** - Stop Kiro Gateway
-- **`worker gateway status`** - Check gateway health
+- **`worker kiro start`** - Start Kiro Gateway
+- **`worker kiro stop`** - Stop Kiro Gateway
+- **`worker kiro status`** - Check gateway health
 
 ## Available Models
 

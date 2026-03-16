@@ -56,7 +56,7 @@ models:
     type: cloud
     provider: gemini
 
-  # Kiro Gateway models (start with: worker gateway start)
+  # Kiro Gateway models (start with: worker kiro start)
   kiro-sonnet:
     model_id: "openai/claude-sonnet-4-5"
     base_url: "http://localhost:${KIRO_GATEWAY_PORT:-8000}/v1"

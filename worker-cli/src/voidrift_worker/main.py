@@ -136,12 +136,12 @@ def bench(num_prompts: int, req_rate: float) -> None:
 
 
 @cli.group()
-def gateway() -> None:
+def kiro() -> None:
     """Manage Kiro Gateway (REQ-WK-9)."""
 
 
-@gateway.command("start")
-def gateway_start() -> None:
+@kiro.command("start")
+def kiro_start() -> None:
     """Start the Kiro Gateway container."""
     try:
         console.print("Starting Kiro Gateway...")
@@ -153,15 +153,15 @@ def gateway_start() -> None:
         sys.exit(1)
 
 
-@gateway.command("stop")
-def gateway_stop() -> None:
+@kiro.command("stop")
+def kiro_stop() -> None:
     """Stop the Kiro Gateway container."""
     stop_gateway()
     console.print("✅ Gateway stopped.")
 
 
-@gateway.command("status")
-def gateway_status_cmd() -> None:
+@kiro.command("status")
+def kiro_status_cmd() -> None:
     """Report Kiro Gateway health."""
     gw = get_gateway_status()
     if gw["active"]:

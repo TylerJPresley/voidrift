@@ -150,7 +150,7 @@
 - **REQ-WK-6:** `worker models` SHALL list available model aliases from `worker-models.yml` with repository, served name, and status (running/stopped).
 - **REQ-WK-7:** Only one local model container SHALL run at a time on the worker node.
 - **REQ-WK-8:** Model configurations SHALL be defined in `worker-models.yml` specifying: repository, docker image, GPU memory utilization, max model length, vLLM args, served model name, and cache mounts.
-- **REQ-WK-9:** `worker gateway start` SHALL start the Kiro Gateway container. `worker gateway stop` SHALL stop it. `worker gateway status` SHALL report health and available models.
+- **REQ-WK-9:** `worker kiro start` SHALL start the Kiro Gateway container. `worker kiro stop` SHALL stop it. `worker kiro status` SHALL report health and available models.
 - **REQ-WK-10:** WHEN Kiro Gateway credentials are invalid (expired token, database permissions), THE SYSTEM SHALL stop immediately with a clear error message identifying the failure mode.
   - *Rationale:* Prevents the CLI from entering an infinite retry loop against invalid credentials. The error message directs the operator to the specific fix (re-login, chmod).
 
