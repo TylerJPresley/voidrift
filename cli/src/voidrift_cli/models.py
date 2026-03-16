@@ -7,14 +7,12 @@ containers, SSH connections, or gateway processes.
 
 from __future__ import annotations
 
-import os
-import re
 from pathlib import Path
 
 import yaml
 from pydantic import BaseModel
 
-from .utils import VOIDRIFT_HOME
+from .config import expand_config_refs, voidrift_home
 
 
 class ModelConfig(BaseModel):
@@ -28,24 +26,13 @@ class ModelConfig(BaseModel):
     provider: str | None = None
 
 
-def _expand_env(value: str) -> str:
-    """Expand ${VAR} and ${VAR:-default} in a string."""
-    def _replace(m: re.Match) -> str:
-        var = m.group(1)
-        if ":-" in var:
-            name, default = var.split(":-", 1)
-            return os.environ.get(name, default)
-        return os.environ.get(var, "")
-    return re.sub(r"\$\{([^}]+)}", _replace, value) if "${" in value else value
-
-
 def _load_models_config() -> dict:
     """Load models.yml from VOIDRIFT_HOME.
 
     Returns:
         Parsed YAML dict, or empty dict if file not found.
     """
-    p = VOIDRIFT_HOME / "models.yml"
+    p = voidrift_home() / "models.yml"
     if not p.exists():
         return {}
     with open(p) as f:
@@ -78,8 +65,8 @@ def resolve_model(alias: str) -> ModelConfig:
         alias=alias,
         model_id=m["model_id"],
         model_type=model_type,
-        api_base=_expand_env(m["base_url"]) if "base_url" in m else None,
-        api_key=_expand_env(m["api_key"]) if "api_key" in m else None,
+        api_base=expand_config_refs(m["base_url"]) if "base_url" in m else None,
+        api_key=expand_config_refs(m["api_key"]) if "api_key" in m else None,
         provider=m.get("provider"),
     )
 

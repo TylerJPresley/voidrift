@@ -185,8 +185,8 @@
 
 ### 4.15 Framework Configuration
 
-- **REQ-CFG-1:** All framework configuration SHALL be read from `~/.voidrift/config.yml`. The file SHALL support `${VAR}` and `${VAR:-default}` environment variable expansion.
-- **REQ-CFG-2:** `config.yml` SHALL contain sections for: `worker` (user, ip), `kiro` (port, api_key), and `api_keys` (anthropic, gemini, openai). Connection settings are literal values; API keys use env var references.
+- **REQ-CFG-1:** All framework configuration SHALL be read from `~/.voidrift/config.yml`. Config files SHALL support `${VAR}` and `${VAR:-default}` for environment variable expansion, and `${section.key}` for cross-referencing values from config.yml.
+- **REQ-CFG-2:** `config.yml` SHALL contain sections for: `worker` (user, ip, api_key, hf_token), `kiro` (port, api_key), and `api_keys` (anthropic, gemini). Connection settings are literal values; secrets use env var references.
 - **REQ-CFG-3:** Framework resources (agents, skills, templates), `models.yml`, and `worker-models.yml` SHALL be read from `~/.voidrift/`. The repo is the source of truth; `make sync` copies to `~/.voidrift/`.
 - **REQ-CFG-4:** `VOIDRIFT_HOME` env var MAY override `~/.voidrift/` for testing and CI. IF not set, `~/.voidrift/` is used.
 

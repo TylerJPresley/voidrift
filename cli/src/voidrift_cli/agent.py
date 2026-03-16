@@ -50,7 +50,7 @@ class AgentLoop(BaseModel):
         Returns:
             Configured OpenAI client instance.
         """
-        from .config import get_api_key
+        from .config import get_api_key, get_worker_config
 
         kwargs: dict[str, Any] = {}
         if self.model.api_base:
@@ -64,7 +64,7 @@ class AgentLoop(BaseModel):
             kwargs["api_key"] = get_api_key("gemini") or ""
             kwargs["base_url"] = "https://generativelanguage.googleapis.com/v1beta/openai/"
         else:
-            kwargs["api_key"] = get_api_key("openai") or "no-key"
+            kwargs["api_key"] = get_worker_config().get("api_key", "no-key")
         return OpenAI(**kwargs)
 
     def _model_name(self) -> str:

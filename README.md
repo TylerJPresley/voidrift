@@ -53,6 +53,8 @@ Edit `~/.voidrift/config.yml` with your settings:
 worker:
   user: your-username
   ip: 192.168.x.x
+  api_key: ${OPENAI_API_KEY:-no-key}
+  hf_token: ${HF_TOKEN}
 
 kiro:
   port: 8000
@@ -61,7 +63,6 @@ kiro:
 api_keys:
   anthropic: ${ANTHROPIC_API_KEY}
   gemini: ${GEMINI_API_KEY}
-  openai: ${OPENAI_API_KEY:-no-key}
 ```
 
 API keys are set as environment variables in your shell profile (`~/.bashrc`):

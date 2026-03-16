@@ -64,6 +64,37 @@ def clear_config_cache() -> None:
     load_config.cache_clear()
 
 
+def expand_config_refs(value: str) -> str:
+    """Expand ${section.key} config references and ${VAR} env vars in a string.
+
+    Config references (e.g., ${worker.ip}) are resolved from config.yml.
+    Env vars (e.g., ${ANTHROPIC_API_KEY}) are resolved from environment.
+    Config refs take precedence over env vars.
+    """
+    if not isinstance(value, str) or "${" not in value:
+        return value
+
+    config = load_config()
+
+    def _replace(m: re.Match) -> str:
+        var = m.group(1)
+        default = ""
+        if ":-" in var:
+            var, default = var.split(":-", 1)
+
+        # Try config reference first (section.key)
+        if "." in var:
+            parts = var.split(".", 1)
+            section = config.get(parts[0], {})
+            if isinstance(section, dict) and parts[1] in section:
+                return str(section[parts[1]])
+
+        # Fall back to env var
+        return os.environ.get(var, default)
+
+    return re.sub(r"\$\{([^}]+)}", _replace, value)
+
+
 def get_worker_config() -> dict:
     """Get worker section from config."""
     return load_config().get("worker", {})

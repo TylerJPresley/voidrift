@@ -8,31 +8,36 @@
 #   local   — Worker node vLLM (managed by worker-cli)
 #   cloud   — Provider APIs (Anthropic, Google)
 #   gateway — Kiro Gateway (managed by worker-cli)
+#
+# Variable expansion:
+#   ${section.key}  — Reference from config.yml (e.g., ${worker.ip})
+#   ${VAR}          — Environment variable
+#   ${VAR:-default} — Environment variable with default
 
 models:
   # Local models (start with: worker start <alias>)
   qwen3-8b:
     model_id: "openai/qwen3-8b"
-    base_url: "http://${WORKER_IP}:8000/v1"
-    api_key: "no-key-needed-here"
+    base_url: "http://${worker.ip}:8000/v1"
+    api_key: "${worker.api_key}"
     type: local
 
   qwen3-instruct:
     model_id: "openai/qwen3-instruct"
-    base_url: "http://${WORKER_IP}:8000/v1"
-    api_key: "no-key-needed-here"
+    base_url: "http://${worker.ip}:8000/v1"
+    api_key: "${worker.api_key}"
     type: local
 
   qwen3-coder:
     model_id: "openai/qwen3-coder"
-    base_url: "http://${WORKER_IP}:8000/v1"
-    api_key: "no-key-needed-here"
+    base_url: "http://${worker.ip}:8000/v1"
+    api_key: "${worker.api_key}"
     type: local
 
   qwen3-coder-next:
     model_id: "openai/qwen3-coder-next"
-    base_url: "http://${WORKER_IP}:8000/v1"
-    api_key: "no-key-needed-here"
+    base_url: "http://${worker.ip}:8000/v1"
+    api_key: "${worker.api_key}"
     type: local
 
   # Cloud models
@@ -59,30 +64,30 @@ models:
   # Kiro Gateway models (start with: worker kiro start)
   kiro-sonnet:
     model_id: "openai/claude-sonnet-4-5"
-    base_url: "http://localhost:${KIRO_GATEWAY_PORT:-8000}/v1"
-    api_key: "${KIRO_API_KEY}"
+    base_url: "http://localhost:${kiro.port}/v1"
+    api_key: "${kiro.api_key}"
     type: gateway
 
   kiro-haiku:
     model_id: "openai/claude-haiku-4-5"
-    base_url: "http://localhost:${KIRO_GATEWAY_PORT:-8000}/v1"
-    api_key: "${KIRO_API_KEY}"
+    base_url: "http://localhost:${kiro.port}/v1"
+    api_key: "${kiro.api_key}"
     type: gateway
 
   kiro-deepseek:
     model_id: "openai/deepseek-v3-2"
-    base_url: "http://localhost:${KIRO_GATEWAY_PORT:-8000}/v1"
-    api_key: "${KIRO_API_KEY}"
+    base_url: "http://localhost:${kiro.port}/v1"
+    api_key: "${kiro.api_key}"
     type: gateway
 
   kiro-minimax:
     model_id: "openai/minimax-m2-1"
-    base_url: "http://localhost:${KIRO_GATEWAY_PORT:-8000}/v1"
-    api_key: "${KIRO_API_KEY}"
+    base_url: "http://localhost:${kiro.port}/v1"
+    api_key: "${kiro.api_key}"
     type: gateway
 
   kiro-qwen:
     model_id: "openai/qwen3-coder-next"
-    base_url: "http://localhost:${KIRO_GATEWAY_PORT:-8000}/v1"
-    api_key: "${KIRO_API_KEY}"
+    base_url: "http://localhost:${kiro.port}/v1"
+    api_key: "${kiro.api_key}"
     type: gateway
