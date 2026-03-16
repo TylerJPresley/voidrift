@@ -172,8 +172,9 @@ def start(alias: str, refresh: bool) -> None:
 
 
 @cli.command()
-def stop() -> None:
-    """Stop the active model container."""
+@click.argument("alias", required=False, shell_complete=_complete_alias)
+def stop(alias: str | None) -> None:
+    """Stop the active model container (alias is optional, ignored)."""
     try:
         status = get_status()
         if not status["active"]:
