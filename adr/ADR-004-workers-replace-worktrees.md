@@ -1,37 +1,26 @@
-# ADR-004: Workers Replace Worktrees
+# ADR-004: Single-Branch Worker Pool
 
 **Date:** 2026-03-15
 **Status:** Accepted
-**Deciders:** Tyler Presley
-**Supersedes:** Git worktree-based parallel execution (AC-D36 through AC-D53)
 
 ## Context
 
-The original parallel execution model created one git worktree per module, ran workers concurrently in separate branches, then merged results back. This required:
-
-- 18 acceptance criteria (AC-D36 through AC-D53) for worktree lifecycle
-- Complex merge conflict resolution with architect consultation
-- Signal handling across process trees (`_kill_tree` recursive depth-first)
-- Disk space estimation (repo size × module count)
-- Three CLI flags (`--parallel`, `--retry`, `--overwrite`)
-
-The implementation was fragile and the merge step was the most common failure point.
+Multi-module projects benefit from concurrent execution, but branch-per-module strategies introduce merge complexity and disk space multiplication. Most module conflicts come from shared config files, not source code.
 
 ## Decision
 
-Replace worktrees with a `--workers N` flag:
+All workers operate on the same branch with a `--workers N` flag:
 
 - `--workers 1` (default): sequential execution, one module at a time
-- `--workers 0`: one worker per module (concurrent, future implementation)
+- `--workers 0`: one worker per module (concurrent)
 - `--workers N`: N concurrent workers across modules
 
-All workers operate on the same branch with a serialized commit lock. No worktrees, no merge step.
+A serialized commit lock prevents concurrent git operations. The planner enforces a file ownership constraint — each file path belongs to exactly one module.
 
 ## Consequences
 
-- **Positive:** Eliminated 18 acceptance criteria and ~200 lines of worktree/merge code
-- **Positive:** Single CLI flag replaces three (`--parallel`, `--retry`, `--overwrite`)
-- **Positive:** No merge conflicts — all work happens on one branch
-- **Positive:** No disk space multiplication
-- **Negative:** Concurrent workers need a commit lock (not yet implemented)
-- **Negative:** No branch isolation — a bad task can affect other modules' files (mitigated: file ownership constraint in requirements)
+- No merge step — all work happens on one branch
+- No disk space multiplication
+- Single CLI flag controls concurrency
+- File ownership constraint prevents cross-module conflicts
+- Commit lock needed for concurrent workers (not yet implemented)

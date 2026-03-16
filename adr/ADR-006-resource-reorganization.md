@@ -1,26 +1,19 @@
-# ADR-006: Resource Reorganization — Agents, Skills, Templates
+# ADR-006: Resource Organization — Agents, Skills, Templates
 
 **Date:** 2026-03-15
 **Status:** Accepted
-**Deciders:** Tyler Presley
-**Supersedes:** Flat `AGENT.md`, `CONVENTIONS.md`, `SKILLS.md`, `skills/*.md`
 
 ## Context
 
-The original resource layout was flat and role-confused:
-
-- Single `AGENT.md` contained all three roles (Analyst, Architect, Developer) — 400+ lines loaded into every session regardless of phase
-- `CONVENTIONS.md` duplicated content from AGENT.md with operational rules
-- `SKILLS.md` was a static registry that had to be manually synced with skill files
-- Skill files used old domain names (`BACKEND.md`, `FRONTEND.md`) that didn't match the expanded scope
+The framework serves three distinct roles (Analyst, Architect, Developer) across five phases. Each role needs different guidance, and loading all guidance into every session wastes context window. Skills and templates need to be discoverable without a manual registry.
 
 ## Decision
 
-Reorganize into three directories under `resources/`:
+Organize resources into three directories:
 
 ```
 resources/
-├── agents/          # Role-specific (3 files)
+├── agents/          # Role-specific guidance (3 files)
 │   ├── ANALYST.md   # Gather phase only
 │   ├── ARCHITECT.md # Plan phase, escalations
 │   └── DEVELOPER.md # Develop, automate, verify
@@ -35,13 +28,12 @@ resources/
     └── ...
 ```
 
-MCP tools serve these on demand: `get_agent(role, topic)`, `get_skill(name, topic)`, `get_template(name)`. The static `SKILLS.md` registry was deleted — the MCP server lists skills dynamically from the directory.
+MCP tools serve these on demand: `get_agent(role, topic)`, `get_skill(name, topic)`, `get_template(name)`. Skills are discovered dynamically from the directory — no static registry to maintain.
 
 ## Consequences
 
-- **Positive:** Each phase loads only its role file — no cross-role confusion
-- **Positive:** 15 specialized skills replace 11 generic ones — better domain coverage
-- **Positive:** No manual registry sync — skills discovered from filesystem
-- **Positive:** Section-level retrieval via markdown parser — models get only what they need
-- **Negative:** `CONVENTIONS.md` content was distributed across agent files and skill files — no single "rulebook" anymore
-- **Negative:** Existing task files referencing old skill tags (`backend`, `frontend`) need updating
+- Each phase loads only its role file — no cross-role confusion
+- 15 specialized skills cover distinct engineering domains
+- Skills discovered from filesystem — adding a skill is just adding a file
+- Section-level retrieval via markdown parser — models get only what they need
+- Task skill tags reference filenames (lowercase, without `.md` extension)
