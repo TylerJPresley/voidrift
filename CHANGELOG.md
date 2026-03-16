@@ -32,7 +32,8 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `gather --from` loads REQUIREMENTS-TEMPLATE and skills (PROD-STRATEGY, QUALITY-QA) into system prompt
 - Interactive gather loads existing requirements into system prompt (was: user message causing tool-call loops)
 - Interactive gather limited to `write_file` tool only (was: all 16 MCP tools causing infinite loops)
-- Analyst prompt instructs concise responses — few questions per turn (replaces max_tokens cap)
+- Analyst prompt instructs concise responses — few questions per turn
+- Interactive gather capped at 4096 max_tokens to prevent multi-minute responses
 - Analyst prompt instructs concise responses — few questions per turn
 - Docker run command includes `vllm serve` and `-e HF_TOKEN` for gated models
 - Phase logs moved to `.voidrift/logs/` subdirectory
