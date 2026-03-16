@@ -35,32 +35,82 @@ from .models import (
 console = Console()
 err_console = Console(stderr=True)
 
+HELP_TEXT = """\
+Manage local model containers, images, and Kiro Gateway.
 
-@click.group(invoke_without_command=True)
+\b
+Quick start:
+  worker check                    Verify worker node is ready
+  worker models pull qwen3-coder  Download model weights
+  worker start qwen3-coder        Start serving the model
+  worker status                   Confirm it's running
+
+\b
+Container lifecycle:
+  worker start <alias> [--refresh]  Start a model container
+  worker stop                       Stop the active container
+  worker status                     Show what's running
+  worker logs [-f]                  View container output
+  worker bench [num] [rate]         Run vLLM benchmark
+
+\b
+Model weights:
+  worker models list                Cached models + disk usage
+  worker models aliases             Configured aliases
+  worker models pull <alias>        Download weights
+  worker models remove <id>         Delete a cached revision
+  worker models prune               Clean broken revisions
+  worker models fix-perms           Fix cache permissions
+
+\b
+Docker images:
+  worker images pull [<image>]      Pull vLLM image (default from config)
+  worker images list                List images on worker
+
+\b
+Worker node:
+  worker check                      Verify prerequisites
+  worker info                       GPU, disk, memory
+  worker cache clear                Wipe kernel caches
+
+\b
+Kiro Gateway:
+  worker kiro start                 Start gateway
+  worker kiro stop                  Stop gateway
+  worker kiro status                Health check
+
+\b
+Environment:
+  WORKER_USR    SSH username for worker node
+  WORKER_IP     Worker node IP address
+"""
+
+
+class OrderedGroup(click.Group):
+    """Click group that preserves command insertion order."""
+
+    def list_commands(self, ctx: click.Context) -> list[str]:
+        return list(self.commands)
+
+
+@click.group(cls=OrderedGroup, invoke_without_command=True, help=HELP_TEXT)
 @click.pass_context
 def cli(ctx: click.Context) -> None:
-    """Manage local model containers, images, and Kiro Gateway on the worker node."""
     if ctx.invoked_subcommand is None:
         click.echo(ctx.get_help())
 
 
-# --- Top-level commands ---
-
-
-@cli.command("help", hidden=True)
-@click.pass_context
-def help_cmd(ctx: click.Context) -> None:
-    """Show this help message."""
-    click.echo(ctx.parent.get_help())
+# --- Container lifecycle ---
 
 
 @cli.command()
 @click.argument("alias")
 @click.option("--refresh", is_flag=True, help="Force-restart even if already running.")
 def start(alias: str, refresh: bool) -> None:
-    """Start a local model container.
+    """Start a model container.
 
     ALIAS is the model name from worker-models.yml (e.g. qwen3-coder).
+    Use --refresh to force-restart if the container is already running.
     """
     try:
         console.print(f"Starting {alias}...")
@@ -90,7 +140,7 @@ def stop() -> None:
 
 @cli.command()
 def status() -> None:
-    """Show active model, container, endpoint, and gateway status."""
+    """Show what's running — active model, endpoint, and gateway."""
     s = get_status()
     if s["active"]:
         console.print(f"Model:     {s['model']}")
@@ -109,10 +159,7 @@ def status() -> None:
 @cli.command()
 @click.option("--follow", "-f", is_flag=True, help="Stream logs continuously.")
 def logs(follow: bool) -> None:
-    """Show logs from the active model container.
-
-    Without --follow, shows the last 200 lines.
-    """
+    """View container output. Shows last 200 lines, or stream with -f."""
     try:
         rc = worker_logs(follow=follow)
         sys.exit(rc)
@@ -122,223 +169,10 @@ def logs(follow: bool) -> None:
 
 
 @cli.command()
-def info() -> None:
-    """Show worker node GPU, disk usage, and memory."""
-    try:
-        output = worker_info()
-        console.print(output)
-    except RuntimeError as e:
-        err_console.print(f"[red]Error: {e}[/red]")
-        sys.exit(1)
-
-
-@cli.command()
-def check() -> None:
-    """Verify worker node prerequisites (SSH, Docker, GPU, uvx)."""
-    try:
-        results = worker_check()
-    except RuntimeError as e:
-        err_console.print(f"[red]Error: {e}[/red]")
-        sys.exit(1)
-
-    all_ok = True
-    for name, passed, detail in results:
-        icon = "✅" if passed else "❌"
-        console.print(f"  {icon} {name:<8} {detail}")
-        if not passed:
-            all_ok = False
-
-    if not all_ok:
-        sys.exit(1)
-
-
-# --- worker models ---
-
-
-@cli.group("models")
-def models_group() -> None:
-    """Manage model weights on the worker node.
-
-    \b
-    Examples:
-      worker models list          # cached models and disk usage
-      worker models pull qwen3-coder
-      worker models prune         # clean broken revisions
-    """
-
-
-@models_group.command("list")
-def models_list_cmd() -> None:
-    """List cached models and disk usage on the worker node."""
-    try:
-        output = models_list_cached()
-        console.print(output)
-    except RuntimeError as e:
-        err_console.print(f"[red]Error: {e}[/red]")
-        sys.exit(1)
-
-
-@models_group.command("aliases")
-def models_aliases_cmd() -> None:
-    """List configured model aliases from worker-models.yml."""
-    available = list_models()
-    if not available:
-        console.print("No models configured. Check worker-models.yml.")
-        return
-    s = get_status()
-    active_alias = s["model"] if s["active"] else None
-    for alias, m in sorted(available.items()):
-        marker = " ✅" if alias == active_alias else ""
-        console.print(f"  {alias:<20} {m.repository}{marker}")
-
-
-@models_group.command("pull")
-@click.argument("alias")
-def models_pull_cmd(alias: str) -> None:
-    """Download model weights for ALIAS.
-
-    Resolves the HuggingFace repository from worker-models.yml.
-    """
-    try:
-        console.print(f"Downloading {alias}...")
-        rc = models_pull(alias)
-        if rc == 0:
-            console.print(f"✅ {alias} downloaded.")
-        else:
-            sys.exit(rc)
-    except (RuntimeError, ValueError) as e:
-        err_console.print(f"[red]Error: {e}[/red]")
-        sys.exit(1)
-
-
-@models_group.command("remove")
-@click.argument("revision_id")
-def models_remove_cmd(revision_id: str) -> None:
-    """Remove a cached model revision by REVISION_ID.
-
-    Get revision IDs from 'worker models list'.
-    """
-    try:
-        rc = models_remove(revision_id)
-        if rc == 0:
-            console.print("✅ Removed.")
-        else:
-            sys.exit(rc)
-    except RuntimeError as e:
-        err_console.print(f"[red]Error: {e}[/red]")
-        sys.exit(1)
-
-
-@models_group.command("prune")
-def models_prune_cmd() -> None:
-    """Clean broken or detached model revisions."""
-    try:
-        rc = models_prune()
-        if rc == 0:
-            console.print("✅ Pruned.")
-        else:
-            sys.exit(rc)
-    except RuntimeError as e:
-        err_console.print(f"[red]Error: {e}[/red]")
-        sys.exit(1)
-
-
-@models_group.command("fix-perms")
-def models_fix_perms_cmd() -> None:
-    """Fix HuggingFace cache directory permissions.
-
-    Resolves "Permission denied" errors when removing models.
-    """
-    try:
-        rc = models_fix_perms()
-        if rc == 0:
-            console.print("✅ Permissions fixed.")
-        else:
-            sys.exit(rc)
-    except RuntimeError as e:
-        err_console.print(f"[red]Error: {e}[/red]")
-        sys.exit(1)
-
-
-# --- worker images ---
-
-
-@cli.group("images")
-def images_group() -> None:
-    """Manage vLLM docker images on the worker node.
-
-    \b
-    Examples:
-      worker images pull           # pull default image from config
-      worker images pull vllm/vllm-openai:latest-aarch64-cu130
-      worker images list
-    """
-
-
-@images_group.command("pull")
-@click.argument("image", required=False)
-def images_pull_cmd(image: str | None) -> None:
-    """Pull a vLLM docker image.
-
-    Without IMAGE, pulls the default from worker-models.yml.
-    """
-    try:
-        label = image or "default image"
-        console.print(f"Pulling {label}...")
-        rc = images_pull(image)
-        if rc == 0:
-            console.print("✅ Image pulled.")
-        else:
-            sys.exit(rc)
-    except RuntimeError as e:
-        err_console.print(f"[red]Error: {e}[/red]")
-        sys.exit(1)
-
-
-@images_group.command("list")
-def images_list_cmd() -> None:
-    """List docker images on the worker node."""
-    try:
-        output = images_list()
-        console.print(output)
-    except RuntimeError as e:
-        err_console.print(f"[red]Error: {e}[/red]")
-        sys.exit(1)
-
-
-# --- worker cache ---
-
-
-@cli.group("cache")
-def cache_group() -> None:
-    """Manage compiled kernel caches on the worker node."""
-
-
-@cache_group.command("clear")
-def cache_clear_cmd() -> None:
-    """Clear flashinfer and vllm kernel caches.
-
-    Use when experiencing GPU compilation errors after driver updates.
-    """
-    try:
-        rc = cache_clear()
-        if rc == 0:
-            console.print("✅ Caches cleared.")
-        else:
-            sys.exit(rc)
-    except RuntimeError as e:
-        err_console.print(f"[red]Error: {e}[/red]")
-        sys.exit(1)
-
-
-# --- worker bench ---
-
-
-@cli.command()
 @click.argument("num_prompts", default=100, type=int)
 @click.argument("req_rate", default=0, type=float)
 def bench(num_prompts: int, req_rate: float) -> None:
-    """Benchmark the active model with NUM_PROMPTS requests.
+    """Run vLLM benchmark. Default: 100 prompts at max rate.
 
     \b
     Examples:
@@ -347,7 +181,7 @@ def bench(num_prompts: int, req_rate: float) -> None:
     """
     s = get_status()
     if not s["active"]:
-        err_console.print("[red]No active worker container. Run 'worker start <alias>' first.[/red]")
+        err_console.print("[red]No active container. Run 'worker start <alias>' first.[/red]")
         sys.exit(1)
 
     console.print(f"[bold cyan]Worker Bench[/bold cyan] — {num_prompts} prompts")
@@ -375,24 +209,216 @@ def bench(num_prompts: int, req_rate: float) -> None:
         sys.exit(1)
 
 
-# --- worker kiro ---
+# --- Model weights ---
 
 
-@cli.group()
-def kiro() -> None:
-    """Manage Kiro Gateway for free Claude access.
+@cli.group("models", cls=OrderedGroup)
+def models_group() -> None:
+    """Manage model weights on the worker node.
 
     \b
     Examples:
-      worker kiro start
-      worker kiro status
-      worker kiro stop
+      worker models list                # what's cached + disk usage
+      worker models pull qwen3-coder    # download by alias
+      worker models prune               # clean broken revisions
+    """
+
+
+@models_group.command("list")
+def models_list_cmd() -> None:
+    """Show cached models and disk usage."""
+    try:
+        output = models_list_cached()
+        console.print(output)
+    except RuntimeError as e:
+        err_console.print(f"[red]Error: {e}[/red]")
+        sys.exit(1)
+
+
+@models_group.command("aliases")
+def models_aliases_cmd() -> None:
+    """Show configured aliases from worker-models.yml."""
+    available = list_models()
+    if not available:
+        console.print("No models configured. Check worker-models.yml.")
+        return
+    s = get_status()
+    active_alias = s["model"] if s["active"] else None
+    for alias, m in sorted(available.items()):
+        marker = " ✅" if alias == active_alias else ""
+        console.print(f"  {alias:<20} {m.repository}{marker}")
+
+
+@models_group.command("pull")
+@click.argument("alias")
+def models_pull_cmd(alias: str) -> None:
+    """Download model weights. Resolves HF repo from worker-models.yml."""
+    try:
+        console.print(f"Downloading {alias}...")
+        rc = models_pull(alias)
+        if rc == 0:
+            console.print(f"✅ {alias} downloaded.")
+        else:
+            sys.exit(rc)
+    except (RuntimeError, ValueError) as e:
+        err_console.print(f"[red]Error: {e}[/red]")
+        sys.exit(1)
+
+
+@models_group.command("remove")
+@click.argument("revision_id")
+def models_remove_cmd(revision_id: str) -> None:
+    """Delete a cached revision. Get IDs from 'worker models list'."""
+    try:
+        rc = models_remove(revision_id)
+        if rc == 0:
+            console.print("✅ Removed.")
+        else:
+            sys.exit(rc)
+    except RuntimeError as e:
+        err_console.print(f"[red]Error: {e}[/red]")
+        sys.exit(1)
+
+
+@models_group.command("prune")
+def models_prune_cmd() -> None:
+    """Clean broken or detached revisions."""
+    try:
+        rc = models_prune()
+        if rc == 0:
+            console.print("✅ Pruned.")
+        else:
+            sys.exit(rc)
+    except RuntimeError as e:
+        err_console.print(f"[red]Error: {e}[/red]")
+        sys.exit(1)
+
+
+@models_group.command("fix-perms")
+def models_fix_perms_cmd() -> None:
+    """Fix cache permissions. Resolves 'Permission denied' on model removal."""
+    try:
+        rc = models_fix_perms()
+        if rc == 0:
+            console.print("✅ Permissions fixed.")
+        else:
+            sys.exit(rc)
+    except RuntimeError as e:
+        err_console.print(f"[red]Error: {e}[/red]")
+        sys.exit(1)
+
+
+# --- Docker images ---
+
+
+@cli.group("images", cls=OrderedGroup)
+def images_group() -> None:
+    """Manage vLLM docker images on the worker node.
+
+    \b
+    Examples:
+      worker images pull           # default image from config
+      worker images pull vllm/vllm-openai:latest-aarch64-cu130
+    """
+
+
+@images_group.command("pull")
+@click.argument("image", required=False)
+def images_pull_cmd(image: str | None) -> None:
+    """Pull a vLLM image. Without IMAGE, pulls the default from config."""
+    try:
+        label = image or "default image"
+        console.print(f"Pulling {label}...")
+        rc = images_pull(image)
+        if rc == 0:
+            console.print("✅ Image pulled.")
+        else:
+            sys.exit(rc)
+    except RuntimeError as e:
+        err_console.print(f"[red]Error: {e}[/red]")
+        sys.exit(1)
+
+
+@images_group.command("list")
+def images_list_cmd() -> None:
+    """List docker images on the worker node."""
+    try:
+        output = images_list()
+        console.print(output)
+    except RuntimeError as e:
+        err_console.print(f"[red]Error: {e}[/red]")
+        sys.exit(1)
+
+
+# --- Worker node ---
+
+
+@cli.command()
+def check() -> None:
+    """Verify prerequisites — SSH, Docker, GPU, uvx."""
+    try:
+        results = worker_check()
+    except RuntimeError as e:
+        err_console.print(f"[red]Error: {e}[/red]")
+        sys.exit(1)
+
+    all_ok = True
+    for name, passed, detail in results:
+        icon = "✅" if passed else "❌"
+        console.print(f"  {icon} {name:<8} {detail}")
+        if not passed:
+            all_ok = False
+
+    if not all_ok:
+        sys.exit(1)
+
+
+@cli.command()
+def info() -> None:
+    """Show GPU, disk usage, and memory on the worker node."""
+    try:
+        output = worker_info()
+        console.print(output)
+    except RuntimeError as e:
+        err_console.print(f"[red]Error: {e}[/red]")
+        sys.exit(1)
+
+
+@cli.group("cache", cls=OrderedGroup)
+def cache_group() -> None:
+    """Manage compiled kernel caches (flashinfer, vllm)."""
+
+
+@cache_group.command("clear")
+def cache_clear_cmd() -> None:
+    """Wipe flashinfer and vllm caches. Use after driver updates."""
+    try:
+        rc = cache_clear()
+        if rc == 0:
+            console.print("✅ Caches cleared.")
+        else:
+            sys.exit(rc)
+    except RuntimeError as e:
+        err_console.print(f"[red]Error: {e}[/red]")
+        sys.exit(1)
+
+
+# --- Kiro Gateway ---
+
+
+@cli.group(cls=OrderedGroup)
+def kiro() -> None:
+    """Manage Kiro Gateway for free Claude, DeepSeek, and Qwen access.
+
+    \b
+    Requires Kiro Gateway installed at ~/opt/kiro-gateway.
+    See README.md § Kiro Gateway Setup for configuration.
     """
 
 
 @kiro.command("start")
 def kiro_start() -> None:
-    """Start the Kiro Gateway container."""
+    """Start the gateway container."""
     try:
         console.print("Starting Kiro Gateway...")
         start_gateway()
@@ -405,19 +431,29 @@ def kiro_start() -> None:
 
 @kiro.command("stop")
 def kiro_stop() -> None:
-    """Stop the Kiro Gateway container."""
+    """Stop the gateway container."""
     stop_gateway()
     console.print("✅ Gateway stopped.")
 
 
 @kiro.command("status")
 def kiro_status_cmd() -> None:
-    """Show Kiro Gateway health and URL."""
+    """Check gateway health."""
     gw = get_gateway_status()
     if gw["active"]:
         console.print(f"Gateway: {gw['url']} (healthy)")
     else:
         console.print("Gateway: not running")
+
+
+# --- Hidden ---
+
+
+@cli.command("help", hidden=True)
+@click.pass_context
+def help_cmd(ctx: click.Context) -> None:
+    """Show help."""
+    click.echo(ctx.parent.get_help())
 
 
 if __name__ == "__main__":
