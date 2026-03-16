@@ -193,6 +193,17 @@ def _gather_from(
     except ImportError:
         tools, handlers = [], {}
 
+    # Override read_source_file to read from the source codebase
+    def read_from_source(path: str) -> str:
+        full = (from_path / path).resolve()
+        if not str(full).startswith(str(from_path.resolve())):
+            return f"Access denied: {path} is outside the source directory"
+        if not full.exists():
+            return f"File not found: {path}"
+        return full.read_text(encoding="utf-8", errors="replace")
+
+    handlers["read_source_file"] = read_from_source
+
     log = log_path("gather")
     console.print(f"[bold cyan]VoidRift Gather (Reverse Engineering)[/bold cyan]")
     console.print(f"Source: {from_path}")
@@ -217,7 +228,7 @@ def _gather_from(
     prompt = (
         f"Analyze this codebase at {from_path} and generate requirements.\n\n"
         f"File tree:\n{file_tree}\n\n"
-        f"Use read_source_file() to examine files (prefix paths with '{from_path}/').\n"
+        f"Use read_source_file() to examine files (use relative paths like 'README.md').\n"
         f"When done, use write_file() to write the requirements to "
         f"'{target.relative_to(Path.cwd())}'."
     )
