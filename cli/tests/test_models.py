@@ -57,7 +57,7 @@ class TestResolveModel:
         """Kiro model resolves kiro.port and kiro.api_key from config.yml."""
         m = resolve_model("kiro-sonnet")
         assert m.model_type == "gateway"
-        assert m.model_id == "openai/claude-sonnet-4-5"
+        assert m.model_id == "openai/claude-sonnet-4.5"
 
     def test_unknown_model_raises(self):
         with pytest.raises(ValueError, match="Unknown model"):

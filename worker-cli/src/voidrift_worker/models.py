@@ -315,6 +315,8 @@ def validate_gateway_credentials(port: str) -> None:
     """
     from .config import get_kiro_config
     api_key = get_kiro_config().get("api_key", "")
+    if not api_key:
+        raise RuntimeError("KIRO_API_KEY is not set. Export it in your shell profile.")
     try:
         r = httpx.post(
             f"http://localhost:{port}/v1/chat/completions",
