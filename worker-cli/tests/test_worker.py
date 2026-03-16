@@ -98,7 +98,7 @@ class TestStartModel:
         mock_httpx.ConnectError = Exception
         mock_httpx.ReadTimeout = Exception
         start_model("qwen3-coder", refresh=True)
-        assert mock_ssh.call_count >= 3
+        assert mock_ssh.call_count >= 4
 
 
 class TestStopModel:
