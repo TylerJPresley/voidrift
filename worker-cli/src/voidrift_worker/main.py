@@ -1,8 +1,7 @@
-"""Worker CLI — manage local model containers and Kiro Gateway (REQ-WK-1)."""
+"""Worker CLI — manage local model containers and Kiro Gateway."""
 
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
 
@@ -28,6 +27,7 @@ from .models import (
     start_model,
     stop_gateway,
     stop_model,
+    worker_check,
     worker_info,
     worker_logs,
 )
@@ -38,14 +38,20 @@ err_console = Console(stderr=True)
 
 @click.group()
 def cli() -> None:
-    """Worker CLI — manage local model containers and Kiro Gateway."""
+    """Manage local model containers, images, and Kiro Gateway on the worker node."""
+
+
+# --- Top-level commands ---
 
 
 @cli.command()
 @click.argument("alias")
-@click.option("--refresh", is_flag=True, help="Force-restart even if already running")
+@click.option("--refresh", is_flag=True, help="Force-restart even if already running.")
 def start(alias: str, refresh: bool) -> None:
-    """Start a local model container (REQ-WK-2)."""
+    """Start a local model container.
+
+    ALIAS is the model name from worker-models.yml (e.g. qwen3-coder).
+    """
     try:
         console.print(f"Starting {alias}...")
         start_model(alias, refresh=refresh)
@@ -58,7 +64,7 @@ def start(alias: str, refresh: bool) -> None:
 
 @cli.command()
 def stop() -> None:
-    """Stop the active model container (REQ-WK-3)."""
+    """Stop the active model container."""
     try:
         status = get_status()
         if not status["active"]:
@@ -74,7 +80,7 @@ def stop() -> None:
 
 @cli.command()
 def status() -> None:
-    """Report active model and endpoint (REQ-WK-4)."""
+    """Show active model, container, endpoint, and gateway status."""
     s = get_status()
     if s["active"]:
         console.print(f"Model:     {s['model']}")
@@ -91,9 +97,12 @@ def status() -> None:
 
 
 @cli.command()
-@click.option("--follow", "-f", is_flag=True, help="Stream logs continuously")
+@click.option("--follow", "-f", is_flag=True, help="Stream logs continuously.")
 def logs(follow: bool) -> None:
-    """Show active container logs (REQ-WK-11)."""
+    """Show logs from the active model container.
+
+    Without --follow, shows the last 200 lines.
+    """
     try:
         rc = worker_logs(follow=follow)
         sys.exit(rc)
@@ -104,7 +113,7 @@ def logs(follow: bool) -> None:
 
 @cli.command()
 def info() -> None:
-    """Report worker node GPU, disk, and memory (REQ-WK-12)."""
+    """Show worker node GPU, disk usage, and memory."""
     try:
         output = worker_info()
         console.print(output)
@@ -113,17 +122,44 @@ def info() -> None:
         sys.exit(1)
 
 
-# --- worker models --- (REQ-WK-6)
+@cli.command()
+def check() -> None:
+    """Verify worker node prerequisites (SSH, Docker, GPU, uvx)."""
+    try:
+        results = worker_check()
+    except RuntimeError as e:
+        err_console.print(f"[red]Error: {e}[/red]")
+        sys.exit(1)
+
+    all_ok = True
+    for name, passed, detail in results:
+        icon = "✅" if passed else "❌"
+        console.print(f"  {icon} {name:<8} {detail}")
+        if not passed:
+            all_ok = False
+
+    if not all_ok:
+        sys.exit(1)
+
+
+# --- worker models ---
 
 
 @cli.group("models")
 def models_group() -> None:
-    """Manage model weights on the worker node."""
+    """Manage model weights on the worker node.
+
+    \b
+    Examples:
+      worker models list          # cached models and disk usage
+      worker models pull qwen3-coder
+      worker models prune         # clean broken revisions
+    """
 
 
 @models_group.command("list")
 def models_list_cmd() -> None:
-    """List cached models and disk usage (REQ-WK-6)."""
+    """List cached models and disk usage on the worker node."""
     try:
         output = models_list_cached()
         console.print(output)
@@ -149,7 +185,10 @@ def models_aliases_cmd() -> None:
 @models_group.command("pull")
 @click.argument("alias")
 def models_pull_cmd(alias: str) -> None:
-    """Download model weights for an alias (REQ-WK-6a)."""
+    """Download model weights for ALIAS.
+
+    Resolves the HuggingFace repository from worker-models.yml.
+    """
     try:
         console.print(f"Downloading {alias}...")
         rc = models_pull(alias)
@@ -165,7 +204,10 @@ def models_pull_cmd(alias: str) -> None:
 @models_group.command("remove")
 @click.argument("revision_id")
 def models_remove_cmd(revision_id: str) -> None:
-    """Remove a cached model revision by ID (REQ-WK-6b)."""
+    """Remove a cached model revision by REVISION_ID.
+
+    Get revision IDs from 'worker models list'.
+    """
     try:
         rc = models_remove(revision_id)
         if rc == 0:
@@ -179,7 +221,7 @@ def models_remove_cmd(revision_id: str) -> None:
 
 @models_group.command("prune")
 def models_prune_cmd() -> None:
-    """Clean broken/detached revisions (REQ-WK-6c)."""
+    """Clean broken or detached model revisions."""
     try:
         rc = models_prune()
         if rc == 0:
@@ -193,7 +235,10 @@ def models_prune_cmd() -> None:
 
 @models_group.command("fix-perms")
 def models_fix_perms_cmd() -> None:
-    """Fix HuggingFace cache permissions (REQ-WK-6d)."""
+    """Fix HuggingFace cache directory permissions.
+
+    Resolves "Permission denied" errors when removing models.
+    """
     try:
         rc = models_fix_perms()
         if rc == 0:
@@ -205,18 +250,28 @@ def models_fix_perms_cmd() -> None:
         sys.exit(1)
 
 
-# --- worker images --- (REQ-WK-13)
+# --- worker images ---
 
 
 @cli.group("images")
 def images_group() -> None:
-    """Manage docker images on the worker node."""
+    """Manage vLLM docker images on the worker node.
+
+    \b
+    Examples:
+      worker images pull           # pull default image from config
+      worker images pull vllm/vllm-openai:latest-aarch64-cu130
+      worker images list
+    """
 
 
 @images_group.command("pull")
 @click.argument("image", required=False)
 def images_pull_cmd(image: str | None) -> None:
-    """Pull a vLLM docker image (REQ-WK-13). Default: image from worker-models.yml."""
+    """Pull a vLLM docker image.
+
+    Without IMAGE, pulls the default from worker-models.yml.
+    """
     try:
         label = image or "default image"
         console.print(f"Pulling {label}...")
@@ -232,7 +287,7 @@ def images_pull_cmd(image: str | None) -> None:
 
 @images_group.command("list")
 def images_list_cmd() -> None:
-    """List docker images on the worker node (REQ-WK-13)."""
+    """List docker images on the worker node."""
     try:
         output = images_list()
         console.print(output)
@@ -241,7 +296,7 @@ def images_list_cmd() -> None:
         sys.exit(1)
 
 
-# --- worker cache --- (REQ-WK-14)
+# --- worker cache ---
 
 
 @cli.group("cache")
@@ -251,7 +306,10 @@ def cache_group() -> None:
 
 @cache_group.command("clear")
 def cache_clear_cmd() -> None:
-    """Clear flashinfer and vllm caches (REQ-WK-14)."""
+    """Clear flashinfer and vllm kernel caches.
+
+    Use when experiencing GPU compilation errors after driver updates.
+    """
     try:
         rc = cache_clear()
         if rc == 0:
@@ -263,14 +321,20 @@ def cache_clear_cmd() -> None:
         sys.exit(1)
 
 
-# --- worker bench --- (REQ-WK-5)
+# --- worker bench ---
 
 
 @cli.command()
 @click.argument("num_prompts", default=100, type=int)
 @click.argument("req_rate", default=0, type=float)
 def bench(num_prompts: int, req_rate: float) -> None:
-    """Benchmark the active model (REQ-WK-5)."""
+    """Benchmark the active model with NUM_PROMPTS requests.
+
+    \b
+    Examples:
+      worker bench              # 100 prompts, max rate
+      worker bench 100 1        # 100 prompts, 1 req/s
+    """
     s = get_status()
     if not s["active"]:
         err_console.print("[red]No active worker container. Run 'worker start <alias>' first.[/red]")
@@ -301,12 +365,19 @@ def bench(num_prompts: int, req_rate: float) -> None:
         sys.exit(1)
 
 
-# --- worker kiro --- (REQ-WK-9)
+# --- worker kiro ---
 
 
 @cli.group()
 def kiro() -> None:
-    """Manage Kiro Gateway (REQ-WK-9)."""
+    """Manage Kiro Gateway for free Claude access.
+
+    \b
+    Examples:
+      worker kiro start
+      worker kiro status
+      worker kiro stop
+    """
 
 
 @kiro.command("start")
@@ -331,7 +402,7 @@ def kiro_stop() -> None:
 
 @kiro.command("status")
 def kiro_status_cmd() -> None:
-    """Report Kiro Gateway health."""
+    """Show Kiro Gateway health and URL."""
     gw = get_gateway_status()
     if gw["active"]:
         console.print(f"Gateway: {gw['url']} (healthy)")

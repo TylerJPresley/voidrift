@@ -1,6 +1,7 @@
 """Tests for worker-cli models — container lifecycle, gateway, and node management."""
 
 import os
+import subprocess
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -26,6 +27,7 @@ from voidrift_worker.models import (
     stop_gateway,
     stop_model,
     validate_gateway_credentials,
+    worker_check,
     worker_info,
     worker_logs,
 )
@@ -284,3 +286,33 @@ class TestCacheClear:
         assert rc == 0
         assert "flashinfer" in mock_stream.call_args[0][0]
         assert "vllm" in mock_stream.call_args[0][0]
+
+
+class TestWorkerCheck:
+    @patch("voidrift_worker.models.ssh_cmd")
+    def test_all_pass(self, mock_ssh):
+        mock_ssh.return_value = MagicMock(stdout="ok\n", stderr="", returncode=0)
+        results = worker_check()
+        assert len(results) == 4
+        assert all(passed for _, passed, _ in results)
+
+    @patch("voidrift_worker.models.ssh_cmd")
+    def test_ssh_fail_stops_early(self, mock_ssh):
+        mock_ssh.side_effect = subprocess.TimeoutExpired(cmd="ssh", timeout=5)
+        results = worker_check()
+        assert len(results) == 1
+        assert results[0][0] == "SSH"
+        assert not results[0][1]
+
+    @patch("voidrift_worker.models.ssh_cmd")
+    def test_docker_missing(self, mock_ssh):
+        def side_effect(cmd):
+            if "echo ok" in cmd:
+                return MagicMock(stdout="ok\n", stderr="", returncode=0)
+            if "docker" in cmd:
+                return MagicMock(stdout="", stderr="not found", returncode=127)
+            return MagicMock(stdout="ok\n", stderr="", returncode=0)
+        mock_ssh.side_effect = side_effect
+        results = worker_check()
+        docker = next(r for r in results if r[0] == "Docker")
+        assert not docker[1]

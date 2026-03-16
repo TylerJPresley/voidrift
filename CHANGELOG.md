@@ -10,7 +10,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 - `worker-cli/` package — manages local model containers and Kiro Gateway (`worker` command)
 - `models.yml` — unified model endpoint config (alias → base_url, api_key, model_id)
-- Worker CLI commands: `worker start`, `stop`, `status`, `logs`, `info`, `models list/pull/remove/prune/fix-perms`, `images pull/list`, `cache clear`, `bench`, `kiro start/stop/status`
+- Worker CLI commands: `worker start`, `stop`, `status`, `check`, `logs`, `info`, `models list/pull/remove/prune/fix-perms`, `images pull/list`, `cache clear`, `bench`, `kiro start/stop/status`
 - `TaskStore` — parses single TASKS.md with `## Module:` headers into per-module queues with write-through to disk
 - MCP tools: `load_tasks`, `get_next_task`, `complete_task`, `get_task_status` for task management
 - MCP tools: `get_agent(role, topic)`, `get_template(name)` for targeted resource retrieval

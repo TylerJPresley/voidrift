@@ -136,6 +136,12 @@ The unified memory architecture allows efficient model loading without CPU-GPU t
    worker images pull
    ```
 
+6. **Verify setup:**
+   ```bash
+   worker check
+   ```
+   All checks should show ✅. Fix any ❌ items before proceeding.
+
 **Available Docker Images:**
 
 Three options are available for running vLLM on the GB10 Grace Blackwell Superchip:
@@ -405,6 +411,7 @@ voidrift verify qwen3-coder claude
 - **`worker start <alias> [--refresh]`** - Start a local model container
 - **`worker stop`** - Stop the active model container
 - **`worker status`** - Show active model and gateway status
+- **`worker check`** - Verify worker node prerequisites (SSH, Docker, GPU, uvx)
 - **`worker logs [--follow]`** - Show active container logs
 - **`worker info`** - Report worker node GPU, disk, and memory
 - **`worker bench [<num>] [<rate>]`** - Benchmark active model

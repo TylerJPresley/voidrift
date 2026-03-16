@@ -423,3 +423,35 @@ def images_list() -> str:
 def cache_clear() -> int:
     """Clear compiled kernel caches on worker node (REQ-WK-14)."""
     return ssh_stream("rm -rf ~/.cache/flashinfer/* ~/.cache/vllm/*")
+
+
+def worker_check() -> list[tuple[str, bool, str]]:
+    """Verify worker node prerequisites (REQ-WK-15).
+
+    Returns:
+        List of (check_name, passed, detail) tuples.
+    """
+    results: list[tuple[str, bool, str]] = []
+
+    # SSH connectivity
+    try:
+        r = ssh_cmd("echo ok")
+        ok = r.stdout.strip() == "ok"
+        results.append(("SSH", ok, _ssh_target() if ok else r.stderr.strip()))
+    except (RuntimeError, subprocess.TimeoutExpired) as e:
+        results.append(("SSH", False, str(e)))
+        return results  # Can't check anything else without SSH
+
+    # Docker
+    r = ssh_cmd("docker --version")
+    results.append(("Docker", r.returncode == 0, r.stdout.strip() or r.stderr.strip()))
+
+    # NVIDIA GPU
+    r = ssh_cmd("nvidia-smi --query-gpu=name --format=csv,noheader")
+    results.append(("GPU", r.returncode == 0, r.stdout.strip() or r.stderr.strip()))
+
+    # uvx
+    r = ssh_cmd("uvx --version")
+    results.append(("uvx", r.returncode == 0, r.stdout.strip() or r.stderr.strip()))
+
+    return results
