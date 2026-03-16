@@ -5,7 +5,11 @@ from __future__ import annotations
 import os
 import signal
 import sys
+import logging
 from pathlib import Path
+
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("openai").setLevel(logging.WARNING)
 
 import click
 from rich.console import Console
@@ -71,7 +75,7 @@ def main() -> None:
     """Entry point with clean error handling."""
     try:
         cli(standalone_mode=False)
-    except click.exceptions.SystemExit:
+    except SystemExit:
         raise
     except RuntimeError as e:
         err_console.print(f"[red]Error: {e}[/red]")
