@@ -112,6 +112,19 @@ def cli(ctx: click.Context) -> None:
         click.echo(ctx.get_help())
 
 
+def main() -> None:
+    """Entry point with clean error handling."""
+    try:
+        cli(standalone_mode=False)
+    except SystemExit:
+        raise
+    except (RuntimeError, OSError) as e:
+        err_console.print(f"[red]Error: {e}[/red]")
+        sys.exit(1)
+    except click.Abort:
+        sys.exit(130)
+
+
 @cli.command("completions")
 @click.argument("shell", type=click.Choice(["bash", "zsh", "fish"]))
 def completions_cmd(shell: str) -> None:

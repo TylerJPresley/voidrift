@@ -23,7 +23,7 @@ pattern = "(?P<version>.+)"
 packages = ["src/voidrift_worker"]
 
 [project.scripts]
-worker = "voidrift_worker.main:cli"
+worker = "voidrift_worker.main:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

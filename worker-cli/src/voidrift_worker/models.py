@@ -285,7 +285,7 @@ def start_gateway() -> None:
             r = httpx.get(f"http://localhost:{port}/health", timeout=3)
             if r.status_code == 200:
                 break
-        except (httpx.ConnectError, httpx.ReadTimeout):
+        except (httpx.ConnectError, httpx.ReadTimeout, httpx.ReadError):
             pass
         time.sleep(1)
     else:
