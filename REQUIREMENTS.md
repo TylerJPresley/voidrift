@@ -27,9 +27,9 @@
   - Anthropic native API (Claude models)
   - Google Generative AI API (Gemini models)
   - MCP protocol via stdio (CLI ↔ MCP Context Server)
-  - SSH (CLI → worker node for container lifecycle)
-  - Docker API (container start/stop/health on worker node)
-- **Communication Protocols:** HTTPS (cloud APIs), HTTP (local vLLM API, Kiro Gateway), stdio (MCP), SSH (worker node management)
+  - SSH (Worker CLI → worker node for container lifecycle)
+  - Docker API (container start/stop/health on worker node, managed by Worker CLI)
+- **Communication Protocols:** HTTPS (cloud APIs), HTTP (local vLLM API, Kiro Gateway), stdio (MCP), SSH (Worker CLI → worker node)
 
 ## 4. Functional Requirements (EARS Notation)
 
@@ -37,11 +37,13 @@
 
 ### 4.1 System Architecture
 
-- **REQ-ARCH-1:** The system SHALL consist of three components: a Python CLI (`cli/`), a Python MCP Context Server (`mcp-context-server/`), and framework reference files (`resources/`).
-- **REQ-ARCH-2:** The CLI SHALL provide subcommands: `gather`, `plan`, `develop`, `automate`, `verify`, `chat`, `status`, `bench`, `log`, `unlock`.
+- **REQ-ARCH-1:** The system SHALL consist of four components: a Python CLI (`cli/`), a Python MCP Context Server (`mcp-context-server/`), a Worker CLI (`worker-cli/`), and framework reference files (`resources/`).
+  - *Rationale:* Separating worker node management from phase orchestration makes the CLI model-agnostic. Every model — local, cloud, or gateway — is just a base URL to the CLI.
+- **REQ-ARCH-2:** The CLI SHALL provide subcommands: `gather`, `plan`, `develop`, `automate`, `verify`, `chat`, `status`, `log`, `unlock`.
 - **REQ-ARCH-3:** WHEN `voidrift` is run with no arguments, THE SYSTEM SHALL launch an interactive guided flow presenting available actions, model selection, and phase-specific options.
 - **REQ-ARCH-4:** The CLI SHALL implement an agent loop that sends messages to model APIs (OpenAI-compatible for local/kiro, native for cloud), handles MCP tool calls, and streams responses to the terminal.
-- **REQ-ARCH-5:** The CLI SHALL manage model lifecycle: start/stop local containers via SSH, start/stop Kiro Gateway, validate credentials, and map model aliases to API endpoints.
+- **REQ-ARCH-5:** The CLI SHALL be model-agnostic. It SHALL resolve model aliases to `(base_url, api_key, model_id)` tuples from a models config file and connect to the endpoint directly. It SHALL NOT manage containers, SSH connections, or gateway processes.
+  - *Rationale:* The worker node already exposes an OpenAI-compatible endpoint. Cloud APIs expose endpoints. Kiro Gateway exposes an endpoint. The CLI treats all three identically — the only variable is the URL.
 - **REQ-ARCH-6:** The CLI SHALL never read framework resource files (agents, skills, templates) directly. All framework context SHALL be served exclusively through MCP server tool calls.
   - *Rationale:* On-demand retrieval via MCP tools keeps context windows small. Models pull only the sections they need instead of loading full files upfront.
 
@@ -131,30 +133,41 @@
 - **REQ-U-2:** `voidrift chat <model>` SHALL start an interactive session with no git context (`--no-git`).
 - **REQ-U-3:** `voidrift log <phase>` SHALL show the last 200 lines of the most recent log. `--prune` SHALL delete log files.
 - **REQ-U-4:** `voidrift unlock` SHALL remove the develop lock file and kill any running develop process.
-- **REQ-U-5:** `voidrift bench` SHALL benchmark the active worker model using vLLM's benchmark tool.
 
 ### 4.10 Model Configuration
 
-- **REQ-MC-1:** WHEN a model name starts with `kiro-`, THE SYSTEM SHALL map it to the actual model name, prefix with `openai/`, set the API base to the Kiro Gateway, and use `KIRO_API_KEY` for authentication.
-- **REQ-MC-2:** WHEN a phase requires a local model, THE SYSTEM SHALL SSH to the worker node, start the container, and poll the API until ready. IF the container crashes, THE SYSTEM SHALL exit immediately with error.
-- **REQ-MC-3:** Only one local model container SHALL run at a time on the worker node.
-- **REQ-MC-4:** Cloud models SHALL require no initialization and be accessed directly via API endpoints.
-- **REQ-MC-5:** WHEN Kiro Gateway credentials are invalid (expired token, database permissions), THE SYSTEM SHALL stop immediately with a clear error message identifying the failure mode.
+- **REQ-MC-1:** WHEN a model alias is used, THE SYSTEM SHALL resolve it to `(base_url, api_key, model_id)` from a models config file (`models.yml`). IF the alias is not found, THE SYSTEM SHALL exit with an error listing available aliases.
+- **REQ-MC-2:** Cloud models SHALL require no initialization and be accessed directly via API endpoints.
+- **REQ-MC-3:** The models config file SHALL support three endpoint types: `local` (worker node vLLM), `cloud` (provider APIs), and `gateway` (Kiro Gateway). Each entry specifies `base_url`, `api_key` (or env var reference), and `model_id`.
 
-### 4.11 Git
+### 4.11 Worker CLI
+
+- **REQ-WK-1:** The Worker CLI (`worker-cli/`) SHALL be a separate Python package providing the `worker` command, installed independently from the VoidRift CLI.
+- **REQ-WK-2:** `worker start <alias>` SHALL SSH to the worker node, stop any running model container, start the requested model container, and poll the API until ready. IF the container crashes, THE SYSTEM SHALL exit immediately with error.
+- **REQ-WK-3:** `worker stop` SHALL SSH to the worker node and stop the active model container.
+- **REQ-WK-4:** `worker status` SHALL report the active model (if any), container health, and API endpoint URL.
+- **REQ-WK-5:** `worker bench [<num_prompts>] [<req_rate>]` SHALL benchmark the active model using vLLM's benchmark tool via SSH.
+- **REQ-WK-6:** `worker models` SHALL list available model aliases from `worker-models.yml` with repository, served name, and status (running/stopped).
+- **REQ-WK-7:** Only one local model container SHALL run at a time on the worker node.
+- **REQ-WK-8:** Model configurations SHALL be defined in `worker-models.yml` specifying: repository, docker image, GPU memory utilization, max model length, vLLM args, served model name, and cache mounts.
+- **REQ-WK-9:** `worker gateway start` SHALL start the Kiro Gateway container. `worker gateway stop` SHALL stop it. `worker gateway status` SHALL report health and available models.
+- **REQ-WK-10:** WHEN Kiro Gateway credentials are invalid (expired token, database permissions), THE SYSTEM SHALL stop immediately with a clear error message identifying the failure mode.
+  - *Rationale:* Prevents the CLI from entering an infinite retry loop against invalid credentials. The error message directs the operator to the specific fix (re-login, chmod).
+
+### 4.12 Git
 
 - **REQ-GIT-1:** Planning artifacts SHALL be committed in a single commit with message `"docs: add planning artifacts"`.
 - **REQ-GIT-2:** WHILE the develop phase is active, source code SHALL be committed per task with task-specific messages. WHEN multiple workers are active, commits SHALL be serialized through a lock.
 - **REQ-GIT-3:** `auto-commits: false` SHALL be set only for the plan phase.
 
-### 4.12 Project Structure
+### 4.13 Project Structure
 
 - **REQ-PS-1:** All framework-generated files SHALL be stored in `.voidrift/` within the target project directory.
 - **REQ-PS-2:** The `.voidrift/` directory SHALL be created automatically on first phase run if it does not exist.
 - **REQ-PS-3:** `.voidrift/STATE.md` SHALL be created automatically on first develop run.
 - **REQ-PS-4:** IF `.voidrift/` exists but is missing required files for a phase, THE SYSTEM SHALL exit with an error suggesting corrective action.
 
-### 4.13 Logging
+### 4.14 Logging
 
 - **REQ-LOG-1:** All phase logs SHALL use timestamped filenames: `<phase>-YYYYMMDD-HHMMSS.log`.
 - **REQ-LOG-2:** Log files SHALL accumulate indefinitely. The operator is responsible for cleanup.
@@ -163,9 +176,9 @@
 
 - **Reliability:** The MCP server SHALL use write-through storage so no data is lost on unexpected exit. The develop phase SHALL use a lock file to prevent concurrent sessions. SIGTERM SHALL trigger graceful shutdown with cleanup.
 - **Performance:** Local models SHALL be served via vLLM with FlashInfer backend. The MCP server SHALL use in-memory indexing for sub-millisecond section retrieval. Agents SHALL receive one task at a time to minimize context window usage.
-- **Security:** The CLI SHALL NOT hardcode secrets. A PATH shim SHALL prevent the worker model from executing package managers on the host. File operations SHALL be sandboxed to the project directory (path traversal denied). Kiro Gateway credentials SHALL be validated before proceeding.
-- **Portability:** The framework SHALL run on Linux, macOS, and WSL2. Local model support requires an NVIDIA GPU worker node accessible via SSH. Cloud-only mode requires no special hardware.
-- **Maintainability:** Both packages SHALL use `pyproject.toml` with hatchling, a shared `VERSION` file, and editable installs. Google-style docstrings and type hints SHALL be used throughout. Tests SHALL use pytest.
+- **Security:** The CLI SHALL NOT hardcode secrets. A PATH shim SHALL prevent the worker model from executing package managers on the host. File operations SHALL be sandboxed to the project directory (path traversal denied). The Worker CLI SHALL validate Kiro Gateway credentials before reporting the endpoint as ready.
+- **Portability:** The framework SHALL run on Linux, macOS, and WSL2. Local model support requires an NVIDIA GPU worker node accessible via SSH and the Worker CLI. Cloud-only mode requires no special hardware or Worker CLI.
+- **Maintainability:** All packages SHALL use `pyproject.toml` with hatchling, a shared `VERSION` file, and editable installs. Google-style docstrings and type hints SHALL be used throughout. Tests SHALL use pytest.
 
 ## 6. Verification Plan
 
@@ -191,8 +204,10 @@
 | V-U-1 | REQ-U-1 | Test | `test_phases.py::TestCLICommands::test_status_command` |
 | V-U-2 | REQ-U-3 | Test | `test_phases.py::TestCLICommands::test_log_view` |
 | V-U-3 | REQ-U-4 | Test | `test_phases.py::TestCLICommands::test_unlock_no_lock` |
-| V-MC-1 | REQ-MC-1 | Test | `test_models.py::TestResolveModel::test_kiro_models` |
-| V-MC-2 | REQ-MC-5 | Test | `test_models.py::TestKiroGateway::test_validate_credentials_expired` |
+| V-MC-1 | REQ-MC-1 | Test | `test_models.py::TestResolveModel` — alias resolution from config |
+| V-MC-2 | REQ-MC-2 | Test | `test_models.py::TestResolveModel::test_cloud_models` |
+| V-WK-1 | REQ-WK-2 | Test | `test_worker.py` — container start/stop via SSH |
+| V-WK-2 | REQ-WK-10 | Test | `test_worker.py::TestKiroGateway::test_validate_credentials_expired` |
 
 ---
 
@@ -218,18 +233,16 @@
 
 ## Appendix B: Environment Variables
 
-| Variable | Required | Default | Purpose |
-|----------|----------|---------|---------|
-| `VOIDRIFT_HOME` | No | `$HOME/.voidrift` | Framework installation directory |
-| `WORKER_USR` | Local models | — | SSH username for worker node |
-| `WORKER_IP` | Local models | — | Worker node IP address |
-| `OPENAI_API_BASE` | Local models | — | OpenAI-compatible API endpoint |
-| `OPENAI_API_KEY` | Local models | — | API key (dummy for local) |
-| `ANTHROPIC_API_KEY` | Claude models | — | Anthropic API key |
-| `GEMINI_API_KEY` | Gemini models | — | Google AI API key |
-| `HF_TOKEN` | Model downloads | — | Hugging Face token |
-| `KIRO_GATEWAY_PORT` | Kiro models | `8000` | Kiro Gateway port |
-| `KIRO_API_KEY` | Kiro models | — | Kiro Gateway authentication |
+| Variable | Required | Default | Used By | Purpose |
+|----------|----------|---------|---------|---------|
+| `VOIDRIFT_HOME` | No | `$HOME/.voidrift` | CLI | Framework installation directory |
+| `ANTHROPIC_API_KEY` | Claude models | — | CLI | Anthropic API key |
+| `GEMINI_API_KEY` | Gemini models | — | CLI | Google AI API key |
+| `WORKER_USR` | Local models | — | Worker CLI | SSH username for worker node |
+| `WORKER_IP` | Local models | — | Worker CLI | Worker node IP address |
+| `HF_TOKEN` | Model downloads | — | Worker CLI | Hugging Face token |
+| `KIRO_GATEWAY_PORT` | Kiro models | `8000` | Worker CLI | Kiro Gateway port |
+| `KIRO_API_KEY` | Kiro models | — | Worker CLI | Kiro Gateway authentication |
 
 ## Appendix C: Model Registry
 
