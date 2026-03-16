@@ -187,7 +187,11 @@ def start_model(alias: str, refresh: bool = False) -> None:
     cmd_parts.append(f"--max-model-len {model.max_model_len}")
     cmd_parts.append(f"--port {port}")
     for arg in model.vllm_args:
-        cmd_parts.append(arg)
+        # Quote args containing special shell characters
+        if any(c in arg for c in '{}"\' '):
+            cmd_parts.append(f"'{arg}'")
+        else:
+            cmd_parts.append(arg)
 
     try:
         r = ssh_cmd(" ".join(cmd_parts))
