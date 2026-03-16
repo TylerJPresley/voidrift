@@ -66,20 +66,19 @@ def check_requirements_exist() -> bool:
     return (voidrift_dir() / "REQUIREMENTS.md").exists()
 
 
-def check_task_files() -> tuple[list[Path], bool]:
-    """Find task files.
+def check_task_files() -> tuple[Path | None, bool]:
+    """Check for TASKS.md and detect if it has module headers.
 
     Returns:
-        Tuple of (task_files, is_multi_module).
+        Tuple of (task_file_path_or_None, has_module_headers).
     """
     d = voidrift_dir()
-    single = d / "TASKS.md"
-    multi = sorted(d.glob("TASKS-*.md"))
-    if multi:
-        return multi, True
-    if single.exists():
-        return [single], False
-    return [], False
+    task_file = d / "TASKS.md"
+    if not task_file.exists():
+        return None, False
+    text = task_file.read_text()
+    has_modules = bool(re.search(r"^## Module:", text, re.MULTILINE))
+    return task_file, has_modules
 
 
 def count_tasks(task_file: Path) -> tuple[int, int, int]:
@@ -98,39 +97,6 @@ def count_tasks(task_file: Path) -> tuple[int, int, int]:
     blocked = text.count("- [!]")
     total = done + blocked + text.count("- [ ]")
     return done, blocked, total
-
-
-def get_next_task(task_file: Path) -> tuple[int, str] | None:
-    """Get the first unchecked task.
-
-    Args:
-        task_file: Path to a TASKS*.md file.
-
-    Returns:
-        Tuple of (task_num, task_text) or None if all tasks are done.
-    """
-    if not task_file.exists():
-        return None
-    lines = task_file.read_text().splitlines()
-    task_num = 0
-    for line in lines:
-        if line.strip().startswith("- ["):
-            task_num += 1
-            if line.strip().startswith("- [ ]"):
-                return task_num, line.strip()
-    return None
-
-
-def mark_task(task_file: Path, marker: str = "x") -> None:
-    """Mark the first unchecked task with the given marker (AC-D34).
-
-    Args:
-        task_file: Path to a TASKS*.md file.
-        marker: Character to place in the checkbox (``x`` or ``!``).
-    """
-    text = task_file.read_text()
-    text = text.replace("- [ ]", f"- [{marker}]", 1)
-    task_file.write_text(text)
 
 
 def extract_skill_tags(task_text: str) -> list[str]:

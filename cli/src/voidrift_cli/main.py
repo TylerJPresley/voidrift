@@ -224,7 +224,7 @@ def _status():
         console.print("  ⬜ Phase 1 (Gather): Run 'voidrift gather <model>'")
 
     # Phase 2: Plan
-    has_tasks = (d / "TASKS.md").exists() or list(d.glob("TASKS-*.md"))
+    has_tasks = (d / "TASKS.md").exists()
     has_adr = (d / "adr").is_dir() and list((d / "adr").glob("*.md"))
     if has_tasks and has_adr:
         console.print("  ✅ Phase 2 (Plan): Tasks and ADRs exist")
@@ -234,20 +234,15 @@ def _status():
         console.print("  ⬜ Phase 2 (Plan): Run 'voidrift plan <model>'")
 
     # Phase 3: Develop
-    task_files = list(d.glob("TASKS*.md"))
-    if task_files:
-        total_done = total_blocked = total_all = 0
-        for tf in task_files:
-            done, blocked, total = count_tasks(tf)
-            total_done += done
-            total_blocked += blocked
-            total_all += total
-        if total_done == total_all and total_all > 0:
-            console.print(f"  ✅ Phase 3 (Develop): All {total_all} tasks complete")
-        elif total_done > 0 or total_blocked > 0:
-            console.print(f"  🔄 Phase 3 (Develop): {total_done}/{total_all} done, {total_blocked} blocked")
+    task_file = d / "TASKS.md"
+    if task_file.exists():
+        done, blocked, total = count_tasks(task_file)
+        if done == total and total > 0:
+            console.print(f"  ✅ Phase 3 (Develop): All {total} tasks complete")
+        elif done > 0 or blocked > 0:
+            console.print(f"  🔄 Phase 3 (Develop): {done}/{total} done, {blocked} blocked")
         else:
-            console.print(f"  ⬜ Phase 3 (Develop): {total_all} tasks pending")
+            console.print(f"  ⬜ Phase 3 (Develop): {total} tasks pending")
     else:
         console.print("  ⬜ Phase 3 (Develop): No tasks")
 

@@ -33,7 +33,7 @@ Skill tags: only skills directly needed
 
 You MUST produce:
 1. .voidrift/ARCHITECTURE.md (use the architecture template)
-2. Task file(s): .voidrift/TASKS.md (single module) or .voidrift/TASKS-<module>.md (multiple)
+2. .voidrift/TASKS.md — single file. For multi-module projects, use ## Module: <name> headers.
 3. ADR file(s) in .voidrift/adr/
 
 Use write_file() to create all artifacts.
@@ -141,17 +141,16 @@ def run_plan(
             cleanup_model(model)
             return 1
 
-    # Validate outputs (AC-P1)
+    # Validate outputs (REQ-P-1)
     has_arch = (d / "ARCHITECTURE.md").exists()
-    has_tasks = (d / "TASKS.md").exists() or list(d.glob("TASKS-*.md"))
+    has_tasks = (d / "TASKS.md").exists()
 
     if not has_arch or not has_tasks:
-        # One retry (AC-P1)
         missing = []
         if not has_arch:
             missing.append("ARCHITECTURE.md")
         if not has_tasks:
-            missing.append("TASKS.md or TASKS-<module>.md")
+            missing.append("TASKS.md")
         console.print(f"[yellow]Missing: {', '.join(missing)} — retrying...[/yellow]")
 
         retry_msg = (
@@ -167,7 +166,7 @@ def run_plan(
                 console.print(f"[red]Retry failed: {e}[/red]")
 
         has_arch = (d / "ARCHITECTURE.md").exists()
-        has_tasks = (d / "TASKS.md").exists() or list(d.glob("TASKS-*.md"))
+        has_tasks = (d / "TASKS.md").exists()
 
         if not has_arch or not has_tasks:
             missing = []

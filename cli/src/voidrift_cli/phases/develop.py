@@ -1,4 +1,4 @@
-"""Phase 3 — Develop: Task execution (AC-D1 through AC-D53)."""
+"""Phase 3 — Develop: Task execution (REQ-D-1 through REQ-D-13)."""
 
 from __future__ import annotations
 
@@ -16,8 +16,8 @@ from ..agent import AgentLoop, build_mcp_tools
 from ..models import ModelConfig, ensure_model_ready, cleanup_model, resolve_model
 from ..utils import (
     ensure_voidrift_dir, voidrift_dir, log_path, check_disk_space,
-    check_requirements_exist, check_task_files, count_tasks, get_next_task,
-    mark_task, truncate_task_label, console,
+    check_requirements_exist, check_task_files, count_tasks,
+    truncate_task_label, console,
 )
 
 DEVELOPER_PROMPT = """[ROLE: Developer]
@@ -25,6 +25,8 @@ DEVELOPER_PROMPT = """[ROLE: Developer]
 You are a Developer in the VoidRift framework. Execute tasks atomically.
 
 You have MCP tools to read project context and write files.
+Use get_next_task() to get your current task.
+Use complete_task() when done.
 Use write_file() to create/modify source files.
 Use get_skill() to load skill conventions for the current task.
 Use read_source_file() to examine existing code.
@@ -54,46 +56,41 @@ def run_develop(
     check_disk_space()
     d = ensure_voidrift_dir()
 
-    # Pre-flight checks
-    if not check_requirements_exist():  # AC-D4a
+    # Pre-flight checks (REQ-D-1)
+    if not check_requirements_exist():
         console.print("[red]REQUIREMENTS.md not found. Run 'voidrift gather <model>' first.[/red]")
         return 1
 
-    task_files, is_multi = check_task_files()
-    if not task_files:  # AC-D2
+    task_file, is_multi = check_task_files()
+    if not task_file:
         console.print("[red]No task files found. Run 'voidrift plan <model>' first.[/red]")
         return 1
 
-    if workers != 1 and not is_multi:  # AC-D1
+    # REQ-D-12
+    if workers != 1 and not is_multi:
         console.print("[yellow]No module headers found. Falling back to single worker.[/yellow]")
         workers = 1
 
-    # Check all tasks complete (AC-D3)
-    all_done = True
-    for tf in task_files:
-        done, blocked, total = count_tasks(tf)
-        if done + blocked < total:
-            all_done = False
-            break
-    if all_done:
+    # REQ-D-2
+    done, blocked, total = count_tasks(task_file)
+    if done + blocked >= total and total > 0:
         console.print("[green]All tasks complete.[/green]")
         return 0
 
-    # Lock file (AC-D5)
+    # Lock file (REQ-D-3)
     lock = d / ".develop.lock"
     if lock.exists():
         try:
             parts = lock.read_text().strip().split("\n")
             pid = int(parts[0])
-            os.kill(pid, 0)  # Check if alive
+            os.kill(pid, 0)
             console.print(f"[red]Develop session already running (PID {pid}, started {parts[1] if len(parts) > 1 else 'unknown'})[/red]")
             return 1
         except (ProcessLookupError, ValueError, IndexError):
-            lock.unlink()  # Stale lock
+            lock.unlink()
 
     lock.write_text(f"{os.getpid()}\n{datetime.now().isoformat()}")
 
-    # SIGTERM handler for clean shutdown
     def _handle_sigterm(signum: int, frame: object) -> None:
         raise KeyboardInterrupt
 
@@ -110,20 +107,28 @@ def run_develop(
     with open(log, "a") as f:
         f.write(f"\n=== Develop session: {datetime.now().isoformat()} ===\n")
 
-    # Set up tools
+    # Set up MCP tools and load tasks
     try:
         import voidrift_mcp.server as mcp_mod
         mcp_mod._boot()
+        mcp_mod.load_tasks(str(task_file))
         tools, handlers = build_mcp_tools(mcp_mod)
     except ImportError:
         tools, handlers = [], {}
 
+    modules = mcp_mod.tasks.modules() if hasattr(mcp_mod, 'tasks') else ["_default"]
+
     result = 1
     try:
-        if is_multi:
-            result = _develop_sequential(worker, architect, task_files, tools, handlers, log)
-        else:
-            result = _develop_loop(worker, architect, task_files[0], tools, handlers, log)
+        if is_multi and workers != 1:
+            # TODO: concurrent worker pool (REQ-D-10, REQ-D-11)
+            console.print("[yellow]Multi-worker mode not yet implemented. Running sequentially.[/yellow]")
+
+        for module in modules:
+            label = f"[{module}] " if is_multi else ""
+            result = _develop_module(worker, architect, module, label, tools, handlers, log)
+            if result != 0:
+                break
     except KeyboardInterrupt:
         console.print("\n[yellow]Interrupted.[/yellow]")
     finally:
@@ -136,52 +141,54 @@ def run_develop(
     return result
 
 
-def _develop_loop(
+def _develop_module(
     worker: ModelConfig,
     architect: ModelConfig | None,
-    task_file: Path,
+    module: str,
+    prefix: str,
     tools: list,
     handlers: dict,
     log: Path,
-    module: str | None = None,
 ) -> int:
-    """Execute tasks from a single task file (AC-D9).
+    """Execute tasks for a single module via MCP task tools (REQ-D-4).
 
     Args:
         worker: Developer model configuration.
         architect: Optional architect model for escalations.
-        task_file: Path to the TASKS*.md file.
+        module: Module name (or '_default' for single-module).
+        prefix: Display prefix (e.g. '[backend] ').
         tools: MCP tool definitions.
         handlers: MCP tool handler functions.
         log: Path to the develop log file.
-        module: Module name for multi-module projects.
 
     Returns:
         Exit code (0 for success, 1 for failure).
     """
+    import voidrift_mcp.server as mcp_mod
+
     escalation_count = 0
     blocked_tasks = 0
     d = voidrift_dir()
+    mod_arg = "" if module == "_default" else module
 
     while True:
-        task_info = get_next_task(task_file)
-        if not task_info:
+        task = mcp_mod.tasks.get_next(mod_arg)
+        if not task:
             break
 
-        task_num, task_text = task_info
-        done, _, total = count_tasks(task_file)
-        label = truncate_task_label(task_text)
-        prefix = f"[{module}] " if module else ""
+        status = mcp_mod.tasks.status(mod_arg)
+        task_num = status["done"] + status["blocked"] + 1
+        total = status["done"] + status["blocked"] + status["remaining"]
+        label = truncate_task_label(f"- [ ] {task.text}")
 
-        console.print(f"\n{prefix}[bold]Task {done + 1}/{total}:[/bold] {label}")
+        console.print(f"\n{prefix}[bold]Task {task_num}/{total}:[/bold] {label}")
 
         # Check for prior architect response
         arch_context = ""
         resp_dir = d / "architect_responses"
-        if module:
-            resp_dir = resp_dir / module
+        if mod_arg:
+            resp_dir = resp_dir / mod_arg
         if resp_dir.is_dir():
-            # Find highest numbered response for this task
             responses = sorted(resp_dir.glob(f"{task_num}-*.md"))
             if responses:
                 arch_context = f"\n\nArchitect guidance:\n{responses[-1].read_text()}"
@@ -194,11 +201,10 @@ def _develop_loop(
             stream=False,
         )
 
-        # Execute task
-        with Status(f"{prefix}Working on task {done + 1}/{total}...", console=console):
+        with Status(f"{prefix}Working on task {task_num}/{total}...", console=console):
             start_time = time.time()
             try:
-                response = agent.send(task_text)
+                response = agent.send(task.text)
                 elapsed = time.time() - start_time
                 with open(log, "a") as f:
                     f.write(f"\n--- Task {task_num}: {label} ({elapsed:.1f}s) ---\n{response}\n")
@@ -208,15 +214,15 @@ def _develop_loop(
                     f.write(f"ERROR on task {task_num}: {e}\n")
                 return 1
 
-        # Check for escalation file (AC-D18)
+        # Check for escalation file (REQ-D-6)
         esc_dir = d / "escalations"
-        if module:
-            esc_dir = esc_dir / module
+        if mod_arg:
+            esc_dir = esc_dir / mod_arg
         esc_file = esc_dir / f"{task_num}.md"
         if esc_file.exists():
             escalation_count += 1
-            if escalation_count > MAX_ESCALATIONS:
-                mark_task(task_file, "!")  # AC-D26
+            if escalation_count > MAX_ESCALATIONS:  # REQ-D-7
+                mcp_mod.tasks.block(mod_arg)
                 blocked_tasks += 1
                 console.print(f"[yellow]Task blocked (max escalations reached)[/yellow]")
                 continue
@@ -224,79 +230,29 @@ def _develop_loop(
             question = esc_file.read_text()
             console.print(f"[yellow]Escalation: {question[:200]}[/yellow]")
 
-            if not architect:  # AC-D19
+            if not architect:
                 console.print("[red]No architect configured. Re-run with an architect model.[/red]")
                 return 1
 
-            guidance = _consult_architect(architect, question, task_text, tools, handlers, log, module)
+            guidance = _consult_architect(architect, question, task.text, tools, handlers, log, mod_arg or None)
             if guidance:
-                # Write response and retry
                 resp_dir.mkdir(parents=True, exist_ok=True)
                 n = len(list(resp_dir.glob(f"{task_num}-*.md"))) + 1
                 (resp_dir / f"{task_num}-{n}.md").write_text(guidance)
-                continue  # Retry same task
+                continue
             else:
                 return 1
 
-        # Mark complete (AC-D34)
-        mark_task(task_file)
+        # Mark complete via MCP (REQ-D-9)
+        mcp_mod.tasks.complete(mod_arg)
         console.print(f"  [green]✓[/green] {label} ({elapsed:.1f}s)")
 
-    # Summary (AC-D27)
     if blocked_tasks > 0:
-        console.print(f"\n[yellow]{blocked_tasks} task(s) blocked — marked [!] in {task_file.name}[/yellow]")
-        for line in task_file.read_text().splitlines():
-            if "- [!]" in line:
-                console.print(f"  {line.strip()}")
+        console.print(f"\n[yellow]{blocked_tasks} task(s) blocked — marked [!] in TASKS.md[/yellow]")
         return 1
 
-    console.print(f"\n[green]✅ All tasks complete in {task_file.name}[/green]")
-    return 0
-
-
-def _develop_sequential(
-    worker: ModelConfig,
-    architect: ModelConfig | None,
-    task_files: list[Path],
-    tools: list,
-    handlers: dict,
-    log: Path,
-) -> int:
-    """Process multiple modules sequentially (AC-D33).
-
-    Args:
-        worker: Developer model configuration.
-        architect: Optional architect model for escalations.
-        task_files: List of TASKS-<module>.md file paths.
-        tools: MCP tool definitions.
-        handlers: MCP tool handler functions.
-        log: Path to the develop log file.
-
-    Returns:
-        Exit code (0 for success, 1 for failure).
-    """
-    d = voidrift_dir()
-    tasks_md = d / "TASKS.md"
-
-    for tf in sorted(task_files):
-        module = tf.stem.replace("TASKS-", "")
-        console.print(f"\n[bold cyan]Module: {module}[/bold cyan]")
-
-        # Copy module tasks to TASKS.md (AC-D34)
-        import shutil
-        shutil.copy2(tf, tasks_md)
-
-        result = _develop_loop(worker, architect, tasks_md, tools, handlers, log, module=module)
-
-        # Sync back (AC-D34)
-        shutil.copy2(tasks_md, tf)
-
-        if result != 0:
-            tasks_md.unlink(missing_ok=True)
-            return result
-
-    # Clean up (AC-D36)
-    tasks_md.unlink(missing_ok=True)
+    mod_label = module if module != "_default" else "all"
+    console.print(f"\n[green]✅ {prefix}All tasks complete ({mod_label})[/green]")
     return 0
 
 

@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from voidrift_cli.utils import (
-    count_tasks, get_next_task, mark_task, extract_skill_tags,
+    count_tasks, extract_skill_tags,
     truncate_task_label,
     voidrift_dir, ensure_voidrift_dir, check_requirements_exist,
     check_task_files, log_path, check_disk_space,
@@ -32,56 +32,6 @@ class TestCountTasks:
 
     def test_missing_file(self, voidrift_dir):
         assert count_tasks(voidrift_dir / "NOPE.md") == (0, 0, 0)
-
-
-class TestGetNextTask:
-    def test_finds_first_unchecked(self, sample_tasks):
-        result = get_next_task(sample_tasks)
-        assert result is not None
-        num, text = result
-        assert num == 2
-        assert "src/utils.py" in text
-
-    def test_skips_done_and_blocked(self, voidrift_dir):
-        tf = voidrift_dir / "TASKS.md"
-        tf.write_text("- [x] Done\n- [!] Blocked\n- [ ] This one\n")
-        result = get_next_task(tf)
-        assert result is not None
-        assert result[0] == 3
-        assert "This one" in result[1]
-
-    def test_none_when_all_done(self, voidrift_dir):
-        tf = voidrift_dir / "TASKS.md"
-        tf.write_text("- [x] Done 1\n- [x] Done 2\n")
-        assert get_next_task(tf) is None
-
-    def test_missing_file(self, voidrift_dir):
-        assert get_next_task(voidrift_dir / "NOPE.md") is None
-
-
-class TestMarkTask:
-    def test_marks_first_unchecked(self, sample_tasks):
-        mark_task(sample_tasks)
-        text = sample_tasks.read_text()
-        # First unchecked (utils.py) should now be [x]
-        lines = [l for l in text.splitlines() if "utils.py" in l]
-        assert lines and "[x]" in lines[0]
-
-    def test_marks_blocked(self, voidrift_dir):
-        tf = voidrift_dir / "TASKS.md"
-        tf.write_text("- [ ] Task A\n- [ ] Task B\n")
-        mark_task(tf, "!")
-        text = tf.read_text()
-        assert "- [!] Task A" in text
-        assert "- [ ] Task B" in text
-
-    def test_only_marks_first(self, voidrift_dir):
-        tf = voidrift_dir / "TASKS.md"
-        tf.write_text("- [ ] First\n- [ ] Second\n")
-        mark_task(tf)
-        text = tf.read_text()
-        assert "- [x] First" in text
-        assert "- [ ] Second" in text
 
 
 class TestExtractSkillTags:
@@ -141,20 +91,22 @@ class TestProjectDirHelpers:
         assert not check_requirements_exist()
 
     def test_check_task_files_single(self, tmp_project, sample_tasks):
-        files, is_multi = check_task_files()
-        assert len(files) == 1
+        result, is_multi = check_task_files()
+        assert result is not None
         assert not is_multi
 
     def test_check_task_files_multi(self, tmp_project, voidrift_dir):
-        (voidrift_dir / "TASKS-backend.md").write_text("- [ ] Task 1 [backend]\n")
-        (voidrift_dir / "TASKS-frontend.md").write_text("- [ ] Task 2 [frontend]\n")
-        files, is_multi = check_task_files()
-        assert len(files) == 2
+        (voidrift_dir / "TASKS.md").write_text(
+            "## Module: backend\n- [ ] Task 1 [backend]\n"
+            "## Module: frontend\n- [ ] Task 2 [frontend]\n"
+        )
+        result, is_multi = check_task_files()
+        assert result is not None
         assert is_multi
 
     def test_check_task_files_none(self, tmp_project):
-        files, is_multi = check_task_files()
-        assert files == []
+        result, is_multi = check_task_files()
+        assert result is None
         assert not is_multi
 
     def test_log_path_format(self, tmp_project):

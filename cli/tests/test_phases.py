@@ -212,8 +212,10 @@ class TestDevelopPreflightChecks:
     @patch("voidrift_cli.phases.develop.AgentLoop")
     def test_sequential_multi_module(self, MockAgent, tmp_project, cloud_model, sample_requirements, mock_model_ready):
         vd = tmp_project / ".voidrift"
-        (vd / "TASKS-backend.md").write_text("- [ ] Task A [backend]\n")
-        (vd / "TASKS-frontend.md").write_text("- [ ] Task B [frontend]\n")
+        (vd / "TASKS.md").write_text(
+            "## Module: backend\n- [ ] Task A [backend]\n"
+            "## Module: frontend\n- [ ] Task B [frontend]\n"
+        )
 
         mock_instance = MagicMock()
         mock_instance.send.return_value = "done"
@@ -222,9 +224,9 @@ class TestDevelopPreflightChecks:
         from voidrift_cli.phases.develop import run_develop
         result = run_develop(cloud_model)
         assert result == 0
-        # Both module files should be marked complete
-        assert "[x]" in (vd / "TASKS-backend.md").read_text()
-        assert "[x]" in (vd / "TASKS-frontend.md").read_text()
+        # Both modules should be marked complete in single file
+        text = (vd / "TASKS.md").read_text()
+        assert text.count("[x]") == 2
 
 
 # ── Automate ────────────────────────────────────────────────────────────
