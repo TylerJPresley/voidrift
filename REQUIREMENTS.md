@@ -364,19 +364,13 @@ This allows regenerating the plan from scratch without manually deleting files.
 
 **AC-P6:** The `edit-format: whole` setting is used for planning. This prevents SEARCH/REPLACE failures that occur when aider commits `.voidrift/ARCHITECTURE.md` mid-response, which would cause subsequent SEARCH blocks to fail to match and reject the entire response including new `.voidrift/TASKS-*.md` files.
 
-**AC-P7 — Subproject identification:** A subproject is an independently deployable unit with its own source tree that does not share source files with other subprojects (e.g., a backend API and a frontend SPA). The planner:
-1. Lists all deployable units implied by requirements
-2. Creates one `.voidrift/TASKS-<module>.md` per subproject when there are two or more
-3. Creates a single `.voidrift/TASKS.md` when there is only one deployable unit
-4. Always creates `.voidrift/TASKS-infra.md` when any build, packaging, or deployment artifact is required
+**AC-P7 — Module identification:** A module is an independently deployable unit with its own source tree (e.g., a backend API and a frontend SPA, or an engine and an editor). The planner:
+1. Identifies all deployable units implied by requirements
+2. Creates a single `.voidrift/TASKS.md` when there is only one deployable unit
+3. Creates one `.voidrift/TASKS-<module>.md` per module when there are two or more, with module names chosen by the architect to reflect the project's structure
+4. Infrastructure, build, and deployment tasks may be placed in their own module if they touch files not owned by any other module
 
-**AC-P8 — .voidrift/TASKS-infra.md triggers:** A `.voidrift/TASKS-infra.md` must be created whenever the project requires any of:
-- Containerized: `Dockerfile`, `Containerfile`, `docker-compose.yml`, `podman-compose.yml`
-- Native/binary: `Makefile`, `CMakeLists.txt`, build scripts, install scripts, systemd/launchd units
-- Cloud/IaC: Terraform, CDK, Pulumi, Ansible playbooks
-- Distribution: `.deb`/`.rpm` packaging, Homebrew formula, snap/flatpak, GitHub Releases workflow
-- Config/secrets: `.env.example`, config file templates, secrets rotation scripts
-- CI/CD: GitHub Actions workflows, Jenkinsfiles, GitLab CI configs
+**AC-P8 — File ownership constraint:** Each file path must appear in exactly one module's task file. No file may be created or modified by tasks in more than one module. Shared files (e.g., root config, docker-compose, CI workflows) must be assigned to a single module. This ensures parallel execution is safe by construction — modules cannot overwrite each other's work.
 
 **AC-P9 — Task format requirements:** Each task line must be a single atomic file operation with this exact format:
 
@@ -409,20 +403,18 @@ These are not tasks - they're categories. Each must be broken into specific file
 
 **AC-P10 — No shell commands in tasks:** Tasks describe file content to create or modify. The worker is a file editor and cannot execute shell commands. Tasks must never say "run npm install", "run pip install", "execute make", etc. Instead, they describe the resulting files (e.g., "Create `package.json` with `dependencies` field listing `axios@^1.6`").
 
-**AC-P11:** Infrastructure tasks (`[infra]` tagged) are placed exclusively in `.voidrift/TASKS-infra.md`. They are never mixed into source subproject task files.
+**AC-P11:** Skill tags are chosen from the available skills in `<VOIDRIFT_HOME>/skills/`. Only skills directly relevant to a specific task are tagged. Over-tagging wastes context window on every invocation for that task.
 
-**AC-P12:** Skill tags are chosen from the available skills in `<VOIDRIFT_HOME>/skills/`. Only skills directly relevant to a specific task are tagged. Over-tagging wastes context window on every aider invocation for that task.
+**AC-P12:** After the architect writes task files, all skill tags used in tasks are validated against the available skill files in `<VOIDRIFT_HOME>/skills/`. If any invalid tags are found, the plan phase fails with an error listing the invalid tags and the available valid tags. The operator must correct the task files before proceeding.
 
-**AC-P13:** After the architect writes task files, all skill tags used in tasks are validated against the available skill files in `<VOIDRIFT_HOME>/skills/`. If any invalid tags are found, the plan phase fails with an error listing the invalid tags and the available valid tags. The operator must correct the task files before proceeding.
+**AC-P13:** Feature plan: produces `.voidrift/adr/ADR-NNN-<feature>.md`. ADR number is chosen by inspecting existing files in `.voidrift/adr/` and incrementing.
 
-**AC-P14:** Feature plan: produces `.voidrift/adr/ADR-NNN-<feature>.md`. ADR number is chosen by inspecting existing files in `.voidrift/adr/` and incrementing.
+**AC-P14:** Full project plan: produces `.voidrift/adr/ADR-001-architecture.md` as the master architectural decision record.
 
-**AC-P15:** Full project plan: produces `.voidrift/adr/ADR-001-architecture.md` as the master architectural decision record.
-
-**AC-P16:** `.voidrift/ARCHITECTURE.md` is the shared technical reference for all workers during develop. It contains: Components table, Data Models, API Surface, Configuration, Dependencies, Decisions (ADR references), Constraints & Limitations, Glossary. If it already exists, only the affected sections are updated; all other content is preserved.
+**AC-P15:** `.voidrift/ARCHITECTURE.md` is the shared technical reference for all workers during develop. It contains: Components table, Data Models, API Surface, Configuration, Dependencies, Decisions (ADR references), Constraints & Limitations, Glossary. If it already exists, only the affected sections are updated; all other content is preserved.
 
 ### Artifacts
-- `.voidrift/TASKS.md` (single subproject) or `.voidrift/TASKS-<module>.md` files (multiple subprojects)
+- `.voidrift/TASKS.md` (single module) or `.voidrift/TASKS-<module>.md` files (multiple modules)
 - `.voidrift/ARCHITECTURE.md`
 - `.voidrift/adr/ADR-NNN-<title>.md`
 - `plan-*.log`
@@ -599,13 +591,13 @@ For single-module projects (only `TASKS.md` exists), only `.voidrift/STATE.md` i
 
 **AC-D32:** `_guard_complete` is available to re-mark a task `[x]` if a subsequent aider call reverts it back to `[ ]` (models sometimes undo checkboxes when editing files they were given as context).
 
-### Sequential Mode (multiple subprojects)
+### Sequential Mode (multiple modules)
 
 **AC-D33:** When `.voidrift/TASKS-<module>.md` files are present and `--parallel` is not specified, modules are processed in alphabetical order, one at a time.
 
 **AC-D34:** Before each module, its `.voidrift/TASKS-<module>.md` is copied to `.voidrift/TASKS.md`. After the module's loop completes, `.voidrift/TASKS.md` is copied back to `.voidrift/TASKS-<module>.md` to sync completion state.
 
-**AC-D35:** Each progress line is prefixed with `[module]` to identify which subproject is active.
+**AC-D35:** Each progress line is prefixed with `[module]` to identify which module is active.
 
 **AC-D36:** `.voidrift/TASKS.md` is deleted after all sequential modules complete.
 
@@ -851,8 +843,8 @@ Returns exit code 0 on success, 1 on error.
 ├── ARCHITECTURE.md           # Architecture reference
 ├── STATE.md                  # Project-level state summary
 ├── STATE-<module>.md         # Module-level state (multi-module projects)
-├── TASKS.md                  # Task list (single subproject)
-├── TASKS-<module>.md         # Task lists (multiple subprojects)
+├── TASKS.md                  # Task list (single module)
+├── TASKS-<module>.md         # Task lists (multiple modules)
 ├── spec/                     # Feature specifications
 │   └── <feature>.md
 ├── adr/                      # Architecture decision records
