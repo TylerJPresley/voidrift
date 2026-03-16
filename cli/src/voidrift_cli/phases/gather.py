@@ -148,6 +148,8 @@ def run_gather(
                 f.write(f"\n> {user_input}\n")
 
             try:
+                sys.stdout.write("\n\n")
+                sys.stdout.flush()
                 response = agent.send(user_input)
             except RuntimeError as e:
                 err_console.print(f"\n[red]Error: {e}[/red]")
