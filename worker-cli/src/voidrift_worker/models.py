@@ -64,6 +64,19 @@ def list_models() -> dict[str, ModelConfig]:
     return result
 
 
+def _ssh_target() -> str:
+    """Return user@ip SSH target string.
+
+    Raises:
+        RuntimeError: If WORKER_USR or WORKER_IP are not set.
+    """
+    user = os.environ.get("WORKER_USR", "")
+    ip = os.environ.get("WORKER_IP", "")
+    if not user or not ip:
+        raise RuntimeError("WORKER_USR and WORKER_IP must be set for local models")
+    return f"{user}@{ip}"
+
+
 def ssh_cmd(cmd: str) -> subprocess.CompletedProcess:
     """Run a command on the worker node via SSH (REQ-WK-2).
 
@@ -76,16 +89,32 @@ def ssh_cmd(cmd: str) -> subprocess.CompletedProcess:
     Raises:
         RuntimeError: If WORKER_USR or WORKER_IP are not set.
     """
-    user = os.environ.get("WORKER_USR", "")
-    ip = os.environ.get("WORKER_IP", "")
-    if not user or not ip:
-        raise RuntimeError("WORKER_USR and WORKER_IP must be set for local models")
     return subprocess.run(
-        ["ssh", "-o", "ConnectTimeout=5", f"{user}@{ip}", cmd],
+        ["ssh", "-o", "ConnectTimeout=5", _ssh_target(), cmd],
         capture_output=True,
         text=True,
         timeout=30,
     )
+
+
+def ssh_stream(cmd: str, timeout: int = 600) -> int:
+    """Run a command on the worker node via SSH, streaming output to stdout.
+
+    Args:
+        cmd: Shell command string to execute remotely.
+        timeout: Max seconds to wait (default 600).
+
+    Returns:
+        Exit code from the remote command.
+
+    Raises:
+        RuntimeError: If WORKER_USR or WORKER_IP are not set.
+    """
+    result = subprocess.run(
+        ["ssh", "-o", "ConnectTimeout=5", _ssh_target(), cmd],
+        timeout=timeout,
+    )
+    return result.returncode
 
 
 def start_model(alias: str, refresh: bool = False) -> None:
@@ -314,3 +343,80 @@ def get_gateway_status() -> dict:
     except (httpx.ConnectError, httpx.ReadTimeout):
         pass
     return {"active": False, "url": None}
+
+
+# --- Worker node management (REQ-WK-6a..14) ---
+
+
+def models_list_cached() -> str:
+    """List cached models on worker node (REQ-WK-6)."""
+    r = ssh_cmd("uvx huggingface-cli cache ls 2>&1")
+    return r.stdout or r.stderr
+
+
+def models_pull(alias: str) -> int:
+    """Download model weights for alias (REQ-WK-6a)."""
+    available = list_models()
+    if alias not in available:
+        raise ValueError(f"Unknown alias: {alias}. Available: {', '.join(sorted(available))}")
+    repo = available[alias].repository
+    return ssh_stream(f"uvx huggingface-cli download {repo}", timeout=1800)
+
+
+def models_remove(revision_id: str) -> int:
+    """Remove a cached model revision (REQ-WK-6b)."""
+    return ssh_stream(f"uvx huggingface-cli cache rm {revision_id}")
+
+
+def models_prune() -> int:
+    """Clean broken/detached revisions (REQ-WK-6c)."""
+    return ssh_stream("uvx huggingface-cli cache prune --yes")
+
+
+def models_fix_perms() -> int:
+    """Fix HuggingFace cache permissions (REQ-WK-6d)."""
+    return ssh_stream("chmod -R u+w ~/.cache/huggingface")
+
+
+def worker_logs(follow: bool = False) -> int:
+    """Show active container logs (REQ-WK-11)."""
+    s = get_status()
+    if not s["active"]:
+        raise RuntimeError("No active model container.")
+    flag = "-f" if follow else "--tail 200"
+    return ssh_stream(f"docker logs {flag} {s['container']}", timeout=3600 if follow else 30)
+
+
+def worker_info() -> str:
+    """Report GPU, disk, and memory from worker node (REQ-WK-12)."""
+    r = ssh_cmd(
+        "echo '=== GPU ===' && nvidia-smi --query-gpu=name,memory.used,memory.total,utilization.gpu "
+        "--format=csv,noheader 2>/dev/null || echo 'nvidia-smi not available' && "
+        "echo '\\n=== Disk ===' && df -h / ~/.cache 2>/dev/null && "
+        "echo '\\n=== Memory ===' && free -h"
+    )
+    return r.stdout or r.stderr
+
+
+def images_pull(image: str | None = None) -> int:
+    """Pull a docker image on the worker node (REQ-WK-13)."""
+    if image is None:
+        config = load_worker_models()
+        models_cfg = config.get("models", {})
+        if models_cfg:
+            first = next(iter(models_cfg.values()))
+            image = first.get("docker_image", "scitrera/dgx-spark-vllm:0.17.0-t5")
+        else:
+            image = "scitrera/dgx-spark-vllm:0.17.0-t5"
+    return ssh_stream(f"docker pull {image}", timeout=600)
+
+
+def images_list() -> str:
+    """List docker images on the worker node (REQ-WK-13)."""
+    r = ssh_cmd("docker images --format 'table {{.Repository}}\\t{{.Tag}}\\t{{.Size}}'")
+    return r.stdout or r.stderr
+
+
+def cache_clear() -> int:
+    """Clear compiled kernel caches on worker node (REQ-WK-14)."""
+    return ssh_stream("rm -rf ~/.cache/flashinfer/* ~/.cache/vllm/*")

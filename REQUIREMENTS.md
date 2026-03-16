@@ -147,12 +147,20 @@
 - **REQ-WK-3:** `worker stop` SHALL SSH to the worker node and stop the active model container.
 - **REQ-WK-4:** `worker status` SHALL report the active model (if any), container health, and API endpoint URL.
 - **REQ-WK-5:** `worker bench [<num_prompts>] [<req_rate>]` SHALL benchmark the active model using vLLM's benchmark tool via SSH.
-- **REQ-WK-6:** `worker models` SHALL list available model aliases from `worker-models.yml` with repository, served name, and status (running/stopped).
+- **REQ-WK-6:** `worker models list` SHALL list cached models on the worker node with disk usage via `uvx hf cache ls` over SSH.
+- **REQ-WK-6a:** `worker models pull <alias>` SHALL resolve the HF repository from `worker-models.yml` and download it on the worker node via `uvx hf download` over SSH.
+- **REQ-WK-6b:** `worker models remove <id>` SHALL delete a cached model revision on the worker node via `uvx hf cache rm` over SSH.
+- **REQ-WK-6c:** `worker models prune` SHALL clean broken/detached revisions on the worker node via `uvx hf cache prune` over SSH.
+- **REQ-WK-6d:** `worker models fix-perms` SHALL fix HuggingFace cache permissions on the worker node via `chmod -R u+w` over SSH.
 - **REQ-WK-7:** Only one local model container SHALL run at a time on the worker node.
 - **REQ-WK-8:** Model configurations SHALL be defined in `worker-models.yml` specifying: repository, docker image, GPU memory utilization, max model length, vLLM args, served model name, and cache mounts.
 - **REQ-WK-9:** `worker kiro start` SHALL start the Kiro Gateway container. `worker kiro stop` SHALL stop it. `worker kiro status` SHALL report health and available models.
 - **REQ-WK-10:** WHEN Kiro Gateway credentials are invalid (expired token, database permissions), THE SYSTEM SHALL stop immediately with a clear error message identifying the failure mode.
   - *Rationale:* Prevents the CLI from entering an infinite retry loop against invalid credentials. The error message directs the operator to the specific fix (re-login, chmod).
+- **REQ-WK-11:** `worker logs [--follow]` SHALL display logs from the active model container via `docker logs` over SSH. IF `--follow` is specified, logs SHALL stream continuously.
+- **REQ-WK-12:** `worker info` SHALL report worker node GPU status (`nvidia-smi`), disk usage (`df -h`), and memory (`free -h`) over SSH.
+- **REQ-WK-13:** `worker images pull [<image>]` SHALL pull a vLLM docker image on the worker node. IF no image is specified, THE SYSTEM SHALL pull the default image from `worker-models.yml`. `worker images list` SHALL list docker images on the worker node.
+- **REQ-WK-14:** `worker cache clear` SHALL remove compiled kernel caches (flashinfer, vllm) on the worker node over SSH.
 
 ### 4.12 Git
 

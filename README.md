@@ -122,17 +122,18 @@ The unified memory architecture allows efficient model loading without CPU-GPU t
    
    # For gated models, login first
    uvx huggingface-cli login
-   
-   # Download models
-   uvx hf download Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8
-   uvx hf download Qwen/Qwen3-32B-FP8
-   uvx hf download ibm-granite/granite-4.0-h-small-FP8
+   ```
+
+   Then download models using the worker CLI:
+   ```bash
+   worker models pull qwen3-coder
+   worker models pull qwen3-instruct
+   worker models pull qwen3-8b
    ```
 
 5. **Pull vLLM Docker image:**
    ```bash
-   ssh $WORKER_USR@$WORKER_IP
-   docker pull scitrera/dgx-spark-vllm:0.17.0-t5
+   worker images pull
    ```
 
 **Available Docker Images:**
@@ -164,27 +165,40 @@ ssh $WORKER_USR@$WORKER_IP "docker pull nvcr.io/nvidia/vllm:26.02-py3"
 
 ```bash
 # List cached models and disk usage
-ssh $WORKER_USR@$WORKER_IP "uvx hf cache ls"
+worker models list
 
-# Delete a specific model by ID
-ssh $WORKER_USR@$WORKER_IP "uvx hf cache rm <ID>"
+# Download model weights by alias
+worker models pull qwen3-coder
+
+# Delete a specific model by revision ID
+worker models remove <ID>
 
 # Clean broken/detached revisions
-ssh $WORKER_USR@$WORKER_IP "uvx hf cache prune"
+worker models prune
 
-# Reset compiled kernel cache (if experiencing GPU issues)
-ssh $WORKER_USR@$WORKER_IP "rm -rf ~/.cache/flashinfer/*"
+# Reset compiled kernel caches (if experiencing GPU issues)
+worker cache clear
 
-# Check running containers
-ssh $WORKER_USR@$WORKER_IP "docker ps"
+# Check active model and gateway status
+worker status
 
 # View container logs
-ssh $WORKER_USR@$WORKER_IP "docker logs worker-<model>"
+worker logs
+worker logs --follow
+
+# Worker node GPU, disk, and memory
+worker info
+
+# Pull vLLM docker image (default from config)
+worker images pull
+
+# Pull a specific image
+worker images pull vllm/vllm-openai:latest-aarch64-cu130
 ```
 
-**Note:** If you encounter "Permission denied" errors when removing models, fix folder permissions:
+**Note:** If you encounter "Permission denied" errors when removing models:
 ```bash
-ssh $WORKER_USR@$WORKER_IP "chmod -R u+w ~/.cache/huggingface"
+worker models fix-perms
 ```
 
 ### Framework Configuration
@@ -391,8 +405,18 @@ voidrift verify qwen3-coder claude
 - **`worker start <alias> [--refresh]`** - Start a local model container
 - **`worker stop`** - Stop the active model container
 - **`worker status`** - Show active model and gateway status
-- **`worker models`** - List available model aliases
+- **`worker logs [--follow]`** - Show active container logs
+- **`worker info`** - Report worker node GPU, disk, and memory
 - **`worker bench [<num>] [<rate>]`** - Benchmark active model
+- **`worker models list`** - List cached models and disk usage
+- **`worker models aliases`** - List configured aliases from worker-models.yml
+- **`worker models pull <alias>`** - Download model weights
+- **`worker models remove <id>`** - Remove a cached model revision
+- **`worker models prune`** - Clean broken/detached revisions
+- **`worker models fix-perms`** - Fix HuggingFace cache permissions
+- **`worker images pull [<image>]`** - Pull vLLM docker image (default from config)
+- **`worker images list`** - List docker images on worker node
+- **`worker cache clear`** - Clear flashinfer/vllm kernel caches
 - **`worker kiro start`** - Start Kiro Gateway
 - **`worker kiro stop`** - Stop Kiro Gateway
 - **`worker kiro status`** - Check gateway health
@@ -541,10 +565,10 @@ Edit `.voidrift/TASKS.md` and use tags from `resources/skills/`
 Review `.voidrift/architect_responses/` for guidance, or re-run with architect model.
 
 ### Container won't start or keeps crashing
-- Check worker node logs: `ssh $WORKER_USR@$WORKER_IP docker logs worker-<model>`
-- Verify GPU availability: `ssh $WORKER_USR@$WORKER_IP nvidia-smi`
-- Check disk space on worker: `ssh $WORKER_USR@$WORKER_IP df -h`
+- Check worker node logs: `worker logs`
+- Check GPU, disk, and memory: `worker info`
 - Force recreation: `worker start <alias> --refresh`
+- Clear kernel caches: `worker cache clear`
 
 ### Model configuration changes not taking effect
 Use `worker start <alias> --refresh` to force container recreation after editing `worker-models.yml`

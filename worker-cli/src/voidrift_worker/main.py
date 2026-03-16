@@ -10,15 +10,26 @@ import click
 from rich.console import Console
 
 from .models import (
+    cache_clear,
+    get_gateway_status,
+    get_status,
+    images_list,
+    images_pull,
     list_models,
     load_worker_models,
-    start_model,
-    stop_model,
-    get_status,
-    start_gateway,
-    stop_gateway,
-    get_gateway_status,
+    models_fix_perms,
+    models_list_cached,
+    models_prune,
+    models_pull,
+    models_remove,
     ssh_cmd,
+    ssh_stream,
+    start_gateway,
+    start_model,
+    stop_gateway,
+    stop_model,
+    worker_info,
+    worker_logs,
 )
 
 console = Console()
@@ -80,19 +91,179 @@ def status() -> None:
 
 
 @cli.command()
-def models() -> None:
-    """List available model aliases (REQ-WK-6)."""
+@click.option("--follow", "-f", is_flag=True, help="Stream logs continuously")
+def logs(follow: bool) -> None:
+    """Show active container logs (REQ-WK-11)."""
+    try:
+        rc = worker_logs(follow=follow)
+        sys.exit(rc)
+    except RuntimeError as e:
+        err_console.print(f"[red]{e}[/red]")
+        sys.exit(1)
+
+
+@cli.command()
+def info() -> None:
+    """Report worker node GPU, disk, and memory (REQ-WK-12)."""
+    try:
+        output = worker_info()
+        console.print(output)
+    except RuntimeError as e:
+        err_console.print(f"[red]Error: {e}[/red]")
+        sys.exit(1)
+
+
+# --- worker models --- (REQ-WK-6)
+
+
+@cli.group("models")
+def models_group() -> None:
+    """Manage model weights on the worker node."""
+
+
+@models_group.command("list")
+def models_list_cmd() -> None:
+    """List cached models and disk usage (REQ-WK-6)."""
+    try:
+        output = models_list_cached()
+        console.print(output)
+    except RuntimeError as e:
+        err_console.print(f"[red]Error: {e}[/red]")
+        sys.exit(1)
+
+
+@models_group.command("aliases")
+def models_aliases_cmd() -> None:
+    """List configured model aliases from worker-models.yml."""
     available = list_models()
     if not available:
         console.print("No models configured. Check worker-models.yml.")
         return
-
     s = get_status()
     active_alias = s["model"] if s["active"] else None
-
     for alias, m in sorted(available.items()):
         marker = " ✅" if alias == active_alias else ""
         console.print(f"  {alias:<20} {m.repository}{marker}")
+
+
+@models_group.command("pull")
+@click.argument("alias")
+def models_pull_cmd(alias: str) -> None:
+    """Download model weights for an alias (REQ-WK-6a)."""
+    try:
+        console.print(f"Downloading {alias}...")
+        rc = models_pull(alias)
+        if rc == 0:
+            console.print(f"✅ {alias} downloaded.")
+        else:
+            sys.exit(rc)
+    except (RuntimeError, ValueError) as e:
+        err_console.print(f"[red]Error: {e}[/red]")
+        sys.exit(1)
+
+
+@models_group.command("remove")
+@click.argument("revision_id")
+def models_remove_cmd(revision_id: str) -> None:
+    """Remove a cached model revision by ID (REQ-WK-6b)."""
+    try:
+        rc = models_remove(revision_id)
+        if rc == 0:
+            console.print("✅ Removed.")
+        else:
+            sys.exit(rc)
+    except RuntimeError as e:
+        err_console.print(f"[red]Error: {e}[/red]")
+        sys.exit(1)
+
+
+@models_group.command("prune")
+def models_prune_cmd() -> None:
+    """Clean broken/detached revisions (REQ-WK-6c)."""
+    try:
+        rc = models_prune()
+        if rc == 0:
+            console.print("✅ Pruned.")
+        else:
+            sys.exit(rc)
+    except RuntimeError as e:
+        err_console.print(f"[red]Error: {e}[/red]")
+        sys.exit(1)
+
+
+@models_group.command("fix-perms")
+def models_fix_perms_cmd() -> None:
+    """Fix HuggingFace cache permissions (REQ-WK-6d)."""
+    try:
+        rc = models_fix_perms()
+        if rc == 0:
+            console.print("✅ Permissions fixed.")
+        else:
+            sys.exit(rc)
+    except RuntimeError as e:
+        err_console.print(f"[red]Error: {e}[/red]")
+        sys.exit(1)
+
+
+# --- worker images --- (REQ-WK-13)
+
+
+@cli.group("images")
+def images_group() -> None:
+    """Manage docker images on the worker node."""
+
+
+@images_group.command("pull")
+@click.argument("image", required=False)
+def images_pull_cmd(image: str | None) -> None:
+    """Pull a vLLM docker image (REQ-WK-13). Default: image from worker-models.yml."""
+    try:
+        label = image or "default image"
+        console.print(f"Pulling {label}...")
+        rc = images_pull(image)
+        if rc == 0:
+            console.print("✅ Image pulled.")
+        else:
+            sys.exit(rc)
+    except RuntimeError as e:
+        err_console.print(f"[red]Error: {e}[/red]")
+        sys.exit(1)
+
+
+@images_group.command("list")
+def images_list_cmd() -> None:
+    """List docker images on the worker node (REQ-WK-13)."""
+    try:
+        output = images_list()
+        console.print(output)
+    except RuntimeError as e:
+        err_console.print(f"[red]Error: {e}[/red]")
+        sys.exit(1)
+
+
+# --- worker cache --- (REQ-WK-14)
+
+
+@cli.group("cache")
+def cache_group() -> None:
+    """Manage compiled kernel caches on the worker node."""
+
+
+@cache_group.command("clear")
+def cache_clear_cmd() -> None:
+    """Clear flashinfer and vllm caches (REQ-WK-14)."""
+    try:
+        rc = cache_clear()
+        if rc == 0:
+            console.print("✅ Caches cleared.")
+        else:
+            sys.exit(rc)
+    except RuntimeError as e:
+        err_console.print(f"[red]Error: {e}[/red]")
+        sys.exit(1)
+
+
+# --- worker bench --- (REQ-WK-5)
 
 
 @cli.command()
@@ -109,30 +280,28 @@ def bench(num_prompts: int, req_rate: float) -> None:
     console.print(f"Container: {s['container']}")
 
     try:
-        # Get model info
-        worker_ip = os.environ.get("WORKER_IP", "")
         config = load_worker_models()
         port = config.get("worker", {}).get("port", 8000)
         r = ssh_cmd(f"curl -s http://localhost:{port}/v1/models")
         console.print(f"Models API: {r.stdout[:200]}")
 
-        # Run benchmark
         rate_arg = f"--request-rate {req_rate}" if req_rate > 0 else "--request-rate inf"
         bench_cmd = (
             f"docker exec {s['container']} python -m vllm.entrypoints.openai.api_server "
             f"--benchmark --num-prompts {num_prompts} {rate_arg}"
         )
         console.print("[dim]Running benchmark...[/dim]")
-        subprocess.run(
-            ["ssh", f"{os.environ.get('WORKER_USR', '')}@{worker_ip}", bench_cmd],
-            timeout=600,
-        )
+        rc = ssh_stream(bench_cmd, timeout=600)
+        sys.exit(rc)
     except subprocess.TimeoutExpired:
         err_console.print("[red]Benchmark timed out[/red]")
         sys.exit(1)
     except (subprocess.SubprocessError, OSError, RuntimeError) as e:
         err_console.print(f"[red]Benchmark failed: {e}[/red]")
         sys.exit(1)
+
+
+# --- worker kiro --- (REQ-WK-9)
 
 
 @cli.group()
