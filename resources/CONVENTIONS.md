@@ -26,7 +26,7 @@
 3. During Phase 3 (Develop), the `develop` command scans all task lines for `[skill, ...]` tags, deduplicates the union, and loads each matching skill file as read-only context for the worker.
 4. Only tag skills the specific task genuinely requires — every skill consumes context window.
 
-**Available skills:** `backend` · `frontend` · `infra` · `native` · `design` · `branding` · `security` · `tdd` · `debugging` · `verification` · `worktrees`
+**Available skills:** `architecture` · `api-design` · `distributed-patterns` · `data-persistence` · `data-modeling` · `web-ui` · `web-perf-seo` · `mobile-dev` · `ux-accessibility` · `branding` · `i18n-l10n` · `infrastructure` · `devops-cicd` · `package-distribution` · `observability` · `security-eng` · `compliance-privacy` · `system-prog` · `integrations` · `testing-qa` · `debugging` · `verification` · `refactoring` · `tech-writing` · `worktrees` · `machine-learning` · `game-dev` · `embedded-systems` · `sre-principles` · `cloud-native` · `scale-perf` · `ai-safety-ethics` · `operational-excellence`
 
 ---
 

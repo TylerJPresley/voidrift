@@ -120,4 +120,4 @@ class TestMarkdownIndex:
         assert count > 50  # We know there are 221+ sections
         # Verify key sections are findable
         assert idx.get_section("Escalation Protocol") is not None
-        assert len(idx.search("backend", file_filter="skills/BACKEND")) > 0
+        assert len(idx.search("API Design", file_filter="skills/API-DESIGN")) > 0

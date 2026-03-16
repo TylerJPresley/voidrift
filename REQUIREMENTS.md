@@ -39,7 +39,7 @@ Python MCP server that stores, retrieves, and exports project artifacts and fram
 
 **AC-MCP1 — Server:** An MCP server at `~/opt/voidrift/mcp-context-server/` built with Python/FastMCP, communicates via stdio. Source at `~/Projects/voidrift/mcp-context-server/`.
 
-**AC-MCP2 — Framework Resources:** The server loads framework files from `~/opt/voidrift/resources/` (AGENT-*.md, CONVENTIONS.md, skills/*.md, templates/*.md), indexes them by markdown header, and serves targeted sections on demand.
+**AC-MCP2 — Framework Resources:** The server loads framework files from `~/opt/voidrift/resources/` (agents/*.md, CONVENTIONS.md, skills/*.md, templates/*.md), indexes them by markdown header, and serves targeted sections on demand.
 
 **AC-MCP3 — Project Artifacts:** The server reads/writes project artifacts in `<project>/.voidrift/`. Stores analysis results, requirements, tasks, and state in memory during a session. Exports to disk on phase completion.
 
@@ -1082,20 +1082,20 @@ This prevents re-downloading models and recompiling kernels on each container st
 
 | File | Purpose | Loaded By |
 |------|---------|-----------|
-| `AGENT-ANALYST.md` | Analyst role definition and guidelines | Gather phase |
-| `AGENT-ARCHITECT.md` | Architect role definition and guidelines | Plan phase, escalations |
-| `AGENT-DEVELOPER.md` | Developer role definition and guidelines | Develop, automate, verify phases |
+| `agents/ANALYST.md` | Analyst role definition and guidelines | Gather phase |
+| `agents/ARCHITECT.md` | Architect role definition and guidelines | Plan phase, escalations |
+| `agents/DEVELOPER.md` | Developer role definition and guidelines | Develop, automate, verify phases |
 | `CONVENTIONS.md` | Operational conventions (planning-first gate, skill loading rules, cost optimization) | All aider sessions |
 | `EDIT-FORMAT.md` | Instructions for formatting file edits | Develop, automate, verify sessions |
 | `SKILLS.md` | Skill registry with one-line summaries and file paths | Plan phase |
 | `skills/*.md` | Skill files loaded contextually per task tag | Develop phase (per task) |
 | `templates/*.md` | Document scaffolding for requirements, design, and ADRs | Plan phase |
 
-**AC-FR2:** Role-specific AGENT files are loaded per phase to prevent role confusion:
-- Gather phase loads only `AGENT-ANALYST.md`
-- Plan phase loads only `AGENT-ARCHITECT.md`
-- Develop/automate/verify phases load only `AGENT-DEVELOPER.md`
-- Escalations during develop load `AGENT-ARCHITECT.md` for architect consultations
+**AC-FR2:** Role-specific agent files are loaded per phase to prevent role confusion:
+- Gather phase loads only `agents/ANALYST.md`
+- Plan phase loads only `agents/ARCHITECT.md`
+- Develop/automate/verify phases load only `agents/DEVELOPER.md`
+- Escalations during develop load `agents/ARCHITECT.md` for architect consultations
 
 **AC-FR3:** `CONVENTIONS.md` is loaded into every aider session via the `read:` list in aider config files. It applies to all roles and phases.
 

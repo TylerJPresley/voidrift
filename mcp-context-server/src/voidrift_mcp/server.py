@@ -286,7 +286,7 @@ def get_framework_resource(name: str) -> str:
     """Retrieve a framework resource file by name.
 
     Args:
-        name: File name (e.g. 'AGENT-ANALYST.md', 'CONVENTIONS.md', 'SKILLS.md').
+        name: File name (e.g. 'ANALYST.md', 'CONVENTIONS.md', 'SKILLS.md').
     """
     p = RESOURCES_DIR / name
     if not p.exists():
