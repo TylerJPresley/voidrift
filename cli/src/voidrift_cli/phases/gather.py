@@ -131,10 +131,12 @@ def run_gather(
     console.print("[dim]Type 'quit' or Ctrl+C to exit[/dim]\n")
 
     # Interactive loop (AC-G3)
+    BLUE = "\033[34m"
+    RESET = "\033[0m"
     try:
         while True:
             try:
-                user_input = input("\n> ").strip()
+                user_input = input(f"\n\n{BLUE}> {RESET}").strip()
             except EOFError:
                 break
             if not user_input:
