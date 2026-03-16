@@ -128,6 +128,7 @@ def run_gather(
 
     # Interactive loop (AC-G3)
     log = log_path("gather")
+    console.print(f"[dim]Log: {log}[/dim]")
     try:
         while True:
             try:
@@ -205,6 +206,7 @@ def _gather_from(
     handlers["read_source_file"] = read_from_source
 
     log = log_path("gather")
+    console.print(f"[dim]Log: {log}[/dim]")
     console.print(f"[bold cyan]VoidRift Gather (Reverse Engineering)[/bold cyan]")
     console.print(f"Source: {from_path}")
     console.print(f"Target: {target}")

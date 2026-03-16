@@ -97,6 +97,7 @@ def run_develop(
     prev_handler = signal.signal(signal.SIGTERM, _handle_sigterm)
 
     log = log_path("develop")
+    console.print(f"[dim]Log: {log}[/dim]")
     with open(log, "a") as f:
         f.write(f"\n=== Develop session: {datetime.now().isoformat()} ===\n")
 

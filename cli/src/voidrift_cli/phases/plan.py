@@ -80,6 +80,7 @@ def run_plan(
                 cache.unlink()
 
     log = log_path("plan")
+    console.print(f"[dim]Log: {log}[/dim]")
     with open(log, "a") as f:
         f.write(f"\n=== Plan run: {datetime.now().isoformat()} ===\n")
 

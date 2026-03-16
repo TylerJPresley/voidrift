@@ -115,6 +115,7 @@ def run_verify(worker: ModelConfig, architect: ModelConfig | None = None) -> int
     raw_file.write_text(raw_output)
 
     log = log_path("verify")
+    console.print(f"[dim]Log: {log}[/dim]")
 
     try:
         import voidrift_mcp.server as mcp_mod

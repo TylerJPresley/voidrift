@@ -51,6 +51,7 @@ def run_automate(worker: ModelConfig, architect: ModelConfig | None = None) -> i
         return 1
 
     log = log_path("automate")
+    console.print(f"[dim]Log: {log}[/dim]")
     iac_exists = _detect_iac()
     mode = "Review" if iac_exists else "Generate"
 
