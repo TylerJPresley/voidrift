@@ -41,7 +41,7 @@
   - *Rationale:* Separating worker node management from phase orchestration makes the CLI model-agnostic. Every model — local, cloud, or gateway — is just a base URL to the CLI.
 - **REQ-ARCH-2:** The CLI SHALL provide subcommands: `gather`, `plan`, `develop`, `automate`, `verify`, `chat`, `status`, `log`, `unlock`.
 - **REQ-ARCH-3:** WHEN `voidrift` is run with no arguments, THE SYSTEM SHALL launch an interactive guided flow presenting available actions, model selection, and phase-specific options.
-- **REQ-ARCH-4:** The CLI SHALL implement an agent loop that sends messages to model APIs (OpenAI-compatible for local/kiro, native for cloud), handles MCP tool calls, and streams responses to the terminal.
+- **REQ-ARCH-4:** The CLI SHALL implement an agent loop that sends messages to model APIs (OpenAI-compatible for local/kiro, native for cloud), handles MCP tool calls, and streams responses to the terminal. WHILE waiting for any model response (initial or after tool calls), THE SYSTEM SHALL display a "Thinking..." spinner on stderr that clears when the response begins streaming.
 - **REQ-ARCH-5:** The CLI SHALL be model-agnostic. It SHALL resolve model aliases to `(base_url, api_key, model_id)` tuples from a models config file and connect to the endpoint directly. It SHALL NOT manage containers, SSH connections, or gateway processes.
   - *Rationale:* The worker node already exposes an OpenAI-compatible endpoint. Cloud APIs expose endpoints. Kiro Gateway exposes an endpoint. The CLI treats all three identically — the only variable is the URL.
 - **REQ-ARCH-6:** The CLI SHALL never read framework resource files (agents, skills, templates) directly. All framework context SHALL be served exclusively through MCP server tool calls.
@@ -73,14 +73,14 @@
 
 ### 4.4 Phase 1 — Gather
 
-- **REQ-G-1:** WHEN `voidrift gather <model>` is run AND the target file exists, THE SYSTEM SHALL load it into the session for revision. IF the file does not exist, THE SYSTEM SHALL create a new file.
+- **REQ-G-1:** WHEN `voidrift gather <model>` is run AND the target file exists, THE SYSTEM SHALL include it in the system prompt as context for revision. IF the file does not exist, THE SYSTEM SHALL create a new file.
 - **REQ-G-2:** WHEN `voidrift gather <model> <feature>` is run AND `.voidrift/REQUIREMENTS.md` does not exist, THE SYSTEM SHALL exit with error code 1.
 - **REQ-G-3:** The gather phase SHALL always be interactive with model output streaming to the terminal in real time.
 - **REQ-G-4:** The model SHALL ask clarifying questions before writing the output file and SHALL NOT write until it has sufficient information.
 - **REQ-G-5:** The model SHALL NOT focus on technology choices unless the operator explicitly requests them.
 - **REQ-G-6:** Full project gather SHALL produce `.voidrift/REQUIREMENTS.md` with sections: Goal, Users, Features, Runtime Environment, Constraints, Out of Scope.
 - **REQ-G-7:** Feature gather SHALL produce `.voidrift/spec/<feature>.md` with sections: Goal, User Stories, Acceptance Criteria (BDD), Non-Functional Requirements, Edge Cases.
-- **REQ-G-8:** WHEN `--from <path>` is specified, THE SYSTEM SHALL reverse-engineer requirements from the existing codebase in three phases: identify source files, analyze each file individually, generate summary. The reference directory SHALL be strictly read-only.
+- **REQ-G-8:** WHEN `--from <path>` is specified, THE SYSTEM SHALL reverse-engineer requirements from the existing codebase in three phases: identify source files, analyze each file individually, generate summary. The reference directory SHALL be strictly read-only. THE SYSTEM SHALL load `REQUIREMENTS-TEMPLATE.md` and relevant skills (`PROD-STRATEGY`, `QUALITY-QA`) into the system prompt to guide output format.
 - **REQ-G-9:** WHEN `--reference <path>` is specified, THE SYSTEM SHALL load the reference codebase read-only for lookup during interactive conversation.
 - **REQ-G-10:** Gather SHALL never auto-commit. `auto-commits: false` and `dirty-commits: false` SHALL be set.
 
@@ -133,6 +133,7 @@
 - **REQ-U-2:** `voidrift chat <model>` SHALL start an interactive session with no git context (`--no-git`).
 - **REQ-U-3:** `voidrift log <phase>` SHALL show the last 200 lines of the most recent log. `--prune` SHALL delete log files.
 - **REQ-U-4:** `voidrift unlock` SHALL remove the develop lock file and kill any running develop process.
+- **REQ-U-5:** `voidrift completions <shell>` SHALL output shell completion scripts for bash, zsh, and fish. All model, worker, and architect arguments SHALL complete from configured aliases in `models.yml`.
 
 ### 4.10 Model Configuration
 
@@ -181,6 +182,7 @@
 
 - **REQ-LOG-1:** All phase logs SHALL use timestamped filenames: `<phase>-YYYYMMDD-HHMMSS.log`.
 - **REQ-LOG-2:** Log files SHALL accumulate indefinitely. The operator is responsible for cleanup.
+- **REQ-LOG-3:** WHEN a phase displays its log path, it SHALL appear immediately after the phase title line.
 
 ### 4.15 Framework Configuration
 
