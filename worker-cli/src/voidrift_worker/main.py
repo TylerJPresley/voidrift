@@ -55,7 +55,7 @@ Models:
   models add <alias> <repo>   Add and download a model
   models remove <alias>       Remove model and free disk
   models use <alias>          Start a model
-  models check                Audit and fix missing weights
+  models check [--prune]      Audit and fix missing weights
 
 Docker Images:
   images pull [<image>]       Pull vLLM image
@@ -287,13 +287,26 @@ def models_use_cmd(alias: str) -> None:
 
 
 @models_group.command("check")
-def models_check_cmd() -> None:
+@click.option("--prune", is_flag=True, help="Remove unconfigured cached models.")
+def models_check_cmd(prune: bool) -> None:
     """Audit models and download missing weights."""
     try:
-        results = models_check()
+        results, unconfigured = models_check(prune=prune)
         for alias, ok, msg in results:
             status = "✅" if ok else "❌"
             console.print(f"  {status} {alias}: {msg}")
+
+        if unconfigured:
+            if prune:
+                console.print("")
+                for repo, size in unconfigured:
+                    console.print(f"  🗑 Removed {repo} ({size})")
+            else:
+                total = sum(float(s.rstrip("G")) for s, _ in [(size, None) for _, size in unconfigured] if s.endswith("G"))
+                console.print(f"\n  ⚠ {len(unconfigured)} unconfigured models in cache (~{total:.1f}G):")
+                for repo, size in unconfigured:
+                    console.print(f"    {repo} ({size})")
+                console.print("  Run 'worker models check --prune' to remove them.")
     except RuntimeError as e:
         err_console.print(f"[red]Error: {e}[/red]")
         sys.exit(1)

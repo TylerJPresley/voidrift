@@ -246,18 +246,44 @@ class TestModelsUse:
 class TestModelsCheck:
     @patch("voidrift_worker.models._get_cached_repos")
     def test_all_cached(self, mock_cached):
-        mock_cached.return_value = {"Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8", "Qwen/Qwen3-8B-FP8"}
-        results = models_check()
+        mock_cached.return_value = {
+            "Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8": "31.2G",
+            "Qwen/Qwen3-8B-FP8": "9.5G",
+        }
+        results, unconfigured = models_check()
         assert all(ok for _, ok, _ in results)
 
     @patch("voidrift_worker.models.ssh_stream")
     @patch("voidrift_worker.models._get_cached_repos")
     def test_downloads_missing(self, mock_cached, mock_stream):
-        mock_cached.return_value = set()
+        mock_cached.return_value = {}
         mock_stream.return_value = 0
-        results = models_check()
+        results, _ = models_check()
         assert all(ok for _, ok, _ in results)
         assert mock_stream.call_count == len(results)
+
+    @patch("voidrift_worker.models._get_cached_repos")
+    def test_reports_unconfigured(self, mock_cached):
+        mock_cached.return_value = {
+            "Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8": "31.2G",
+            "Qwen/Qwen3-8B-FP8": "9.5G",
+            "Qwen/Qwen3-32B-FP8": "34.3G",
+        }
+        _, unconfigured = models_check()
+        repos = [r for r, _ in unconfigured]
+        assert "Qwen/Qwen3-32B-FP8" in repos
+
+    @patch("voidrift_worker.models.ssh_stream")
+    @patch("voidrift_worker.models._get_cached_repos")
+    def test_prune_removes_unconfigured(self, mock_cached, mock_stream):
+        mock_cached.return_value = {
+            "Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8": "31.2G",
+            "Extra/Model": "10G",
+        }
+        mock_stream.return_value = 0
+        _, unconfigured = models_check(prune=True)
+        assert len(unconfigured) == 1
+        assert "cache rm Extra/Model" in mock_stream.call_args[0][0]
 
 
 class TestWorkerLogs:

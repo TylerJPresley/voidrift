@@ -362,18 +362,17 @@ def get_gateway_status() -> dict:
 HF_CLI = "uvx --from huggingface_hub hf"
 
 
-def _get_cached_repos() -> set[str]:
-    """Get set of cached repository names from HF cache."""
+def _get_cached_repos() -> dict[str, str]:
+    """Get cached repository names with sizes from HF cache."""
     r = ssh_cmd(f"{HF_CLI} cache ls 2>&1")
     output = r.stdout or ""
-    repos = set()
+    repos = {}
     for line in output.splitlines():
         if line.startswith("model/"):
-            # Format: model/Org/Name  SIZE  ...
             parts = line.split()
-            if parts:
+            if len(parts) >= 2:
                 repo = parts[0].replace("model/", "", 1)
-                repos.add(repo)
+                repos[repo] = parts[1]
     return repos
 
 
@@ -481,12 +480,18 @@ def models_use(alias: str) -> None:
     start_model(alias)
 
 
-def models_check() -> list[tuple[str, bool, str]]:
-    """Audit models and fix missing weights (REQ-WK-6d)."""
+def models_check(prune: bool = False) -> tuple[list[tuple[str, bool, str]], list[tuple[str, str]]]:
+    """Audit models and fix missing weights (REQ-WK-6d).
+    
+    Returns:
+        Tuple of (configured results, unconfigured repos with sizes).
+    """
     results = []
     available = list_models()
     cached = _get_cached_repos()
+    configured_repos = {m.repository for m in available.values()}
 
+    # Check configured models
     for alias, m in available.items():
         if m.repository in cached:
             results.append((alias, True, "cached"))
@@ -498,7 +503,15 @@ def models_check() -> list[tuple[str, bool, str]]:
             else:
                 results[-1] = (alias, False, "download failed")
 
-    return results
+    # Find unconfigured cached models
+    unconfigured = [(repo, size) for repo, size in cached.items() if repo not in configured_repos]
+
+    # Prune if requested
+    if prune and unconfigured:
+        for repo, _ in unconfigured:
+            ssh_stream(f"{HF_CLI} cache rm {repo} --yes 2>&1")
+
+    return results, unconfigured
 
 
 def worker_logs(follow: bool = False) -> int:

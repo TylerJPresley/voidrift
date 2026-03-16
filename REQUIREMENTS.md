@@ -151,7 +151,7 @@
 - **REQ-WK-6a:** `worker models add <alias> <repo>` SHALL add a new model to `worker-models.yml` AND download the weights. IF the alias already exists, THE SYSTEM SHALL exit with an error.
 - **REQ-WK-6b:** `worker models remove <alias>` SHALL delete the cached weights AND move the model config to a `retired` section in `worker-models.yml`.
 - **REQ-WK-6c:** `worker models use <alias>` SHALL start the specified model (stopping any running model first). Background operations are transparent to the user.
-- **REQ-WK-6d:** `worker models check` SHALL audit all configured models, verify cache integrity, and attempt to download missing weights for configured models.
+- **REQ-WK-6d:** `worker models check` SHALL audit all configured models, verify cache integrity, and attempt to download missing weights for configured models. It SHALL report unconfigured models in the cache. With `--prune`, it SHALL remove unconfigured cached models.
 - **REQ-WK-7:** Only one local model container SHALL run at a time on the worker node.
 - **REQ-WK-8:** Model configurations SHALL be defined in `worker-models.yml` specifying: repository, docker image, GPU memory utilization, max model length, vLLM args, served model name, and cache mounts.
 - **REQ-WK-9:** `worker kiro start` SHALL start the Kiro Gateway container. `worker kiro stop` SHALL stop it. `worker kiro status` SHALL report health and available models.
