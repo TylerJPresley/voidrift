@@ -14,14 +14,11 @@ from .models import (
     get_status,
     images_list,
     images_pull,
-    list_models,
-    load_worker_models,
     models_add,
-    models_fix_perms,
-    models_list_cached,
-    models_prune,
-    models_pull,
+    models_check,
+    models_list,
     models_remove,
+    models_use,
     ssh_cmd,
     ssh_stream,
     start_gateway,
@@ -40,8 +37,8 @@ HELP_TEXT = """Manage local model containers, images, and Kiro Gateway.
 
 Getting started:
   worker check                    Verify worker node is ready
-  worker models pull <alias>      Download model weights
-  worker start <alias>            Start serving the model
+  worker models list              See available models
+  worker models use <alias>       Start serving a model
   worker status                   Confirm it's running
 
 Commands:
@@ -53,14 +50,12 @@ Commands:
   info                        GPU, disk, memory
   bench [<num>] [<rate>]      Run vLLM benchmark
 
-Model Weights:
-  models list                 Available models from config
-  models cache                Cached models + disk usage
-  models add <alias> <repo>   Add a new model to config
-  models pull <alias>         Download weights
-  models remove <id>          Delete a cached revision
-  models prune                Clean broken revisions
-  models fix-perms            Fix cache permissions
+Models:
+  models list                 Configured + cached models
+  models add <alias> <repo>   Add and download a model
+  models remove <alias>       Remove model and free disk
+  models use <alias>          Start a model
+  models check                Audit and fix missing weights
 
 Docker Images:
   images pull [<image>]       Pull vLLM image
@@ -221,95 +216,24 @@ def bench(num_prompts: int, req_rate: float) -> None:
 
 @cli.group("models", cls=OrderedGroup)
 def models_group() -> None:
-    """Manage model weights on the worker node.
+    """Manage models on the worker node.
 
     \b
     Examples:
-      worker models list                # available models from config
-      worker models pull <alias>        # download by alias
-      worker models cache               # what's cached + disk usage
+      worker models list              # show configured + cached models
+      worker models add <alias> <repo>  # add and download a model
+      worker models use <alias>       # start a model
+      worker models remove <alias>    # remove model and free disk
+      worker models check             # audit and fix missing weights
     """
 
 
 @models_group.command("list")
 def models_list_cmd() -> None:
-    """Show available models from worker-models.yml."""
-    available = list_models()
-    if not available:
-        console.print("No models configured. Check worker-models.yml.")
-        return
-    s = get_status()
-    active_alias = s["model"] if s["active"] else None
-    for alias, m in sorted(available.items()):
-        marker = " ✅" if alias == active_alias else ""
-        console.print(f"  {alias:<20} {m.repository}{marker}")
-
-
-@models_group.command("cache")
-def models_cache_cmd() -> None:
-    """Show cached models and disk usage."""
+    """Show configured and cached models."""
     try:
-        output = models_list_cached()
+        output = models_list()
         console.print(output)
-    except RuntimeError as e:
-        err_console.print(f"[red]Error: {e}[/red]")
-        sys.exit(1)
-
-
-@models_group.command("pull")
-@click.argument("alias")
-def models_pull_cmd(alias: str) -> None:
-    """Download model weights. Resolves HF repo from worker-models.yml."""
-    try:
-        console.print(f"Downloading {alias}...")
-        rc = models_pull(alias)
-        if rc == 0:
-            console.print(f"✅ {alias} downloaded.")
-        else:
-            sys.exit(rc)
-    except (RuntimeError, ValueError) as e:
-        err_console.print(f"[red]Error: {e}[/red]")
-        sys.exit(1)
-
-
-@models_group.command("remove")
-@click.argument("revision_id")
-def models_remove_cmd(revision_id: str) -> None:
-    """Delete a cached revision. Get IDs from 'worker models list'."""
-    try:
-        rc = models_remove(revision_id)
-        if rc == 0:
-            console.print("✅ Removed.")
-        else:
-            sys.exit(rc)
-    except RuntimeError as e:
-        err_console.print(f"[red]Error: {e}[/red]")
-        sys.exit(1)
-
-
-@models_group.command("prune")
-def models_prune_cmd() -> None:
-    """Clean broken or detached revisions."""
-    try:
-        rc = models_prune()
-        if rc == 0:
-            console.print("✅ Pruned.")
-        else:
-            sys.exit(rc)
-    except RuntimeError as e:
-        err_console.print(f"[red]Error: {e}[/red]")
-        sys.exit(1)
-
-
-@models_group.command("fix-perms")
-def models_fix_perms_cmd() -> None:
-    """Fix cache permissions. Resolves 'Permission denied' on model removal."""
-    try:
-        rc = models_fix_perms()
-        if rc == 0:
-            console.print("✅ Permissions fixed.")
-        else:
-            sys.exit(rc)
     except RuntimeError as e:
         err_console.print(f"[red]Error: {e}[/red]")
         sys.exit(1)
@@ -319,14 +243,58 @@ def models_fix_perms_cmd() -> None:
 @click.argument("alias")
 @click.argument("repo")
 def models_add_cmd(alias: str, repo: str) -> None:
-    """Add a new model to worker-models.yml with defaults.
-
-    Edit worker-models.yml afterwards to customize vllm_args.
-    """
+    """Add a new model and download weights."""
     try:
-        models_add(alias, repo)
-        console.print(f"✅ Added {alias} → {repo}")
+        console.print(f"Adding {alias} ({repo})...")
+        rc = models_add(alias, repo)
+        if rc == 0:
+            console.print(f"✅ {alias} added and downloaded.")
+        else:
+            console.print(f"⚠ {alias} added but download failed (rc={rc}).")
+            sys.exit(rc)
     except ValueError as e:
+        err_console.print(f"[red]Error: {e}[/red]")
+        sys.exit(1)
+
+
+@models_group.command("remove")
+@click.argument("alias")
+def models_remove_cmd(alias: str) -> None:
+    """Remove a model from config and cache."""
+    try:
+        console.print(f"Removing {alias}...")
+        rc = models_remove(alias)
+        if rc == 0:
+            console.print(f"✅ {alias} removed (moved to retired).")
+        else:
+            console.print(f"⚠ {alias} retired but cache removal failed.")
+    except ValueError as e:
+        err_console.print(f"[red]Error: {e}[/red]")
+        sys.exit(1)
+
+
+@models_group.command("use")
+@click.argument("alias")
+def models_use_cmd(alias: str) -> None:
+    """Start a model. Stops any running model first."""
+    try:
+        console.print(f"Starting {alias}...")
+        models_use(alias)
+        console.print(f"✅ {alias} is running.")
+    except (RuntimeError, ValueError) as e:
+        err_console.print(f"[red]Error: {e}[/red]")
+        sys.exit(1)
+
+
+@models_group.command("check")
+def models_check_cmd() -> None:
+    """Audit models and download missing weights."""
+    try:
+        results = models_check()
+        for alias, ok, msg in results:
+            status = "✅" if ok else "❌"
+            console.print(f"  {status} {alias}: {msg}")
+    except RuntimeError as e:
         err_console.print(f"[red]Error: {e}[/red]")
         sys.exit(1)
 

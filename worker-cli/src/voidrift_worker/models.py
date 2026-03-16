@@ -362,53 +362,59 @@ def get_gateway_status() -> dict:
 HF_CLI = "uvx --from huggingface_hub hf"
 
 
-def models_list_cached() -> str:
-    """List cached models on worker node (REQ-WK-6)."""
+def _get_cached_repos() -> set[str]:
+    """Get set of cached repository names from HF cache."""
     r = ssh_cmd(f"{HF_CLI} cache ls 2>&1")
-    return r.stdout or r.stderr
+    output = r.stdout or ""
+    repos = set()
+    for line in output.splitlines():
+        if line.startswith("model/"):
+            # Format: model/Org/Name  SIZE  ...
+            parts = line.split()
+            if parts:
+                repo = parts[0].replace("model/", "", 1)
+                repos.add(repo)
+    return repos
 
 
-def models_pull(alias: str) -> int:
-    """Download model weights for alias (REQ-WK-6a)."""
+def models_list() -> str:
+    """List configured and cached models (REQ-WK-6)."""
+    lines = []
+
+    # Configured models
     available = list_models()
-    if alias not in available:
-        raise ValueError(f"Unknown alias: {alias}. Available: {', '.join(sorted(available))}")
-    repo = available[alias].repository
-    return ssh_stream(f"{HF_CLI} download {repo}", timeout=1800)
+    cached = _get_cached_repos()
+    s = get_status()
+    active = s["model"] if s["active"] else None
+
+    lines.append("Configured Models:")
+    if available:
+        for alias, m in sorted(available.items()):
+            status = "✅ running" if alias == active else ("✓ cached" if m.repository in cached else "⚠ not downloaded")
+            lines.append(f"  {alias:<20} {m.repository:<45} {status}")
+    else:
+        lines.append("  (none)")
+
+    # Cached models
+    lines.append("")
+    lines.append("Cached Models:")
+    r = ssh_cmd(f"{HF_CLI} cache ls 2>&1")
+    cache_output = r.stdout or r.stderr or "(none)"
+    for line in cache_output.splitlines():
+        lines.append(f"  {line}")
+
+    return "\n".join(lines)
 
 
-def models_remove(revision_id: str) -> int:
-    """Remove a cached model revision (REQ-WK-6b)."""
-    return ssh_stream(f"{HF_CLI} cache rm {revision_id}")
-
-
-def models_prune() -> int:
-    """Clean broken/detached revisions (REQ-WK-6c)."""
-    return ssh_stream(f"{HF_CLI} cache prune --yes")
-
-
-def models_fix_perms() -> int:
-    """Fix HuggingFace cache permissions (REQ-WK-6d)."""
-    return ssh_stream("chmod -R u+w ~/.cache/huggingface")
-
-
-def models_add(alias: str, repo: str) -> None:
-    """Add a new model to worker-models.yml (REQ-WK-6e).
-
-    Args:
-        alias: Short name for the model.
-        repo: HuggingFace repository (e.g. Qwen/Qwen3-8B-FP8).
-
-    Raises:
-        ValueError: If alias already exists.
-    """
+def models_add(alias: str, repo: str) -> int:
+    """Add a new model and download weights (REQ-WK-6a)."""
     config = load_worker_models()
     models = config.get("models", {})
 
     if alias in models:
-        raise ValueError(f"Alias '{alias}' already exists in worker-models.yml")
+        raise ValueError(f"Alias '{alias}' already exists")
 
-    # Get defaults from first existing model or use hardcoded defaults
+    # Get defaults from first existing model
     if models:
         first = next(iter(models.values()))
         docker_image = first.get("docker_image", "scitrera/dgx-spark-vllm:0.17.0-t5")
@@ -427,11 +433,72 @@ def models_add(alias: str, repo: str) -> None:
         "max_model_len": max_len,
         "vllm_args": [],
     }
-
     config["models"] = models
+
     p = _worker_models_path()
     with open(p, "w") as f:
         yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+
+    # Download weights
+    return ssh_stream(f"{HF_CLI} download {repo}", timeout=1800)
+
+
+def models_remove(alias: str) -> int:
+    """Remove model from config and cache (REQ-WK-6b)."""
+    config = load_worker_models()
+    models = config.get("models", {})
+
+    if alias not in models:
+        raise ValueError(f"Alias '{alias}' not found")
+
+    model = models.pop(alias)
+    repo = model.get("repository", "")
+
+    # Move to retired section
+    retired = config.get("retired", {})
+    retired[alias] = model
+    config["retired"] = retired
+    config["models"] = models
+
+    p = _worker_models_path()
+    with open(p, "w") as f:
+        yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+
+    # Delete from cache
+    return ssh_stream(f"{HF_CLI} cache rm {repo} --yes 2>&1")
+
+
+def models_use(alias: str) -> None:
+    """Start a model (REQ-WK-6c). Stops any running model first."""
+    available = list_models()
+    if alias not in available:
+        raise ValueError(f"Unknown alias: {alias}. Available: {', '.join(sorted(available))}")
+
+    s = get_status()
+    if s["active"]:
+        stop_model()
+
+    start_model(alias)
+
+
+def models_check() -> list[tuple[str, bool, str]]:
+    """Audit models and fix missing weights (REQ-WK-6d)."""
+    results = []
+    available = list_models()
+    cached = _get_cached_repos()
+
+    for alias, m in available.items():
+        if m.repository in cached:
+            results.append((alias, True, "cached"))
+        else:
+            results.append((alias, False, "downloading..."))
+            rc = ssh_stream(f"{HF_CLI} download {m.repository}", timeout=1800)
+            if rc == 0:
+                results[-1] = (alias, True, "downloaded")
+            else:
+                results[-1] = (alias, False, "download failed")
+
+    return results
 
 
 def worker_logs(follow: bool = False) -> int:

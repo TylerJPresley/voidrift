@@ -147,12 +147,11 @@
 - **REQ-WK-3:** `worker stop` SHALL SSH to the worker node and stop the active model container.
 - **REQ-WK-4:** `worker status` SHALL report the active model (if any), container health, and API endpoint URL.
 - **REQ-WK-5:** `worker bench [<num_prompts>] [<req_rate>]` SHALL benchmark the active model using vLLM's benchmark tool via SSH.
-- **REQ-WK-6:** `worker models list` SHALL list cached models on the worker node with disk usage via `uvx hf cache ls` over SSH.
-- **REQ-WK-6a:** `worker models pull <alias>` SHALL resolve the HF repository from `worker-models.yml` and download it on the worker node via `uvx hf download` over SSH.
-- **REQ-WK-6b:** `worker models remove <id>` SHALL delete a cached model revision on the worker node via `uvx hf cache rm` over SSH.
-- **REQ-WK-6c:** `worker models prune` SHALL clean broken/detached revisions on the worker node via `uvx hf cache prune` over SSH.
-- **REQ-WK-6d:** `worker models fix-perms` SHALL fix HuggingFace cache permissions on the worker node via `chmod -R u+w` over SSH.
-- **REQ-WK-6e:** `worker models add <alias> <repo>` SHALL add a new model entry to `worker-models.yml` with the given alias and HF repository, using defaults from the existing configuration (docker image, GPU utilization, max model length). IF the alias already exists, THE SYSTEM SHALL exit with an error.
+- **REQ-WK-6:** `worker models list` SHALL display configured models (from `worker-models.yml`) and cached models (from HF cache) with clear section headers.
+- **REQ-WK-6a:** `worker models add <alias> <repo>` SHALL add a new model to `worker-models.yml` AND download the weights. IF the alias already exists, THE SYSTEM SHALL exit with an error.
+- **REQ-WK-6b:** `worker models remove <alias>` SHALL delete the cached weights AND move the model config to a `retired` section in `worker-models.yml`.
+- **REQ-WK-6c:** `worker models use <alias>` SHALL start the specified model (stopping any running model first). Background operations are transparent to the user.
+- **REQ-WK-6d:** `worker models check` SHALL audit all configured models, verify cache integrity, and attempt to download missing weights for configured models.
 - **REQ-WK-7:** Only one local model container SHALL run at a time on the worker node.
 - **REQ-WK-8:** Model configurations SHALL be defined in `worker-models.yml` specifying: repository, docker image, GPU memory utilization, max model length, vLLM args, served model name, and cache mounts.
 - **REQ-WK-9:** `worker kiro start` SHALL start the Kiro Gateway container. `worker kiro stop` SHALL stop it. `worker kiro status` SHALL report health and available models.

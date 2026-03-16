@@ -16,11 +16,10 @@ from voidrift_worker.models import (
     list_models,
     load_worker_models,
     models_add,
-    models_fix_perms,
-    models_list_cached,
-    models_prune,
-    models_pull,
+    models_check,
+    models_list,
     models_remove,
+    models_use,
     ssh_cmd,
     ssh_stream,
     start_gateway,
@@ -172,66 +171,32 @@ class TestGateway:
 # --- Worker node management tests ---
 
 
-class TestModelsListCached:
+class TestModelsList:
+    @patch("voidrift_worker.models.get_status")
     @patch("voidrift_worker.models.ssh_cmd")
-    def test_returns_output(self, mock_ssh):
-        mock_ssh.return_value = MagicMock(stdout="REPO  REVISION  SIZE\nQwen  abc123  5.2G\n", stderr="")
-        result = models_list_cached()
-        assert "Qwen" in result
-
-
-class TestModelsPull:
-    def test_unknown_alias_raises(self):
-        with pytest.raises(ValueError, match="Unknown alias"):
-            models_pull("nonexistent")
-
-    @patch("voidrift_worker.models.ssh_stream")
-    def test_resolves_repo(self, mock_stream):
-        mock_stream.return_value = 0
-        rc = models_pull("qwen3-coder")
-        assert rc == 0
-        assert "Qwen/Qwen3-Coder" in mock_stream.call_args[0][0]
-
-
-class TestModelsRemove:
-    @patch("voidrift_worker.models.ssh_stream")
-    def test_calls_cache_rm(self, mock_stream):
-        mock_stream.return_value = 0
-        rc = models_remove("abc123")
-        assert rc == 0
-        assert "cache rm abc123" in mock_stream.call_args[0][0]
-
-
-class TestModelsPrune:
-    @patch("voidrift_worker.models.ssh_stream")
-    def test_calls_prune(self, mock_stream):
-        mock_stream.return_value = 0
-        rc = models_prune()
-        assert rc == 0
-        assert "prune" in mock_stream.call_args[0][0]
-
-
-class TestModelsFixPerms:
-    @patch("voidrift_worker.models.ssh_stream")
-    def test_calls_chmod(self, mock_stream):
-        mock_stream.return_value = 0
-        rc = models_fix_perms()
-        assert rc == 0
-        assert "chmod" in mock_stream.call_args[0][0]
+    def test_shows_configured_and_cached(self, mock_ssh, mock_status):
+        mock_status.return_value = {"active": False, "model": None}
+        mock_ssh.return_value = MagicMock(stdout="model/Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8  31.2G\n", stderr="")
+        result = models_list()
+        assert "Configured Models:" in result
+        assert "Cached Models:" in result
+        assert "qwen3-coder" in result
 
 
 class TestModelsAdd:
-    def test_adds_to_config(self, tmp_path, monkeypatch):
+    @patch("voidrift_worker.models.ssh_stream")
+    def test_adds_and_downloads(self, mock_stream, tmp_path, monkeypatch):
         yml = tmp_path / "worker-models.yml"
         yml.write_text("models:\n  existing:\n    repository: Some/Model\n    docker_image: img:1\n    gpu_memory_utilization: 0.85\n    max_model_len: 32768\n")
         monkeypatch.setattr("voidrift_worker.models._worker_models_path", lambda: yml)
-        models_add("new-model", "Org/New-Model")
+        mock_stream.return_value = 0
+        rc = models_add("new-model", "Org/New-Model")
+        assert rc == 0
         import yaml
         config = yaml.safe_load(yml.read_text())
         assert "new-model" in config["models"]
         assert config["models"]["new-model"]["repository"] == "Org/New-Model"
-        assert config["models"]["new-model"]["docker_image"] == "img:1"
-        assert config["models"]["new-model"]["gpu_memory_utilization"] == 0.85
+        assert "download" in mock_stream.call_args[0][0]
 
     def test_duplicate_alias_raises(self, tmp_path, monkeypatch):
         yml = tmp_path / "worker-models.yml"
@@ -239,6 +204,60 @@ class TestModelsAdd:
         monkeypatch.setattr("voidrift_worker.models._worker_models_path", lambda: yml)
         with pytest.raises(ValueError, match="already exists"):
             models_add("qwen", "Qwen/Other")
+
+
+class TestModelsRemove:
+    @patch("voidrift_worker.models.ssh_stream")
+    def test_retires_and_deletes(self, mock_stream, tmp_path, monkeypatch):
+        yml = tmp_path / "worker-models.yml"
+        yml.write_text("models:\n  qwen:\n    repository: Qwen/Qwen3\n")
+        monkeypatch.setattr("voidrift_worker.models._worker_models_path", lambda: yml)
+        mock_stream.return_value = 0
+        rc = models_remove("qwen")
+        assert rc == 0
+        import yaml
+        config = yaml.safe_load(yml.read_text())
+        assert "qwen" not in config["models"]
+        assert "qwen" in config["retired"]
+
+    def test_unknown_alias_raises(self, tmp_path, monkeypatch):
+        yml = tmp_path / "worker-models.yml"
+        yml.write_text("models:\n  qwen:\n    repository: Qwen/Qwen3\n")
+        monkeypatch.setattr("voidrift_worker.models._worker_models_path", lambda: yml)
+        with pytest.raises(ValueError, match="not found"):
+            models_remove("nonexistent")
+
+
+class TestModelsUse:
+    @patch("voidrift_worker.models.start_model")
+    @patch("voidrift_worker.models.stop_model")
+    @patch("voidrift_worker.models.get_status")
+    def test_stops_running_and_starts(self, mock_status, mock_stop, mock_start):
+        mock_status.return_value = {"active": True, "model": "other"}
+        models_use("qwen3-coder")
+        mock_stop.assert_called_once()
+        mock_start.assert_called_once_with("qwen3-coder")
+
+    def test_unknown_alias_raises(self):
+        with pytest.raises(ValueError, match="Unknown alias"):
+            models_use("nonexistent")
+
+
+class TestModelsCheck:
+    @patch("voidrift_worker.models._get_cached_repos")
+    def test_all_cached(self, mock_cached):
+        mock_cached.return_value = {"Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8", "Qwen/Qwen3-8B-FP8"}
+        results = models_check()
+        assert all(ok for _, ok, _ in results)
+
+    @patch("voidrift_worker.models.ssh_stream")
+    @patch("voidrift_worker.models._get_cached_repos")
+    def test_downloads_missing(self, mock_cached, mock_stream):
+        mock_cached.return_value = set()
+        mock_stream.return_value = 0
+        results = models_check()
+        assert all(ok for _, ok, _ in results)
+        assert mock_stream.call_count == len(results)
 
 
 class TestWorkerLogs:

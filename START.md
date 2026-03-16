@@ -70,7 +70,7 @@ Python monorepo with two packages:
 - Runtime role assignment via [ROLE: X]
 - Pydantic models, Google-style docstrings, src/ layout
 - Build: hatchling, VERSION file (shared), Makefile
-- Tests: pytest, 200 tests across cli/tests/, mcp-context-server/tests/, and worker-cli/tests/
+- Tests: pytest, 201 tests across cli/tests/, mcp-context-server/tests/, and worker-cli/tests/
 
 ## When User Requests a Feature
 
@@ -98,5 +98,5 @@ Skills are authoritative. Don't just reference them — follow them. If a skill 
 After implementing, explicitly check:
 - Does this affect REQUIREMENTS.md, README.md, AGENT.md, or CONVENTIONS.md?
 - Update CHANGELOG.md with the change
-- Run `make test` to verify 200 tests pass
+- Run `make test` to verify 201 tests pass
 - Don't consider work complete until documentation is updated
