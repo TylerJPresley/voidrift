@@ -27,7 +27,6 @@ def tmp_project(tmp_path, monkeypatch):
     project.mkdir()
     (project / ".voidrift").mkdir()
     monkeypatch.chdir(project)
-    monkeypatch.setenv("VOIDRIFT_PROJECT_DIR", str(project))
     monkeypatch.setenv("VOIDRIFT_HOME", str(REPO_ROOT))
     return project
 

@@ -11,7 +11,6 @@ import pytest
 def _reset_server(tmp_project, monkeypatch):
     """Reset server module state before each test."""
     import importlib
-    monkeypatch.setenv("VOIDRIFT_PROJECT_DIR", str(tmp_project))
     import voidrift_mcp.server as srv
     importlib.reload(srv)
     srv._boot()

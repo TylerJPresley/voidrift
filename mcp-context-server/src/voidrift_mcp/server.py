@@ -21,7 +21,7 @@ from .task_store import TaskStore
 # ---------------------------------------------------------------------------
 VOIDRIFT_HOME = Path(os.environ.get("VOIDRIFT_HOME", Path.home() / ".voidrift"))
 RESOURCES_DIR = VOIDRIFT_HOME / "resources"
-PROJECT_DIR = Path(os.environ.get("VOIDRIFT_PROJECT_DIR", Path.cwd()))
+PROJECT_DIR = Path.cwd()
 VOIDRIFT_DIR = PROJECT_DIR / ".voidrift"
 
 # ---------------------------------------------------------------------------
