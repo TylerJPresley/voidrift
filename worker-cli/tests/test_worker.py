@@ -98,7 +98,9 @@ class TestStartModel:
         mock_httpx.ConnectError = Exception
         mock_httpx.ReadTimeout = Exception
         start_model("qwen3-coder", refresh=True)
-        assert mock_ssh.call_count >= 4
+        # Verify docker run was called
+        run_calls = [c for c in mock_ssh.call_args_list if "docker run" in str(c)]
+        assert len(run_calls) == 1
 
 
 class TestStopModel:
