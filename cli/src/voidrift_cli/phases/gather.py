@@ -132,25 +132,44 @@ def run_gather(
 
     # Interactive loop (AC-G3)
     BLUE = "\033[34m"
+    BOLD_BLUE = "\033[1;34m"
     RESET = "\033[0m"
     try:
         while True:
+            # Multi-line input: blank line submits
+            lines = []
             try:
-                user_input = input(f"\n\n{BLUE}> ").strip()
+                first = input(f"\n\n{BLUE}> ")
                 sys.stdout.write(RESET)
                 sys.stdout.flush()
+                if not first.strip():
+                    continue
+                lines.append(first)
+                while True:
+                    line = input(f"{BLUE}  ")
+                    sys.stdout.write(RESET)
+                    sys.stdout.flush()
+                    if not line.strip():
+                        break
+                    lines.append(line)
             except EOFError:
                 break
+            user_input = "\n".join(lines).strip()
             if not user_input:
                 continue
             if user_input.lower() in ("quit", "exit", "/quit"):
                 break
 
+            # Re-display as bold blue
+            sys.stdout.write(f"\033[{len(lines) + 1}A\033[J")  # move up and clear
+            sys.stdout.write(f"{BOLD_BLUE}> {user_input}{RESET}\n")
+            sys.stdout.flush()
+
             with open(log, "a") as f:
                 f.write(f"\n> {user_input}\n")
 
             try:
-                sys.stdout.write("\n\n")
+                sys.stdout.write("\n")
                 sys.stdout.flush()
                 response = agent.send(user_input)
             except RuntimeError as e:
