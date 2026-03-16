@@ -33,6 +33,16 @@ from .models import (
 console = Console()
 err_console = Console(stderr=True)
 
+
+def _complete_alias(ctx, param, incomplete):
+    """Shell completion for model aliases."""
+    try:
+        from .models import list_models
+        return [a for a in list_models() if a.startswith(incomplete)]
+    except Exception:
+        return []
+
+
 HELP_TEXT = """Manage local model containers, images, and Kiro Gateway.
 
 Getting started:
@@ -71,6 +81,7 @@ Kiro Gateway:
 
 Configuration:
   ~/.voidrift/config.yml      Worker, Kiro, and API key settings
+  completions <shell>         Generate shell completions (bash/zsh/fish)
 
 Run 'worker COMMAND --help' for details."""
 
@@ -102,11 +113,28 @@ def cli(ctx: click.Context) -> None:
         click.echo(ctx.get_help())
 
 
+@cli.command("completions")
+@click.argument("shell", type=click.Choice(["bash", "zsh", "fish"]))
+def completions_cmd(shell: str) -> None:
+    """Generate shell completion script.
+
+    \b
+    Install once:
+      worker completions bash > ~/.local/share/bash-completion/completions/worker
+      worker completions zsh > ~/.zfunc/_worker
+      worker completions fish > ~/.config/fish/completions/worker.fish
+    """
+    import os
+    env_var = "_WORKER_COMPLETE"
+    script = os.popen(f"{env_var}={shell}_source worker").read()
+    click.echo(script)
+
+
 # --- Container lifecycle ---
 
 
 @cli.command()
-@click.argument("alias")
+@click.argument("alias", shell_complete=_complete_alias)
 @click.option("--refresh", is_flag=True, help="Force-restart even if already running.")
 def start(alias: str, refresh: bool) -> None:
     """Start a model container.
@@ -240,7 +268,7 @@ def models_list_cmd() -> None:
 
 
 @models_group.command("add")
-@click.argument("alias")
+@click.argument("alias", shell_complete=_complete_alias)
 @click.argument("repo")
 def models_add_cmd(alias: str, repo: str) -> None:
     """Add a new model and download weights."""
@@ -258,7 +286,7 @@ def models_add_cmd(alias: str, repo: str) -> None:
 
 
 @models_group.command("remove")
-@click.argument("alias")
+@click.argument("alias", shell_complete=_complete_alias)
 def models_remove_cmd(alias: str) -> None:
     """Remove a model from config and cache."""
     try:
@@ -274,7 +302,7 @@ def models_remove_cmd(alias: str) -> None:
 
 
 @models_group.command("use")
-@click.argument("alias")
+@click.argument("alias", shell_complete=_complete_alias)
 def models_use_cmd(alias: str) -> None:
     """Start a model. Stops any running model first."""
     try:
