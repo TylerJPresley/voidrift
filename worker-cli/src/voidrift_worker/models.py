@@ -77,6 +77,9 @@ def _ssh_target() -> str:
     return f"{user}@{ip}"
 
 
+_SSH_PATH_PREFIX = "export PATH=$HOME/.local/bin:$PATH && "
+
+
 def ssh_cmd(cmd: str) -> subprocess.CompletedProcess:
     """Run a command on the worker node via SSH (REQ-WK-2).
 
@@ -90,7 +93,7 @@ def ssh_cmd(cmd: str) -> subprocess.CompletedProcess:
         RuntimeError: If WORKER_USR or WORKER_IP are not set.
     """
     return subprocess.run(
-        ["ssh", "-o", "ConnectTimeout=5", _ssh_target(), cmd],
+        ["ssh", "-o", "ConnectTimeout=5", _ssh_target(), _SSH_PATH_PREFIX + cmd],
         capture_output=True,
         text=True,
         timeout=30,
@@ -111,7 +114,7 @@ def ssh_stream(cmd: str, timeout: int = 600) -> int:
         RuntimeError: If WORKER_USR or WORKER_IP are not set.
     """
     result = subprocess.run(
-        ["ssh", "-o", "ConnectTimeout=5", _ssh_target(), cmd],
+        ["ssh", "-o", "ConnectTimeout=5", _ssh_target(), _SSH_PATH_PREFIX + cmd],
         timeout=timeout,
     )
     return result.returncode
