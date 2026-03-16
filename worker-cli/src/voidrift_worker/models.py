@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shlex
 import subprocess
 import sys
 import time
@@ -190,11 +191,7 @@ def start_model(alias: str, refresh: bool = False) -> None:
     cmd_parts.append(f"--max-model-len {model.max_model_len}")
     cmd_parts.append(f"--port {port}")
     for arg in model.vllm_args:
-        # Quote args containing special shell characters
-        if any(c in arg for c in '{}"\' '):
-            cmd_parts.append(f"'{arg}'")
-        else:
-            cmd_parts.append(arg)
+        cmd_parts.append(shlex.quote(arg))
 
     try:
         r = ssh_cmd(" ".join(cmd_parts))

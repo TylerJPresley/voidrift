@@ -26,9 +26,11 @@ models:
     max_model_len: 65536
     vllm_args:
       - --enable-prefix-caching
-      - --tool-call-parser qwen3_xml
+      - --tool-call-parser
+      - qwen3_xml
       - --enable-auto-tool-choice
-      - --attention-backend flashinfer
+      - --attention-backend
+      - flashinfer
       - --chat-template-kwargs
       - '{"enable_thinking": false}'
     notes: General-purpose, thinking disabled — fast for gather and chat
@@ -41,9 +43,11 @@ models:
     max_model_len: 65536
     vllm_args:
       - --enable-prefix-caching
-      - --tool-call-parser qwen3_xml
+      - --tool-call-parser
+      - qwen3_xml
       - --enable-auto-tool-choice
-      - --attention-backend flashinfer
+      - --attention-backend
+      - flashinfer
     notes: General-purpose with thinking enabled — for plan and complex reasoning
 
   qwen3-coder:
@@ -54,9 +58,11 @@ models:
     max_model_len: 65536
     vllm_args:
       - --enable-prefix-caching
-      - --tool-call-parser qwen3_coder
+      - --tool-call-parser
+      - qwen3_coder
       - --enable-auto-tool-choice
-      - --attention-backend flashinfer
+      - --attention-backend
+      - flashinfer
     notes: Code-focused, 30B parameters, larger context
 
   qwen3-coder-next:
@@ -67,9 +73,11 @@ models:
     max_model_len: 65536
     vllm_args:
       - --enable-prefix-caching
-      - --tool-call-parser qwen3_coder
+      - --tool-call-parser
+      - qwen3_coder
       - --enable-auto-tool-choice
-      - --attention-backend flashinfer
+      - --attention-backend
+      - flashinfer
     notes: Next-gen code model, 80B MoE, FP8 dynamic quantization
 
 # Retired models — preserved for reference, not actively used
@@ -81,9 +89,11 @@ retired_models:
     max_model_len: 40960
     vllm_args:
       - --enable-prefix-caching
-      - --tool-call-parser qwen3_coder
+      - --tool-call-parser
+      - qwen3_coder
       - --enable-auto-tool-choice
-      - --attention-backend flashinfer
+      - --attention-backend
+      - flashinfer
     notes: Retired — dense 32B underperforms MoE equivalent on GB10; 33% slower throughput than qwen3-coder
 
   granite-4-small:
@@ -93,9 +103,11 @@ retired_models:
     max_model_len: 65536
     vllm_args:
       - --enable-prefix-caching
-      - --tool-call-parser granite
+      - --tool-call-parser
+      - granite
       - --enable-auto-tool-choice
-      - --attention-backend flashinfer
+      - --attention-backend
+      - flashinfer
     notes: Retired — Mamba-2 hybrid architecture not well-optimized for SM_121 on current vLLM image; unacceptable latency in practice
 
 # Worker node configuration
