@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import shutil
 from datetime import datetime
 from pathlib import Path
 
@@ -70,14 +69,6 @@ def run_plan(
         for f in (d / "spec").glob("*.md"):
             f.unlink()
         console.print("[dim]Cleared existing planning artifacts.[/dim]")
-
-    # Clean caches (AC-P3)
-    for cache in [Path(".aider.tags.cache.v4"), Path(".aider.chat.history.md")]:
-        if cache.exists():
-            if cache.is_dir():
-                shutil.rmtree(cache)
-            else:
-                cache.unlink()
 
     log = log_path("plan")
     console.print(f"[dim]Log: {log}[/dim]")
