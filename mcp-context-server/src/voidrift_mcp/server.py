@@ -170,14 +170,13 @@ def get_template(name: str) -> str:
     Args:
         name: Template name (e.g. 'adr-template', 'architecture-template').
     """
-    templates_dir = RESOURCES_DIR / "templates"
-    p = templates_dir / f"{name.upper()}.md"
-    if not p.exists():
-        candidates = list(templates_dir.glob("*.md"))
-        available = [c.stem.lower() for c in sorted(candidates)]
-        return f"Template '{name}' not found. Available: {', '.join(available)}"
-    session_store.log_action(session_id, "get", "template", name)
-    return p.read_text(encoding="utf-8")
+    file_filter = f"templates/{name.upper()}"
+    all_secs = [s for s in index._sections if file_filter in s.file_path]
+    if all_secs:
+        session_store.log_action(session_id, "get", "template", name)
+        return "\n\n".join(s.content for s in all_secs)
+    available = [p.stem.lower() for p in sorted((RESOURCES_DIR / "templates").glob("*.md"))]
+    return f"Template '{name}' not found. Available: {', '.join(available)}"
 
 
 @mcp.tool()
