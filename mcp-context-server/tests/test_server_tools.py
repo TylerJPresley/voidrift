@@ -152,12 +152,12 @@ class TestListArtifacts:
 
 class TestFrameworkResource:
     def test_get_existing(self, _reset_server):
-        result = _reset_server.get_framework_resource("SKILLS.md")
-        assert "Skills Registry" in result
+        result = _reset_server.get_framework_resource("CONVENTIONS.md")
+        assert "Conventions" in result or "conventions" in result
 
     def test_get_nested(self, _reset_server):
-        result = _reset_server.get_framework_resource("BACKEND.md")
-        assert "backend" in result.lower() or "Backend" in result
+        result = _reset_server.get_framework_resource("WEB-ENG.md")
+        assert "web" in result.lower()
 
     def test_get_missing(self, _reset_server):
         result = _reset_server.get_framework_resource("NONEXISTENT.md")

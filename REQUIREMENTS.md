@@ -204,7 +204,6 @@ Core documents that define voidrift identity, operational rules, and editing con
 #### 2c. Other Shared Infrastructure
 
 - **EDIT-FORMAT.md** — File editing instructions (loaded during Develop, Automate, Verify)
-- **SKILLS.md** — Skill registry with descriptions (loaded during Plan)
 - **Skill files** (`skills/*.md`) — Domain-specific conventions (loaded contextually during Develop)
 - **Aider configurations** (`.aider.*.yml`) — Phase-specific aider settings
 - **Templates** (`templates/*.md`) — Document scaffolding for requirements, design, and ADRs
@@ -490,9 +489,9 @@ These are not tasks - they're categories. Each must be broken into specific file
 
 **AC-P11:** Infrastructure tasks (`[infra]` tagged) are placed exclusively in `.voidrift/TASKS-infra.md`. They are never mixed into source subproject task files.
 
-**AC-P12:** Skill tags are chosen from `<VOIDRIFT_HOME>/SKILLS.md`. Only skills directly relevant to a specific task are tagged. Over-tagging wastes context window on every aider invocation for that task.
+**AC-P12:** Skill tags are chosen from the available skills in `<VOIDRIFT_HOME>/skills/`. Only skills directly relevant to a specific task are tagged. Over-tagging wastes context window on every aider invocation for that task.
 
-**AC-P13:** After the architect writes task files, all skill tags used in tasks are validated against `<VOIDRIFT_HOME>/SKILLS.md`. If any invalid tags are found, the plan phase fails with an error listing the invalid tags and the available valid tags from SKILLS.md. The operator must correct the task files before proceeding.
+**AC-P13:** After the architect writes task files, all skill tags used in tasks are validated against the available skill files in `<VOIDRIFT_HOME>/skills/`. If any invalid tags are found, the plan phase fails with an error listing the invalid tags and the available valid tags. The operator must correct the task files before proceeding.
 
 **AC-P14:** Feature plan: produces `.voidrift/adr/ADR-NNN-<feature>.md`. ADR number is chosen by inspecting existing files in `.voidrift/adr/` and incrementing.
 
@@ -1072,7 +1071,7 @@ This prevents re-downloading models and recompiling kernels on each container st
 
 **AC-SK6:** Skill files are authoritative for technology choices. The planner and worker must follow them without deviation. Each skill file defines the canonical framework, libraries, and conventions for its domain.
 
-**AC-SK7:** `<VOIDRIFT_HOME>/SKILLS.md` is the registry that maps tag names to skill file descriptions. It is read by the planner to understand which tags are available and what each skill covers.
+**AC-SK7:** The MCP server dynamically lists available skills from `<VOIDRIFT_HOME>/skills/`. The planner uses the `get_skill()` and `list_skills()` MCP tools to discover available tags and their conventions.
 
 ---
 
@@ -1087,7 +1086,6 @@ This prevents re-downloading models and recompiling kernels on each container st
 | `agents/DEVELOPER.md` | Developer role definition and guidelines | Develop, automate, verify phases |
 | `CONVENTIONS.md` | Operational conventions (planning-first gate, skill loading rules, cost optimization) | All aider sessions |
 | `templates/EDIT-FORMAT.md` | Instructions for formatting file edits | Develop, automate, verify sessions |
-| `SKILLS.md` | Skill registry with one-line summaries and file paths | Plan phase |
 | `skills/*.md` | Skill files loaded contextually per task tag | Develop phase (per task) |
 | `templates/*.md` | Document scaffolding for requirements, design, and ADRs | Plan phase |
 
