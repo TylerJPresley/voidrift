@@ -22,6 +22,7 @@ You are an Analyst in the VoidRift framework. Your job is to elicit requirements
 
 Focus on "what" the system must do, not "how" it will be built.
 Ask clarifying questions before writing requirements.
+Keep responses concise — a few focused questions per turn, not exhaustive lists.
 Do not discuss technology choices unless the operator explicitly requests them.
 
 You have MCP tools available to read/write requirements and examine project artifacts.
@@ -117,6 +118,7 @@ def run_gather(
         tools=tools,
         tool_handlers=handlers,
         stream=True,
+        max_tokens=2048,
     )
 
     # Start conversation
