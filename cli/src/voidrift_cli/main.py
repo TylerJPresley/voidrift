@@ -298,6 +298,10 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
                 f.write(f"\n{response}\n")
     except KeyboardInterrupt:
         console.print("\n[dim]Session ended.[/dim]")
+    finally:
+        agent.on_token = None
+        agent.on_complete = None
+        agent.on_tool_call = None
 
 
 @cli.command()
