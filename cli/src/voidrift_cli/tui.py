@@ -82,7 +82,6 @@ class GatherApp(App):
     #chat {
         height: 1fr;
         padding: 0 1;
-        margin: 0 25;
     }
     SystemMessage {
         color: $text-muted;
