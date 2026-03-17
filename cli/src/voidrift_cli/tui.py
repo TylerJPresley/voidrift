@@ -77,18 +77,19 @@ class GatherApp(App):
     #chat {
         height: 1fr;
         padding: 0 1;
+        margin: 0 25%;
     }
     UserMessage {
         background: $surface-lighten-1;
         padding: 1 2;
-        margin: 2 0 0 0;
+        margin: 1 0 0 0;
         color: $text;
     }
     AssistantLabel {
         color: $text-muted;
         text-style: italic;
         padding: 0 2;
-        margin: 2 0 0 0;
+        margin: 1 0 0 0;
     }
     AssistantMessage {
         padding: 0 2;
