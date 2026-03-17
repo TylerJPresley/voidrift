@@ -283,9 +283,16 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
 
             # /write enables tools for this turn (REQ-UI-3)
             if write_tools is not None:
-                if user_input.lower().startswith("/write"):
+                low = user_input.lower().strip()
+                is_write = low.startswith("/write") or low in {
+                    "write", "write it", "go ahead and write",
+                    "please write the file now", "please write the file",
+                    "write the file", "write the file now",
+                }
+                if is_write:
                     agent.tools = write_tools
-                    user_input = user_input[6:].strip() or "Please write the file now."
+                    if low.startswith("/write"):
+                        user_input = user_input[6:].strip() or "Please write the file now."
                 else:
                     agent.tools = []
 
