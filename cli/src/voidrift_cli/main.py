@@ -242,9 +242,20 @@ def chat(model) -> None:
     # Light blue (ANSI 117) for model output
     _blue = "\033[38;5;117m"
     _reset = "\033[0m"
+    _indent = "  "
+    _at_line_start = True
 
     def on_token(token: str) -> None:
-        sys.stdout.write(f"{_blue}{token}{_reset}")
+        nonlocal _at_line_start
+        out = ""
+        for ch in token:
+            if _at_line_start:
+                out += _indent
+                _at_line_start = False
+            out += ch
+            if ch == "\n":
+                _at_line_start = True
+        sys.stdout.write(f"{_blue}{out}{_reset}")
         sys.stdout.flush()
 
     def on_complete(stats: dict) -> None:
@@ -256,7 +267,7 @@ def chat(model) -> None:
         if stats.get("elapsed"):
             parts.append(f"{stats['elapsed']}s")
         if parts:
-            console.print(f"\n[dim]{' · '.join(parts)}[/dim]")
+            console.print(f"\n[dim]  {' · '.join(parts)}[/dim]")
 
     def on_tool_call(name: str) -> None:
         console.print(f"\n[dim]⚙ {name}()[/dim]")
@@ -277,7 +288,8 @@ def chat(model) -> None:
             with open(log, "a") as f:
                 f.write(f"\n> {user_input}\n")
 
-            console.print(f"\n[dim italic]◆ {mc.alias}[/dim italic]\n")
+            console.print(f"\n[dim italic]  ◆ {mc.alias}[/dim italic]\n")
+            _at_line_start = True
             try:
                 response = agent.send(user_input)
             except RuntimeError as e:
