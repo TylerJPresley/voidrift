@@ -277,7 +277,7 @@ def chat(model) -> None:
             with open(log, "a") as f:
                 f.write(f"\n> {user_input}\n")
 
-            console.print(f"[dim italic]◆ {mc.alias}[/dim italic]")
+            console.print(f"\n[dim italic]◆ {mc.alias}[/dim italic]\n")
             try:
                 response = agent.send(user_input)
             except RuntimeError as e:
