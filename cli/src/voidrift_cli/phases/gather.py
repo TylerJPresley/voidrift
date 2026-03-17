@@ -116,7 +116,7 @@ def run_gather(
         tools=tools,
         tool_handlers=handlers,
         stream=True,
-        max_tokens=4096,
+        max_tokens=16384,
         extra_body={"chat_template_kwargs": {"enable_thinking": False}},
     )
 
