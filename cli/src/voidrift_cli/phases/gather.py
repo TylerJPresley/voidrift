@@ -91,6 +91,8 @@ def run_gather(
 
     # Build system prompt
     system = ANALYST_PROMPT
+    target_rel = str(target.relative_to(Path.cwd()))
+    system += f"\n\nWhen using write_file(), write to exactly this path: {target_rel}"
     if reference_path:
         system += f"\n\nA reference codebase is available at {reference_path}. You can use read_source_file() to examine it."
 
