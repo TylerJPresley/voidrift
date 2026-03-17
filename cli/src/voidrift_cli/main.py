@@ -281,8 +281,6 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
                 else:
                     agent.tools = []
 
-            console.rule(style="bright_black")
-
             with open(log, "a") as f:
                 f.write(f"\n> {user_input}\n")
 
@@ -296,6 +294,7 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
 
             with open(log, "a") as f:
                 f.write(f"\n{response}\n")
+            console.rule(style="bright_black")
     except KeyboardInterrupt:
         console.print("\n[dim]Session ended.[/dim]")
     finally:
