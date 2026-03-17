@@ -237,10 +237,14 @@ def chat(model) -> None:
 
     console.print(f"[dim]VoidRift Chat[/dim]")
     console.print(f"[dim]Log: {log}[/dim]")
-    console.print(f"[dim]Model: {model_label}[/dim]\n")
+    console.print(f"[dim]Model: {model_label}[/dim]")
+
+    # Light blue (ANSI 117) for model output
+    _blue = "\033[38;5;117m"
+    _reset = "\033[0m"
 
     def on_token(token: str) -> None:
-        sys.stdout.write(token)
+        sys.stdout.write(f"{_blue}{token}{_reset}")
         sys.stdout.flush()
 
     def on_complete(stats: dict) -> None:
@@ -252,10 +256,10 @@ def chat(model) -> None:
         if stats.get("elapsed"):
             parts.append(f"{stats['elapsed']}s")
         if parts:
-            console.print(f"\n[dim]{' · '.join(parts)}[/dim]")
+            console.print(f"[dim]{' · '.join(parts)}[/dim]")
 
     def on_tool_call(name: str) -> None:
-        console.print(f"\n[dim]⚙ {name}()[/dim]")
+        console.print(f"[dim]⚙ {name}()[/dim]")
 
     agent.on_token = on_token
     agent.on_complete = on_complete
@@ -264,7 +268,7 @@ def chat(model) -> None:
     try:
         while True:
             try:
-                user_input = input("\n> ").strip()
+                user_input = input("> ").strip()
             except EOFError:
                 break
             if not user_input or user_input.lower() in ("quit", "exit", "/quit"):
