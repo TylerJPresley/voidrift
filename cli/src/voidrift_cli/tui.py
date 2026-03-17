@@ -204,12 +204,17 @@ class GatherApp(App):
     @work(thread=True)
     def _send_message(self, text: str) -> None:
         self._streaming_text = ""
+        self._stats: dict = {}
 
         def on_token(token: str) -> None:
             self._streaming_text += token
             self.call_from_thread(self._update_stream, self._streaming_text)
 
+        def on_complete(stats: dict) -> None:
+            self._stats = stats
+
         self.agent.on_token = on_token
+        self.agent.on_complete = on_complete
         try:
             response = self.agent.send(text)
         except RuntimeError as e:
@@ -217,6 +222,7 @@ class GatherApp(App):
             return
         finally:
             self.agent.on_token = None
+            self.agent.on_complete = None
 
         self.call_from_thread(self._finish_stream, response)
 
@@ -238,6 +244,20 @@ class GatherApp(App):
             self._streaming_msg.update_content(f"◆ {response}")
         self._streaming_msg = None
         self._streaming_text = ""
+
+        # Show stats
+        stats = self._stats
+        if stats:
+            parts = []
+            if stats.get("completion_tokens"):
+                parts.append(f"{stats['completion_tokens']} tokens")
+            if stats.get("tokens_per_sec"):
+                parts.append(f"{stats['tokens_per_sec']} tok/s")
+            if stats.get("elapsed"):
+                parts.append(f"{stats['elapsed']}s")
+            if parts:
+                chat = self.query_one("#chat", VerticalScroll)
+                chat.mount(SystemMessage(" · ".join(parts)))
 
         with open(self.log_file, "a") as f:
             f.write(f"\n{response}\n")

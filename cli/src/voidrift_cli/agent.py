@@ -7,6 +7,7 @@ import json
 import os
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Any, Callable
 
@@ -40,6 +41,7 @@ class AgentLoop(BaseModel):
     max_tokens: int = 16384
     extra_body: dict | None = None
     on_token: Callable[[str], None] | None = None
+    on_complete: Callable[[dict], None] | None = None
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -164,8 +166,12 @@ class AgentLoop(BaseModel):
             Collected response text.
         """
         kwargs["stream"] = True
+        kwargs["stream_options"] = {"include_usage": True}
         collected_text = ""
         collected_tool_calls: dict[int, dict] = {}
+        token_count = 0
+        usage_data: dict = {}
+        stream_start = time.time()
 
         # Spinner until first token arrives (skip if TUI handles display)
         stop_spinner = threading.Event()
@@ -186,6 +192,13 @@ class AgentLoop(BaseModel):
             stream = client.chat.completions.create(**kwargs)
             for chunk in stream:
                 if not chunk.choices:
+                    # Final chunk may have usage data
+                    if hasattr(chunk, "usage") and chunk.usage:
+                        usage_data = {
+                            "prompt_tokens": chunk.usage.prompt_tokens or 0,
+                            "completion_tokens": chunk.usage.completion_tokens or 0,
+                            "total_tokens": chunk.usage.total_tokens or 0,
+                        }
                     continue
                 delta = chunk.choices[0].delta
 
@@ -200,6 +213,7 @@ class AgentLoop(BaseModel):
                         sys.stdout.write(delta.content)
                         sys.stdout.flush()
                     collected_text += delta.content
+                    token_count += 1
 
                 # Accumulate tool calls
                 if delta.tool_calls:
@@ -253,6 +267,18 @@ class AgentLoop(BaseModel):
             sys.stdout.write("\n")
             sys.stdout.flush()
         self.messages.append({"role": "assistant", "content": collected_text})
+
+        # Emit stats
+        if self.on_complete:
+            elapsed = time.time() - stream_start
+            completion_tokens = usage_data.get("completion_tokens", token_count)
+            tps = completion_tokens / elapsed if elapsed > 0 else 0
+            self.on_complete({
+                **usage_data,
+                "elapsed": round(elapsed, 1),
+                "tokens_per_sec": round(tps, 1),
+            })
+
         return collected_text
 
     def _execute_tool(self, name: str, arguments: str) -> str:
