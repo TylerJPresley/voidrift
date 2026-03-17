@@ -73,8 +73,6 @@ class AssistantMessage(Static):
 class GatherApp(App):
     """Interactive gather TUI (REQ-UI-1)."""
 
-    THEME = "dracula"
-
     CSS = """
     Screen {
         background: $surface;
@@ -149,6 +147,7 @@ class GatherApp(App):
         yield PromptInput(id="prompt")
 
     def on_mount(self) -> None:
+        self.theme = "dracula"
         self.title = "VoidRift Gather"
         self.sub_title = f"{self.model_label} · {self.target_label}"
         chat = self.query_one("#chat", VerticalScroll)
