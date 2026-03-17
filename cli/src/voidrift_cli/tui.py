@@ -8,7 +8,7 @@ from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import VerticalScroll
-from textual.widgets import Footer, Header, Markdown, Static, TextArea
+from textual.widgets import Header, Markdown, Static, TextArea
 
 from .agent import AgentLoop
 
@@ -88,7 +88,6 @@ class GatherApp(App):
         yield Header(show_clock=False)
         yield VerticalScroll(id="chat")
         yield TextArea(id="prompt")
-        yield Footer()
 
     def on_mount(self) -> None:
         self.title = "VoidRift Gather"
