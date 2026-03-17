@@ -72,7 +72,7 @@ class AgentLoop(BaseModel):
             kwargs["base_url"] = "https://generativelanguage.googleapis.com/v1beta/openai/"
         else:
             kwargs["api_key"] = get_worker_config().get("api_key", "no-key")
-        return OpenAI(**kwargs)
+        return OpenAI(timeout=120.0, **kwargs)
 
     def _model_name(self) -> str:
         """Get the model name to pass to the API, stripping provider prefixes.
@@ -174,15 +174,13 @@ class AgentLoop(BaseModel):
         usage_data: dict = {}
         stream_start = time.time()
 
-        # Spinner until first token arrives (skip if TUI handles display)
+        # Spinner until first token arrives
         stop_spinner = threading.Event()
-        if self.on_token:
-            stop_spinner.set()  # no spinner in TUI mode
         def _spin():
             for ch in itertools.cycle("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"):
                 if stop_spinner.wait(0.1):
                     break
-                sys.stderr.write(f"\r\033[2m{ch} Thinking...\033[0m")
+                sys.stderr.write(f"\r\033[2m  {ch} Thinking...\033[0m")
                 sys.stderr.flush()
             sys.stderr.write("\r\033[K")
             sys.stderr.flush()
