@@ -40,7 +40,7 @@ When writing feature specs (spec/<feature>.md), use exactly these sections:
 - Non-Functional Requirements
 - Edge Cases
 
-After writing REQUIREMENTS.md, list all identified features and tell the user to run 'voidrift gather <model> <feature>' for each.
+After writing REQUIREMENTS.md, list all identified features and tell the user to run 'voidrift gather {model} <feature>' for each. Use the exact model alias shown — do not suggest other models.
 
 Do NOT write the file until you have sufficient information. Ask questions first.
 When you have enough information, tell the operator you're ready to write and ask them to type /write.
@@ -90,7 +90,7 @@ def run_gather(
     # Interactive mode (AC-G3, AC-G4)
 
     # Build system prompt
-    system = ANALYST_PROMPT
+    system = ANALYST_PROMPT.replace("{model}", model.alias)
     target_rel = str(target.relative_to(Path.cwd()))
     system += f"\n\nWhen using write_file(), write to exactly this path: {target_rel}"
     if reference_path:
