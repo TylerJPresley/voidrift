@@ -169,6 +169,7 @@ class GatherApp(App):
 
         chat = self.query_one("#chat", VerticalScroll)
         chat.mount(UserMessage(f"> {text}"))
+        chat.mount(SystemMessage("⠋ Thinking...", id="thinking"))
         chat.scroll_end(animate=False)
 
         with open(self.log_file, "a") as f:
@@ -198,6 +199,11 @@ class GatherApp(App):
 
     def _update_stream(self, text: str) -> None:
         chat = self.query_one("#chat", VerticalScroll)
+        # Remove thinking indicator on first token
+        try:
+            self.query_one("#thinking").remove()
+        except Exception:
+            pass
         if self._streaming_msg is None:
             # Add model label before first token
             chat.mount(AssistantLabel(f"Responding with {self.model_label}"))
@@ -222,6 +228,10 @@ class GatherApp(App):
 
     def _show_error(self, msg: str) -> None:
         chat = self.query_one("#chat", VerticalScroll)
+        try:
+            self.query_one("#thinking").remove()
+        except Exception:
+            pass
         chat.mount(AssistantLabel(f"Error: {msg}"))
         self._streaming_msg = None
         self._streaming_text = ""
