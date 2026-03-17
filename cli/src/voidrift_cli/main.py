@@ -232,17 +232,58 @@ def chat(model) -> None:
     )
 
     from .utils import log_path
-    from .tui import GatherApp
-
     log = log_path("chat")
     model_label = f"{mc.alias} ({mc.model_id})"
-    app = GatherApp(
-        agent=agent,
-        log_file=log,
-        model_label=model_label,
-        phase="Chat",
-    )
-    app.run()
+
+    console.print(f"[dim]VoidRift Chat[/dim]")
+    console.print(f"[dim]Log: {log}[/dim]")
+    console.print(f"[dim]Model: {model_label}[/dim]\n")
+
+    def on_token(token: str) -> None:
+        sys.stdout.write(token)
+        sys.stdout.flush()
+
+    def on_complete(stats: dict) -> None:
+        parts = []
+        if stats.get("completion_tokens"):
+            parts.append(f"{stats['completion_tokens']} tokens")
+        if stats.get("tokens_per_sec"):
+            parts.append(f"{stats['tokens_per_sec']} tok/s")
+        if stats.get("elapsed"):
+            parts.append(f"{stats['elapsed']}s")
+        if parts:
+            console.print(f"\n[dim]{' · '.join(parts)}[/dim]")
+
+    def on_tool_call(name: str) -> None:
+        console.print(f"\n[dim]⚙ {name}()[/dim]")
+
+    agent.on_token = on_token
+    agent.on_complete = on_complete
+    agent.on_tool_call = on_tool_call
+
+    try:
+        while True:
+            try:
+                user_input = input("\n> ").strip()
+            except EOFError:
+                break
+            if not user_input or user_input.lower() in ("quit", "exit", "/quit"):
+                break
+
+            with open(log, "a") as f:
+                f.write(f"\n> {user_input}\n")
+
+            console.print(f"[dim italic]◆ {mc.alias}[/dim italic]")
+            try:
+                response = agent.send(user_input)
+            except RuntimeError as e:
+                console.print(f"[red]Error: {e}[/red]")
+                continue
+
+            with open(log, "a") as f:
+                f.write(f"\n{response}\n")
+    except KeyboardInterrupt:
+        console.print("\n[dim]Session ended.[/dim]")
 
 
 @cli.command()
