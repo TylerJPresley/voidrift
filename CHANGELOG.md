@@ -8,6 +8,22 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- Shared interactive terminal UI for gather and chat phases (REQ-UI-1–4)
+  - Light blue indented model responses, dim model label with `◆` marker
+  - `prompt_toolkit` multi-line input (Enter for newlines, blank line to submit)
+  - Dim stats line (token count, tok/s, elapsed) after each response
+  - Horizontal rule between turns
+  - `/write` command in gather to enable file tools for one turn
+
+### Changed
+- Gather and chat use plain terminal flow instead of Textual TUI — no alternate screen buffer
+- Replaced `textual` dependency with `prompt_toolkit`
+- Tools disabled by default in gather to prevent model thinking-token overhead
+
+### Removed
+- `tui.py` — Textual TUI module (replaced by shared `_interactive_loop`)
+- `textual` dependency
+
 - `worker-cli/` package — manages local model containers and Kiro Gateway (`worker` command)
 - `models.yml` — unified model endpoint config (alias → base_url, api_key, model_id)
 - Worker CLI commands: `worker start`, `stop`, `status`, `check`, `logs`, `info`, `models list/add/remove/check`, `images pull/list`, `cache clear`, `bench`, `kiro start/stop/status`
