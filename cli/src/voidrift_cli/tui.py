@@ -115,6 +115,7 @@ class GatherApp(App):
         width: 100%;
         margin: 0 1;
         border: round $primary 40%;
+        background: $surface;
     }
     #hint {
         dock: bottom;
