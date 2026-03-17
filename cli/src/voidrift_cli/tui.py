@@ -37,6 +37,11 @@ class PromptInput(TextArea):
                 self.post_message(self.Submitted(text))
 
 
+class SystemMessage(Static):
+    """Dim system info line."""
+    pass
+
+
 class UserMessage(Static):
     """User input displayed as '> text' on a subtle background."""
     pass
@@ -78,6 +83,11 @@ class GatherApp(App):
         height: 1fr;
         padding: 0 1;
         margin: 0 25;
+    }
+    SystemMessage {
+        color: $text-muted;
+        padding: 0 2;
+        margin: 0;
     }
     UserMessage {
         background: $surface-lighten-1;
@@ -142,6 +152,12 @@ class GatherApp(App):
     def on_mount(self) -> None:
         self.title = "VoidRift Gather"
         self.sub_title = f"{self.model_label} · {self.target_label}"
+        chat = self.query_one("#chat", VerticalScroll)
+        title = f"Feature: {self.feature}" if self.feature else "Full Project"
+        chat.mount(SystemMessage(f"VoidRift Gather — {title}"))
+        chat.mount(SystemMessage(f"Log: {self.log_file}"))
+        chat.mount(SystemMessage(f"Model: {self.model_label}"))
+        chat.mount(SystemMessage(f"Target: {self.target_label}"))
         self.query_one("#prompt", PromptInput).focus()
 
     @on(PromptInput.Submitted)
