@@ -259,8 +259,7 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
     try:
         while True:
             try:
-                console.print("\n[bold]> [/bold]", end="")
-                user_input = input("").strip()
+                user_input = input("\n> ").strip()
             except EOFError:
                 break
             if not user_input or user_input.lower() in ("quit", "exit", "/quit"):
