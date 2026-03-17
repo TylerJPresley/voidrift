@@ -77,7 +77,7 @@ class GatherApp(App):
     #chat {
         height: 1fr;
         padding: 0 1;
-        margin: 0 25%;
+        margin: 0 25;
     }
     UserMessage {
         background: $surface-lighten-1;
