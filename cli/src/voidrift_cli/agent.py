@@ -273,26 +273,6 @@ class AgentLoop(BaseModel):
             sys.stdout.write("\n")
             sys.stdout.flush()
 
-        # Fallback: vLLM may return tool calls as raw <tool_call> tags in content
-        if not collected_tool_calls and "<tool_call>" in collected_text:
-            parsed = self._parse_tool_call_tags(collected_text)
-            if parsed:
-                self.messages.append({
-                    "role": "assistant",
-                    "content": None,
-                    "tool_calls": parsed,
-                })
-                for tc in parsed:
-                    if self.on_tool_call:
-                        self.on_tool_call(tc["function"]["name"])
-                    result = self._handle_tool_call_dict(tc)
-                    self.messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc["id"],
-                        "content": result,
-                    })
-                return self._run_loop(force_tool=False)
-
         self.messages.append({"role": "assistant", "content": collected_text})
 
         # Emit stats
@@ -381,10 +361,7 @@ def build_mcp_tools(mcp_server_module: Any) -> tuple[list[dict], dict[str, Calla
         get_agent,
         get_skill,
         get_template,
-        read_source_file,
-        write_file,
         export_to_file,
-        list_project_artifacts,
     )
 
     tool_map = {
@@ -467,21 +444,6 @@ def build_mcp_tools(mcp_server_module: Any) -> tuple[list[dict], dict[str, Calla
             },
             "required": ["name"],
         }),
-        "read_source_file": (read_source_file, {
-            "type": "object",
-            "properties": {
-                "path": {"type": "string", "description": "Relative path from project root"},
-            },
-            "required": ["path"],
-        }),
-        "write_file": (write_file, {
-            "type": "object",
-            "properties": {
-                "path": {"type": "string", "description": "Relative path from project root"},
-                "content": {"type": "string", "description": "File content to write"},
-            },
-            "required": ["path", "content"],
-        }),
         "export_to_file": (export_to_file, {
             "type": "object",
             "properties": {
@@ -489,9 +451,6 @@ def build_mcp_tools(mcp_server_module: Any) -> tuple[list[dict], dict[str, Calla
                 "path": {"type": "string", "description": "Relative path to write to"},
             },
             "required": ["artifact_type", "path"],
-        }),
-        "list_project_artifacts": (list_project_artifacts, {
-            "type": "object", "properties": {},
         }),
     }
 
@@ -505,5 +464,10 @@ def build_mcp_tools(mcp_server_module: Any) -> tuple[list[dict], dict[str, Calla
             },
         })
         handlers[name] = func
+
+    # Include CLI-native filesystem tools (REQ-MCP-4a)
+    from .tools import LOCAL_TOOLS, LOCAL_HANDLERS
+    tools.extend(LOCAL_TOOLS)
+    handlers.update(LOCAL_HANDLERS)
 
     return tools, handlers

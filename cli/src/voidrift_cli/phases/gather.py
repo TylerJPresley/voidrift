@@ -98,18 +98,12 @@ def run_gather(
     if target.exists():
         system += f"\n\nHere is the existing requirements file for revision:\n\n{target.read_text()}"
 
-    # Set up minimal tools for interactive gather (REQ-G-3)
-    try:
-        import voidrift_mcp.server as mcp_mod
-        mcp_mod._boot()
-        all_tools, all_handlers = build_mcp_tools(mcp_mod)
-    except ImportError:
-        all_tools, all_handlers = [], {}
+    # CLI-native filesystem tools for interactive gather (REQ-G-3, REQ-MCP-4a)
+    from ..tools import LOCAL_TOOLS, LOCAL_HANDLERS
 
-    # Only expose write_file and read_source_file to avoid tool-call loops
     allowed = {"write_file", "read_source_file"} if reference_path else {"write_file"}
-    tools = [t for t in all_tools if t["function"]["name"] in allowed]
-    handlers = {k: v for k, v in all_handlers.items() if k in allowed}
+    tools = [t for t in LOCAL_TOOLS if t["function"]["name"] in allowed]
+    handlers = {k: v for k, v in LOCAL_HANDLERS.items() if k in allowed}
 
     agent = AgentLoop(
         model=model,
