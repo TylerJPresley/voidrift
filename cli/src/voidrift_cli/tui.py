@@ -26,6 +26,7 @@ class PromptInput(TextArea):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self.show_line_numbers = False
+        self.theme = "css"
 
     async def _on_key(self, event: Key) -> None:
         if event.key == "enter":
