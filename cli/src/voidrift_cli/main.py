@@ -259,7 +259,8 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
     try:
         while True:
             try:
-                user_input = input("\n> ").strip()
+                console.print("\n[bold]> [/bold]", end="")
+                user_input = input("").strip()
             except EOFError:
                 break
             if not user_input or user_input.lower() in ("quit", "exit", "/quit"):
@@ -273,10 +274,7 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
                 else:
                     agent.tools = []
 
-            sys.stdout.write("\033[1A\033[2K")
-            sys.stdout.flush()
             console.rule(style="bright_black")
-            console.print(f"[bold]> {user_input}[/bold]")
 
             with open(log, "a") as f:
                 f.write(f"\n> {user_input}\n")
