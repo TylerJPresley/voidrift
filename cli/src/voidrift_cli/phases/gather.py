@@ -136,51 +136,6 @@ def run_gather(
     app.run()
     return 0
 
-    # Interactive loop (AC-G3)
-    # \x01/\x02 tell readline to ignore ANSI codes when calculating prompt width
-    BB = "\033[1;34m"   # bold blue
-    RS = "\033[0m"      # reset
-    try:
-        while True:
-            # Multi-line input: trailing \ continues, plain Enter submits
-            lines = []
-            try:
-                sys.stdout.write(f"\n\n{BB}>{RS} ")
-                sys.stdout.flush()
-                first = input()
-                if not first.strip():
-                    continue
-                while first.endswith("\\"):
-                    lines.append(first[:-1])
-                    sys.stdout.write(f"{BB} {RS} ")
-                    sys.stdout.flush()
-                    first = input()
-                lines.append(first)
-            except EOFError:
-                break
-            user_input = "\n".join(lines).strip()
-            if not user_input:
-                continue
-            if user_input.lower() in ("quit", "exit", "/quit"):
-                break
-
-            with open(log, "a") as f:
-                f.write(f"\n> {user_input}\n")
-
-            try:
-                sys.stdout.write("\n")
-                sys.stdout.flush()
-                response = agent.send(user_input)
-            except RuntimeError as e:
-                err_console.print(f"\n[red]Error: {e}[/red]")
-                continue
-
-            with open(log, "a") as f:
-                f.write(f"\n{response}\n")
-    except KeyboardInterrupt:
-        console.print("\n[dim]Session ended.[/dim]")
-
-    return 0
 
 
 def _gather_from(

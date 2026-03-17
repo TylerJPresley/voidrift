@@ -129,6 +129,10 @@ class GatherApp(App):
         Binding("ctrl+c", "quit", "Exit"),
     ]
 
+    def action_quit(self) -> None:
+        self._shutting_down = True
+        self.exit()
+
     def __init__(
         self,
         agent: AgentLoop,
@@ -145,6 +149,7 @@ class GatherApp(App):
         self.feature = feature
         self._streaming_msg: AssistantMessage | None = None
         self._streaming_text = ""
+        self._shutting_down = False
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
@@ -228,6 +233,8 @@ class GatherApp(App):
         self.call_from_thread(self._finish_stream, response)
 
     def _update_stream(self, text: str) -> None:
+        if self._shutting_down:
+            return
         chat = self.query_one("#chat", VerticalScroll)
         # Remove thinking indicator on first token
         self._stop_thinking()
@@ -241,6 +248,8 @@ class GatherApp(App):
         chat.scroll_end(animate=False)
 
     def _finish_stream(self, response: str) -> None:
+        if self._shutting_down:
+            return
         if self._streaming_msg:
             self._streaming_msg.update_content(f"◆ {response}")
         self._streaming_msg = None
@@ -268,6 +277,8 @@ class GatherApp(App):
         self.query_one("#chat", VerticalScroll).scroll_end(animate=False)
 
     def _show_error(self, msg: str) -> None:
+        if self._shutting_down:
+            return
         chat = self.query_one("#chat", VerticalScroll)
         self._stop_thinking()
         chat.mount(AssistantLabel(f"Error: {msg}"))
