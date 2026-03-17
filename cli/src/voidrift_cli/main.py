@@ -6,6 +6,8 @@ import os
 import signal
 import sys
 import logging
+import itertools
+import threading
 from pathlib import Path
 
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -227,6 +229,7 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
 
     def on_token(token):
         nonlocal _at_line_start
+        _stop_tool_spinner()
         out = ""
         for ch in token:
             if _at_line_start:
@@ -239,6 +242,7 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
         sys.stdout.flush()
 
     def on_complete(stats):
+        _stop_tool_spinner()
         parts = []
         if stats.get("completion_tokens"):
             parts.append(f"{stats['completion_tokens']} tokens")
@@ -249,8 +253,35 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
         if parts:
             console.print(f"\n\n[dim]  {' · '.join(parts)}[/dim]")
 
+    _tool_spinner = None
+    _tool_stop = None
+
     def on_tool_call(name):
-        console.print(f"\n[dim]  ⚙ {name}()[/dim]")
+        nonlocal _tool_spinner, _tool_stop
+        # Stop any previous tool spinner
+        if _tool_stop:
+            _tool_stop.set()
+            _tool_spinner.join()
+        console.print(f"\n[dim]  ⚙ {name}()[/dim]", end="")
+        _tool_stop = threading.Event()
+        def _spin():
+            for ch in itertools.cycle("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"):
+                if _tool_stop.wait(0.1):
+                    break
+                sys.stderr.write(f"\r\033[2m  {ch} working...\033[0m")
+                sys.stderr.flush()
+            sys.stderr.write("\r\033[K")
+            sys.stderr.flush()
+        _tool_spinner = threading.Thread(target=_spin, daemon=True)
+        _tool_spinner.start()
+
+    def _stop_tool_spinner():
+        nonlocal _tool_spinner, _tool_stop
+        if _tool_stop:
+            _tool_stop.set()
+            _tool_spinner.join()
+            _tool_stop = None
+            _tool_spinner = None
 
     agent.on_token = on_token
     agent.on_complete = on_complete
@@ -291,10 +322,13 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
                 }
                 if is_write:
                     agent.tools = write_tools
+                    # qwen3 ignores enable_thinking:false with tools — drop it
+                    agent.extra_body = None
                     if low.startswith("/write"):
                         user_input = user_input[6:].strip() or "Please write the file now."
                 else:
                     agent.tools = []
+                    agent.extra_body = {"chat_template_kwargs": {"enable_thinking": False}}
 
             with open(log, "a") as f:
                 f.write(f"\n> {user_input}\n")
