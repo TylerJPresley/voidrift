@@ -285,6 +285,11 @@ def chat(model) -> None:
             if not user_input or user_input.lower() in ("quit", "exit", "/quit"):
                 break
 
+            # Reprint user input as bold with rule above
+            console.print(f"\033[1A\033[2K", end="")  # erase the raw input line
+            console.rule(style="dim")
+            console.print(f"[bold]> {user_input}[/bold]")
+
             with open(log, "a") as f:
                 f.write(f"\n> {user_input}\n")
 
