@@ -209,6 +209,92 @@ def verify(worker, architect) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None):
+    """Shared interactive terminal loop (REQ-UI-1, REQ-UI-2, REQ-UI-4)."""
+    from .agent import AgentLoop
+
+    model_label = f"{mc.alias} ({mc.model_id})"
+    console.print(f"[dim]{title}[/dim]")
+    if extra_header:
+        for line in extra_header:
+            console.print(f"[dim]{line}[/dim]")
+    console.print(f"[dim]Log: {log}[/dim]")
+    console.print(f"[dim]Model: {model_label}[/dim]")
+
+    _blue = "\033[38;5;117m"
+    _reset = "\033[0m"
+    _at_line_start = True
+
+    def on_token(token):
+        nonlocal _at_line_start
+        out = ""
+        for ch in token:
+            if _at_line_start:
+                out += "  "
+                _at_line_start = False
+            out += ch
+            if ch == "\n":
+                _at_line_start = True
+        sys.stdout.write(f"{_blue}{out}{_reset}")
+        sys.stdout.flush()
+
+    def on_complete(stats):
+        parts = []
+        if stats.get("completion_tokens"):
+            parts.append(f"{stats['completion_tokens']} tokens")
+        if stats.get("tokens_per_sec"):
+            parts.append(f"{stats['tokens_per_sec']} tok/s")
+        if stats.get("elapsed"):
+            parts.append(f"{stats['elapsed']}s")
+        if parts:
+            console.print(f"\n\n[dim]  {' · '.join(parts)}[/dim]")
+
+    def on_tool_call(name):
+        console.print(f"\n[dim]  ⚙ {name}()[/dim]")
+
+    agent.on_token = on_token
+    agent.on_complete = on_complete
+    agent.on_tool_call = on_tool_call
+
+    try:
+        while True:
+            try:
+                user_input = input("\n> ").strip()
+            except EOFError:
+                break
+            if not user_input or user_input.lower() in ("quit", "exit", "/quit"):
+                break
+
+            # /write enables tools for this turn (REQ-UI-3)
+            if write_tools is not None:
+                if user_input.lower().startswith("/write"):
+                    agent.tools = write_tools
+                    user_input = user_input[6:].strip() or "Please write the file now."
+                else:
+                    agent.tools = []
+
+            sys.stdout.write("\033[1A\033[2K")
+            sys.stdout.flush()
+            console.rule(style="bright_black")
+            console.print(f"[bold]> {user_input}[/bold]")
+
+            with open(log, "a") as f:
+                f.write(f"\n> {user_input}\n")
+
+            console.print(f"\n[dim italic]  ◆ {mc.alias}[/dim italic]\n")
+            _at_line_start = True
+            try:
+                response = agent.send(user_input)
+            except RuntimeError as e:
+                console.print(f"[red]  Error: {e}[/red]")
+                continue
+
+            with open(log, "a") as f:
+                f.write(f"\n{response}\n")
+    except KeyboardInterrupt:
+        console.print("\n[dim]Session ended.[/dim]")
+
+
 @cli.command()
 @click.argument("model", shell_complete=_complete_model)
 def chat(model) -> None:
@@ -232,80 +318,7 @@ def chat(model) -> None:
     )
 
     from .utils import log_path
-    log = log_path("chat")
-    model_label = f"{mc.alias} ({mc.model_id})"
-
-    console.print(f"[dim]VoidRift Chat[/dim]")
-    console.print(f"[dim]Log: {log}[/dim]")
-    console.print(f"[dim]Model: {model_label}[/dim]")
-
-    # Light blue (ANSI 117) for model output
-    _blue = "\033[38;5;117m"
-    _reset = "\033[0m"
-    _indent = "  "
-    _at_line_start = True
-
-    def on_token(token: str) -> None:
-        nonlocal _at_line_start
-        out = ""
-        for ch in token:
-            if _at_line_start:
-                out += _indent
-                _at_line_start = False
-            out += ch
-            if ch == "\n":
-                _at_line_start = True
-        sys.stdout.write(f"{_blue}{out}{_reset}")
-        sys.stdout.flush()
-
-    def on_complete(stats: dict) -> None:
-        parts = []
-        if stats.get("completion_tokens"):
-            parts.append(f"{stats['completion_tokens']} tokens")
-        if stats.get("tokens_per_sec"):
-            parts.append(f"{stats['tokens_per_sec']} tok/s")
-        if stats.get("elapsed"):
-            parts.append(f"{stats['elapsed']}s")
-        if parts:
-            console.print(f"\n\n[dim]  {' · '.join(parts)}[/dim]")
-
-    def on_tool_call(name: str) -> None:
-        console.print(f"\n[dim]⚙ {name}()[/dim]")
-
-    agent.on_token = on_token
-    agent.on_complete = on_complete
-    agent.on_tool_call = on_tool_call
-
-    try:
-        while True:
-            try:
-                user_input = input("\n> ").strip()
-            except EOFError:
-                break
-            if not user_input or user_input.lower() in ("quit", "exit", "/quit"):
-                break
-
-            # Reprint user input as bold with rule above
-            sys.stdout.write("\033[1A\033[2K")  # erase the raw input line
-            sys.stdout.flush()
-            console.rule(style="bright_black")
-            console.print(f"[bold]> {user_input}[/bold]")
-
-            with open(log, "a") as f:
-                f.write(f"\n> {user_input}\n")
-
-            console.print(f"\n[dim italic]  ◆ {mc.alias}[/dim italic]\n")
-            _at_line_start = True
-            try:
-                response = agent.send(user_input)
-            except RuntimeError as e:
-                console.print(f"[red]Error: {e}[/red]")
-                continue
-
-            with open(log, "a") as f:
-                f.write(f"\n{response}\n")
-    except KeyboardInterrupt:
-        console.print("\n[dim]Session ended.[/dim]")
+    _interactive_loop(agent, mc, log_path("chat"), "VoidRift Chat")
 
 
 @cli.command()

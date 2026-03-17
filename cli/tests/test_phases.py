@@ -22,7 +22,7 @@ class TestGatherPreflightChecks:
         from voidrift_cli.phases.gather import run_gather
         # This will try to start TUI — we just verify it gets past preflight
         with patch("voidrift_cli.phases.gather.AgentLoop"):
-            with patch("voidrift_cli.tui.GatherApp.run"):
+            with patch("voidrift_cli.main._interactive_loop"):
                 result = run_gather(cloud_model, feature="auth")
         assert result == 0  # Exited cleanly
         # Verify spec dir was created

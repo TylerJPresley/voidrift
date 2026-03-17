@@ -75,8 +75,8 @@
 
 - **REQ-G-1:** WHEN `voidrift gather <model>` is run AND the target file exists, THE SYSTEM SHALL include it in the system prompt as context for revision. IF the file does not exist, THE SYSTEM SHALL create a new file.
 - **REQ-G-2:** WHEN `voidrift gather <model> <feature>` is run AND `.voidrift/REQUIREMENTS.md` does not exist, THE SYSTEM SHALL exit with error code 1.
-- **REQ-G-3:** The gather phase SHALL always be interactive with model output streaming to the terminal in real time. The input prompt SHALL support line editing (arrow keys, backspace, history). IF a model request fails mid-session, THE SYSTEM SHALL print the error and return to the prompt (not exit). The interactive gather agent SHALL only have access to file-writing tools (`write_file`, `read_source_file`), not the full MCP tool set. Operator input SHALL be visually distinct from model output (colored prompt, blank line separation). The interactive agent SHALL use `max_tokens=4096` to keep responses bounded.
-  - *Rationale:* Exposing all 16 MCP tools in interactive mode causes local models to enter infinite tool-call loops instead of conversing. Limiting tools to write-only keeps the agent focused on dialogue. Unbounded max_tokens causes local models to generate for minutes per turn; 4096 is enough for conversation and file writes (~3000 words). High token limits cause local models to generate for minutes per turn.
+- **REQ-G-3:** The gather phase SHALL use the shared interactive terminal loop (REQ-UI-1 through REQ-UI-4). The interactive gather agent SHALL only have access to file-writing tools (`write_file`, `read_source_file`), not the full MCP tool set. Tools SHALL be disabled by default and enabled via `/write` command (REQ-UI-3). IF a model request fails mid-session, THE SYSTEM SHALL print the error and return to the prompt (not exit).
+  - *Rationale:* Exposing all 16 MCP tools in interactive mode causes local models to enter infinite tool-call loops instead of conversing. Disabling tools by default also prevents the model from burning tokens on hidden thinking when tools are present in the request.
 - **REQ-G-4:** The model SHALL ask clarifying questions before writing the output file and SHALL NOT write until it has sufficient information.
 - **REQ-G-5:** The model SHALL NOT focus on technology choices unless the operator explicitly requests them.
 - **REQ-G-6:** Full project gather SHALL produce `.voidrift/REQUIREMENTS.md` with sections: Goal, Users, Features, Runtime Environment, Constraints, Out of Scope.
@@ -185,11 +185,12 @@
 - **REQ-LOG-2:** Log files SHALL accumulate indefinitely. The operator is responsible for cleanup.
 - **REQ-LOG-3:** WHEN a phase displays its log path, it SHALL appear immediately after the phase title line.
 
-### 4.15 Interactive TUI
+### 4.15 Interactive Terminal UI
 
-- **REQ-UI-1:** The interactive gather phase SHALL use a Textual TUI application with: a scrollable message area displaying the conversation (operator messages right-aligned, model responses left-aligned with markdown rendering), a text input area at the bottom supporting multi-line input, streaming model responses rendered in real-time into the message area, a header showing phase name, model alias, and log path, and a footer showing keybindings (Ctrl+C to exit, Enter to send).
-- **REQ-UI-2:** The Textual TUI SHALL replace the current `input()` loop and `sys.stdout.write()` streaming for the gather phase only. All other phases SHALL continue using Rich console output.
-- **REQ-UI-3:** `textual>=0.80` SHALL be added as a dependency to the `cli/` package.
+- **REQ-UI-1:** ALL interactive conversation phases (gather, chat) SHALL use a consistent plain-terminal interface with: a dim header block (phase name, log path, model label), `input()` prompt for operator input, streamed model responses via `on_token` callback, and a dim stats line after each response showing token count, tokens/sec, and elapsed time.
+- **REQ-UI-2:** Operator input SHALL be reprinted bold after submission, preceded by a horizontal rule (`console.rule`, `bright_black` style). Model responses SHALL be displayed in light blue (ANSI 256-color 117), indented 2 spaces, with a dim italic model label (`◆ alias`) above.
+- **REQ-UI-3:** The `/write` command in gather SHALL enable file-writing tools for that turn only. Tools SHALL be disabled by default during conversation to avoid model thinking-token overhead. Chat SHALL always have its tools available.
+- **REQ-UI-4:** Interactive sessions SHALL handle Ctrl+C gracefully (print dim "Session ended." and exit), handle EOF on input (exit cleanly), and log all operator input and model responses to the session log file.
 
 ### 4.16 Framework Configuration
 

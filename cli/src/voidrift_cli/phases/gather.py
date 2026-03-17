@@ -121,21 +121,14 @@ def run_gather(
         extra_body={"chat_template_kwargs": {"enable_thinking": False}},
     )
 
-    # Launch TUI (REQ-UI-1)
+    # Interactive terminal loop (REQ-UI-1)
+    from ..main import _interactive_loop
+
     log = log_path("gather")
     target_label = str(target.relative_to(Path.cwd()))
-    model_label = f"{model.alias} ({model.model_id})"
-
-    from ..tui import GatherApp
-    app = GatherApp(
-        agent=agent,
-        log_file=log,
-        model_label=model_label,
-        target_label=target_label,
-        feature=feature,
-        write_tools=tools,
-    )
-    app.run()
+    title = f"VoidRift Gather — Feature: {feature}" if feature else "VoidRift Gather"
+    extra = [f"Target: {target_label}"]
+    _interactive_loop(agent, model, log, title, write_tools=tools, extra_header=extra)
     return 0
 
 
