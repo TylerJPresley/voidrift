@@ -130,10 +130,9 @@ class AgentLoop(BaseModel):
                 "messages": self.messages,
                 "max_tokens": self.max_tokens,
             }
-            if self.tools:
+            if self.tools and force_tool:
                 kwargs["tools"] = self.tools
-                if force_tool:
-                    kwargs["tool_choice"] = "required"
+                kwargs["tool_choice"] = "required"
             if self.extra_body:
                 kwargs["extra_body"] = self.extra_body
 

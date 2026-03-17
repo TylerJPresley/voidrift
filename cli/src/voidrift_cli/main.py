@@ -295,8 +295,9 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
     @kb.add("enter")
     def _submit_or_newline(event):
         buf = event.current_buffer
-        # Blank line (or empty) submits; otherwise insert newline
-        if buf.document.current_line.strip() == "" and buf.text.strip():
+        text = buf.text.strip()
+        # Commands and single-line input: submit immediately
+        if not text or text.startswith("/") or buf.document.current_line.strip() == "":
             buf.validate_and_handle()
         else:
             buf.insert_text("\n")
