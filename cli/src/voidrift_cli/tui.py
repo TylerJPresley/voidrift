@@ -112,7 +112,7 @@ class GatherApp(App):
         height: auto;
         min-height: 3;
         max-height: 8;
-        margin: 0 1 0 1;
+        margin: 0 2 0 1;
         border: round $primary 40%;
     }
     #hint {
