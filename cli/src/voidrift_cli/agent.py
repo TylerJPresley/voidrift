@@ -112,8 +112,11 @@ class AgentLoop(BaseModel):
                 msg = f"Cannot connect to {base} — is the model/gateway running?"
             raise RuntimeError(msg) from e
 
-    def _run_loop(self) -> str:
+    def _run_loop(self, force_tool: bool = True) -> str:
         """Run the agent loop until a final text response (no more tool calls).
+
+        Args:
+            force_tool: If True and tools are present, set tool_choice=required.
 
         Returns:
             Final assistant response text.
@@ -129,7 +132,8 @@ class AgentLoop(BaseModel):
             }
             if self.tools:
                 kwargs["tools"] = self.tools
-                kwargs["tool_choice"] = "required"
+                if force_tool:
+                    kwargs["tool_choice"] = "required"
             if self.extra_body:
                 kwargs["extra_body"] = self.extra_body
 
@@ -262,7 +266,7 @@ class AgentLoop(BaseModel):
                     "content": result,
                 })
             # Continue the loop
-            return self._run_loop()
+            return self._run_loop(force_tool=False)
 
         # Final text response
         if collected_text and not self.on_token:
@@ -287,7 +291,7 @@ class AgentLoop(BaseModel):
                         "tool_call_id": tc["id"],
                         "content": result,
                     })
-                return self._run_loop()
+                return self._run_loop(force_tool=False)
 
         self.messages.append({"role": "assistant", "content": collected_text})
 
