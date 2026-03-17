@@ -86,6 +86,11 @@ class GatherApp(App):
         padding: 0 2;
         margin: 0;
     }
+    #thinking {
+        color: $text-muted;
+        padding: 0 2;
+        margin: 1 0;
+    }
     UserMessage {
         background: $surface-lighten-1;
         padding: 1 2;
@@ -170,6 +175,8 @@ class GatherApp(App):
         chat = self.query_one("#chat", VerticalScroll)
         chat.mount(UserMessage(f"> {text}"))
         chat.mount(SystemMessage("⠋ Thinking...", id="thinking"))
+        self._thinking_frames = iter(__import__('itertools').cycle("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"))
+        self._thinking_timer = self.set_interval(0.1, self._animate_thinking)
         chat.scroll_end(animate=False)
 
         with open(self.log_file, "a") as f:
@@ -177,6 +184,22 @@ class GatherApp(App):
 
         self.query_one("#prompt", PromptInput).disabled = True
         self._send_message(text)
+
+    def _animate_thinking(self) -> None:
+        try:
+            w = self.query_one("#thinking")
+            w.update(f"{next(self._thinking_frames)} Thinking...")
+        except Exception:
+            self._stop_thinking()
+
+    def _stop_thinking(self) -> None:
+        if hasattr(self, "_thinking_timer") and self._thinking_timer:
+            self._thinking_timer.stop()
+            self._thinking_timer = None
+        try:
+            self.query_one("#thinking").remove()
+        except Exception:
+            pass
 
     @work(thread=True)
     def _send_message(self, text: str) -> None:
@@ -200,10 +223,7 @@ class GatherApp(App):
     def _update_stream(self, text: str) -> None:
         chat = self.query_one("#chat", VerticalScroll)
         # Remove thinking indicator on first token
-        try:
-            self.query_one("#thinking").remove()
-        except Exception:
-            pass
+        self._stop_thinking()
         if self._streaming_msg is None:
             # Add model label before first token
             chat.mount(AssistantLabel(f"Responding with {self.model_label}"))
@@ -228,10 +248,7 @@ class GatherApp(App):
 
     def _show_error(self, msg: str) -> None:
         chat = self.query_one("#chat", VerticalScroll)
-        try:
-            self.query_one("#thinking").remove()
-        except Exception:
-            pass
+        self._stop_thinking()
         chat.mount(AssistantLabel(f"Error: {msg}"))
         self._streaming_msg = None
         self._streaming_text = ""
