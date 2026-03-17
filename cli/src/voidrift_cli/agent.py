@@ -129,6 +129,7 @@ class AgentLoop(BaseModel):
             }
             if self.tools:
                 kwargs["tools"] = self.tools
+                kwargs["tool_choice"] = "required"
             if self.extra_body:
                 kwargs["extra_body"] = self.extra_body
 
@@ -267,6 +268,27 @@ class AgentLoop(BaseModel):
         if collected_text and not self.on_token:
             sys.stdout.write("\n")
             sys.stdout.flush()
+
+        # Fallback: vLLM may return tool calls as raw <tool_call> tags in content
+        if not collected_tool_calls and "<tool_call>" in collected_text:
+            parsed = self._parse_tool_call_tags(collected_text)
+            if parsed:
+                self.messages.append({
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": parsed,
+                })
+                for tc in parsed:
+                    if self.on_tool_call:
+                        self.on_tool_call(tc["function"]["name"])
+                    result = self._handle_tool_call_dict(tc)
+                    self.messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc["id"],
+                        "content": result,
+                    })
+                return self._run_loop()
+
         self.messages.append({"role": "assistant", "content": collected_text})
 
         # Emit stats

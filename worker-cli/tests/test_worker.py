@@ -92,7 +92,11 @@ class TestStartModel:
     @patch("voidrift_worker.models.ssh_cmd")
     @patch("voidrift_worker.models.httpx")
     def test_refresh_forces_restart(self, mock_httpx, mock_ssh):
-        mock_ssh.return_value = MagicMock(stdout="", returncode=0)
+        def _ssh_side_effect(cmd):
+            if "docker ps --filter name=worker-qwen3-coder --format" in cmd:
+                return MagicMock(stdout="worker-qwen3-coder", returncode=0)
+            return MagicMock(stdout="", returncode=0)
+        mock_ssh.side_effect = _ssh_side_effect
         mock_get = MagicMock(status_code=200)
         mock_httpx.get.return_value = mock_get
         mock_httpx.ConnectError = Exception

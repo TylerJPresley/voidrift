@@ -205,18 +205,29 @@ def start_model(alias: str, refresh: bool = False) -> None:
     except subprocess.TimeoutExpired:
         raise RuntimeError("SSH timeout starting container")
 
-    # Wait for API ready
+    # Wait for API ready, checking container health (REQ-WK-2)
     worker_ip = worker_cfg.get("ip", "")
     url = f"http://{worker_ip}:{port}/v1/models"
     start_time = time.time()
     while time.time() - start_time < 300:
+        # Check container is still running
+        try:
+            ps = ssh_cmd(f"docker ps --filter name={container_name} --format '{{{{.Names}}}}'")
+            if container_name not in ps.stdout:
+                logs = ssh_cmd(f"docker logs --tail 30 {container_name} 2>&1")
+                raise RuntimeError(
+                    f"Container {container_name} exited during startup.\n{logs.stdout}"
+                )
+        except subprocess.SubprocessError:
+            pass
+        # Check API health
         try:
             r = httpx.get(url, timeout=5)
             if r.status_code == 200:
                 return
         except (httpx.ConnectError, httpx.ReadTimeout):
             pass
-        time.sleep(1)
+        time.sleep(2)
     raise RuntimeError(f"Model at {url} did not become ready within 300s")
 
 
