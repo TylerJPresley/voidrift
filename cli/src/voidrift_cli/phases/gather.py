@@ -135,8 +135,8 @@ def run_gather(
 
     # Interactive loop (AC-G3)
     # \x01/\x02 tell readline to ignore ANSI codes when calculating prompt width
-    BB = "\x01\033[1;34m\x02"  # bold blue
-    RS = "\x01\033[0m\x02"     # reset
+    BB = "\033[1;34m"   # bold blue
+    RS = "\033[0m"      # reset
     try:
         while True:
             # Multi-line input: trailing \ continues, plain Enter submits
