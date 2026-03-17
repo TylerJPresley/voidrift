@@ -165,12 +165,19 @@ def _gather_from(
     if force and target.exists():
         target.unlink()
 
+    # CLI-native filesystem tools + MCP content tools (REQ-MCP-4a)
+    from ..tools import LOCAL_TOOLS, LOCAL_HANDLERS
+    tools = list(LOCAL_TOOLS)
+    handlers = dict(LOCAL_HANDLERS)
+
     try:
         import voidrift_mcp.server as mcp_mod
         mcp_mod._boot()
-        tools, handlers = build_mcp_tools(mcp_mod)
+        mcp_tools, mcp_handlers = build_mcp_tools(mcp_mod)
+        tools.extend(mcp_tools)
+        handlers.update(mcp_handlers)
     except ImportError:
-        tools, handlers = [], {}
+        pass
 
     # Override read_source_file to read from the source codebase
     def read_from_source(path: str) -> str:
