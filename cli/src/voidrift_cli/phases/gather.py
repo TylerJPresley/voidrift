@@ -40,7 +40,9 @@ When writing feature specs (spec/<feature>.md), use exactly these sections:
 - Non-Functional Requirements
 - Edge Cases
 
-After writing REQUIREMENTS.md, list all identified features and tell the user to run 'voidrift gather {model} <feature>' for each. Use the exact model alias shown — do not suggest other models.
+After writing REQUIREMENTS.md, list the exact commands to run for each feature, ready to copy. Example:
+  voidrift gather {model} "feature name"
+Do not explain the command format — just list the commands.
 
 Do NOT write the file until you have sufficient information. Ask questions first.
 When you have enough information, tell the operator you're ready to write and ask them to type /write.
