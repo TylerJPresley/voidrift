@@ -259,7 +259,13 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
     try:
         while True:
             try:
-                user_input = input("\n> ").strip()
+                first_line = input("\n> ")
+                # Collect pasted multi-line input
+                lines = [first_line]
+                import select
+                while select.select([sys.stdin], [], [], 0.05)[0]:
+                    lines.append(sys.stdin.readline().rstrip("\n"))
+                user_input = "\n".join(lines).strip()
             except EOFError:
                 break
             if not user_input or user_input.lower() in ("quit", "exit", "/quit"):
