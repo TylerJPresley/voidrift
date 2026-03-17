@@ -231,20 +231,18 @@ def chat(model) -> None:
         stream=True,
     )
 
-    console.print(f"[bold cyan]VoidRift Chat[/bold cyan] — {mc.alias}")
-    console.print("[dim]Type 'quit' or Ctrl+C to exit[/dim]\n")
+    from .utils import log_path
+    from .tui import GatherApp
 
-    try:
-        while True:
-            try:
-                user_input = input("\n> ").strip()
-            except EOFError:
-                break
-            if not user_input or user_input.lower() in ("quit", "exit", "/quit"):
-                break
-            agent.send(user_input)
-    except KeyboardInterrupt:
-        console.print("\n[dim]Session ended.[/dim]")
+    log = log_path("chat")
+    model_label = f"{mc.alias} ({mc.model_id})"
+    app = GatherApp(
+        agent=agent,
+        log_file=log,
+        model_label=model_label,
+        phase="Chat",
+    )
+    app.run()
 
 
 @cli.command()

@@ -1,4 +1,4 @@
-"""Textual TUI for interactive gather phase (REQ-UI-1, REQ-UI-2)."""
+"""Textual TUI for interactive sessions (REQ-UI-1, REQ-UI-2)."""
 
 from __future__ import annotations
 
@@ -72,7 +72,7 @@ class AssistantMessage(Static):
 
 
 class GatherApp(App):
-    """Interactive gather TUI (REQ-UI-1)."""
+    """Interactive TUI for conversation phases."""
 
     CSS = """
     Screen {
@@ -140,9 +140,10 @@ class GatherApp(App):
         agent: AgentLoop,
         log_file: Path,
         model_label: str,
-        target_label: str,
+        target_label: str | None = None,
         feature: str | None = None,
         write_tools: list | None = None,
+        phase: str = "Gather",
     ) -> None:
         super().__init__()
         self.agent = agent
@@ -151,6 +152,7 @@ class GatherApp(App):
         self.target_label = target_label
         self.feature = feature
         self._write_tools = write_tools or []
+        self._phase = phase
         self._streaming_msg: AssistantMessage | None = None
         self._streaming_text = ""
         self._shutting_down = False
@@ -158,19 +160,26 @@ class GatherApp(App):
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
         yield VerticalScroll(id="chat")
-        yield Static("Enter to send · /write to save file · Ctrl+C to exit", id="hint")
+        hint = "Enter to send · /write to save file · Ctrl+C to exit" if self._write_tools else "Enter to send · Ctrl+C to exit"
+        yield Static(hint, id="hint")
         yield PromptInput(id="prompt")
 
     def on_mount(self) -> None:
         self.theme = "dracula"
-        self.title = "VoidRift Gather"
-        self.sub_title = f"{self.model_label} · {self.target_label}"
+        self.title = f"VoidRift {self._phase}"
+        parts = [self.model_label]
+        if self.target_label:
+            parts.append(self.target_label)
+        self.sub_title = " · ".join(parts)
         chat = self.query_one("#chat", VerticalScroll)
-        title = f"Feature: {self.feature}" if self.feature else "Full Project"
-        chat.mount(SystemMessage(f"VoidRift Gather — {title}"))
+        if self.feature:
+            chat.mount(SystemMessage(f"VoidRift {self._phase} — Feature: {self.feature}"))
+        else:
+            chat.mount(SystemMessage(f"VoidRift {self._phase}"))
         chat.mount(SystemMessage(f"Log: {self.log_file}"))
         chat.mount(SystemMessage(f"Model: {self.model_label}"))
-        chat.mount(SystemMessage(f"Target: {self.target_label}"))
+        if self.target_label:
+            chat.mount(SystemMessage(f"Target: {self.target_label}"))
         self.query_one("#prompt", PromptInput).focus()
 
     @on(PromptInput.Submitted)
@@ -182,11 +191,12 @@ class GatherApp(App):
             self.exit()
             return
 
-        # /write enables tools for this turn
-        enable_write = False
-        if text.lower().startswith("/write"):
-            enable_write = True
+        # /write enables tools for this turn (gather only)
+        if self._write_tools and text.lower().startswith("/write"):
             text = text[6:].strip() or "Please write the file now."
+            self.agent.tools = self._write_tools
+        elif self._write_tools:
+            self.agent.tools = []
 
         chat = self.query_one("#chat", VerticalScroll)
         chat.mount(UserMessage(f"> {text}"))
@@ -197,9 +207,6 @@ class GatherApp(App):
 
         with open(self.log_file, "a") as f:
             f.write(f"\n> {text}\n")
-
-        # Toggle tools for this turn
-        self.agent.tools = self._write_tools if enable_write else []
 
         self.query_one("#prompt", PromptInput).disabled = True
         self._send_message(text)
