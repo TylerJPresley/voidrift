@@ -114,6 +114,7 @@ class GatherApp(App):
         max-height: 8;
         width: 100%;
         margin: 0 1;
+        padding: 1 1;
         border: round $primary 40%;
     }
     #hint {
