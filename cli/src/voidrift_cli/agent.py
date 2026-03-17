@@ -235,6 +235,8 @@ class AgentLoop(BaseModel):
                         if tc_delta.function:
                             if tc_delta.function.name:
                                 tc["function"]["name"] = tc_delta.function.name
+                                if self.on_tool_call:
+                                    self.on_tool_call(tc_delta.function.name)
                             if tc_delta.function.arguments:
                                 tc["function"]["arguments"] += tc_delta.function.arguments
         finally:
@@ -254,8 +256,6 @@ class AgentLoop(BaseModel):
                 "tool_calls": tool_calls_list,
             })
             for tc in tool_calls_list:
-                if self.on_tool_call:
-                    self.on_tool_call(tc["function"]["name"])
                 result = self._handle_tool_call_dict(tc)
                 self.messages.append({
                     "role": "tool",
