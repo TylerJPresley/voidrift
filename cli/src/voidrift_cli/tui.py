@@ -220,8 +220,12 @@ class GatherApp(App):
         def on_complete(stats: dict) -> None:
             self._stats = stats
 
+        def on_tool_call(name: str) -> None:
+            self.call_from_thread(self._show_tool_call, name)
+
         self.agent.on_token = on_token
         self.agent.on_complete = on_complete
+        self.agent.on_tool_call = on_tool_call
         try:
             response = self.agent.send(text)
         except RuntimeError as e:
@@ -230,6 +234,7 @@ class GatherApp(App):
         finally:
             self.agent.on_token = None
             self.agent.on_complete = None
+            self.agent.on_tool_call = None
 
         self.call_from_thread(self._finish_stream, response)
 
@@ -277,6 +282,14 @@ class GatherApp(App):
         self.query_one("#prompt", PromptInput).disabled = False
         self.query_one("#prompt", PromptInput).focus()
         self.query_one("#chat", VerticalScroll).scroll_end(animate=False)
+
+    def _show_tool_call(self, name: str) -> None:
+        if self._shutting_down:
+            return
+        self._stop_thinking()
+        chat = self.query_one("#chat", VerticalScroll)
+        chat.mount(SystemMessage(f"⚙ {name}()"))
+        chat.scroll_end(animate=False)
 
     def _show_error(self, msg: str) -> None:
         if self._shutting_down:

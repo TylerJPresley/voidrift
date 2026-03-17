@@ -42,6 +42,7 @@ class AgentLoop(BaseModel):
     extra_body: dict | None = None
     on_token: Callable[[str], None] | None = None
     on_complete: Callable[[dict], None] | None = None
+    on_tool_call: Callable[[str], None] | None = None
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -253,6 +254,8 @@ class AgentLoop(BaseModel):
                 "tool_calls": tool_calls_list,
             })
             for tc in tool_calls_list:
+                if self.on_tool_call:
+                    self.on_tool_call(tc["function"]["name"])
                 result = self._handle_tool_call_dict(tc)
                 self.messages.append({
                     "role": "tool",
