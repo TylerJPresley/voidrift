@@ -142,12 +142,16 @@ def run_gather(
             # Multi-line input: trailing \ continues, plain Enter submits
             lines = []
             try:
-                first = input(f"\n\n{BB}> {RS}")
+                sys.stdout.write(f"\n\n{BB}>{RS} ")
+                sys.stdout.flush()
+                first = input()
                 if not first.strip():
                     continue
                 while first.endswith("\\"):
                     lines.append(first[:-1])
-                    first = input(f"{BB}  {RS}")
+                    sys.stdout.write(f"{BB} {RS} ")
+                    sys.stdout.flush()
+                    first = input()
                 lines.append(first)
             except EOFError:
                 break
