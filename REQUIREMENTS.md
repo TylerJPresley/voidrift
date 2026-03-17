@@ -187,7 +187,7 @@
 
 ### 4.15 Interactive Terminal UI
 
-- **REQ-UI-1:** ALL interactive conversation phases (gather, chat) SHALL use a consistent plain-terminal interface with: a dim header block (phase name, log path, model label), `input()` prompt for operator input, streamed model responses via `on_token` callback, and a dim stats line after each response showing token count, tokens/sec, and elapsed time.
+- **REQ-UI-1:** ALL interactive conversation phases (gather, chat) SHALL use a consistent plain-terminal interface with: a dim header block (phase name, log path, model label), a `prompt_toolkit` multi-line input (blank line to submit, backspace/arrows work across lines), streamed model responses via `on_token` callback, and a dim stats line after each response showing token count, tokens/sec, and elapsed time.
 - **REQ-UI-2:** Operator input SHALL be reprinted bold after submission, preceded by a horizontal rule (`console.rule`, `bright_black` style). Model responses SHALL be displayed in light blue (ANSI 256-color 117), indented 2 spaces, with a dim italic model label (`◆ alias`) above.
 - **REQ-UI-3:** The `/write` command in gather SHALL enable file-writing tools for that turn only. Tools SHALL be disabled by default during conversation to avoid model thinking-token overhead. Chat SHALL always have its tools available.
 - **REQ-UI-4:** Interactive sessions SHALL handle Ctrl+C gracefully (print dim "Session ended." and exit), handle EOF on input (exit cleanly), and log all operator input and model responses to the session log file.

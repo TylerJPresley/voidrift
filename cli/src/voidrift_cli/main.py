@@ -256,18 +256,26 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
     agent.on_complete = on_complete
     agent.on_tool_call = on_tool_call
 
+    from prompt_toolkit import PromptSession
+    from prompt_toolkit.key_binding import KeyBindings
+
+    kb = KeyBindings()
+
+    @kb.add("enter")
+    def _submit_or_newline(event):
+        buf = event.current_buffer
+        # Blank line (or empty) submits; otherwise insert newline
+        if buf.document.current_line.strip() == "" and buf.text.strip():
+            buf.validate_and_handle()
+        else:
+            buf.insert_text("\n")
+
+    session = PromptSession(key_bindings=kb, multiline=True)
+
     try:
         while True:
             try:
-                lines = []
-                prompt = "\n> "
-                while True:
-                    line = input(prompt)
-                    if not line and lines:
-                        break  # blank line submits
-                    lines.append(line)
-                    prompt = "  "
-                user_input = "\n".join(lines).strip()
+                user_input = session.prompt("\n> ").strip()
             except EOFError:
                 break
             if not user_input or user_input.lower() in ("quit", "exit", "/quit"):
