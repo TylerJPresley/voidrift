@@ -68,6 +68,8 @@ class AssistantMessage(Static):
 class GatherApp(App):
     """Interactive gather TUI (REQ-UI-1)."""
 
+    THEME = "dracula"
+
     CSS = """
     Screen {
         background: $surface;
@@ -78,19 +80,19 @@ class GatherApp(App):
     }
     UserMessage {
         background: $surface-lighten-1;
-        padding: 0 2;
-        margin: 1 0 0 0;
+        padding: 1 2;
+        margin: 2 0 0 0;
         color: $text;
     }
     AssistantLabel {
         color: $text-muted;
         text-style: italic;
         padding: 0 2;
-        margin: 1 0 0 0;
+        margin: 2 0 0 0;
     }
     AssistantMessage {
         padding: 0 2;
-        margin: 0;
+        margin: 0 0 1 0;
     }
     #prompt {
         dock: bottom;
