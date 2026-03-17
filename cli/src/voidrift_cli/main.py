@@ -267,7 +267,7 @@ def chat(model) -> None:
         if stats.get("elapsed"):
             parts.append(f"{stats['elapsed']}s")
         if parts:
-            console.print(f"\n[dim]  {' · '.join(parts)}[/dim]")
+            console.print(f"\n\n[dim]  {' · '.join(parts)}[/dim]")
 
     def on_tool_call(name: str) -> None:
         console.print(f"\n[dim]⚙ {name}()[/dim]")
