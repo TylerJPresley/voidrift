@@ -8,7 +8,7 @@ from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import VerticalScroll
-from textual.widgets import Footer, Header, Input, Markdown, Static
+from textual.widgets import Footer, Header, Markdown, Static, TextArea
 
 from .agent import AgentLoop
 
@@ -56,6 +56,9 @@ class GatherApp(App):
     }
     #prompt {
         dock: bottom;
+        height: auto;
+        min-height: 3;
+        max-height: 8;
         margin: 0 2 1 2;
     }
     """
@@ -84,34 +87,40 @@ class GatherApp(App):
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
         yield VerticalScroll(id="chat")
-        yield Input(placeholder="Type a message... (Enter to send)", id="prompt")
+        yield TextArea(id="prompt")
         yield Footer()
 
     def on_mount(self) -> None:
         self.title = "VoidRift Gather"
         self.sub_title = f"{self.model_label} · {self.target_label}"
-        self.query_one("#prompt", Input).focus()
+        prompt = self.query_one("#prompt", TextArea)
+        prompt.focus()
+        prompt.show_line_numbers = False
 
-    async def on_input_submitted(self, event: Input.Submitted) -> None:
-        """Handle user input submission."""
-        text = event.value.strip()
-        if not text:
+    def _on_key(self, event) -> None:
+        """Submit on Enter, newline on Shift+Enter."""
+        prompt = self.query_one("#prompt", TextArea)
+        if not prompt.has_focus:
             return
-        event.input.value = ""
+        if event.key == "enter" and not event.shift:
+            event.prevent_default()
+            text = prompt.text.strip()
+            if not text:
+                return
+            prompt.clear()
+            if text.lower() in ("quit", "exit", "/quit"):
+                self.exit()
+                return
 
-        if text.lower() in ("quit", "exit", "/quit"):
-            self.exit()
-            return
+            chat = self.query_one("#chat", VerticalScroll)
+            chat.mount(MessageBubble(text, role="user"))
+            chat.scroll_end(animate=False)
 
-        chat = self.query_one("#chat", VerticalScroll)
-        chat.mount(MessageBubble(text, role="user"))
-        chat.scroll_end(animate=False)
+            with open(self.log_file, "a") as f:
+                f.write(f"\n> {text}\n")
 
-        with open(self.log_file, "a") as f:
-            f.write(f"\n> {text}\n")
-
-        event.input.disabled = True
-        self._send_message(text)
+            prompt.disabled = True
+            self._send_message(text)
 
     @work(thread=True)
     def _send_message(self, text: str) -> None:
@@ -157,7 +166,7 @@ class GatherApp(App):
         with open(self.log_file, "a") as f:
             f.write(f"\n{response}\n")
 
-        prompt = self.query_one("#prompt", Input)
+        prompt = self.query_one("#prompt", TextArea)
         prompt.disabled = False
         prompt.focus()
         self.query_one("#chat", VerticalScroll).scroll_end(animate=False)
@@ -169,7 +178,7 @@ class GatherApp(App):
         self._streaming_bubble = None
         self._streaming_text = ""
 
-        prompt = self.query_one("#prompt", Input)
+        prompt = self.query_one("#prompt", TextArea)
         prompt.disabled = False
         prompt.focus()
         chat.scroll_end(animate=False)
