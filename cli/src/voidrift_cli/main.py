@@ -256,10 +256,10 @@ def chat(model) -> None:
         if stats.get("elapsed"):
             parts.append(f"{stats['elapsed']}s")
         if parts:
-            console.print(f"[dim]{' · '.join(parts)}[/dim]")
+            console.print(f"\n[dim]{' · '.join(parts)}[/dim]")
 
     def on_tool_call(name: str) -> None:
-        console.print(f"[dim]⚙ {name}()[/dim]")
+        console.print(f"\n[dim]⚙ {name}()[/dim]")
 
     agent.on_token = on_token
     agent.on_complete = on_complete
@@ -268,7 +268,7 @@ def chat(model) -> None:
     try:
         while True:
             try:
-                user_input = input("> ").strip()
+                user_input = input("\n> ").strip()
             except EOFError:
                 break
             if not user_input or user_input.lower() in ("quit", "exit", "/quit"):
