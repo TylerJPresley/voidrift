@@ -7,6 +7,7 @@ import json
 import os
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Any, Callable
 
@@ -39,6 +40,9 @@ class AgentLoop(BaseModel):
     stream: bool = True
     max_tokens: int = 16384
     extra_body: dict | None = None
+    on_token: Callable[[str], None] | None = None
+    on_complete: Callable[[dict], None] | None = None
+    on_tool_call: Callable[[str], None] | None = None
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -163,11 +167,17 @@ class AgentLoop(BaseModel):
             Collected response text.
         """
         kwargs["stream"] = True
+        kwargs["stream_options"] = {"include_usage": True}
         collected_text = ""
         collected_tool_calls: dict[int, dict] = {}
+        token_count = 0
+        usage_data: dict = {}
+        stream_start = time.time()
 
-        # Spinner until first token arrives
+        # Spinner until first token arrives (skip if TUI handles display)
         stop_spinner = threading.Event()
+        if self.on_token:
+            stop_spinner.set()  # no spinner in TUI mode
         def _spin():
             for ch in itertools.cycle("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"):
                 if stop_spinner.wait(0.1):
@@ -183,6 +193,13 @@ class AgentLoop(BaseModel):
             stream = client.chat.completions.create(**kwargs)
             for chunk in stream:
                 if not chunk.choices:
+                    # Final chunk may have usage data
+                    if hasattr(chunk, "usage") and chunk.usage:
+                        usage_data = {
+                            "prompt_tokens": chunk.usage.prompt_tokens or 0,
+                            "completion_tokens": chunk.usage.completion_tokens or 0,
+                            "total_tokens": chunk.usage.total_tokens or 0,
+                        }
                     continue
                 delta = chunk.choices[0].delta
 
@@ -191,9 +208,13 @@ class AgentLoop(BaseModel):
                     if not stop_spinner.is_set():
                         stop_spinner.set()
                         spinner.join()
-                    sys.stdout.write(delta.content)
-                    sys.stdout.flush()
+                    if self.on_token:
+                        self.on_token(delta.content)
+                    else:
+                        sys.stdout.write(delta.content)
+                        sys.stdout.flush()
                     collected_text += delta.content
+                    token_count += 1
 
                 # Accumulate tool calls
                 if delta.tool_calls:
@@ -214,6 +235,8 @@ class AgentLoop(BaseModel):
                         if tc_delta.function:
                             if tc_delta.function.name:
                                 tc["function"]["name"] = tc_delta.function.name
+                                if self.on_tool_call:
+                                    self.on_tool_call(tc_delta.function.name)
                             if tc_delta.function.arguments:
                                 tc["function"]["arguments"] += tc_delta.function.arguments
         finally:
@@ -223,7 +246,7 @@ class AgentLoop(BaseModel):
 
         # If we got tool calls, handle them and loop
         if collected_tool_calls:
-            if collected_text:
+            if collected_text and not self.on_token:
                 sys.stdout.write("\n")
                 sys.stdout.flush()
             tool_calls_list = [collected_tool_calls[i] for i in sorted(collected_tool_calls)]
@@ -243,10 +266,22 @@ class AgentLoop(BaseModel):
             return self._run_loop()
 
         # Final text response
-        if collected_text:
+        if collected_text and not self.on_token:
             sys.stdout.write("\n")
             sys.stdout.flush()
         self.messages.append({"role": "assistant", "content": collected_text})
+
+        # Emit stats
+        if self.on_complete:
+            elapsed = time.time() - stream_start
+            completion_tokens = usage_data.get("completion_tokens", token_count)
+            tps = completion_tokens / elapsed if elapsed > 0 else 0
+            self.on_complete({
+                **usage_data,
+                "elapsed": round(elapsed, 1),
+                "tokens_per_sec": round(tps, 1),
+            })
+
         return collected_text
 
     def _execute_tool(self, name: str, arguments: str) -> str:

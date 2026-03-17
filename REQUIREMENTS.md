@@ -75,8 +75,8 @@
 
 - **REQ-G-1:** WHEN `voidrift gather <model>` is run AND the target file exists, THE SYSTEM SHALL include it in the system prompt as context for revision. IF the file does not exist, THE SYSTEM SHALL create a new file.
 - **REQ-G-2:** WHEN `voidrift gather <model> <feature>` is run AND `.voidrift/REQUIREMENTS.md` does not exist, THE SYSTEM SHALL exit with error code 1.
-- **REQ-G-3:** The gather phase SHALL always be interactive with model output streaming to the terminal in real time. The input prompt SHALL support line editing (arrow keys, backspace, history). IF a model request fails mid-session, THE SYSTEM SHALL print the error and return to the prompt (not exit). The interactive gather agent SHALL only have access to file-writing tools (`write_file`, `read_source_file`), not the full MCP tool set. Operator input SHALL be visually distinct from model output (colored prompt, blank line separation). The interactive agent SHALL use `max_tokens=4096` to keep responses bounded.
-  - *Rationale:* Exposing all 16 MCP tools in interactive mode causes local models to enter infinite tool-call loops instead of conversing. Limiting tools to write-only keeps the agent focused on dialogue. Unbounded max_tokens causes local models to generate for minutes per turn; 4096 is enough for conversation and file writes (~3000 words). High token limits cause local models to generate for minutes per turn.
+- **REQ-G-3:** The gather phase SHALL use the shared interactive terminal loop (REQ-UI-1 through REQ-UI-4). The interactive gather agent SHALL only have access to file-writing tools (`write_file`, `read_source_file`), not the full MCP tool set. Tools SHALL be disabled by default and enabled via `/write` command (REQ-UI-3). IF a model request fails mid-session, THE SYSTEM SHALL print the error and return to the prompt (not exit).
+  - *Rationale:* Exposing all 16 MCP tools in interactive mode causes local models to enter infinite tool-call loops instead of conversing. Disabling tools by default also prevents the model from burning tokens on hidden thinking when tools are present in the request.
 - **REQ-G-4:** The model SHALL ask clarifying questions before writing the output file and SHALL NOT write until it has sufficient information.
 - **REQ-G-5:** The model SHALL NOT focus on technology choices unless the operator explicitly requests them.
 - **REQ-G-6:** Full project gather SHALL produce `.voidrift/REQUIREMENTS.md` with sections: Goal, Users, Features, Runtime Environment, Constraints, Out of Scope.
@@ -185,7 +185,14 @@
 - **REQ-LOG-2:** Log files SHALL accumulate indefinitely. The operator is responsible for cleanup.
 - **REQ-LOG-3:** WHEN a phase displays its log path, it SHALL appear immediately after the phase title line.
 
-### 4.15 Framework Configuration
+### 4.15 Interactive Terminal UI
+
+- **REQ-UI-1:** ALL interactive conversation phases (gather, chat) SHALL use a consistent plain-terminal interface with: a dim header block (phase name, log path, model label), a `prompt_toolkit` multi-line input (blank line to submit, backspace/arrows work across lines), streamed model responses via `on_token` callback, and a dim stats line after each response showing token count, tokens/sec, and elapsed time.
+- **REQ-UI-2:** Operator input SHALL be reprinted bold after submission, preceded by a horizontal rule (`console.rule`, `bright_black` style). Model responses SHALL be displayed in light blue (ANSI 256-color 117), indented 2 spaces, with a dim italic model label (`◆ alias`) above.
+- **REQ-UI-3:** The `/write` command in gather SHALL enable file-writing tools for that turn only. Tools SHALL be disabled by default during conversation to avoid model thinking-token overhead. Chat SHALL always have its tools available.
+- **REQ-UI-4:** Interactive sessions SHALL handle Ctrl+C gracefully (print dim "Session ended." and exit), handle EOF on input (exit cleanly), and log all operator input and model responses to the session log file.
+
+### 4.16 Framework Configuration
 
 - **REQ-CFG-1:** All framework configuration SHALL be read from `~/.voidrift/config.yml`. Config files SHALL support `${VAR}` and `${VAR:-default}` for environment variable expansion, and `${section.key}` for cross-referencing values from config.yml.
 - **REQ-CFG-2:** `config.yml` SHALL contain sections for: `worker` (user, ip, api_key, hf_token), `kiro` (port, api_key), and `api_keys` (anthropic, gemini). Connection settings are literal values; secrets use env var references.

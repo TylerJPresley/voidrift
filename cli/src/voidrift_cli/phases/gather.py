@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import readline  # noqa: F401 — enables line editing in input()
-import sys
 from pathlib import Path
 
 import click
@@ -45,6 +43,7 @@ When writing feature specs (spec/<feature>.md), use exactly these sections:
 After writing REQUIREMENTS.md, list all identified features and tell the user to run 'voidrift gather <model> <feature>' for each.
 
 Do NOT write the file until you have sufficient information. Ask questions first.
+When you have enough information, tell the operator you're ready to write and ask them to type /write.
 """
 
 
@@ -115,69 +114,23 @@ def run_gather(
     agent = AgentLoop(
         model=model,
         system_prompt=system,
-        tools=tools,
+        tools=[],
         tool_handlers=handlers,
         stream=True,
-        max_tokens=4096,
+        max_tokens=16384,
         extra_body={"chat_template_kwargs": {"enable_thinking": False}},
     )
 
-    # Start conversation
-    console.print(f"[bold cyan]VoidRift Gather[/bold cyan] — {'Feature: ' + feature if feature else 'Full Project'}")
+    # Interactive terminal loop (REQ-UI-1)
+    from ..main import _interactive_loop
+
     log = log_path("gather")
-    console.print(f"[dim]Log: {log}[/dim]")
-    console.print(f"Model: {model.alias} ({model.model_id})")
-    if target.exists():
-        console.print(f"[dim]Revising existing: {target.relative_to(Path.cwd())}[/dim]")
-    else:
-        console.print(f"[dim]Creating new: {target.relative_to(Path.cwd())}[/dim]")
-    console.print("[dim]Type 'quit' or Ctrl+C to exit[/dim]\n")
-
-    # Interactive loop (AC-G3)
-    # \x01/\x02 tell readline to ignore ANSI codes when calculating prompt width
-    BB = "\033[1;34m"   # bold blue
-    RS = "\033[0m"      # reset
-    try:
-        while True:
-            # Multi-line input: trailing \ continues, plain Enter submits
-            lines = []
-            try:
-                sys.stdout.write(f"\n\n{BB}>{RS} ")
-                sys.stdout.flush()
-                first = input()
-                if not first.strip():
-                    continue
-                while first.endswith("\\"):
-                    lines.append(first[:-1])
-                    sys.stdout.write(f"{BB} {RS} ")
-                    sys.stdout.flush()
-                    first = input()
-                lines.append(first)
-            except EOFError:
-                break
-            user_input = "\n".join(lines).strip()
-            if not user_input:
-                continue
-            if user_input.lower() in ("quit", "exit", "/quit"):
-                break
-
-            with open(log, "a") as f:
-                f.write(f"\n> {user_input}\n")
-
-            try:
-                sys.stdout.write("\n")
-                sys.stdout.flush()
-                response = agent.send(user_input)
-            except RuntimeError as e:
-                err_console.print(f"\n[red]Error: {e}[/red]")
-                continue
-
-            with open(log, "a") as f:
-                f.write(f"\n{response}\n")
-    except KeyboardInterrupt:
-        console.print("\n[dim]Session ended.[/dim]")
-
+    target_label = str(target.relative_to(Path.cwd()))
+    title = f"VoidRift Gather — Feature: {feature}" if feature else "VoidRift Gather"
+    extra = [f"Target: {target_label}"]
+    _interactive_loop(agent, model, log, title, write_tools=tools, extra_header=extra)
     return 0
+
 
 
 def _gather_from(
