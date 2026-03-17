@@ -142,6 +142,7 @@ class GatherApp(App):
         model_label: str,
         target_label: str,
         feature: str | None = None,
+        write_tools: list | None = None,
     ) -> None:
         super().__init__()
         self.agent = agent
@@ -149,6 +150,7 @@ class GatherApp(App):
         self.model_label = model_label
         self.target_label = target_label
         self.feature = feature
+        self._write_tools = write_tools or []
         self._streaming_msg: AssistantMessage | None = None
         self._streaming_text = ""
         self._shutting_down = False
@@ -156,7 +158,7 @@ class GatherApp(App):
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
         yield VerticalScroll(id="chat")
-        yield Static("Enter to send · Ctrl+C to exit", id="hint")
+        yield Static("Enter to send · /write to save file · Ctrl+C to exit", id="hint")
         yield PromptInput(id="prompt")
 
     def on_mount(self) -> None:
@@ -180,6 +182,12 @@ class GatherApp(App):
             self.exit()
             return
 
+        # /write enables tools for this turn
+        enable_write = False
+        if text.lower().startswith("/write"):
+            enable_write = True
+            text = text[6:].strip() or "Please write the file now."
+
         chat = self.query_one("#chat", VerticalScroll)
         chat.mount(UserMessage(f"> {text}"))
         chat.mount(SystemMessage("⠋ Thinking...", id="thinking"))
@@ -189,6 +197,9 @@ class GatherApp(App):
 
         with open(self.log_file, "a") as f:
             f.write(f"\n> {text}\n")
+
+        # Toggle tools for this turn
+        self.agent.tools = self._write_tools if enable_write else []
 
         self.query_one("#prompt", PromptInput).disabled = True
         self._send_message(text)

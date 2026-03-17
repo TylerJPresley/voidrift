@@ -43,6 +43,7 @@ When writing feature specs (spec/<feature>.md), use exactly these sections:
 After writing REQUIREMENTS.md, list all identified features and tell the user to run 'voidrift gather <model> <feature>' for each.
 
 Do NOT write the file until you have sufficient information. Ask questions first.
+When you have enough information, tell the operator you're ready to write and ask them to type /write.
 """
 
 
@@ -113,10 +114,10 @@ def run_gather(
     agent = AgentLoop(
         model=model,
         system_prompt=system,
-        tools=tools,
+        tools=[],
         tool_handlers=handlers,
         stream=True,
-        max_tokens=32768,
+        max_tokens=16384,
         extra_body={"chat_template_kwargs": {"enable_thinking": False}},
     )
 
@@ -132,6 +133,7 @@ def run_gather(
         model_label=model_label,
         target_label=target_label,
         feature=feature,
+        write_tools=tools,
     )
     app.run()
     return 0
