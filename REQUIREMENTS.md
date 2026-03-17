@@ -185,7 +185,13 @@
 - **REQ-LOG-2:** Log files SHALL accumulate indefinitely. The operator is responsible for cleanup.
 - **REQ-LOG-3:** WHEN a phase displays its log path, it SHALL appear immediately after the phase title line.
 
-### 4.15 Framework Configuration
+### 4.15 Interactive TUI
+
+- **REQ-UI-1:** The interactive gather phase SHALL use a Textual TUI application with: a scrollable message area displaying the conversation (operator messages right-aligned, model responses left-aligned with markdown rendering), a text input area at the bottom supporting multi-line input, streaming model responses rendered in real-time into the message area, a header showing phase name, model alias, and log path, and a footer showing keybindings (Ctrl+C to exit, Enter to send).
+- **REQ-UI-2:** The Textual TUI SHALL replace the current `input()` loop and `sys.stdout.write()` streaming for the gather phase only. All other phases SHALL continue using Rich console output.
+- **REQ-UI-3:** `textual>=0.80` SHALL be added as a dependency to the `cli/` package.
+
+### 4.16 Framework Configuration
 
 - **REQ-CFG-1:** All framework configuration SHALL be read from `~/.voidrift/config.yml`. Config files SHALL support `${VAR}` and `${VAR:-default}` for environment variable expansion, and `${section.key}` for cross-referencing values from config.yml.
 - **REQ-CFG-2:** `config.yml` SHALL contain sections for: `worker` (user, ip, api_key, hf_token), `kiro` (port, api_key), and `api_keys` (anthropic, gemini). Connection settings are literal values; secrets use env var references.

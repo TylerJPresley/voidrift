@@ -20,11 +20,11 @@ class TestGatherPreflightChecks:
 
     def test_feature_with_requirements(self, tmp_project, cloud_model, sample_requirements):
         from voidrift_cli.phases.gather import run_gather
-        # This will try to start interactive mode — we just verify it gets past preflight
-        with patch("voidrift_cli.phases.gather.AgentLoop") as MockAgent:
-            with patch("builtins.input", side_effect=EOFError):
+        # This will try to start TUI — we just verify it gets past preflight
+        with patch("voidrift_cli.phases.gather.AgentLoop"):
+            with patch("voidrift_cli.tui.GatherApp.run"):
                 result = run_gather(cloud_model, feature="auth")
-        assert result == 0  # Exited cleanly via EOFError
+        assert result == 0  # Exited cleanly
         # Verify spec dir was created
         assert (tmp_project / ".voidrift" / "spec").is_dir()
 

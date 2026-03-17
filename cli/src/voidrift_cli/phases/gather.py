@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import readline  # noqa: F401 — enables line editing in input()
-import sys
 from pathlib import Path
 
 import click
@@ -122,16 +120,21 @@ def run_gather(
         extra_body={"chat_template_kwargs": {"enable_thinking": False}},
     )
 
-    # Start conversation
-    console.print(f"[bold cyan]VoidRift Gather[/bold cyan] — {'Feature: ' + feature if feature else 'Full Project'}")
+    # Launch TUI (REQ-UI-1)
     log = log_path("gather")
-    console.print(f"[dim]Log: {log}[/dim]")
-    console.print(f"Model: {model.alias} ({model.model_id})")
-    if target.exists():
-        console.print(f"[dim]Revising existing: {target.relative_to(Path.cwd())}[/dim]")
-    else:
-        console.print(f"[dim]Creating new: {target.relative_to(Path.cwd())}[/dim]")
-    console.print("[dim]Type 'quit' or Ctrl+C to exit[/dim]\n")
+    target_label = str(target.relative_to(Path.cwd()))
+    model_label = f"{model.alias} ({model.model_id})"
+
+    from ..tui import GatherApp
+    app = GatherApp(
+        agent=agent,
+        log_file=log,
+        model_label=model_label,
+        target_label=target_label,
+        feature=feature,
+    )
+    app.run()
+    return 0
 
     # Interactive loop (AC-G3)
     # \x01/\x02 tell readline to ignore ANSI codes when calculating prompt width

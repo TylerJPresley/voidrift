@@ -39,6 +39,7 @@ class AgentLoop(BaseModel):
     stream: bool = True
     max_tokens: int = 16384
     extra_body: dict | None = None
+    on_token: Callable[[str], None] | None = None
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -166,8 +167,10 @@ class AgentLoop(BaseModel):
         collected_text = ""
         collected_tool_calls: dict[int, dict] = {}
 
-        # Spinner until first token arrives
+        # Spinner until first token arrives (skip if TUI handles display)
         stop_spinner = threading.Event()
+        if self.on_token:
+            stop_spinner.set()  # no spinner in TUI mode
         def _spin():
             for ch in itertools.cycle("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"):
                 if stop_spinner.wait(0.1):
@@ -191,8 +194,11 @@ class AgentLoop(BaseModel):
                     if not stop_spinner.is_set():
                         stop_spinner.set()
                         spinner.join()
-                    sys.stdout.write(delta.content)
-                    sys.stdout.flush()
+                    if self.on_token:
+                        self.on_token(delta.content)
+                    else:
+                        sys.stdout.write(delta.content)
+                        sys.stdout.flush()
                     collected_text += delta.content
 
                 # Accumulate tool calls
@@ -223,7 +229,7 @@ class AgentLoop(BaseModel):
 
         # If we got tool calls, handle them and loop
         if collected_tool_calls:
-            if collected_text:
+            if collected_text and not self.on_token:
                 sys.stdout.write("\n")
                 sys.stdout.flush()
             tool_calls_list = [collected_tool_calls[i] for i in sorted(collected_tool_calls)]
@@ -243,7 +249,7 @@ class AgentLoop(BaseModel):
             return self._run_loop()
 
         # Final text response
-        if collected_text:
+        if collected_text and not self.on_token:
             sys.stdout.write("\n")
             sys.stdout.flush()
         self.messages.append({"role": "assistant", "content": collected_text})
