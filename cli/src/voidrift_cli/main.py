@@ -288,7 +288,7 @@ def chat(model) -> None:
             # Reprint user input as bold with rule above
             sys.stdout.write("\033[1A\033[2K")  # erase the raw input line
             sys.stdout.flush()
-            console.rule(style="dim")
+            console.rule(style="bright_black")
             console.print(f"[bold]> {user_input}[/bold]")
 
             with open(log, "a") as f:
