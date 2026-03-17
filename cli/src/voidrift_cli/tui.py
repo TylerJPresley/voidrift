@@ -251,6 +251,7 @@ class GatherApp(App):
     def _finish_stream(self, response: str) -> None:
         if self._shutting_down:
             return
+        self._stop_thinking()
         if self._streaming_msg:
             self._streaming_msg.update_content(f"◆ {response}")
         self._streaming_msg = None
