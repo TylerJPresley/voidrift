@@ -294,6 +294,7 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
 
             with open(log, "a") as f:
                 f.write(f"\n{response}\n")
+            console.print()
             console.rule(style="bright_black")
     except KeyboardInterrupt:
         console.print("\n[dim]Session ended.[/dim]")
