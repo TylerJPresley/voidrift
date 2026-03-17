@@ -283,9 +283,14 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
             _tool_stop = None
             _tool_spinner = None
 
+    def on_tool_result(name, result):
+        _stop_tool_spinner()
+        console.print(f"\n[dim green]  ✓ {result}[/dim green]")
+
     agent.on_token = on_token
     agent.on_complete = on_complete
     agent.on_tool_call = on_tool_call
+    agent.on_tool_result = on_tool_result
 
     from prompt_toolkit import PromptSession
     from prompt_toolkit.key_binding import KeyBindings
@@ -352,6 +357,7 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
         agent.on_token = None
         agent.on_complete = None
         agent.on_tool_call = None
+        agent.on_tool_result = None
 
 
 @cli.command()
