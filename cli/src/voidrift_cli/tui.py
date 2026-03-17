@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from threading import Thread
 
 from textual import work
 from textual.app import App, ComposeResult
@@ -35,24 +34,29 @@ class GatherApp(App):
     CSS = """
     #chat {
         height: 1fr;
-        padding: 1;
+        padding: 1 2;
     }
     .user {
-        background: $primary-darken-2;
-        margin: 1 0 1 8;
-        padding: 0 1;
+        background: $primary 15%;
+        color: $text;
+        margin: 1 0 0 20;
+        padding: 0 2;
+        border: round $primary 40%;
+        text-align: right;
     }
     .assistant {
-        background: $surface;
-        margin: 1 8 1 0;
-        padding: 0 1;
+        background: $surface-lighten-1;
+        color: $text;
+        margin: 1 20 0 0;
+        padding: 0 2;
+        border: round $surface-lighten-2;
     }
     .assistant.streaming {
-        background: $surface;
+        border: round $accent 50%;
     }
     #prompt {
         dock: bottom;
-        margin: 0 1;
+        margin: 0 2 1 2;
     }
     """
 
@@ -78,7 +82,6 @@ class GatherApp(App):
         self._streaming_text = ""
 
     def compose(self) -> ComposeResult:
-        title = f"VoidRift Gather — {'Feature: ' + self.feature if self.feature else 'Full Project'}"
         yield Header(show_clock=False)
         yield VerticalScroll(id="chat")
         yield Input(placeholder="Type a message... (Enter to send)", id="prompt")
@@ -100,18 +103,14 @@ class GatherApp(App):
             self.exit()
             return
 
-        # Add user message
         chat = self.query_one("#chat", VerticalScroll)
         chat.mount(MessageBubble(text, role="user"))
+        chat.scroll_end(animate=False)
 
-        # Log
         with open(self.log_file, "a") as f:
             f.write(f"\n> {text}\n")
 
-        # Disable input while streaming
         event.input.disabled = True
-
-        # Stream response
         self._send_message(text)
 
     @work(thread=True)
@@ -155,11 +154,9 @@ class GatherApp(App):
         self._streaming_bubble = None
         self._streaming_text = ""
 
-        # Log
         with open(self.log_file, "a") as f:
             f.write(f"\n{response}\n")
 
-        # Re-enable input
         prompt = self.query_one("#prompt", Input)
         prompt.disabled = False
         prompt.focus()
