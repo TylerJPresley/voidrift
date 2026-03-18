@@ -457,6 +457,9 @@ def build_mcp_tools(mcp_server_module: Any) -> tuple[list[dict], dict[str, Calla
     }
 
     for name, (func, params) in tool_map.items():
+        # Strip 'default' from properties — Anthropic rejects it
+        for prop in params.get("properties", {}).values():
+            prop.pop("default", None)
         tools.append({
             "type": "function",
             "function": {
