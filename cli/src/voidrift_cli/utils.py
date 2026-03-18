@@ -52,6 +52,28 @@ def log_path(phase: str) -> Path:
     return log_dir / f"{phase}-{ts}.log"
 
 
+def boot_run(phase: str) -> tuple[Path, str]:
+    """Start a phase run: create log, set run ID, prune old runs (REQ-MCP-3a).
+
+    Args:
+        phase: Phase name.
+
+    Returns:
+        Tuple of (log_path, run_id).
+    """
+    log = log_path(phase)
+    run_id = log.stem
+
+    # Auto-prune old run directories, keep last 5
+    runs_dir = ensure_voidrift_dir() / "runs"
+    if runs_dir.is_dir():
+        dirs = sorted([d for d in runs_dir.iterdir() if d.is_dir()], key=lambda d: d.name)
+        for old in dirs[:-5]:
+            shutil.rmtree(old)
+
+    return log, run_id
+
+
 def check_disk_space() -> None:
     """Warn if less than 1GB available (AC-MC7)."""
     st = os.statvfs(".")

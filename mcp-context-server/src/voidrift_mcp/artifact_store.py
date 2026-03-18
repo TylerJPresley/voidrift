@@ -18,16 +18,22 @@ class ArtifactStore(BaseModel):
     run_id: str = ""
     _artifacts: dict[str, str] = PrivateAttr(default_factory=dict)
 
+    def _run_dir(self) -> Path | None:
+        """Return the run-scoped directory, or None if no run_id set."""
+        if self.run_id:
+            return self.voidrift_dir / "runs" / self.run_id
+        return None
+
     def _disk_path(self, artifact_type: str, key: str) -> Path | None:
         """Map artifact type+key to a disk path, or None if no mapping."""
+        # Persistent artifacts — not run-scoped
         if artifact_type == "requirements":
             if key == "project":
                 return self.voidrift_dir / "REQUIREMENTS.md"
             return self.voidrift_dir / "spec" / f"{key}.md"
+        # Ephemeral artifacts — run-scoped
         if artifact_type == "analysis":
-            base = self.voidrift_dir / "analyses"
-            if self.run_id:
-                base = base / self.run_id
+            base = self._run_dir() or self.voidrift_dir / "runs" / "_unscoped"
             return base / f"{key.replace('/', '_').replace(chr(92), '_')}.md"
         return None
 

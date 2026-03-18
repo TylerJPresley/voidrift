@@ -13,7 +13,7 @@ from rich.status import Status
 from ..agent import AgentLoop, build_mcp_tools
 from ..models import ModelConfig
 from ..utils import (
-    ensure_voidrift_dir, voidrift_dir, log_path, check_disk_space,
+    ensure_voidrift_dir, voidrift_dir, boot_run, check_disk_space,
     check_requirements_exist, check_task_files, count_tasks,
     truncate_task_label,
 )
@@ -93,7 +93,7 @@ def run_develop(
     prev_handler = signal.signal(signal.SIGTERM, _handle_sigterm)
 
     ui.phase("VoidRift Develop")
-    log = log_path("develop")
+    log, run_id = boot_run("develop")
     ui.detail(f"Log: {log}")
     with open(log, "a") as f:
         f.write(f"\n=== Develop session: {datetime.now().isoformat()} ===\n")
@@ -101,6 +101,7 @@ def run_develop(
     try:
         import voidrift_mcp.server as mcp_mod
         mcp_mod._boot()
+        mcp_mod.artifacts.run_id = run_id
         mcp_mod.load_tasks(str(task_file))
         tools, handlers = build_mcp_tools(mcp_mod)
     except ImportError:

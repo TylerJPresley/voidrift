@@ -10,7 +10,7 @@ from rich.status import Status
 
 from ..agent import AgentLoop, build_mcp_tools
 from ..models import ModelConfig
-from ..utils import ensure_voidrift_dir, voidrift_dir, log_path, check_disk_space
+from ..utils import ensure_voidrift_dir, voidrift_dir, boot_run, check_disk_space
 from .. import ui
 
 
@@ -95,19 +95,19 @@ def run_verify(worker: ModelConfig, architect: ModelConfig | None = None) -> int
 
     ui.phase("VoidRift Verify")
 
-    # Run checks
     ui.stage("Running quality checks...")
     raw_output, failed_checks = _run_checks()
 
     raw_file = d / "VERIFY-RAW.md"
     raw_file.write_text(raw_output)
 
-    log = log_path("verify")
+    log, run_id = boot_run("verify")
     ui.detail(f"Log: {log}")
 
     try:
         import voidrift_mcp.server as mcp_mod
         mcp_mod._boot()
+        mcp_mod.artifacts.run_id = run_id
         tools, handlers = build_mcp_tools(mcp_mod)
     except ImportError:
         tools, handlers = [], {}

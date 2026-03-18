@@ -9,7 +9,7 @@ from rich.status import Status
 
 from ..agent import AgentLoop, build_mcp_tools
 from ..models import ModelConfig
-from ..utils import ensure_voidrift_dir, voidrift_dir, log_path, check_disk_space
+from ..utils import ensure_voidrift_dir, voidrift_dir, boot_run, check_disk_space
 from .. import ui
 
 ARCHITECT_PROMPT = """[ROLE: Architect]
@@ -67,7 +67,7 @@ def run_plan(
             f.unlink()
         ui.info("Cleared existing planning artifacts.")
 
-    log = log_path("plan")
+    log, run_id = boot_run("plan")
     ui.detail(f"Log: {log}")
     with open(log, "a") as f:
         f.write(f"\n=== Plan run: {datetime.now().isoformat()} ===\n")
@@ -76,6 +76,7 @@ def run_plan(
     try:
         import voidrift_mcp.server as mcp_mod
         mcp_mod._boot()
+        mcp_mod.artifacts.run_id = run_id
         tools, handlers = build_mcp_tools(mcp_mod)
     except ImportError:
         tools, handlers = [], {}

@@ -9,7 +9,7 @@ import click
 from ..agent import AgentLoop, build_mcp_tools
 from ..models import ModelConfig
 from ..utils import (
-    ensure_voidrift_dir, voidrift_dir, log_path, check_disk_space,
+    ensure_voidrift_dir, voidrift_dir, log_path, boot_run, check_disk_space,
 )
 from .. import ui
 
@@ -110,7 +110,7 @@ def run_gather(
     )
 
     from ..main import _interactive_loop
-    log = log_path("gather")
+    log, _ = boot_run("gather")
     target_label = str(target.relative_to(Path.cwd()))
     title = f"VoidRift Gather — Feature: {feature}" if feature else "VoidRift Gather"
     extra = [f"Target: {target_label}"]
@@ -147,23 +147,11 @@ def _gather_from(
         all_handlers = dict(LOCAL_HANDLERS)
         mcp_mod = None
 
-    log = log_path("gather")
+    log, run_id = boot_run("gather")
 
-    # Scope analyses to this run (REQ-MCP-3a)
-    run_id = Path(log).stem
+    # Scope ephemeral data to this run (REQ-MCP-3a)
     if mcp_mod is not None:
         mcp_mod.artifacts.run_id = run_id
-
-    # Auto-prune old analysis runs, keep last 3 (REQ-MCP-3a)
-    import shutil
-    analyses_dir = voidrift_dir() / "analyses"
-    if analyses_dir.is_dir():
-        runs = sorted(
-            [d for d in analyses_dir.iterdir() if d.is_dir()],
-            key=lambda d: d.name,
-        )
-        for old in runs[:-3]:
-            shutil.rmtree(old)
 
     def read_from_source(path: str) -> str:
         full = (from_path / path).resolve()
