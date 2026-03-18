@@ -113,7 +113,7 @@
 - **REQ-D-3:** WHEN a develop session starts, THE SYSTEM SHALL create `.voidrift/.develop.lock` with PID and timestamp. IF the lock exists with a live PID, THE SYSTEM SHALL exit with error.
 - **REQ-D-4:** WHILE the develop loop is active, THE SYSTEM SHALL process the first unchecked task from TASKS.md via `get_next_task()`. WHEN no unchecked tasks remain, the loop SHALL exit.
 - **REQ-D-5:** IF the worker produces no file changes (HEAD unchanged), THE SYSTEM SHALL retry once. IF the retry also fails AND an architect is configured, THE SYSTEM SHALL escalate.
-- **REQ-D-6:** WHEN the worker writes an escalation file (`.voidrift/escalations/<task_num>.md`), THE SYSTEM SHALL consult the architect and write the response to `.voidrift/architect_responses/<task_num>.md`, then retry the task.
+- **REQ-D-6:** WHEN the worker escalates, THE SYSTEM SHALL consult the architect with the escalation context and inject the architect's response into the agent's message history, then retry the task. Escalations and responses are ephemeral — they exist only in the agent's message history during the run.
 - **REQ-D-7:** WHEN `max_escalations` (5) is exceeded for a session, THE SYSTEM SHALL mark the task `[!]` (blocked), increment `blocked_tasks`, and continue to the next task.
 - **REQ-D-8:** WHEN architect is consulted, THE SYSTEM SHALL provide: problem description, REQUIREMENTS.md, ARCHITECTURE.md, and task text. Source code files SHALL NOT be loaded.
 - **REQ-D-9:** Task completion SHALL be managed by the MCP server's `complete_task()` tool, which marks `- [ ]` as `- [x]` and writes through to disk.
@@ -144,7 +144,7 @@
 - **REQ-U-3:** `voidrift log <phase>` SHALL show the last 200 lines of the most recent log. `--prune` SHALL delete log files.
 - **REQ-U-4:** `voidrift unlock` SHALL remove the develop lock file and kill any running develop process.
 - **REQ-U-5:** `voidrift completions <shell>` SHALL output shell completion scripts for bash, zsh, and fish. All model, worker, and architect arguments SHALL complete from configured aliases in `models.yml`.
-- **REQ-U-6:** `voidrift prune` SHALL remove project-level ephemeral data (`.voidrift/` escalations, architect_responses, logs, stale `.develop.lock`) beyond the configured retention limit (`retention.project`, default 5). `--all` SHALL remove ALL project ephemeral data regardless of limit. `--global` SHALL prune the framework-level SessionStore (`~/.voidrift/`) beyond the configured retention limit (`retention.global`, default 30 days). `--global --all` SHALL remove ALL framework SessionStore data. Neither mode SHALL touch operator work products (REQUIREMENTS.md, ARCHITECTURE.md, TASKS.md, STATE.md, spec/) or framework config (config.yml, models.yml, worker-models.yml, resources/). WHEN `--global` is NOT set AND no `.voidrift/` directory exists in the current project, THE SYSTEM SHALL exit with a friendly error (e.g. "No .voidrift directory found — nothing to prune").
+- **REQ-U-6:** `voidrift prune` SHALL remove project-level ephemeral data (`.voidrift/` logs, stale `.develop.lock`) beyond the configured retention limit (`retention.project`, default 5). `--all` SHALL remove ALL project ephemeral data regardless of limit. `--global` SHALL prune the framework-level SessionStore (`~/.voidrift/`) beyond the configured retention limit (`retention.global`, default 30 days). `--global --all` SHALL remove ALL framework SessionStore data. Neither mode SHALL touch operator work products (REQUIREMENTS.md, ARCHITECTURE.md, TASKS.md, STATE.md, spec/) or framework config (config.yml, models.yml, worker-models.yml, resources/). WHEN `--global` is NOT set AND no `.voidrift/` directory exists in the current project, THE SYSTEM SHALL exit with a friendly error (e.g. "No .voidrift directory found — nothing to prune").
 
 ### 4.10 Model Configuration
 
@@ -264,10 +264,6 @@
 ├── TASKS.md                  # Task list (single file, module headers for multi-module)
 ├── spec/                     # Feature specifications
 │   └── <feature>.md
-├── escalations/              # Developer escalation questions
-│   └── [module/]<task_num>-<N>.md
-├── architect_responses/      # Architect guidance
-│   └── [module/]<task_num>-<N>.md
 ├── <phase>-*.log             # Phase logs
 └── .develop.lock             # Concurrent execution lock
 ```

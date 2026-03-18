@@ -477,8 +477,7 @@ def log(phase, prune) -> None:
 @click.option("--global", "global_", is_flag=True, help="Prune framework-level data (~/.voidrift)")
 @click.option("--all", "all_", is_flag=True, help="Remove all ephemeral data (ignore retention limit)")
 def prune(global_: bool, all_: bool) -> None:
-    """Clean ephemeral data (logs, analyses, escalations)."""
-    import shutil
+    """Clean ephemeral data (logs, stale locks, session DB)."""
     from datetime import datetime, timezone, timedelta
     from .utils import voidrift_dir
     from .config import get_retention, voidrift_home
@@ -511,16 +510,8 @@ def prune(global_: bool, all_: bool) -> None:
         ui.error("No .voidrift directory found — nothing to prune")
         sys.exit(1)
 
-    ephemeral_dirs = ["escalations", "architect_responses"]
-    removed_dirs = 0
     removed_logs = 0
-
     if all_:
-        for name in ephemeral_dirs:
-            p = d / name
-            if p.is_dir():
-                shutil.rmtree(p)
-                removed_dirs += 1
         for log_file in (d / "logs").glob("*.log"):
             log_file.unlink()
             removed_logs += 1
@@ -542,8 +533,6 @@ def prune(global_: bool, all_: bool) -> None:
             stale_lock = True
 
     parts = []
-    if removed_dirs:
-        parts.append(f"{removed_dirs} dir(s)")
     if removed_logs:
         parts.append(f"{removed_logs} log(s)")
     if stale_lock:

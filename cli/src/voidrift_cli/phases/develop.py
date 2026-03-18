@@ -143,6 +143,7 @@ def _develop_module(
     blocked_tasks = 0
     d = voidrift_dir()
     mod_arg = "" if module == "_default" else module
+    arch_guidance: dict[int, str] = {}  # task_num -> latest architect response
 
     while True:
         task = mcp_mod.tasks.get_next(mod_arg)
@@ -156,15 +157,9 @@ def _develop_module(
 
         ui.stage(f"{prefix}Task {task_num}/{total}: {label}")
 
-        # Check for prior architect response
         arch_context = ""
-        resp_dir = d / "architect_responses"
-        if mod_arg:
-            resp_dir = resp_dir / mod_arg
-        if resp_dir.is_dir():
-            responses = sorted(resp_dir.glob(f"{task_num}-*.md"))
-            if responses:
-                arch_context = f"\n\nArchitect guidance:\n{responses[-1].read_text()}"
+        if task_num in arch_guidance:
+            arch_context = f"\n\nArchitect guidance:\n{arch_guidance[task_num]}"
 
         agent = AgentLoop(
             model=worker,
@@ -193,6 +188,9 @@ def _develop_module(
             esc_dir = esc_dir / mod_arg
         esc_file = esc_dir / f"{task_num}.md"
         if esc_file.exists():
+            question = esc_file.read_text()
+            esc_file.unlink()  # ephemeral — clean up immediately
+
             escalation_count += 1
             if escalation_count > MAX_ESCALATIONS:
                 mcp_mod.tasks.block(mod_arg)
@@ -200,7 +198,6 @@ def _develop_module(
                 ui.warn("Task blocked (max escalations reached)")
                 continue
 
-            question = esc_file.read_text()
             ui.warn(f"Escalation: {question[:200]}")
 
             if not architect:
@@ -209,15 +206,19 @@ def _develop_module(
 
             guidance = _consult_architect(architect, question, task.text, tools, handlers, log, mod_arg or None)
             if guidance:
-                resp_dir.mkdir(parents=True, exist_ok=True)
-                n = len(list(resp_dir.glob(f"{task_num}-*.md"))) + 1
-                (resp_dir / f"{task_num}-{n}.md").write_text(guidance)
+                arch_guidance[task_num] = guidance
                 continue
             else:
                 return 1
 
         mcp_mod.tasks.complete(mod_arg)
         ui.success(f"{label} ({elapsed:.1f}s)")
+
+    # Clean up any leftover escalation dirs
+    esc_root = d / "escalations"
+    if esc_root.is_dir():
+        import shutil
+        shutil.rmtree(esc_root)
 
     if blocked_tasks > 0:
         ui.warn(f"{blocked_tasks} task(s) blocked — marked [!] in TASKS.md")

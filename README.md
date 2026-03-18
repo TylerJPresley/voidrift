@@ -472,8 +472,6 @@ your-project/
 │   ├── STATE.md                  # Project state summary
 │   ├── TASKS.md                  # Task list
 │   ├── spec/                     # Feature specifications
-│   ├── escalations/              # Developer escalation questions
-│   ├── architect_responses/      # Architect guidance
 │   └── *.log               # Phase logs
 ├── src/                          # Your source code
 └── ...
@@ -573,7 +571,7 @@ Check worker connection: `worker check`
 Edit `.voidrift/TASKS.md` and use tags from `resources/skills/`
 
 ### Tasks marked `[!]` (blocked)
-Review `.voidrift/architect_responses/` for guidance, or re-run with architect model.
+Review the architect's response in the develop log, or re-run with architect model.
 
 ### Container won't start or keeps crashing
 - Check worker node logs: `worker logs`
