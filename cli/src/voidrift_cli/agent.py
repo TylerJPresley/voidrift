@@ -184,8 +184,11 @@ class AgentLoop(BaseModel):
         stream_start = time.time()
 
         # Spinner until first token arrives (blank line for spacing)
-        sys.stderr.write("\n")
-        sys.stderr.flush()
+        if self.on_token:
+            self.on_token("\n")
+        else:
+            sys.stderr.write("\n")
+            sys.stderr.flush()
         stop_spinner = threading.Event()
         def _spin():
             for ch in itertools.cycle("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"):
