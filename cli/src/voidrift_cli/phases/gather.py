@@ -189,8 +189,12 @@ def _gather_from(
             "You are a code analyst. Given a file tree, return ONLY a JSON object with:\n"
             '- "groups": a dict mapping logical boundary names to lists of relative file paths.\n'
             "  Auto-detect boundaries from directory structure (e.g. frontend/, backend/, api/, shared/).\n"
-            "  For single-application codebases, use one group named after the project.\n"
-            "- Skip build artifacts, minified bundles, lock files, images, and generated code.\n"
+            "  For single-application codebases, use one group named after the project.\n\n"
+            "INCLUDE ONLY: source files, documentation, and configuration.\n"
+            "EXCLUDE: build output, compiled artifacts, dependency directories (node_modules, "
+            "__pycache__, .venv, vendor, target, etc.), generated code, binaries, images, "
+            "fonts, lock files, minified/hashed bundles, and any other non-source content.\n"
+            "Use your knowledge of the project's language and toolchain to decide.\n\n"
             "Return raw JSON, no markdown fences.\n\n"
             'Example: {"groups": {"backend": ["backend/main.py"], "frontend": ["frontend/src/App.vue"]}}'
         ),
@@ -421,8 +425,7 @@ def _build_file_tree(directory: Path, max_files: int = 500) -> str:
     Returns:
         Newline-separated list of relative file paths.
     """
-    exclude_dirs = {".git", "node_modules", "__pycache__", ".cache", ".venv", "venv",
-                    ".voidrift", ".agendev"}
+    exclude_dirs = {".git"}
     lines = []
     count = 0
     for p in sorted(directory.rglob("*")):
@@ -432,9 +435,6 @@ def _build_file_tree(directory: Path, max_files: int = 500) -> str:
         if any(part in exclude_dirs for part in p.parts):
             continue
         if p.is_file():
-            rel = p.relative_to(directory)
-            if rel.parts[0].startswith("."):
-                continue
-            lines.append(str(rel))
+            lines.append(str(p.relative_to(directory)))
             count += 1
     return "\n".join(lines)
