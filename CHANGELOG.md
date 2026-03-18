@@ -8,6 +8,11 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- Four-stage gather `--from` pipeline with auto-detected logical boundaries (REQ-G-8)
+  - Triage detects groups (e.g. frontend, backend) from directory structure
+  - Per-group synthesis agents write focused spec files to `.voidrift/spec/<group>.md`
+  - Overview agent writes project-level REQUIREMENTS.md referencing specs
+  - Single-group codebases collapse to one thorough REQUIREMENTS.md
 - `voidrift prune` command — clean ephemeral data with configurable retention (REQ-U-6)
   - `prune` — project logs beyond retention limit (default: keep 5)
   - `prune --all` — all project ephemeral data (escalations, architect_responses, logs, stale lock)

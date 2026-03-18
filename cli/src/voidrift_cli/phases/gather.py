@@ -126,7 +126,7 @@ def _gather_from(
     feature: str | None,
     force: bool,
 ) -> int:
-    """Reverse engineering mode — three-stage pipeline (REQ-G-8, REQ-ARCH-7)."""
+    """Reverse engineering mode — four-stage pipeline (REQ-G-8, REQ-ARCH-7)."""
     if target.exists() and not force:
         ui.error(f"{target} already exists. Use --force to overwrite.")
         return 1
@@ -136,7 +136,6 @@ def _gather_from(
     if force and target.exists():
         target.unlink()
 
-    # Build tools from MCP + CLI-native (REQ-MCP-4a)
     log, run_id = boot_run("gather")
 
     try:
@@ -182,15 +181,18 @@ def _gather_from(
     with open(log, "a") as f:
         f.write(f"=== Reverse engineering from {from_path} ===\n")
 
-    # --- Stage 1: Triage ---
-    ui.stage("Stage 1/3: Triaging files...")
+    # --- Stage 1: Triage — identify files and logical groups ---
+    ui.stage("Stage 1: Triaging files...")
     triage = AgentLoop(
         model=model, stream=False, extra_body=extra, max_tokens=4096,
         system_prompt=(
-            "You are a code analyst. Given a file tree, return ONLY a JSON array of "
-            "relative file paths worth analyzing for requirements. Skip build artifacts, "
-            "minified bundles, lock files, images, and generated code. "
-            "Return raw JSON, no markdown fences."
+            "You are a code analyst. Given a file tree, return ONLY a JSON object with:\n"
+            '- "groups": a dict mapping logical boundary names to lists of relative file paths.\n'
+            "  Auto-detect boundaries from directory structure (e.g. frontend/, backend/, api/, shared/).\n"
+            "  For single-application codebases, use one group named after the project.\n"
+            "- Skip build artifacts, minified bundles, lock files, images, and generated code.\n"
+            "Return raw JSON, no markdown fences.\n\n"
+            'Example: {"groups": {"backend": ["backend/main.py"], "frontend": ["frontend/src/App.vue"]}}'
         ),
         tools=[], tool_handlers={},
     )
@@ -202,24 +204,33 @@ def _gather_from(
 
     import json as _json
     try:
-        files = _json.loads(triage_response.strip())
+        triage_data = _json.loads(triage_response.strip())
     except _json.JSONDecodeError:
         import re
-        m = re.search(r"\[.*\]", triage_response, re.DOTALL)
+        m = re.search(r"\{.*\}", triage_response, re.DOTALL)
         if m:
-            files = _json.loads(m.group())
+            triage_data = _json.loads(m.group())
         else:
-            ui.error("Triage did not return a valid file list.")
+            ui.error("Triage did not return valid JSON.")
             with open(log, "a") as f:
                 f.write(f"Triage response:\n{triage_response}\n")
             return 1
 
-    ui.info(f"{len(files)} files selected")
-    with open(log, "a") as f:
-        f.write(f"Triage: {files}\n")
+    # Normalize: support old flat list format or new groups format
+    if "groups" in triage_data:
+        groups: dict[str, list[str]] = triage_data["groups"]
+    elif isinstance(triage_data, list):
+        groups = {"project": triage_data}
+    else:
+        groups = {"project": list(triage_data.values())[0] if triage_data else []}
 
-    # --- Stage 2: Analysis — one agent per file, concurrent (REQ-ARCH-7) ---
-    ui.stage("Stage 2/3: Analyzing files...")
+    all_files = [f for files in groups.values() for f in files]
+    ui.info(f"{len(all_files)} files in {len(groups)} group(s): {', '.join(groups.keys())}")
+    with open(log, "a") as f:
+        f.write(f"Triage: {_json.dumps(groups)}\n")
+
+    # --- Stage 2: Analysis — one agent per file, concurrent ---
+    ui.stage("Stage 2: Analyzing files...")
     analysis_tools, analysis_handlers = _pick_tools({"read_source_file", "store_file_analysis"})
 
     import time as _time
@@ -227,7 +238,7 @@ def _gather_from(
     from ..config import get_concurrency
 
     concurrency = get_concurrency(model.model_type)
-    max_workers = len(files) if concurrency == 0 else concurrency
+    max_workers = len(all_files) if concurrency == 0 else concurrency
     _counter = {"done": 0}
     _lock = __import__("threading").Lock()
 
@@ -249,59 +260,149 @@ def _gather_from(
             return filepath, None, str(e)
 
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        futures = {pool.submit(_analyze_file, fp): fp for fp in files}
+        futures = {pool.submit(_analyze_file, fp): fp for fp in all_files}
         for future in as_completed(futures):
             filepath, elapsed, err = future.result()
             with _lock:
                 _counter["done"] += 1
                 n = _counter["done"]
             if err:
-                ui.progress(n, len(files), f"{filepath}...", end="")
+                ui.progress(n, len(all_files), f"{filepath}...", end="")
                 ui._con.print(f" [yellow]⚠ {err}[/yellow]")
             else:
-                ui.progress(n, len(files), f"{filepath}...", end="")
+                ui.progress(n, len(all_files), f"{filepath}...", end="")
                 ui._con.print(f" [green]✓[/green] [dim]{elapsed:.1f}s[/dim]")
             with open(log, "a") as f:
                 f.write(f"Analyzed: {filepath}\n")
 
-    # --- Stage 3: Synthesis ---
-    ui.stage("Stage 3/3: Writing requirements...")
-    ui.model_label(model.alias)
+    # Retrieve all analyses from SessionStore for building per-group context
+    all_analyses = mcp_mod.session_store.get_all(run_id, "analysis") if mcp_mod else {}
+
+    def _build_group_analyses(file_list: list[str]) -> str:
+        parts = []
+        for fp in sorted(file_list):
+            content = all_analyses.get(fp, "")
+            if content:
+                parts.append(f"## {fp}\n\n{content}")
+        return "\n\n---\n\n".join(parts)
 
     synth_tools, synth_handlers = _pick_tools(
-        {"get_all_analyses", "get_template", "get_skill", "write_file"}
+        {"get_template", "get_skill", "write_file"}
     )
-    synth = AgentLoop(
-        model=model, stream=True, extra_body=extra, max_tokens=16384,
-        on_token=ui.make_token_handler(),
-        system_prompt=(
-            "[ROLE: Analyst]\n\n"
-            "You are writing comprehensive requirements from file analysis summaries.\n"
-            "Steps:\n"
-            "1. Call get_all_analyses() to retrieve the summaries.\n"
-            "2. Call get_template('REQUIREMENTS-TEMPLATE') for the output format.\n"
-            "3. Call get_skill('PROD-STRATEGY') for guidance.\n"
-            f"4. Call write_file() to write the final requirements to '{target_rel}'.\n"
-            "5. Call done() when finished.\n"
-            "Do NOT call the same tool more than once.\n\n"
-            "CRITICAL: The requirements document must be THOROUGH and DETAILED.\n"
-            "- Every API endpoint, data flow, and UI component from the analyses must appear as a requirement.\n"
-            "- Each functional requirement needs specific acceptance criteria.\n"
-            "- Include all external interfaces, configuration parameters, and error handling behaviors.\n"
-            "- Capture every feature implied by the code, not just high-level summaries.\n"
-            "- The output should be long and complete — do not summarize or abbreviate.\n\n"
-            "After calling done(), summarize the key requirements you wrote: "
-            "project goal, features, external interfaces, and constraints."
-        ),
-        tools=synth_tools, tool_handlers=synth_handlers,
-    )
+    multi = len(groups) > 1
 
-    try:
-        response = synth.send("Write the requirements from the stored analyses.")
-        with open(log, "a") as f:
-            f.write(f"Synthesis:\n{response}\n")
-    except KeyboardInterrupt:
-        ui.info("Interrupted.")
+    if multi:
+        # --- Stage 3: Per-group synthesis ---
+        total_stages = len(groups) + 1
+        for i, (group_name, group_files) in enumerate(groups.items(), 1):
+            spec_path = f".voidrift/spec/{group_name}.md"
+            ui.stage(f"Stage 3.{i}/{total_stages}: Writing {group_name} spec...")
+            ui.model_label(model.alias)
+
+            group_context = _build_group_analyses(group_files)
+            synth = AgentLoop(
+                model=model, stream=True, extra_body=extra, max_tokens=16384,
+                on_token=ui.make_token_handler(),
+                system_prompt=(
+                    f"[ROLE: Analyst]\n\n"
+                    f"You are writing detailed requirements for the '{group_name}' component.\n"
+                    "Steps:\n"
+                    "1. Call get_template('REQUIREMENTS-TEMPLATE') for the output format.\n"
+                    "2. Call get_skill('PROD-STRATEGY') for guidance.\n"
+                    f"3. Call write_file() to write requirements to '{spec_path}'.\n"
+                    "4. Call done() when finished.\n"
+                    "Do NOT call the same tool more than once.\n\n"
+                    "CRITICAL: Be THOROUGH and DETAILED.\n"
+                    "- Every endpoint, component, data flow, config parameter, and error behavior must be a requirement.\n"
+                    "- Each requirement needs specific acceptance criteria.\n"
+                    "- Do not summarize or abbreviate.\n\n"
+                    f"After calling done(), summarize the key requirements for {group_name}.\n\n"
+                    f"--- FILE ANALYSES FOR {group_name.upper()} ---\n\n{group_context}"
+                ),
+                tools=synth_tools, tool_handlers=synth_handlers,
+            )
+            try:
+                response = synth.send(f"Write detailed requirements for the {group_name} component.")
+                with open(log, "a") as f:
+                    f.write(f"Synthesis ({group_name}):\n{response}\n")
+            except KeyboardInterrupt:
+                ui.info("Interrupted.")
+                return 1
+
+        # --- Stage 4: Overview ---
+        ui.stage(f"Stage 4: Writing project overview...")
+        ui.model_label(model.alias)
+
+        spec_dir = Path.cwd() / ".voidrift" / "spec"
+        spec_summaries = []
+        for group_name in groups:
+            sp = spec_dir / f"{group_name}.md"
+            if sp.exists():
+                spec_summaries.append(f"## {group_name}\n\n{sp.read_text()[:8000]}")
+        specs_context = "\n\n---\n\n".join(spec_summaries)
+
+        overview = AgentLoop(
+            model=model, stream=True, extra_body=extra, max_tokens=8192,
+            on_token=ui.make_token_handler(),
+            system_prompt=(
+                "[ROLE: Analyst]\n\n"
+                "You are writing a project-level requirements overview.\n"
+                "The project has multiple components, each with its own spec file.\n"
+                "Steps:\n"
+                f"1. Call write_file() to write the overview to '{target_rel}'.\n"
+                "2. Call done() when finished.\n\n"
+                "The overview must cover:\n"
+                "- System purpose and scope\n"
+                "- How the components interact (API contracts, shared config, data flow)\n"
+                "- Deployment topology\n"
+                "- Cross-cutting concerns (auth, logging, monitoring, error handling)\n"
+                f"- References to spec files: {', '.join(f'spec/{g}.md' for g in groups)}\n\n"
+                "After calling done(), summarize the project architecture.\n\n"
+                f"--- COMPONENT SPECS ---\n\n{specs_context}"
+            ),
+            tools=synth_tools, tool_handlers=synth_handlers,
+        )
+        try:
+            response = overview.send("Write the project-level requirements overview.")
+            with open(log, "a") as f:
+                f.write(f"Overview:\n{response}\n")
+        except KeyboardInterrupt:
+            ui.info("Interrupted.")
+            return 1
+
+    else:
+        # Single group — write directly to REQUIREMENTS.md
+        ui.stage("Stage 3: Writing requirements...")
+        ui.model_label(model.alias)
+
+        group_context = _build_group_analyses(all_files)
+        synth = AgentLoop(
+            model=model, stream=True, extra_body=extra, max_tokens=16384,
+            on_token=ui.make_token_handler(),
+            system_prompt=(
+                "[ROLE: Analyst]\n\n"
+                "You are writing comprehensive requirements from file analysis summaries.\n"
+                "Steps:\n"
+                "1. Call get_template('REQUIREMENTS-TEMPLATE') for the output format.\n"
+                "2. Call get_skill('PROD-STRATEGY') for guidance.\n"
+                f"3. Call write_file() to write the final requirements to '{target_rel}'.\n"
+                "4. Call done() when finished.\n"
+                "Do NOT call the same tool more than once.\n\n"
+                "CRITICAL: Be THOROUGH and DETAILED.\n"
+                "- Every endpoint, component, data flow, config parameter, and error behavior must be a requirement.\n"
+                "- Each requirement needs specific acceptance criteria.\n"
+                "- Do not summarize or abbreviate.\n\n"
+                "After calling done(), summarize the key requirements.\n\n"
+                f"--- FILE ANALYSES ---\n\n{group_context}"
+            ),
+            tools=synth_tools, tool_handlers=synth_handlers,
+        )
+        try:
+            response = synth.send("Write the requirements from the file analyses.")
+            with open(log, "a") as f:
+                f.write(f"Synthesis:\n{response}\n")
+        except KeyboardInterrupt:
+            ui.info("Interrupted.")
 
     if target.exists():
         ui.done(f"Requirements written to {target_rel}")
