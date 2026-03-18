@@ -37,7 +37,7 @@ Phases:
 Utility:
   status                      Show project phase status
   chat <model>                Interactive chat session
-  log <phase> [--prune]       View or manage phase logs
+  log <phase> [--prune] [-f]   View or manage phase logs
   prune [--global] [--all]    Clean ephemeral data
   unlock                      Remove develop lock
 
@@ -438,7 +438,8 @@ def _status():
 @cli.command()
 @click.argument("phase", required=False)
 @click.option("--prune", is_flag=True, help="Delete log files")
-def log(phase, prune) -> None:
+@click.option("--follow", "-f", is_flag=True, help="Tail the log file")
+def log(phase, prune, follow) -> None:
     """View or manage phase log files."""
     from .utils import voidrift_dir
 
@@ -454,7 +455,7 @@ def log(phase, prune) -> None:
         return
 
     if not phase:
-        ui._con.print("Usage: voidrift log <phase> [--prune]")
+        ui._con.print("Usage: voidrift log <phase> [--prune] [--follow/-f]")
         ui._con.print(f"Phases: {', '.join(valid_phases)}")
         sys.exit(1)
 
@@ -468,9 +469,24 @@ def log(phase, prune) -> None:
         sys.exit(1)
 
     latest = logs[-1]
-    lines = latest.read_text().splitlines()
-    for line in lines[-200:]:
-        ui._con.print(line)
+
+    if follow:
+        import time as _time
+        try:
+            with open(latest) as f:
+                f.seek(0, 2)  # end of file
+                while True:
+                    line = f.readline()
+                    if line:
+                        ui._con.print(line, end="")
+                    else:
+                        _time.sleep(0.3)
+        except KeyboardInterrupt:
+            return
+    else:
+        lines = latest.read_text().splitlines()
+        for line in lines[-200:]:
+            ui._con.print(line)
 
 
 @cli.command()

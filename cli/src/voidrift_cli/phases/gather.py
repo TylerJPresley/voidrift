@@ -185,6 +185,7 @@ def _gather_from(
     ui.stage("Stage 1: Triaging files...")
     triage = AgentLoop(
         model=model, stream=False, extra_body=extra, max_tokens=4096,
+        log_path=log,
         system_prompt=(
             "You are a code analyst. Given a file tree, return ONLY a JSON object with:\n"
             '- "groups": a dict mapping logical boundary names to lists of relative file paths.\n'
@@ -239,6 +240,7 @@ def _gather_from(
     all_files = [f for fs in groups.values() for f in fs]
     validator = AgentLoop(
         model=model, stream=False, extra_body=extra, max_tokens=4096,
+        log_path=log,
         system_prompt=(
             "You are a strict code reviewer. Given a list of files selected for source code analysis, "
             "remove any that should NOT be analyzed:\n"
@@ -281,6 +283,7 @@ def _gather_from(
         start = _time.time()
         agent = AgentLoop(
             model=model, stream=False, extra_body=extra, max_tokens=4096,
+            log_path=log,
             system_prompt=(
                 "You are a code analyst. Read the file, then call store_file_analysis() "
                 "with a concise summary covering: purpose, key components/functions, "
@@ -337,6 +340,7 @@ def _gather_from(
             group_context = _build_group_analyses(group_files)
             synth = AgentLoop(
                 model=model, stream=True, extra_body=extra, max_tokens=16384,
+                log_path=log,
                 on_token=ui.make_token_handler(),
                 system_prompt=(
                     f"[ROLE: Analyst]\n\n"
@@ -378,6 +382,7 @@ def _gather_from(
 
         overview = AgentLoop(
             model=model, stream=True, extra_body=extra, max_tokens=8192,
+            log_path=log,
             on_token=ui.make_token_handler(),
             system_prompt=(
                 "[ROLE: Analyst]\n\n"
@@ -413,6 +418,7 @@ def _gather_from(
         group_context = _build_group_analyses(all_files)
         synth = AgentLoop(
             model=model, stream=True, extra_body=extra, max_tokens=16384,
+            log_path=log,
             on_token=ui.make_token_handler(),
             system_prompt=(
                 "[ROLE: Analyst]\n\n"

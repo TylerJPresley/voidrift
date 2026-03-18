@@ -43,6 +43,7 @@ class AgentLoop(BaseModel):
     on_complete: Callable[[dict], None] | None = None
     on_tool_call: Callable[[str], None] | None = None
     on_tool_result: Callable[[str, str], None] | None = None
+    log_path: Path | None = None
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -122,6 +123,12 @@ class AgentLoop(BaseModel):
         },
     }
 
+    def _log(self, entry: str) -> None:
+        """Append a line to the log file if log_path is set."""
+        if self.log_path:
+            with open(self.log_path, "a") as f:
+                f.write(entry + "\n")
+
     def _run_loop(self) -> str:
         """Run the agent loop until a final text response (REQ-ARCH-4).
 
@@ -136,6 +143,13 @@ class AgentLoop(BaseModel):
         client = self._get_client()
         model_name = self._model_name()
         last_call_sig: str | None = None
+
+        # Log system prompt and latest user message
+        if self.log_path:
+            for m in self.messages:
+                if m["role"] == "system":
+                    self._log(f"[SYSTEM] {m['content'][:500]}")
+            self._log(f"[USER] {self.messages[-1]['content'][:500]}")
 
         while True:
             kwargs: dict[str, Any] = {
@@ -156,6 +170,7 @@ class AgentLoop(BaseModel):
 
             if not tool_calls:
                 self.messages.append({"role": "assistant", "content": text})
+                self._log(f"[ASSISTANT] {text}")
                 return text
 
             # Stall detection — same call signature as last iteration
@@ -177,12 +192,14 @@ class AgentLoop(BaseModel):
 
             for tc in tool_calls:
                 name = tc["function"]["name"]
+                self._log(f"[TOOL_CALL] {name}({tc['function'].get('arguments', '')})")
                 if name == "done":
                     result = "OK"
                 else:
                     result = self._handle_tool_call_dict(tc)
                     if self.on_tool_result:
                         self.on_tool_result(name, result)
+                self._log(f"[TOOL_RESULT] {name} -> {result[:500]}")
                 self.messages.append({
                     "role": "tool",
                     "tool_call_id": tc["id"],
@@ -194,6 +211,7 @@ class AgentLoop(BaseModel):
                 continue
 
         # Stalled — force a final text call with no tools
+        self._log("[STALL] Forcing final text call")
         self.tools = []
         kwargs = {
             "model": model_name,
@@ -206,6 +224,7 @@ class AgentLoop(BaseModel):
             text, _ = self._stream_response(client, kwargs)
         else:
             text, _ = self._sync_response(client, kwargs)
+        self._log(f"[ASSISTANT] {text}")
         return text
 
     def _sync_response(self, client: OpenAI, kwargs: dict) -> tuple[str, list[dict]]:
