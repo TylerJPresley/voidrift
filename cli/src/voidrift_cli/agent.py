@@ -134,6 +134,10 @@ class AgentLoop(BaseModel):
             if self.tools and force_tool:
                 kwargs["tools"] = self.tools
                 kwargs["tool_choice"] = "required"
+            elif self.tools and not force_tool and self.model.model_type != "local":
+                # Non-local models (gateway/cloud) support tool_choice=auto
+                # vLLM's parser is broken with auto, so local models skip tools
+                kwargs["tools"] = self.tools
             if self.extra_body:
                 kwargs["extra_body"] = self.extra_body
 
