@@ -11,6 +11,7 @@ from __future__ import annotations
 import sys
 
 from rich.console import Console
+from rich.markup import escape as _esc
 
 _con = Console()
 _err = Console(stderr=True)
@@ -29,57 +30,57 @@ def phase(title: str) -> None:
 
 def info(msg: str) -> None:
     """Informational system message."""
-    _con.print(f"[dim]▸ {msg}[/dim]")
+    _con.print(f"[dim]▸ {_esc(msg)}[/dim]")
 
 
 def detail(msg: str) -> None:
     """Secondary detail (log path, target, etc.)."""
-    _con.print(f"[dim]  {msg}[/dim]")
+    _con.print(f"[dim]  {_esc(msg)}[/dim]")
 
 
 def stage(msg: str) -> None:
     """Stage transition."""
-    _con.print(f"\n[dim]▸ {msg}[/dim]")
+    _con.print(f"\n[dim]▸ {_esc(msg)}[/dim]")
 
 
 def progress(i: int, total: int, label: str, *, end: str = "\n") -> None:
     """Per-item progress line."""
-    _con.print(f"[dim]  {i}/{total} {label}[/dim]", end=end)
+    _con.print(f"[dim]  {i}/{total} {_esc(label)}[/dim]", end=end)
 
 
 def success(msg: str) -> None:
     """Green success message."""
-    _con.print(f"[green]  ✓ {msg}[/green]")
+    _con.print(f"[green]  ✓ {_esc(msg)}[/green]")
 
 
 def done(msg: str) -> None:
     """Final phase success."""
-    _con.print(f"\n\n[green]  ✓ {msg}[/green]\n")
+    _con.print(f"\n\n[green]  ✓ {_esc(msg)}[/green]\n")
 
 
 def warn(msg: str) -> None:
     """Yellow warning on stderr."""
-    _err.print(f"[yellow]  ⚠ {msg}[/yellow]")
+    _err.print(f"[yellow]  ⚠ {_esc(msg)}[/yellow]")
 
 
 def error(msg: str) -> None:
     """Red error on stderr."""
-    _err.print(f"[red]  ✗ {msg}[/red]")
+    _err.print(f"[red]  ✗ {_esc(msg)}[/red]")
 
 
 def stats(parts: list[str]) -> None:
     """Dim stats line (tokens, elapsed, etc.)."""
-    _con.print(f"\n[dim]  {' · '.join(parts)}[/dim]")
+    _con.print(f"\n[dim]  {' · '.join(_esc(p) for p in parts)}[/dim]")
 
 
 def tool_start(name: str) -> None:
     """Tool call starting."""
-    _con.print(f"\n[dim]  ⚙ {name}()[/dim]", end="")
+    _con.print(f"\n[dim]  ⚙ {_esc(name)}()[/dim]", end="")
 
 
 def tool_done(result: str) -> None:
     """Tool call result."""
-    _con.print(f"\n[dim green]  ✓ {result}[/dim green]")
+    _con.print(f"\n[dim green]  ✓ {_esc(result)}[/dim green]")
 
 
 # --- Model role ---
