@@ -6,20 +6,16 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
-from rich.console import Console
 from rich.status import Status
 
 from ..agent import AgentLoop, build_mcp_tools
 from ..models import ModelConfig
-from ..utils import ensure_voidrift_dir, voidrift_dir, log_path, check_disk_space, console, err_console
+from ..utils import ensure_voidrift_dir, voidrift_dir, log_path, check_disk_space
+from .. import ui
 
 
 def _run_checks() -> tuple[str, int]:
-    """Detect tech stack and run appropriate checks (AC-V1).
-
-    Returns:
-        Tuple of (raw_output_text, failed_check_count).
-    """
+    """Detect tech stack and run appropriate checks (AC-V1)."""
     cwd = Path.cwd()
     output_parts = [f"# Verification Results\n\nDate: {datetime.now().isoformat()}\n"]
     failed = 0
@@ -30,6 +26,7 @@ def _run_checks() -> tuple[str, int]:
         if name in checks_run:
             return
         checks_run.add(name)
+        ui.info(f"Running {name}...")
         output_parts.append(f"\n## {name}\n\n```\n")
         try:
             r = subprocess.run(cmd, capture_output=True, text=True, timeout=300, cwd=cwd)
@@ -75,7 +72,7 @@ def _run_checks() -> tuple[str, int]:
     if (cwd / "pom.xml").exists():
         _run("Maven Tests", ["mvn", "test"])
 
-    # Docker/Compose validation
+    # Docker/Compose
     for compose in ["docker-compose.yml", "docker-compose.yaml", "podman-compose.yml", "podman-compose.yaml"]:
         if (cwd / compose).exists():
             _run("Compose Validation", ["docker-compose", "-f", compose, "config", "--quiet"])
@@ -92,30 +89,21 @@ def _run_checks() -> tuple[str, int]:
 
 
 def run_verify(worker: ModelConfig, architect: ModelConfig | None = None) -> int:
-    """Execute the verify phase.
-
-    Args:
-        worker: Model configuration for analysis.
-        architect: Optional model for fix planning on failure.
-
-    Returns:
-        Exit code (0 for success, 1 for failure).
-    """
+    """Execute the verify phase."""
     check_disk_space()
     d = ensure_voidrift_dir()
 
-    console.print("[bold cyan]VoidRift Verify[/bold cyan]")
+    ui.phase("VoidRift Verify")
 
-    # Run checks (AC-V1)
-    console.print("[dim]Running quality checks...[/dim]")
+    # Run checks
+    ui.stage("Running quality checks...")
     raw_output, failed_checks = _run_checks()
 
-    # Write raw output (AC-V3)
     raw_file = d / "VERIFY-RAW.md"
     raw_file.write_text(raw_output)
 
     log = log_path("verify")
-    console.print(f"[dim]Log: {log}[/dim]")
+    ui.detail(f"Log: {log}")
 
     try:
         import voidrift_mcp.server as mcp_mod
@@ -124,7 +112,7 @@ def run_verify(worker: ModelConfig, architect: ModelConfig | None = None) -> int
     except ImportError:
         tools, handlers = [], {}
 
-    # Analysis (AC-V4)
+    # Analysis
     context_parts = [f"Raw check output:\n{raw_output}"]
     if (d / "REQUIREMENTS.md").exists():
         context_parts.append(f"REQUIREMENTS.md:\n{(d / 'REQUIREMENTS.md').read_text()[:12000]}")
@@ -147,24 +135,23 @@ def run_verify(worker: ModelConfig, architect: ModelConfig | None = None) -> int
         stream=False,
     )
 
-    with Status("[bold cyan]Analyzing results...", console=console):
+    ui.stage("Analyzing results...")
+    with Status("  ⠋ Thinking...", console=ui._con):
         try:
             response = agent.send("\n\n".join(context_parts))
             with open(log, "a") as f:
                 f.write(f"\n=== Verify: {datetime.now().isoformat()} ===\n{response}\n")
         except (RuntimeError, OSError, ValueError) as e:
-            err_console.print(f"[red]Analysis failed: {e}[/red]")
+            ui.error(f"Analysis failed: {e}")
             return 1
 
-    # Delete raw output (AC-V5)
     raw_file.unlink(missing_ok=True)
 
-    # Check verdict (AC-V6)
+    # Check verdict
     verify_file = d / "VERIFY.md"
     passed = False
     if verify_file.exists():
         text = verify_file.read_text()
-        # Find verdict section
         for line in text.splitlines():
             stripped = line.strip()
             if stripped == "PASS" and failed_checks == 0:
@@ -173,18 +160,17 @@ def run_verify(worker: ModelConfig, architect: ModelConfig | None = None) -> int
             if stripped == "FAIL":
                 break
 
-    if passed:  # AC-V7
-        console.print("[green]✅ Verification passed.[/green]")
+    if passed:
+        ui.done("Verification passed.")
         return 0
 
     # FAIL path
-    if not architect:  # AC-V8
-        err_console.print("[red]❌ Verification failed.[/red]")
-        err_console.print("Re-run with an architect model to generate fix tasks.")
+    if not architect:
+        ui.error("Verification failed.")
+        ui.info("Re-run with an architect model to generate fix tasks.")
         return 1
 
-    # Fix planning (AC-V9 through AC-V12)
-    err_console.print("[yellow]Verification failed — consulting architect for fix plan...[/yellow]")
+    ui.warn("Verification failed — consulting architect for fix plan...")
 
     verify_content = verify_file.read_text() if verify_file.exists() else "No VERIFY.md produced"
 
@@ -201,15 +187,15 @@ def run_verify(worker: ModelConfig, architect: ModelConfig | None = None) -> int
         stream=False,
     )
 
-    with Status("[bold cyan]Architect planning fixes...", console=console):
+    ui.stage("Architect planning fixes...")
+    with Status("  ⠋ Thinking...", console=ui._con):
         try:
             arch_response = arch_agent.send(verify_content)
             with open(log, "a") as f:
                 f.write(f"\n--- Architect fix plan ---\n{arch_response}\n")
         except (RuntimeError, OSError, ValueError) as e:
-            err_console.print(f"[red]Architect consultation failed: {e}[/red]")
+            ui.error(f"Architect consultation failed: {e}")
 
-    # Generate fix tasks (AC-V11)
     arch_verify = d / "ARCHITECT_VERIFY.md"
     if arch_verify.exists():
         fix_agent = AgentLoop(
@@ -224,19 +210,19 @@ def run_verify(worker: ModelConfig, architect: ModelConfig | None = None) -> int
             tool_handlers=handlers,
             stream=False,
         )
-        with Status("[bold cyan]Generating fix tasks...", console=console):
+        ui.stage("Generating fix tasks...")
+        with Status("  ⠋ Thinking...", console=ui._con):
             try:
                 fix_response = fix_agent.send(arch_verify.read_text())
                 with open(log, "a") as f:
                     f.write(f"\n--- Fix tasks ---\n{fix_response}\n")
             except (RuntimeError, OSError, ValueError) as e:
-                err_console.print(f"[red]Fix task generation failed: {e}[/red]")
-
+                ui.error(f"Fix task generation failed: {e}")
 
     if (d / "TASKS-fixes.md").exists():
-        err_console.print("[yellow]❌ Verification failed — fix tasks generated.[/yellow]")
-        console.print("Run 'voidrift develop <worker> <architect>' to address fixes.")
+        ui.warn("Verification failed — fix tasks generated.")
+        ui.info("Run 'voidrift develop <worker> <architect>' to address fixes.")
     else:
-        err_console.print("[red]❌ Verification failed.[/red]")
+        ui.error("Verification failed.")
 
     return 1

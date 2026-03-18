@@ -2,17 +2,16 @@
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import click
-from rich.console import Console
 
 from ..agent import AgentLoop, build_mcp_tools
 from ..models import ModelConfig
 from ..utils import (
-    ensure_voidrift_dir, voidrift_dir, log_path, check_disk_space, console, err_console,
+    ensure_voidrift_dir, voidrift_dir, log_path, check_disk_space,
 )
+from .. import ui
 
 # System prompt for the Analyst role
 ANALYST_PROMPT = """[ROLE: Analyst]
@@ -74,15 +73,11 @@ def run_gather(
 
     # Determine target file (AC-G1)
     if feature:
-        # Feature gather requires REQUIREMENTS.md to exist (AC-G2)
         if not (d / "REQUIREMENTS.md").exists():
-            err_console.print(
-                "[red]REQUIREMENTS.md not found. Run 'voidrift gather <model>' "
-                "first to create project requirements.[/red]"
-            )
+            ui.error("REQUIREMENTS.md not found. Run 'voidrift gather <model>' first.")
             return 1
         target = d / "spec" / f"{feature}.md"
-        target.parent.mkdir(exist_ok=True)  # AC-G10
+        target.parent.mkdir(exist_ok=True)
     else:
         target = d / "REQUIREMENTS.md"
 
@@ -91,21 +86,15 @@ def run_gather(
         return _gather_from(model, target, Path(from_path), feature, force)
 
     # Interactive mode (AC-G3, AC-G4)
-
-    # Build system prompt
     system = ANALYST_PROMPT.replace("{model}", model.alias)
     target_rel = str(target.relative_to(Path.cwd()))
     system += f"\n\nWhen using write_file(), write to exactly this path: {target_rel}"
     if reference_path:
         system += f"\n\nA reference codebase is available at {reference_path}. You can use read_source_file() to examine it."
-
-    # Load existing file into system prompt for revision (AC-G1)
     if target.exists():
         system += f"\n\nHere is the existing requirements file for revision:\n\n{target.read_text()}"
 
-    # CLI-native filesystem tools for interactive gather (REQ-G-3, REQ-MCP-4a)
     from ..tools import LOCAL_TOOLS, LOCAL_HANDLERS
-
     allowed = {"write_file", "read_source_file"} if reference_path else {"write_file"}
     tools = [t for t in LOCAL_TOOLS if t["function"]["name"] in allowed]
     handlers = {k: v for k, v in LOCAL_HANDLERS.items() if k in allowed}
@@ -120,9 +109,7 @@ def run_gather(
         extra_body={"chat_template_kwargs": {"enable_thinking": False}},
     )
 
-    # Interactive terminal loop (REQ-UI-1)
     from ..main import _interactive_loop
-
     log = log_path("gather")
     target_label = str(target.relative_to(Path.cwd()))
     title = f"VoidRift Gather — Feature: {feature}" if feature else "VoidRift Gather"
@@ -141,13 +128,10 @@ def _gather_from(
 ) -> int:
     """Reverse engineering mode — three-stage pipeline (REQ-G-8, REQ-ARCH-7)."""
     if target.exists() and not force:
-        console.print(
-            f"[red]Error: {target} already exists. Use --force to overwrite, "
-            f"or run without --from to revise interactively.[/red]"
-        )
+        ui.error(f"{target} already exists. Use --force to overwrite.")
         return 1
     if not from_path.is_dir():
-        err_console.print(f"[red]Error: {from_path} is not a directory[/red]")
+        ui.error(f"{from_path} is not a directory")
         return 1
     if force and target.exists():
         target.unlink()
@@ -162,7 +146,6 @@ def _gather_from(
         all_tools = list(LOCAL_TOOLS)
         all_handlers = dict(LOCAL_HANDLERS)
 
-    # Override read_source_file to read from the source codebase
     def read_from_source(path: str) -> str:
         full = (from_path / path).resolve()
         if not str(full).startswith(str(from_path.resolve())):
@@ -185,10 +168,10 @@ def _gather_from(
     )
 
     log = log_path("gather")
-    console.print("[bold cyan]VoidRift Gather (Reverse Engineering)[/bold cyan]")
-    console.print(f"[dim]Log: {log}[/dim]")
-    console.print(f"Source: {from_path}")
-    console.print(f"Target: {target}")
+    ui.phase("VoidRift Gather (Reverse Engineering)")
+    ui.detail(f"Log: {log}")
+    ui.detail(f"Source: {from_path}")
+    ui.detail(f"Target: {target}")
 
     file_tree = _build_file_tree(from_path)
     target_rel = str(target.relative_to(Path.cwd()))
@@ -196,8 +179,8 @@ def _gather_from(
     with open(log, "a") as f:
         f.write(f"=== Reverse engineering from {from_path} ===\n")
 
-    # --- Stage 1: Triage — pick files to analyze ---
-    console.print("\n[dim]Stage 1/3: Triaging files...[/dim]")
+    # --- Stage 1: Triage ---
+    ui.stage("Stage 1/3: Triaging files...")
     triage = AgentLoop(
         model=model, stream=False, extra_body=extra, max_tokens=4096,
         system_prompt=(
@@ -211,35 +194,35 @@ def _gather_from(
     try:
         triage_response = triage.send(f"File tree:\n{file_tree}")
     except (RuntimeError, OSError) as e:
-        err_console.print(f"[red]Triage failed: {e}[/red]")
+        ui.error(f"Triage failed: {e}")
         return 1
 
     import json as _json
     try:
         files = _json.loads(triage_response.strip())
     except _json.JSONDecodeError:
-        # Try to extract JSON array from response
         import re
         m = re.search(r"\[.*\]", triage_response, re.DOTALL)
         if m:
             files = _json.loads(m.group())
         else:
-            err_console.print("[red]Triage did not return a valid file list.[/red]")
+            ui.error("Triage did not return a valid file list.")
             with open(log, "a") as f:
                 f.write(f"Triage response:\n{triage_response}\n")
             return 1
 
-    console.print(f"  [dim]{len(files)} files selected[/dim]")
+    ui.info(f"{len(files)} files selected")
     with open(log, "a") as f:
         f.write(f"Triage: {files}\n")
 
     # --- Stage 2: Analysis — one agent per file ---
-    console.print("[dim]Stage 2/3: Analyzing files...[/dim]")
+    ui.stage("Stage 2/3: Analyzing files...")
     analysis_tools, analysis_handlers = _pick_tools({"read_source_file", "store_file_analysis"})
 
+    import time as _time
     for i, filepath in enumerate(files, 1):
-        console.print(f"  [dim]{i}/{len(files)} {filepath}...[/dim]", end="")
-        start = __import__("time").time()
+        ui.progress(i, len(files), f"{filepath}...", end="")
+        start = _time.time()
         agent = AgentLoop(
             model=model, stream=False, extra_body=extra, max_tokens=4096,
             system_prompt=(
@@ -251,50 +234,23 @@ def _gather_from(
         )
         try:
             agent.send(f"Analyze: {filepath}")
-            elapsed = __import__("time").time() - start
-            console.print(f" [green]✓[/green] [dim]{elapsed:.1f}s[/dim]")
+            elapsed = _time.time() - start
+            ui._con.print(f" [green]✓[/green] [dim]{elapsed:.1f}s[/dim]")
         except (RuntimeError, OSError) as e:
-            console.print(f" [yellow]⚠ {e}[/yellow]")
+            ui._con.print(f" [yellow]⚠ {e}[/yellow]")
         with open(log, "a") as f:
             f.write(f"Analyzed: {filepath}\n")
 
-    # --- Stage 3: Synthesis — pull summaries, write requirements ---
-    console.print("[dim]Stage 3/3: Writing requirements...[/dim]")
-
-    _blue = "\033[38;5;117m"
-    _reset = "\033[0m"
-    _at_line_start = True
-    _blank_lines = 0
-
-    def _on_token(token: str) -> None:
-        nonlocal _at_line_start, _blank_lines
-        out = ""
-        for ch in token:
-            if ch == "\n":
-                if _at_line_start:
-                    _blank_lines += 1
-                    if _blank_lines > 1:
-                        continue
-                else:
-                    _blank_lines = 0
-                _at_line_start = True
-                out += ch
-            else:
-                if _at_line_start:
-                    out += "  "
-                    _at_line_start = False
-                    _blank_lines = 0
-                out += ch
-        if out:
-            sys.stdout.write(f"{_blue}{out}{_reset}")
-            sys.stdout.flush()
+    # --- Stage 3: Synthesis ---
+    ui.stage("Stage 3/3: Writing requirements...")
+    ui.model_label(model.alias)
 
     synth_tools, synth_handlers = _pick_tools(
         {"get_all_analyses", "get_template", "get_skill", "write_file"}
     )
     synth = AgentLoop(
         model=model, stream=True, extra_body=extra, max_tokens=8192,
-        on_token=_on_token,
+        on_token=ui.make_token_handler(),
         system_prompt=(
             "[ROLE: Analyst]\n\n"
             "You are writing requirements from file analysis summaries.\n"
@@ -311,13 +267,13 @@ def _gather_from(
         with open(log, "a") as f:
             f.write(f"Synthesis:\n{response}\n")
     except KeyboardInterrupt:
-        console.print("\n[dim]Interrupted.[/dim]")
+        ui.info("Interrupted.")
 
     if target.exists():
-        console.print(f"\n[green]✅ Requirements written to {target_rel}[/green]")
+        ui.done(f"Requirements written to {target_rel}")
         return 0
     else:
-        err_console.print("[yellow]⚠ Requirements file was not created.[/yellow]")
+        ui.warn("Requirements file was not created.")
         return 1
 
 def _build_file_tree(directory: Path, max_files: int = 500) -> str:

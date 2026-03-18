@@ -5,27 +5,21 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from rich.console import Console
 from rich.status import Status
 
 from ..agent import AgentLoop, build_mcp_tools
 from ..models import ModelConfig
-from ..utils import ensure_voidrift_dir, voidrift_dir, log_path, check_disk_space, console, err_console
+from ..utils import ensure_voidrift_dir, voidrift_dir, log_path, check_disk_space
+from .. import ui
 
 
 def _detect_iac() -> bool:
-    """Check if IaC files exist (AC-A1).
-
-    Returns:
-        True if any infrastructure-as-code files are detected.
-    """
+    """Check if IaC files exist."""
     cwd = Path.cwd()
-    # Terraform files up to 2 levels deep
     for depth in range(3):
         pattern = "/".join(["*"] * depth + ["*.tf"]) if depth else "*.tf"
         if list(cwd.glob(pattern)):
             return True
-    # Other IaC markers
     for name in ["cdk.json", "podman-compose.yml", "podman-compose.yaml",
                   "docker-compose.yml", "docker-compose.yaml"]:
         if (cwd / name).exists():
@@ -34,26 +28,20 @@ def _detect_iac() -> bool:
 
 
 def run_automate(worker: ModelConfig, architect: ModelConfig | None = None) -> int:
-    """Execute the automate phase.
-
-    Args:
-        worker: Model configuration for the developer role.
-        architect: Optional model for design decisions.
-
-    Returns:
-        Exit code (0 for success, 1 for failure).
-    """
+    """Execute the automate phase."""
     check_disk_space()
     d = ensure_voidrift_dir()
 
     if not (d / "REQUIREMENTS.md").exists():
-        err_console.print("[red]REQUIREMENTS.md not found. Run 'voidrift gather <model>' first.[/red]")
+        ui.error("REQUIREMENTS.md not found. Run 'voidrift gather <model>' first.")
         return 1
 
-    log = log_path("automate")
-    console.print(f"[dim]Log: {log}[/dim]")
     iac_exists = _detect_iac()
     mode = "Review" if iac_exists else "Generate"
+
+    ui.phase(f"VoidRift Automate ({mode})")
+    log = log_path("automate")
+    ui.detail(f"Log: {log}")
 
     try:
         import voidrift_mcp.server as mcp_mod
@@ -99,22 +87,19 @@ def run_automate(worker: ModelConfig, architect: ModelConfig | None = None) -> i
         stream=False,
     )
 
-    console.print(f"[bold cyan]VoidRift Automate ({mode})[/bold cyan]")
-
-    with Status(f"[bold cyan]{mode}ing infrastructure...", console=console):
+    ui.stage(f"{mode}ing infrastructure...")
+    with Status("  ⠋ Thinking...", console=ui._con):
         try:
             response = agent.send("\n".join(prompt_parts))
             with open(log, "a") as f:
                 f.write(f"\n=== Automate {mode}: {datetime.now().isoformat()} ===\n{response}\n")
         except (RuntimeError, OSError, ValueError) as e:
-            err_console.print(f"[red]Automate failed: {e}[/red]")
+            ui.error(f"Automate failed: {e}")
             return 1
 
-
-    # Verify IaC was created (AC-A8)
     if mode == "Generate" and not _detect_iac():
-        err_console.print("[yellow]⚠ No IaC files detected after generation. Check REQUIREMENTS.md ## Deployment.[/yellow]")
+        ui.warn("No IaC files detected after generation. Check REQUIREMENTS.md ## Deployment.")
         return 1
 
-    console.print(f"[green]✅ Automate ({mode.lower()}) complete.[/green]")
+    ui.done(f"Automate ({mode.lower()}) complete.")
     return 0

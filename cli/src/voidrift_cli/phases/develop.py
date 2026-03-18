@@ -4,12 +4,10 @@ from __future__ import annotations
 
 import os
 import signal
-import subprocess
 import time
 from datetime import datetime
 from pathlib import Path
 
-from rich.console import Console
 from rich.status import Status
 
 from ..agent import AgentLoop, build_mcp_tools
@@ -17,8 +15,9 @@ from ..models import ModelConfig
 from ..utils import (
     ensure_voidrift_dir, voidrift_dir, log_path, check_disk_space,
     check_requirements_exist, check_task_files, count_tasks,
-    truncate_task_label, console, err_console,
+    truncate_task_label,
 )
+from .. import ui
 
 DEVELOPER_PROMPT = """[ROLE: Developer]
 
@@ -56,25 +55,22 @@ def run_develop(
     check_disk_space()
     d = ensure_voidrift_dir()
 
-    # Pre-flight checks (REQ-D-1)
     if not check_requirements_exist():
-        err_console.print("[red]REQUIREMENTS.md not found. Run 'voidrift gather <model>' first.[/red]")
+        ui.error("REQUIREMENTS.md not found. Run 'voidrift gather <model>' first.")
         return 1
 
     task_file, is_multi = check_task_files()
     if not task_file:
-        err_console.print("[red]No task files found. Run 'voidrift plan <model>' first.[/red]")
+        ui.error("No task files found. Run 'voidrift plan <model>' first.")
         return 1
 
-    # REQ-D-12
     if workers != 1 and not is_multi:
-        err_console.print("[yellow]No module headers found. Falling back to single worker.[/yellow]")
+        ui.warn("No module headers found. Falling back to single worker.")
         workers = 1
 
-    # REQ-D-2
-    done, blocked, total = count_tasks(task_file)
-    if done + blocked >= total and total > 0:
-        console.print("[green]All tasks complete.[/green]")
+    done_count, blocked, total = count_tasks(task_file)
+    if done_count + blocked >= total and total > 0:
+        ui.done("All tasks complete.")
         return 0
 
     # Lock file (REQ-D-3)
@@ -84,7 +80,7 @@ def run_develop(
             parts = lock.read_text().strip().split("\n")
             pid = int(parts[0])
             os.kill(pid, 0)
-            err_console.print(f"[red]Develop session already running (PID {pid}, started {parts[1] if len(parts) > 1 else 'unknown'})[/red]")
+            ui.error(f"Develop session already running (PID {pid}, started {parts[1] if len(parts) > 1 else 'unknown'})")
             return 1
         except (ProcessLookupError, ValueError, IndexError):
             lock.unlink()
@@ -96,12 +92,12 @@ def run_develop(
 
     prev_handler = signal.signal(signal.SIGTERM, _handle_sigterm)
 
+    ui.phase("VoidRift Develop")
     log = log_path("develop")
-    console.print(f"[dim]Log: {log}[/dim]")
+    ui.detail(f"Log: {log}")
     with open(log, "a") as f:
         f.write(f"\n=== Develop session: {datetime.now().isoformat()} ===\n")
 
-    # Set up MCP tools and load tasks
     try:
         import voidrift_mcp.server as mcp_mod
         mcp_mod._boot()
@@ -115,8 +111,7 @@ def run_develop(
     result = 1
     try:
         if is_multi and workers != 1:
-            # TODO: concurrent worker pool (REQ-D-10, REQ-D-11)
-            err_console.print("[yellow]Multi-worker mode not yet implemented. Running sequentially.[/yellow]")
+            ui.warn("Multi-worker mode not yet implemented. Running sequentially.")
 
         for module in modules:
             label = f"[{module}] " if is_multi else ""
@@ -124,7 +119,7 @@ def run_develop(
             if result != 0:
                 break
     except KeyboardInterrupt:
-        err_console.print("\n[yellow]Interrupted.[/yellow]")
+        ui.warn("Interrupted.")
     finally:
         signal.signal(signal.SIGTERM, prev_handler)
         lock.unlink(missing_ok=True)
@@ -141,20 +136,7 @@ def _develop_module(
     handlers: dict,
     log: Path,
 ) -> int:
-    """Execute tasks for a single module via MCP task tools (REQ-D-4).
-
-    Args:
-        worker: Developer model configuration.
-        architect: Optional architect model for escalations.
-        module: Module name (or '_default' for single-module).
-        prefix: Display prefix (e.g. '[backend] ').
-        tools: MCP tool definitions.
-        handlers: MCP tool handler functions.
-        log: Path to the develop log file.
-
-    Returns:
-        Exit code (0 for success, 1 for failure).
-    """
+    """Execute tasks for a single module via MCP task tools (REQ-D-4)."""
     import voidrift_mcp.server as mcp_mod
 
     escalation_count = 0
@@ -172,7 +154,7 @@ def _develop_module(
         total = status["done"] + status["blocked"] + status["remaining"]
         label = truncate_task_label(f"- [ ] {task.text}")
 
-        console.print(f"\n{prefix}[bold]Task {task_num}/{total}:[/bold] {label}")
+        ui.stage(f"{prefix}Task {task_num}/{total}: {label}")
 
         # Check for prior architect response
         arch_context = ""
@@ -192,7 +174,7 @@ def _develop_module(
             stream=False,
         )
 
-        with Status(f"{prefix}Working on task {task_num}/{total}...", console=console):
+        with Status(f"  ⠋ Working...", console=ui._con):
             start_time = time.time()
             try:
                 response = agent.send(task.text)
@@ -200,7 +182,7 @@ def _develop_module(
                 with open(log, "a") as f:
                     f.write(f"\n--- Task {task_num}: {label} ({elapsed:.1f}s) ---\n{response}\n")
             except (RuntimeError, OSError, ValueError) as e:
-                err_console.print(f"[red]Task failed: {e}[/red]")
+                ui.error(f"Task failed: {e}")
                 with open(log, "a") as f:
                     f.write(f"ERROR on task {task_num}: {e}\n")
                 return 1
@@ -212,17 +194,17 @@ def _develop_module(
         esc_file = esc_dir / f"{task_num}.md"
         if esc_file.exists():
             escalation_count += 1
-            if escalation_count > MAX_ESCALATIONS:  # REQ-D-7
+            if escalation_count > MAX_ESCALATIONS:
                 mcp_mod.tasks.block(mod_arg)
                 blocked_tasks += 1
-                err_console.print(f"[yellow]Task blocked (max escalations reached)[/yellow]")
+                ui.warn("Task blocked (max escalations reached)")
                 continue
 
             question = esc_file.read_text()
-            err_console.print(f"[yellow]Escalation: {question[:200]}[/yellow]")
+            ui.warn(f"Escalation: {question[:200]}")
 
             if not architect:
-                err_console.print("[red]No architect configured. Re-run with an architect model.[/red]")
+                ui.error("No architect configured. Re-run with an architect model.")
                 return 1
 
             guidance = _consult_architect(architect, question, task.text, tools, handlers, log, mod_arg or None)
@@ -234,16 +216,15 @@ def _develop_module(
             else:
                 return 1
 
-        # Mark complete via MCP (REQ-D-9)
         mcp_mod.tasks.complete(mod_arg)
-        console.print(f"  [green]✓[/green] {label} ({elapsed:.1f}s)")
+        ui.success(f"{label} ({elapsed:.1f}s)")
 
     if blocked_tasks > 0:
-        err_console.print(f"\n[yellow]{blocked_tasks} task(s) blocked — marked [!] in TASKS.md[/yellow]")
+        ui.warn(f"{blocked_tasks} task(s) blocked — marked [!] in TASKS.md")
         return 1
 
     mod_label = module if module != "_default" else "all"
-    console.print(f"\n[green]✅ {prefix}All tasks complete ({mod_label})[/green]")
+    ui.done(f"{prefix}All tasks complete ({mod_label})")
     return 0
 
 
@@ -256,20 +237,7 @@ def _consult_architect(
     log: Path,
     module: str | None = None,
 ) -> str | None:
-    """Consult the architect model for guidance (AC-D28a, AC-D28b).
-
-    Args:
-        architect: Architect model configuration.
-        question: The developer's escalation question.
-        task_text: The current task line text.
-        tools: MCP tool definitions.
-        handlers: MCP tool handler functions.
-        log: Path to the develop log file.
-        module: Module name for multi-module projects.
-
-    Returns:
-        Architect's guidance text, or None on failure.
-    """
+    """Consult the architect model for guidance (REQ-D-6, REQ-D-8)."""
     d = voidrift_dir()
     context_parts = [f"Question from developer:\n{question}\n\nTask:\n{task_text}"]
     req = d / "REQUIREMENTS.md"
@@ -292,12 +260,13 @@ def _consult_architect(
         stream=False,
     )
 
-    with Status("[bold cyan]Consulting architect...", console=console):
+    ui.info("Consulting architect...")
+    with Status("  ⠋ Thinking...", console=ui._con):
         try:
             response = agent.send("\n\n".join(context_parts))
             with open(log, "a") as f:
                 f.write(f"\n--- Architect consultation ---\n{response}\n")
             return response
         except (RuntimeError, OSError, ValueError) as e:
-            err_console.print(f"[red]Architect consultation failed: {e}[/red]")
+            ui.error(f"Architect consultation failed: {e}")
             return None

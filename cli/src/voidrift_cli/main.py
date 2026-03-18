@@ -14,13 +14,10 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("openai").setLevel(logging.WARNING)
 
 import click
-from rich.console import Console
 from rich.prompt import Prompt, IntPrompt
 
 from .models import resolve_model, list_models
-
-console = Console()
-err_console = Console(stderr=True)
+from . import ui
 
 HELP_TEXT = """Local-first Agentic Development Framework.
 
@@ -90,24 +87,24 @@ def main() -> None:
     except KeyboardInterrupt:
         sys.exit(130)
     except click.UsageError as e:
-        err_console.print(f"[red]Error: {e.format_message()}[/red]")
+        ui.error(e.format_message())
         if e.ctx:
-            err_console.print(e.ctx.get_help())
+            ui._err.print(e.ctx.get_help())
         sys.exit(2)
     except click.Abort:
         sys.exit(130)
     except Exception as e:
-        err_console.print(f"[red]Error: {e}[/red]")
+        ui.error(str(e))
         sys.exit(1)
 
 
 def _interactive_mode():
     """Interactive guided flow when no subcommand given (REQ-ARCH-3)."""
-    console.print("[bold cyan]VoidRift[/bold cyan] — Local-first Agentic Development Framework\n")
+    ui.phase("VoidRift — Local-first Agentic Development Framework")
 
     actions = ["gather", "plan", "develop", "automate", "verify", "chat", "status"]
     for i, a in enumerate(actions, 1):
-        console.print(f"  {i}. {a}")
+        ui._con.print(f"  {i}. {a}")
 
     try:
         choice = IntPrompt.ask("\nSelect action", choices=[str(i) for i in range(1, len(actions) + 1)])
@@ -119,9 +116,8 @@ def _interactive_mode():
         _status()
         return
 
-    # Model selection
     models = list_models()
-    console.print(f"\nAvailable models: {', '.join(models)}")
+    ui._con.print(f"\nAvailable models: {', '.join(models)}")
     try:
         model_name = Prompt.ask("Model", default="qwen3-coder")
     except (KeyboardInterrupt, EOFError):
@@ -216,30 +212,18 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
     from .agent import AgentLoop
 
     model_label = f"{mc.alias} ({mc.model_id})"
-    console.print(f"[dim]{title}[/dim]")
+    ui.phase(title)
     if extra_header:
         for line in extra_header:
-            console.print(f"[dim]{line}[/dim]")
-    console.print(f"[dim]Log: {log}[/dim]")
-    console.print(f"[dim]Model: {model_label}[/dim]")
+            ui.detail(line)
+    ui.detail(f"Log: {log}")
+    ui.detail(f"Model: {model_label}")
 
-    _blue = "\033[38;5;117m"
-    _reset = "\033[0m"
-    _at_line_start = True
+    _token_handler = ui.make_token_handler()
 
     def on_token(token):
-        nonlocal _at_line_start
         _stop_tool_spinner()
-        out = ""
-        for ch in token:
-            if _at_line_start:
-                out += "  "
-                _at_line_start = False
-            out += ch
-            if ch == "\n":
-                _at_line_start = True
-        sys.stdout.write(f"{_blue}{out}{_reset}")
-        sys.stdout.flush()
+        _token_handler(token)
 
     def on_complete(stats):
         _stop_tool_spinner()
@@ -251,18 +235,17 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
         if stats.get("elapsed"):
             parts.append(f"{stats['elapsed']}s")
         if parts:
-            console.print(f"\n\n[dim]  {' · '.join(parts)}[/dim]")
+            ui.stats(parts)
 
     _tool_spinner = None
     _tool_stop = None
 
     def on_tool_call(name):
         nonlocal _tool_spinner, _tool_stop
-        # Stop any previous tool spinner
         if _tool_stop:
             _tool_stop.set()
             _tool_spinner.join()
-        console.print(f"\n[dim]  ⚙ {name}()[/dim]", end="")
+        ui.tool_start(name)
         _tool_stop = threading.Event()
         def _spin():
             for ch in itertools.cycle("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"):
@@ -285,7 +268,7 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
 
     def on_tool_result(name, result):
         _stop_tool_spinner()
-        console.print(f"\n[dim green]  ✓ {result}[/dim green]")
+        ui.tool_done(result)
 
     agent.on_token = on_token
     agent.on_complete = on_complete
@@ -339,20 +322,20 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
             with open(log, "a") as f:
                 f.write(f"\n> {user_input}\n")
 
-            console.print(f"\n[dim italic]  ◆ {mc.alias}[/dim italic]\n")
-            _at_line_start = True
+            ui.model_label(mc.alias)
+            _token_handler = ui.make_token_handler()  # reset per turn
             try:
                 response = agent.send(user_input)
             except RuntimeError as e:
-                console.print(f"[red]  Error: {e}[/red]")
+                ui.error(str(e))
                 continue
 
             with open(log, "a") as f:
                 f.write(f"\n{response}\n")
-            console.print()
-            console.rule(style="bright_black")
+            ui._con.print()
+            ui.operator_rule()
     except KeyboardInterrupt:
-        console.print("\n[dim]Session ended.[/dim]")
+        ui.info("Session ended.")
     finally:
         agent.on_token = None
         agent.on_complete = None
@@ -398,63 +381,57 @@ def _status():
 
     d = voidrift_dir()
 
-    console.print("[bold cyan]VoidRift Status[/bold cyan]\n")
+    ui.phase("VoidRift Status")
 
-    # Phase 1: Gather
     req = d / "REQUIREMENTS.md"
     if req.exists():
-        console.print("  ✅ Phase 1 (Gather): REQUIREMENTS.md exists")
+        ui._con.print("  ✅ Phase 1 (Gather): REQUIREMENTS.md exists")
     else:
-        console.print("  ⬜ Phase 1 (Gather): Run 'voidrift gather <model>'")
+        ui._con.print("  ⬜ Phase 1 (Gather): Run 'voidrift gather <model>'")
 
-    # Phase 2: Plan
     has_tasks = (d / "TASKS.md").exists()
     has_arch = (d / "ARCHITECTURE.md").exists()
     if has_tasks and has_arch:
-        console.print("  ✅ Phase 2 (Plan): Tasks and architecture exist")
+        ui._con.print("  ✅ Phase 2 (Plan): Tasks and architecture exist")
     elif has_tasks:
-        console.print("  🔄 Phase 2 (Plan): Tasks exist, no architecture")
+        ui._con.print("  🔄 Phase 2 (Plan): Tasks exist, no architecture")
     else:
-        console.print("  ⬜ Phase 2 (Plan): Run 'voidrift plan <model>'")
+        ui._con.print("  ⬜ Phase 2 (Plan): Run 'voidrift plan <model>'")
 
-    # Phase 3: Develop
     task_file = d / "TASKS.md"
     if task_file.exists():
         done, blocked, total = count_tasks(task_file)
         if done == total and total > 0:
-            console.print(f"  ✅ Phase 3 (Develop): All {total} tasks complete")
+            ui._con.print(f"  ✅ Phase 3 (Develop): All {total} tasks complete")
         elif done > 0 or blocked > 0:
-            console.print(f"  🔄 Phase 3 (Develop): {done}/{total} done, {blocked} blocked")
+            ui._con.print(f"  🔄 Phase 3 (Develop): {done}/{total} done, {blocked} blocked")
         else:
-            console.print(f"  ⬜ Phase 3 (Develop): {total} tasks pending")
+            ui._con.print(f"  ⬜ Phase 3 (Develop): {total} tasks pending")
     else:
-        console.print("  ⬜ Phase 3 (Develop): No tasks")
+        ui._con.print("  ⬜ Phase 3 (Develop): No tasks")
 
-    # Phase 4: Automate
     from .phases.automate import _detect_iac
     if _detect_iac():
-        console.print("  ✅ Phase 4 (Automate): IaC detected")
+        ui._con.print("  ✅ Phase 4 (Automate): IaC detected")
     else:
-        console.print("  ⬜ Phase 4 (Automate): Run 'voidrift automate <model>'")
+        ui._con.print("  ⬜ Phase 4 (Automate): Run 'voidrift automate <model>'")
 
-    # Phase 5: Verify
     if (d / "VERIFY.md").exists():
         text = (d / "VERIFY.md").read_text()
         if "PASS" in text:
-            console.print("  ✅ Phase 5 (Verify): PASS")
+            ui._con.print("  ✅ Phase 5 (Verify): PASS")
         else:
-            console.print("  ❌ Phase 5 (Verify): FAIL")
+            ui._con.print("  ❌ Phase 5 (Verify): FAIL")
     else:
-        console.print("  ⬜ Phase 5 (Verify): Run 'voidrift verify <model>'")
+        ui._con.print("  ⬜ Phase 5 (Verify): Run 'voidrift verify <model>'")
 
-    # Feature specs
     spec_dir = d / "spec"
     if spec_dir.is_dir():
         specs = list(spec_dir.glob("*.md"))
         if specs:
-            console.print(f"\n  Feature specs ({len(specs)}):")
+            ui._con.print(f"\n  Feature specs ({len(specs)}):")
             for s in sorted(specs):
-                console.print(f"    - {s.stem}")
+                ui._con.print(f"    - {s.stem}")
 
 
 @cli.command()
@@ -472,27 +449,27 @@ def log(phase, prune) -> None:
         logs = sorted(d.glob(pattern))
         for l in logs:
             l.unlink()
-        console.print(f"Deleted {len(logs)} log file(s)" if logs else "No log files to prune")
+        ui.info(f"Deleted {len(logs)} log file(s)" if logs else "No log files to prune")
         return
 
     if not phase:
-        console.print("Usage: voidrift log <phase> [--prune]")
-        console.print(f"Phases: {', '.join(valid_phases)}")
+        ui._con.print("Usage: voidrift log <phase> [--prune]")
+        ui._con.print(f"Phases: {', '.join(valid_phases)}")
         sys.exit(1)
 
     if phase not in valid_phases:
-        err_console.print(f"[red]Invalid phase: {phase}. Must be one of: {', '.join(valid_phases)}[/red]")
+        ui.error(f"Invalid phase: {phase}. Must be one of: {', '.join(valid_phases)}")
         sys.exit(1)
 
     logs = sorted(d.glob(f"{phase}-*.log"))
     if not logs:
-        err_console.print(f"[red]No log files found for phase: {phase}[/red]")
+        ui.error(f"No log files found for phase: {phase}")
         sys.exit(1)
 
     latest = logs[-1]
     lines = latest.read_text().splitlines()
     for line in lines[-200:]:
-        console.print(line)
+        ui._con.print(line)
 
 
 @cli.command()
@@ -502,7 +479,7 @@ def unlock() -> None:
 
     lock = voidrift_dir() / ".develop.lock"
     if not lock.exists():
-        console.print("No lock file found.")
+        ui.info("No lock file found.")
         return
 
     try:
@@ -517,11 +494,11 @@ def unlock() -> None:
                 os.kill(pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
-            console.print(f"Killed process {pid}")
+            ui.info(f"Killed process {pid}")
         except ProcessLookupError:
-            console.print(f"Removed stale lock (PID {pid} not running)")
+            ui.info(f"Removed stale lock (PID {pid} not running)")
     except (ValueError, IndexError):
-        console.print("Removed invalid lock file")
+        ui.info("Removed invalid lock file")
 
     lock.unlink()
 
