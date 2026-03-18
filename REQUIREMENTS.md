@@ -67,10 +67,10 @@
 
 ### 4.3 Framework Reference Files
 
-- **REQ-RES-1:** Role-specific agent files SHALL be loaded per phase: Analyst for gather, Architect for plan and escalations, Developer for develop/automate/verify.
+- **REQ-RES-1:** Role-specific agent files SHALL be loaded per phase via `get_agent()` MCP tool calls (per REQ-ARCH-6): Analyst for gather, Architect for plan and escalations, Developer for develop/automate/verify.
 - **REQ-RES-2:** Skill files SHALL live in `resources/skills/` with uppercase filenames. Available skills SHALL be determined dynamically from the directory contents.
-- **REQ-RES-3:** WHILE the plan phase is active, all skill files SHALL be loaded as read-only context.
-- **REQ-RES-4:** WHILE the develop phase is active, skill files SHALL be loaded per-task based on `[tag, ...]` annotations.
+- **REQ-RES-3:** WHILE the plan phase is active, skill files SHALL be loaded on demand via `get_skill()` MCP tool calls (per REQ-ARCH-6).
+- **REQ-RES-4:** WHILE the develop phase is active, skill files SHALL be loaded per-task via `get_skill()` MCP tool calls based on `[tag, ...]` annotations (per REQ-ARCH-6).
 - **REQ-RES-5:** IF a skill file referenced in a task tag does not exist, THE SYSTEM SHALL print a warning and continue without loading it.
 
 ### 4.4 Phase 1 — Gather
