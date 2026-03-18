@@ -193,20 +193,7 @@ def _gather_from(
     console.print(f"Source: {from_path}")
     console.print(f"Target: {target}")
 
-    # Load requirements template and skills
-    resources = Path.home() / ".voidrift" / "resources"
-    template = ""
-    skills = ""
-    try:
-        t = resources / "templates" / "REQUIREMENTS-TEMPLATE.md"
-        if t.exists():
-            template = t.read_text()
-        for name in ("PROD-STRATEGY.md", "QUALITY-QA.md"):
-            s = resources / "skills" / name
-            if s.exists():
-                skills += s.read_text() + "\n\n"
-    except OSError:
-        pass
+    # Load requirements template and skills via MCP tools, not direct reads (REQ-ARCH-6)
 
     _blue = "\033[38;5;117m"
     _reset = "\033[0m"
@@ -242,11 +229,11 @@ def _gather_from(
             "[ROLE: Analyst]\n\n"
             "You are reverse-engineering requirements from an existing codebase.\n"
             "The codebase is read-only. Treat code as ground truth, documentation as claims to verify.\n"
-            "Analyze the codebase structure, then produce requirements.\n"
-            "Use write_file() to write the requirements when ready.\n\n"
-            "You MUST follow this template structure exactly:\n\n"
-            f"{template}\n\n"
-            f"Follow these skills:\n\n{skills}"
+            "Analyze the codebase structure, then produce requirements.\n\n"
+            "Before writing, use get_template('REQUIREMENTS-TEMPLATE') to get the output format,\n"
+            "and get_skill('PROD-STRATEGY') and get_skill('QUALITY-QA') for writing guidance.\n\n"
+            "Use read_source_file() to examine files. "
+            "Use write_file() to write the requirements when ready."
         ),
         tools=tools,
         tool_handlers=handlers,

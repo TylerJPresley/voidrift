@@ -83,7 +83,7 @@
 - **REQ-G-5:** The model SHALL NOT focus on technology choices unless the operator explicitly requests them.
 - **REQ-G-6:** Full project gather SHALL produce `.voidrift/REQUIREMENTS.md` with sections: Goal, Users, Features, Runtime Environment, Constraints, Out of Scope.
 - **REQ-G-7:** Feature gather SHALL produce `.voidrift/spec/<feature>.md` with sections: Goal, User Stories, Acceptance Criteria (BDD), Non-Functional Requirements, Edge Cases.
-- **REQ-G-8:** WHEN `--from <path>` is specified, THE SYSTEM SHALL reverse-engineer requirements from the existing codebase in three phases: identify source files, analyze each file individually, generate summary. The reference directory SHALL be strictly read-only. THE SYSTEM SHALL load `REQUIREMENTS-TEMPLATE.md` and relevant skills (`PROD-STRATEGY`, `QUALITY-QA`) into the system prompt to guide output format.
+- **REQ-G-8:** WHEN `--from <path>` is specified, THE SYSTEM SHALL reverse-engineer requirements from the existing codebase. The reference directory SHALL be strictly read-only. The system prompt SHALL contain only the role and instructions — NOT templates or skills. The model SHALL use `get_template()` and `get_skill()` MCP tools to fetch formatting guidance on demand (per REQ-ARCH-6).
 - **REQ-G-9:** WHEN `--reference <path>` is specified, THE SYSTEM SHALL load the reference codebase read-only for lookup during interactive conversation.
 - **REQ-G-10:** Gather SHALL never auto-commit. `auto-commits: false` and `dirty-commits: false` SHALL be set.
 
