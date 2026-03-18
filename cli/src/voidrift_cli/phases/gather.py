@@ -251,6 +251,7 @@ def _gather_from(
         tools=tools,
         tool_handlers=handlers,
         stream=True,
+        max_tokens=8192,
         on_token=_on_token,
         extra_body={"chat_template_kwargs": {"enable_thinking": False}}
         if model.model_type == "local"
