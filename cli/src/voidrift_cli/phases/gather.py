@@ -177,13 +177,18 @@ def _gather_from(
         handlers = dict(LOCAL_HANDLERS)
 
     # Override read_source_file to read from the source codebase
+    _MAX_FILE_CHARS = 32_000  # ~8K tokens — prevent context blowout
+
     def read_from_source(path: str) -> str:
         full = (from_path / path).resolve()
         if not str(full).startswith(str(from_path.resolve())):
             return f"Access denied: {path} is outside the source directory"
         if not full.exists():
             return f"File not found: {path}"
-        return full.read_text(encoding="utf-8", errors="replace")
+        text = full.read_text(encoding="utf-8", errors="replace")
+        if len(text) > _MAX_FILE_CHARS:
+            return text[:_MAX_FILE_CHARS] + f"\n\n... [TRUNCATED — file is {len(text)} chars, showing first {_MAX_FILE_CHARS}]"
+        return text
 
     handlers["read_source_file"] = read_from_source
 
@@ -284,7 +289,8 @@ def _build_file_tree(directory: Path, max_files: int = 500) -> str:
         Newline-separated list of relative file paths.
     """
     exclude = {".git", "node_modules", "__pycache__", ".cache", "dist", "build", ".venv", "venv",
-               ".voidrift", ".agendev", ".aider.tags.cache.v4"}
+               ".voidrift", ".agendev", ".aider.tags.cache.v4", "static/assets"}
+    skip_names = {"package-lock.json", "yarn.lock", "pnpm-lock.yaml"}
     lines = []
     count = 0
     for p in sorted(directory.rglob("*")):
@@ -297,6 +303,8 @@ def _build_file_tree(directory: Path, max_files: int = 500) -> str:
             # Skip dotfiles in root (e.g. .aider.*, .gitignore)
             rel = p.relative_to(directory)
             if rel.parts[0].startswith("."):
+                continue
+            if p.name in skip_names:
                 continue
             lines.append(str(rel))
             count += 1
