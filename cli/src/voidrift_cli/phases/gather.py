@@ -272,11 +272,11 @@ def _gather_from(
         {"get_all_analyses", "get_template", "get_skill", "write_file"}
     )
     synth = AgentLoop(
-        model=model, stream=True, extra_body=extra, max_tokens=8192,
+        model=model, stream=True, extra_body=extra, max_tokens=16384,
         on_token=ui.make_token_handler(),
         system_prompt=(
             "[ROLE: Analyst]\n\n"
-            "You are writing requirements from file analysis summaries.\n"
+            "You are writing comprehensive requirements from file analysis summaries.\n"
             "Steps:\n"
             "1. Call get_all_analyses() to retrieve the summaries.\n"
             "2. Call get_template('REQUIREMENTS-TEMPLATE') for the output format.\n"
@@ -284,8 +284,14 @@ def _gather_from(
             f"4. Call write_file() to write the final requirements to '{target_rel}'.\n"
             "5. Call done() when finished.\n"
             "Do NOT call the same tool more than once.\n\n"
-            "After calling done(), provide a summary of the requirements you wrote: "
-            "the project goal, key features, runtime environment, and constraints."
+            "CRITICAL: The requirements document must be THOROUGH and DETAILED.\n"
+            "- Every API endpoint, data flow, and UI component from the analyses must appear as a requirement.\n"
+            "- Each functional requirement needs specific acceptance criteria.\n"
+            "- Include all external interfaces, configuration parameters, and error handling behaviors.\n"
+            "- Capture every feature implied by the code, not just high-level summaries.\n"
+            "- The output should be long and complete — do not summarize or abbreviate.\n\n"
+            "After calling done(), summarize the key requirements you wrote: "
+            "project goal, features, external interfaces, and constraints."
         ),
         tools=synth_tools, tool_handlers=synth_handlers,
     )
