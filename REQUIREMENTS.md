@@ -53,8 +53,8 @@
 
 - **REQ-MCP-1:** The MCP server SHALL communicate via stdio using the MCP protocol, built with Python/FastMCP.
 - **REQ-MCP-2:** WHEN the server starts, THE SYSTEM SHALL load all framework files from `resources/` (agents, skills, templates), index them by markdown header, and serve targeted sections on demand.
-- **REQ-MCP-3:** The server SHALL use write-through storage: `store_*` tools write to both in-memory cache and disk simultaneously. Memory serves as read cache; disk is the source of truth.
-  - *Rationale:* Write-through ensures no data loss on unexpected exit while keeping reads fast via memory cache.
+- **REQ-MCP-3:** The server SHALL use write-through storage for persistent artifacts (requirements, specs): `store_*` tools write to both in-memory cache and disk simultaneously. Ephemeral artifacts (analyses) SHALL be stored in memory only and discarded when the process exits.
+  - *Rationale:* Without resume capability, writing ephemeral data to disk is dead weight — a crashed run starts over regardless. Only operator work products need disk persistence.
 - **REQ-MCP-3a:** ALL phase executions SHALL be scoped to a run ID. The run ID SHALL be the log filename stem (e.g. `gather-20260318-101048`). The run ID is a correlation identifier — it does NOT organize the filesystem. Ephemeral artifacts (analyses, etc.) SHALL be stored flat under `.voidrift/analyses/`. The run ID SHALL be available for SQLite session correlation via `SessionStore`. The log file serves as the run's PID file — its existence and filename are the canonical record of the run.
 - **REQ-MCP-4:** The server SHALL expose content management tools: `store_file_analysis()`, `get_file_analysis()`, `get_all_analyses()`, `store_requirements()`, `get_requirements()`, `get_agent(role, topic)`, `get_skill(name, topic)`, `get_template(name)`, `load_tasks(path)`, `get_next_task(module)`, `complete_task(module)`, `get_task_status(module)`. The MCP server SHALL NOT perform local filesystem operations — it MAY reside on a different host than the CLI.
 - **REQ-MCP-4a:** The CLI SHALL provide local filesystem tools directly (not via MCP): `write_file(path, content)`, `read_source_file(path)`, `export_to_file(type, path)`, `list_project_artifacts()`. These tools execute on the workstation where the CLI runs.
@@ -144,7 +144,7 @@
 - **REQ-U-3:** `voidrift log <phase>` SHALL show the last 200 lines of the most recent log. `--prune` SHALL delete log files.
 - **REQ-U-4:** `voidrift unlock` SHALL remove the develop lock file and kill any running develop process.
 - **REQ-U-5:** `voidrift completions <shell>` SHALL output shell completion scripts for bash, zsh, and fish. All model, worker, and architect arguments SHALL complete from configured aliases in `models.yml`.
-- **REQ-U-6:** `voidrift prune` SHALL remove project-level ephemeral data (`.voidrift/` analyses, escalations, architect_responses, logs, stale `.develop.lock`) beyond the configured retention limit (`retention.project`, default 5). `--all` SHALL remove ALL project ephemeral data regardless of limit. `--global` SHALL prune the framework-level SessionStore (`~/.voidrift/`) beyond the configured retention limit (`retention.global`, default 30 days). `--global --all` SHALL remove ALL framework SessionStore data. Neither mode SHALL touch operator work products (REQUIREMENTS.md, ARCHITECTURE.md, TASKS.md, STATE.md, spec/) or framework config (config.yml, models.yml, worker-models.yml, resources/). WHEN `--global` is NOT set AND no `.voidrift/` directory exists in the current project, THE SYSTEM SHALL exit with a friendly error (e.g. "No .voidrift directory found — nothing to prune").
+- **REQ-U-6:** `voidrift prune` SHALL remove project-level ephemeral data (`.voidrift/` escalations, architect_responses, logs, stale `.develop.lock`) beyond the configured retention limit (`retention.project`, default 5). `--all` SHALL remove ALL project ephemeral data regardless of limit. `--global` SHALL prune the framework-level SessionStore (`~/.voidrift/`) beyond the configured retention limit (`retention.global`, default 30 days). `--global --all` SHALL remove ALL framework SessionStore data. Neither mode SHALL touch operator work products (REQUIREMENTS.md, ARCHITECTURE.md, TASKS.md, STATE.md, spec/) or framework config (config.yml, models.yml, worker-models.yml, resources/). WHEN `--global` is NOT set AND no `.voidrift/` directory exists in the current project, THE SYSTEM SHALL exit with a friendly error (e.g. "No .voidrift directory found — nothing to prune").
 
 ### 4.10 Model Configuration
 
@@ -264,8 +264,6 @@
 ├── TASKS.md                  # Task list (single file, module headers for multi-module)
 ├── spec/                     # Feature specifications
 │   └── <feature>.md
-├── analyses/                 # Per-file analysis (write-through from MCP)
-│   └── <sanitized_path>.md
 ├── escalations/              # Developer escalation questions
 │   └── [module/]<task_num>-<N>.md
 ├── architect_responses/      # Architect guidance

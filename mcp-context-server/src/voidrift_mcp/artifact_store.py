@@ -18,13 +18,11 @@ class ArtifactStore(BaseModel):
     _artifacts: dict[str, str] = PrivateAttr(default_factory=dict)
 
     def _disk_path(self, artifact_type: str, key: str) -> Path | None:
-        """Map artifact type+key to a disk path, or None if no mapping."""
+        """Map artifact type+key to a disk path, or None if memory-only."""
         if artifact_type == "requirements":
             if key == "project":
                 return self.voidrift_dir / "REQUIREMENTS.md"
             return self.voidrift_dir / "spec" / f"{key}.md"
-        if artifact_type == "analysis":
-            return self.voidrift_dir / "analyses" / f"{key.replace('/', '_').replace(chr(92), '_')}.md"
         return None
 
     def store(self, artifact_type: str, key: str, content: str) -> None:

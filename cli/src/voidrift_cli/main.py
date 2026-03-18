@@ -511,7 +511,7 @@ def prune(global_: bool, all_: bool) -> None:
         ui.error("No .voidrift directory found — nothing to prune")
         sys.exit(1)
 
-    ephemeral_dirs = ["analyses", "escalations", "architect_responses"]
+    ephemeral_dirs = ["escalations", "architect_responses"]
     removed_dirs = 0
     removed_logs = 0
 

@@ -10,7 +10,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 - `voidrift prune` command — clean ephemeral data with configurable retention (REQ-U-6)
   - `prune` — project logs beyond retention limit (default: keep 5)
-  - `prune --all` — all project ephemeral data (analyses, escalations, logs, stale lock)
+  - `prune --all` — all project ephemeral data (escalations, architect_responses, logs, stale lock)
   - `prune --global` — framework SessionStore beyond retention limit (default: 30 days)
   - `prune --global --all` — all framework session data
 - `retention:` config section with `project` and `global` limits (REQ-CFG-5)
@@ -24,6 +24,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - `/write` command in gather to enable file tools for one turn
 
 ### Changed
+- Analyses (file summaries from gather --from) are now memory-only — no disk write-through (REQ-MCP-3)
 - Gather and chat use plain terminal flow instead of Textual TUI — no alternate screen buffer
 - Replaced `textual` dependency with `prompt_toolkit`
 - Tools disabled by default in gather to prevent model thinking-token overhead
