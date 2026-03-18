@@ -46,6 +46,8 @@
   - *Rationale:* The worker node already exposes an OpenAI-compatible endpoint. Cloud APIs expose endpoints. Kiro Gateway exposes an endpoint. The CLI treats all three identically — the only variable is the URL.
 - **REQ-ARCH-6:** The CLI SHALL never read framework resource files (agents, skills, templates) directly. All framework context SHALL be served exclusively through MCP server tool calls.
   - *Rationale:* On-demand retrieval via MCP tools keeps context windows small. Models pull only the sections they need instead of loading full files upfront.
+- **REQ-ARCH-7:** Multi-stage phases SHALL use separate agent instances per unit of work to prevent context accumulation. Each agent starts with a clean message history. Shared state between agents SHALL be passed through MCP tools (`store_file_analysis`, `get_all_analyses`, etc.), not message history.
+  - *Rationale:* A single agent reading multiple files accumulates raw content in its message history until the context window fills. Separate agents per file keep each context small and focused — the same pattern used by the develop phase (one agent per task).
 
 ### 4.2 MCP Context Server
 
@@ -83,7 +85,11 @@
 - **REQ-G-5:** The model SHALL NOT focus on technology choices unless the operator explicitly requests them.
 - **REQ-G-6:** Full project gather SHALL produce `.voidrift/REQUIREMENTS.md` with sections: Goal, Users, Features, Runtime Environment, Constraints, Out of Scope.
 - **REQ-G-7:** Feature gather SHALL produce `.voidrift/spec/<feature>.md` with sections: Goal, User Stories, Acceptance Criteria (BDD), Non-Functional Requirements, Edge Cases.
-- **REQ-G-8:** WHEN `--from <path>` is specified, THE SYSTEM SHALL reverse-engineer requirements from the existing codebase. The reference directory SHALL be strictly read-only. The system prompt SHALL contain only the role and instructions — NOT templates or skills. The model SHALL use `get_template()` and `get_skill()` MCP tools to fetch formatting guidance on demand (per REQ-ARCH-6).
+- **REQ-G-8:** WHEN `--from <path>` is specified, THE SYSTEM SHALL reverse-engineer requirements in three stages, each using a separate agent instance (per REQ-ARCH-7):
+  1. **Triage:** Agent receives the file tree and returns a JSON list of source files to analyze (skipping build artifacts, binaries, lock files, etc.).
+  2. **Analysis:** One agent per file — reads the file via `read_source_file()`, stores a summary via `store_file_analysis()`, then exits. Each agent has a clean context containing only the single file.
+  3. **Synthesis:** Agent calls `get_all_analyses()` to retrieve all stored summaries, fetches formatting guidance via `get_template()` and `get_skill()` (per REQ-ARCH-6), and writes the final requirements via `write_file()`.
+  The reference directory SHALL be strictly read-only. The system prompt for each stage SHALL contain only the role and stage-specific instructions.
 - **REQ-G-9:** WHEN `--reference <path>` is specified, THE SYSTEM SHALL load the reference codebase read-only for lookup during interactive conversation.
 - **REQ-G-10:** Gather SHALL never auto-commit. `auto-commits: false` and `dirty-commits: false` SHALL be set.
 
