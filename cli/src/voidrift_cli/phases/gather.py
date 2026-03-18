@@ -277,10 +277,13 @@ def _gather_from(
         system_prompt=(
             "[ROLE: Analyst]\n\n"
             "You are writing requirements from file analysis summaries.\n"
-            "Use get_all_analyses() to retrieve the summaries.\n"
-            "Use get_template('REQUIREMENTS-TEMPLATE') for the output format.\n"
-            "Use get_skill('PROD-STRATEGY') and get_skill('QUALITY-QA') for guidance.\n"
-            f"Use write_file() to write the final requirements to '{target_rel}'."
+            "Steps:\n"
+            "1. Call get_all_analyses() to retrieve the summaries.\n"
+            "2. Call get_template('REQUIREMENTS-TEMPLATE') for the output format.\n"
+            "3. Call get_skill('PROD-STRATEGY') for guidance.\n"
+            f"4. Call write_file() to write the final requirements to '{target_rel}'.\n"
+            "5. Call done() when finished.\n"
+            "Do NOT call the same tool more than once."
         ),
         tools=synth_tools, tool_handlers=synth_handlers,
     )

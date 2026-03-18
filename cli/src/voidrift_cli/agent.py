@@ -133,8 +133,9 @@ class AgentLoop(BaseModel):
         """
         client = self._get_client()
         model_name = self._model_name()
+        max_iterations = 20
 
-        while True:
+        for _iteration in range(max_iterations):
             kwargs: dict[str, Any] = {
                 "model": model_name,
                 "messages": self.messages,
@@ -185,6 +186,21 @@ class AgentLoop(BaseModel):
                 # Final call — no tools, get text summary
                 self.tools = []
                 continue
+
+        # Exhausted iterations — force a final text call
+        self.tools = []
+        kwargs = {
+            "model": model_name,
+            "messages": self.messages,
+            "max_tokens": self.max_tokens,
+        }
+        if self.extra_body:
+            kwargs["extra_body"] = self.extra_body
+        if self.stream:
+            text, _ = self._stream_response(client, kwargs)
+        else:
+            text, _ = self._sync_response(client, kwargs)
+        return text
 
     def _sync_response(self, client: OpenAI, kwargs: dict) -> tuple[str, list[dict]]:
         """Non-streaming response.
