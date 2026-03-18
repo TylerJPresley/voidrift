@@ -8,6 +8,8 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- Run ID correlation for all phases — log filename stem serves as run ID (REQ-MCP-3a)
+- `boot_run()` utility returns `(log_path, run_id)` for all phases
 - Shared interactive terminal UI for gather and chat phases (REQ-UI-1–4)
   - Light blue indented model responses, dim model label with `◆` marker
   - `prompt_toolkit` multi-line input (Enter for newlines, blank line to submit)
