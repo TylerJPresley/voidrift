@@ -11,7 +11,7 @@ class SessionStore:
     """SQLite-backed session metadata and ephemeral run-scoped data."""
 
     def __init__(self, db_path: Path | str = ":memory:"):
-        self._conn = sqlite3.connect(str(db_path))
+        self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._init_schema()
 

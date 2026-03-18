@@ -66,7 +66,7 @@
 - **REQ-MCP-8:** WHEN `get_next_task(module)` is called, THE SYSTEM SHALL return the first unchecked (`- [ ]`) task for the given module, including its skill tags. The agent SHALL only ever see one task at a time.
   - *Rationale:* One task at a time keeps the agent's context window focused and prevents it from skipping ahead or reordering work.
 - **REQ-MCP-9:** WHEN `complete_task(module)` is called, THE SYSTEM SHALL mark the first unchecked task as `- [x]` and write through to disk.
-- **REQ-MCP-10:** The server SHALL use in-memory index for content (parsed markdown sections) and SQLite (`~/.voidrift/sessions.db`) for session metadata and ephemeral run data (analyses, escalation context).
+- **REQ-MCP-10:** The server SHALL use in-memory index for content (parsed markdown sections) and SQLite (`~/.voidrift/sessions.db`) for session metadata and ephemeral run data (analyses, escalation context). The SQLite connection SHALL be thread-safe (`check_same_thread=False`) to support concurrent file analysis in the gather pipeline.
 
 ### 4.3 Framework Reference Files
 
