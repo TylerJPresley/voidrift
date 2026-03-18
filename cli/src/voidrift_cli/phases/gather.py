@@ -215,13 +215,18 @@ def _gather_from(
     with open(log, "a") as f:
         f.write(f"Triage: {files}\n")
 
-    # --- Stage 2: Analysis — one agent per file ---
+    # --- Stage 2: Analysis — one agent per file, concurrent (REQ-ARCH-7) ---
     ui.stage("Stage 2/3: Analyzing files...")
     analysis_tools, analysis_handlers = _pick_tools({"read_source_file", "store_file_analysis"})
 
     import time as _time
-    for i, filepath in enumerate(files, 1):
-        ui.progress(i, len(files), f"{filepath}...", end="")
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    max_workers = 2 if model.model_type == "local" else 8
+    _counter = {"done": 0}
+    _lock = __import__("threading").Lock()
+
+    def _analyze_file(filepath: str) -> tuple[str, float | None, str | None]:
         start = _time.time()
         agent = AgentLoop(
             model=model, stream=False, extra_body=extra, max_tokens=4096,
@@ -234,12 +239,25 @@ def _gather_from(
         )
         try:
             agent.send(f"Analyze: {filepath}")
-            elapsed = _time.time() - start
-            ui._con.print(f" [green]✓[/green] [dim]{elapsed:.1f}s[/dim]")
+            return filepath, _time.time() - start, None
         except (RuntimeError, OSError) as e:
-            ui._con.print(f" [yellow]⚠ {e}[/yellow]")
-        with open(log, "a") as f:
-            f.write(f"Analyzed: {filepath}\n")
+            return filepath, None, str(e)
+
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {pool.submit(_analyze_file, fp): fp for fp in files}
+        for future in as_completed(futures):
+            filepath, elapsed, err = future.result()
+            with _lock:
+                _counter["done"] += 1
+                n = _counter["done"]
+            if err:
+                ui.progress(n, len(files), f"{filepath}...")
+                ui._con.print(f" [yellow]⚠ {err}[/yellow]")
+            else:
+                ui.progress(n, len(files), f"{filepath}...")
+                ui._con.print(f" [green]✓[/green] [dim]{elapsed:.1f}s[/dim]")
+            with open(log, "a") as f:
+                f.write(f"Analyzed: {filepath}\n")
 
     # --- Stage 3: Synthesis ---
     ui.stage("Stage 3/3: Writing requirements...")
