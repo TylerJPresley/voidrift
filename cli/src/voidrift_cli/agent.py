@@ -127,15 +127,17 @@ class AgentLoop(BaseModel):
 
         When tools are present: tool_choice=required on every call, done() triggers
         a final call with no tools. When no tools: single call, text response.
+        Stall detection: if the model makes the same tool call (name+args) on
+        consecutive iterations, force a final text call.
 
         Returns:
             Final assistant response text.
         """
         client = self._get_client()
         model_name = self._model_name()
-        max_iterations = 20
+        last_call_sig: str | None = None
 
-        for _iteration in range(max_iterations):
+        while True:
             kwargs: dict[str, Any] = {
                 "model": model_name,
                 "messages": self.messages,
@@ -153,21 +155,26 @@ class AgentLoop(BaseModel):
                 text, tool_calls = self._sync_response(client, kwargs)
 
             if not tool_calls:
-                # No tools or final text response
                 self.messages.append({"role": "assistant", "content": text})
                 return text
 
-            # Check if model called done()
+            # Stall detection — same call signature as last iteration
+            call_sig = "|".join(
+                f"{tc['function']['name']}:{tc['function'].get('arguments', '')}"
+                for tc in tool_calls
+            )
+            if call_sig == last_call_sig:
+                break  # stalled — force final text call
+            last_call_sig = call_sig
+
             done = any(tc["function"]["name"] == "done" for tc in tool_calls)
 
-            # Append assistant message with tool calls
             self.messages.append({
                 "role": "assistant",
                 "content": text or None,
                 "tool_calls": tool_calls,
             })
 
-            # Execute non-done tool calls
             for tc in tool_calls:
                 name = tc["function"]["name"]
                 if name == "done":
@@ -183,11 +190,10 @@ class AgentLoop(BaseModel):
                 })
 
             if done:
-                # Final call — no tools, get text summary
                 self.tools = []
                 continue
 
-        # Exhausted iterations — force a final text call
+        # Stalled — force a final text call with no tools
         self.tools = []
         kwargs = {
             "model": model_name,
