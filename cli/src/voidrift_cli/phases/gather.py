@@ -425,14 +425,13 @@ def _build_file_tree(directory: Path, max_files: int = 500) -> str:
     Returns:
         Newline-separated list of relative file paths.
     """
-    exclude_dirs = {".git"}
     lines = []
     count = 0
     for p in sorted(directory.rglob("*")):
         if count >= max_files:
             lines.append(f"... (truncated at {max_files} files)")
             break
-        if any(part in exclude_dirs for part in p.parts):
+        if any(part.startswith(".") for part in p.relative_to(directory).parts):
             continue
         if p.is_file():
             lines.append(str(p.relative_to(directory)))

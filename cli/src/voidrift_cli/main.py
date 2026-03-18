@@ -513,10 +513,16 @@ def prune(global_: bool, all_: bool) -> None:
         sys.exit(1)
 
     removed_logs = 0
+    removed_specs = False
     if all_:
         for log_file in (d / "logs").glob("*.log"):
             log_file.unlink()
             removed_logs += 1
+        spec_dir = d / "spec"
+        if spec_dir.is_dir():
+            import shutil
+            shutil.rmtree(spec_dir)
+            removed_specs = True
     else:
         keep = get_retention("project")
         logs = sorted((d / "logs").glob("*.log"))
@@ -537,6 +543,8 @@ def prune(global_: bool, all_: bool) -> None:
     parts = []
     if removed_logs:
         parts.append(f"{removed_logs} log(s)")
+    if removed_specs:
+        parts.append("spec/")
     if stale_lock:
         parts.append("stale lock")
     ui.success(f"Pruned {', '.join(parts)}" if parts else "Nothing to prune")
