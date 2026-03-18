@@ -212,11 +212,14 @@ def _gather_from(
     _reset = "\033[0m"
     _at_line_start = True
     _blank_lines = 0
+    _buf = ""  # Buffer to detect and suppress <tool_call> XML
 
-    def _on_token(token: str) -> None:
-        nonlocal _at_line_start, _blank_lines
+    def _flush_buf() -> None:
+        nonlocal _buf, _at_line_start, _blank_lines
+        if not _buf:
+            return
         out = ""
-        for ch in token:
+        for ch in _buf:
             if ch == "\n":
                 if _at_line_start:
                     _blank_lines += 1
@@ -232,9 +235,22 @@ def _gather_from(
                     _at_line_start = False
                     _blank_lines = 0
                 out += ch
+        _buf = ""
         if out:
             sys.stdout.write(f"{_blue}{out}{_reset}")
             sys.stdout.flush()
+
+    def _on_token(token: str) -> None:
+        nonlocal _buf
+        _buf += token
+        # Hold buffer while it might be a <tool_call> tag
+        if "<" in _buf and "</tool_call>" not in _buf and len(_buf) < 2000:
+            return
+        # If it contains tool_call XML, suppress it entirely
+        if "<tool_call>" in _buf:
+            _buf = ""
+            return
+        _flush_buf()
 
     agent = AgentLoop(
         model=model,
@@ -295,7 +311,8 @@ def _build_file_tree(directory: Path, max_files: int = 500) -> str:
     Returns:
         Newline-separated list of relative file paths.
     """
-    exclude = {".git", "node_modules", "__pycache__", ".cache", "dist", "build", ".venv", "venv"}
+    exclude = {".git", "node_modules", "__pycache__", ".cache", "dist", "build", ".venv", "venv",
+               ".voidrift", ".agendev", ".aider.tags.cache.v4"}
     lines = []
     count = 0
     for p in sorted(directory.rglob("*")):
@@ -305,6 +322,10 @@ def _build_file_tree(directory: Path, max_files: int = 500) -> str:
         if any(part in exclude for part in p.parts):
             continue
         if p.is_file():
-            lines.append(str(p.relative_to(directory)))
+            # Skip dotfiles in root (e.g. .aider.*, .gitignore)
+            rel = p.relative_to(directory)
+            if rel.parts[0].startswith("."):
+                continue
+            lines.append(str(rel))
             count += 1
     return "\n".join(lines)
