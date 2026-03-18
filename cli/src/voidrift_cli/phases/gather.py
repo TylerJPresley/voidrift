@@ -190,11 +190,18 @@ def _gather_from(
             '- "groups": a dict mapping logical boundary names to lists of relative file paths.\n'
             "  Auto-detect boundaries from directory structure (e.g. frontend/, backend/, api/, shared/).\n"
             "  For single-application codebases, use one group named after the project.\n\n"
-            "INCLUDE ONLY: source files, documentation, and configuration.\n"
-            "EXCLUDE: build output, compiled artifacts, dependency directories (node_modules, "
-            "__pycache__, .venv, vendor, target, etc.), generated code, binaries, images, "
-            "fonts, lock files, minified/hashed bundles, and any other non-source content.\n"
-            "Use your knowledge of the project's language and toolchain to decide.\n\n"
+            "INCLUDE ONLY these three categories:\n"
+            "1. Source files — code written by developers\n"
+            "2. Documentation — READMEs, design docs, specs\n"
+            "3. Configuration — env files, Dockerfiles, CI/CD, build configs\n\n"
+            "You MUST NOT include:\n"
+            "- Files with content hashes in their names (e.g. index-CW8_b_Xi.js) — these are compiled build output\n"
+            "- Lock files (package-lock.json, poetry.lock, Gemfile.lock, etc.)\n"
+            "- Binary files and images (.png, .jpg, .gif, .ico, .woff, .ttf)\n"
+            "- Dependency directories (node_modules, vendor, target, __pycache__)\n"
+            "- Generated HTML in build/static/dist directories\n"
+            "- Minified or bundled files\n\n"
+            "Use your knowledge of the project's language and toolchain to decide.\n"
             "Return raw JSON, no markdown fences.\n\n"
             'Example: {"groups": {"backend": ["backend/main.py"], "frontend": ["frontend/src/App.vue"]}}'
         ),
@@ -227,6 +234,30 @@ def _gather_from(
         groups = {"project": triage_data}
     else:
         groups = {"project": list(triage_data.values())[0] if triage_data else []}
+
+    # --- Validation pass — model reviews its own triage output ---
+    all_files = [f for fs in groups.values() for f in fs]
+    validator = AgentLoop(
+        model=model, stream=False, extra_body=extra, max_tokens=4096,
+        system_prompt=(
+            "You are a strict code reviewer. Given a list of files selected for source code analysis, "
+            "remove any that should NOT be analyzed:\n"
+            "- Compiled/bundled files (hashed filenames like index-CW8_b_Xi.js)\n"
+            "- Lock files (package-lock.json, poetry.lock, etc.)\n"
+            "- Binary files and images (.png, .jpg, .gif, .ico, .woff, .ttf)\n"
+            "- Generated build output (files in static/assets/, dist/, build/ directories)\n"
+            "- Minified files\n\n"
+            "Return ONLY a JSON list of files that SHOULD be kept. No markdown fences."
+        ),
+        tools=[], tool_handlers={},
+    )
+    try:
+        val_response = validator.send(f"Files to review:\n{_json.dumps(all_files)}")
+        keep = set(_json.loads(val_response.strip()))
+        groups = {g: [f for f in fs if f in keep] for g, fs in groups.items()}
+        groups = {g: fs for g, fs in groups.items() if fs}  # drop empty groups
+    except Exception:
+        pass  # validation is best-effort; proceed with original triage
 
     all_files = [f for files in groups.values() for f in files]
     ui.info(f"{len(all_files)} files in {len(groups)} group(s): {', '.join(groups.keys())}")
