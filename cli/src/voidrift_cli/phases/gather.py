@@ -149,10 +149,6 @@ def _gather_from(
 
     log, run_id = boot_run("gather")
 
-    # Scope ephemeral data to this run (REQ-MCP-3a)
-    if mcp_mod is not None:
-        mcp_mod.artifacts.run_id = run_id
-
     def read_from_source(path: str) -> str:
         full = (from_path / path).resolve()
         if not str(full).startswith(str(from_path.resolve())):

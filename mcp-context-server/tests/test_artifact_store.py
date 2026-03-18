@@ -53,9 +53,9 @@ class TestArtifactStore:
         assert (tmp_path / "spec" / "auth.md").read_text() == "# Auth Feature"
 
     def test_write_through_analysis(self, tmp_path):
-        store = ArtifactStore(voidrift_dir=tmp_path, run_id="test-run")
+        store = ArtifactStore(voidrift_dir=tmp_path)
         store.store("analysis", "src/main.py", "Entry point")
-        assert (tmp_path / "runs" / "test-run" / "src_main.py.md").read_text() == "Entry point"
+        assert (tmp_path / "analyses" / "src_main.py.md").read_text() == "Entry point"
 
     def test_disk_fallback_on_get(self, tmp_path):
         # Write directly to disk, then get via a fresh store

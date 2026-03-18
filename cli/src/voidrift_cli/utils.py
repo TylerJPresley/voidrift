@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import re
-import shutil
 import subprocess
 from datetime import datetime
 from pathlib import Path
@@ -63,14 +62,6 @@ def boot_run(phase: str) -> tuple[Path, str]:
     """
     log = log_path(phase)
     run_id = log.stem
-
-    # Auto-prune old run directories, keep last 5
-    runs_dir = ensure_voidrift_dir() / "runs"
-    if runs_dir.is_dir():
-        dirs = sorted([d for d in runs_dir.iterdir() if d.is_dir()], key=lambda d: d.name)
-        for old in dirs[:-5]:
-            shutil.rmtree(old)
-
     return log, run_id
 
 
