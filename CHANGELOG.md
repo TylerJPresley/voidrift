@@ -24,6 +24,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - `/write` command in gather to enable file tools for one turn
 
 ### Changed
+- Ephemeral data (analyses, escalations) stored in MCP SessionStore SQLite (`~/.voidrift/sessions.db`), keyed by run_id (REQ-MCP-3, REQ-MCP-3a)
 - Analyses (file summaries from gather --from) are now memory-only — no disk write-through (REQ-MCP-3)
 - Gather and chat use plain terminal flow instead of Textual TUI — no alternate screen buffer
 - Replaced `textual` dependency with `prompt_toolkit`

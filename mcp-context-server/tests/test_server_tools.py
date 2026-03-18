@@ -13,6 +13,7 @@ def _reset_server(tmp_project, monkeypatch):
     import importlib
     import voidrift_mcp.server as srv
     importlib.reload(srv)
+    srv.run_id = "test-run"
     srv._boot()
     yield srv
 

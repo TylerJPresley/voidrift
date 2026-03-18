@@ -75,6 +75,7 @@ def run_plan(
     # Set up tools
     try:
         import voidrift_mcp.server as mcp_mod
+        mcp_mod.run_id = run_id
         mcp_mod._boot()
         tools, handlers = build_mcp_tools(mcp_mod)
     except ImportError:

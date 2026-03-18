@@ -490,6 +490,7 @@ def prune(global_: bool, all_: bool) -> None:
         import sqlite3
         conn = sqlite3.connect(str(db_path))
         if all_:
+            conn.execute("DELETE FROM ephemeral")
             conn.execute("DELETE FROM context_log")
             conn.execute("DELETE FROM sessions")
             conn.commit()
@@ -499,6 +500,7 @@ def prune(global_: bool, all_: bool) -> None:
             cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
             cur = conn.execute("DELETE FROM sessions WHERE started_at < ?", (cutoff,))
             conn.execute("DELETE FROM context_log WHERE session_id NOT IN (SELECT id FROM sessions)")
+            conn.execute("DELETE FROM ephemeral WHERE run_id NOT IN (SELECT run_id FROM sessions)")
             conn.commit()
             ui.success(f"Pruned {cur.rowcount} session(s) older than {days} days")
         conn.execute("VACUUM")

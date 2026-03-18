@@ -137,8 +137,11 @@ def _gather_from(
         target.unlink()
 
     # Build tools from MCP + CLI-native (REQ-MCP-4a)
+    log, run_id = boot_run("gather")
+
     try:
         import voidrift_mcp.server as mcp_mod
+        mcp_mod.run_id = run_id
         mcp_mod._boot()
         all_tools, all_handlers = build_mcp_tools(mcp_mod)
     except ImportError:
@@ -146,8 +149,6 @@ def _gather_from(
         all_tools = list(LOCAL_TOOLS)
         all_handlers = dict(LOCAL_HANDLERS)
         mcp_mod = None
-
-    log, run_id = boot_run("gather")
 
     def read_from_source(path: str) -> str:
         full = (from_path / path).resolve()

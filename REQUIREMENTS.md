@@ -53,9 +53,9 @@
 
 - **REQ-MCP-1:** The MCP server SHALL communicate via stdio using the MCP protocol, built with Python/FastMCP.
 - **REQ-MCP-2:** WHEN the server starts, THE SYSTEM SHALL load all framework files from `resources/` (agents, skills, templates), index them by markdown header, and serve targeted sections on demand.
-- **REQ-MCP-3:** The server SHALL use write-through storage for persistent artifacts (requirements, specs): `store_*` tools write to both in-memory cache and disk simultaneously. Ephemeral artifacts (analyses) SHALL be stored in memory only and discarded when the process exits.
-  - *Rationale:* Without resume capability, writing ephemeral data to disk is dead weight — a crashed run starts over regardless. Only operator work products need disk persistence.
-- **REQ-MCP-3a:** ALL phase executions SHALL be scoped to a run ID. The run ID SHALL be the log filename stem (e.g. `gather-20260318-101048`). The run ID is a correlation identifier — it does NOT organize the filesystem. Ephemeral artifacts (analyses, etc.) SHALL be stored flat under `.voidrift/analyses/`. The run ID SHALL be available for SQLite session correlation via `SessionStore`. The log file serves as the run's PID file — its existence and filename are the canonical record of the run.
+- **REQ-MCP-3:** The server SHALL use write-through storage for persistent artifacts (requirements, specs): `store_*` tools write to both in-memory cache and disk simultaneously. Ephemeral artifacts (analyses, escalation context) SHALL be stored in the SessionStore SQLite database (`~/.voidrift/sessions.db`), keyed by run ID.
+  - *Rationale:* Persistent artifacts are operator work products that belong on disk. Ephemeral data belongs in the MCP's data store — queryable, prunable by age, and correlated by run ID.
+- **REQ-MCP-3a:** ALL phase executions SHALL be scoped to a run ID. The run ID SHALL be the log filename stem (e.g. `gather-20260318-101048`). The CLI SHALL pass the run ID to the MCP server after `_boot()` to start a session in the SessionStore. ALL ephemeral MCP data (analyses, escalation context) SHALL be stored in the SessionStore keyed by run ID. The log file serves as the run's PID file — its existence and filename are the canonical record of the run.
 - **REQ-MCP-4:** The server SHALL expose content management tools: `store_file_analysis()`, `get_file_analysis()`, `get_all_analyses()`, `store_requirements()`, `get_requirements()`, `get_agent(role, topic)`, `get_skill(name, topic)`, `get_template(name)`, `load_tasks(path)`, `get_next_task(module)`, `complete_task(module)`, `get_task_status(module)`. The MCP server SHALL NOT perform local filesystem operations — it MAY reside on a different host than the CLI.
 - **REQ-MCP-4a:** The CLI SHALL provide local filesystem tools directly (not via MCP): `write_file(path, content)`, `read_source_file(path)`, `export_to_file(type, path)`, `list_project_artifacts()`. These tools execute on the workstation where the CLI runs.
   - *Rationale:* The MCP server may be remote. Only the CLI is guaranteed to have local filesystem access.
@@ -66,7 +66,7 @@
 - **REQ-MCP-8:** WHEN `get_next_task(module)` is called, THE SYSTEM SHALL return the first unchecked (`- [ ]`) task for the given module, including its skill tags. The agent SHALL only ever see one task at a time.
   - *Rationale:* One task at a time keeps the agent's context window focused and prevents it from skipping ahead or reordering work.
 - **REQ-MCP-9:** WHEN `complete_task(module)` is called, THE SYSTEM SHALL mark the first unchecked task as `- [x]` and write through to disk.
-- **REQ-MCP-10:** The server SHALL use in-memory index for content (parsed markdown sections) and SQLite for session metadata.
+- **REQ-MCP-10:** The server SHALL use in-memory index for content (parsed markdown sections) and SQLite (`~/.voidrift/sessions.db`) for session metadata and ephemeral run data (analyses, escalation context).
 
 ### 4.3 Framework Reference Files
 

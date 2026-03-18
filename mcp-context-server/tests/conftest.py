@@ -17,8 +17,15 @@ def tmp_project(tmp_path, monkeypatch):
     project = tmp_path / "project"
     project.mkdir()
     (project / ".voidrift").mkdir()
+    voidrift_home = tmp_path / "voidrift_home"
+    voidrift_home.mkdir()
+    # Copy resources from repo so _boot() can load them
+    import shutil
+    src_resources = REPO_ROOT / "resources"
+    if src_resources.is_dir():
+        shutil.copytree(src_resources, voidrift_home / "resources")
     monkeypatch.chdir(project)
-    monkeypatch.setenv("VOIDRIFT_HOME", str(REPO_ROOT))
+    monkeypatch.setenv("VOIDRIFT_HOME", str(voidrift_home))
     return project
 
 

@@ -30,8 +30,9 @@ VOIDRIFT_DIR = PROJECT_DIR / ".voidrift"
 index = MarkdownIndex()
 artifacts = ArtifactStore(voidrift_dir=VOIDRIFT_DIR)
 tasks = TaskStore()
-session_store = SessionStore()  # in-memory by default
+session_store = SessionStore(db_path=VOIDRIFT_HOME / "sessions.db")
 session_id: int = 0
+run_id: str = ""
 
 # ---------------------------------------------------------------------------
 # MCP Server
@@ -51,6 +52,7 @@ def _boot() -> None:
     """Load framework resources into the index on startup."""
     global session_id
     session_id = session_store.start_session(
+        run_id=run_id or "unscoped",
         phase="init", project_dir=str(PROJECT_DIR)
     )
     if RESOURCES_DIR.is_dir():
@@ -74,7 +76,7 @@ def store_file_analysis(file_path: str, analysis: str) -> str:
         file_path: Relative path of the analyzed file.
         analysis: The analysis text (purpose, functionality, dependencies, issues).
     """
-    artifacts.store("analysis", file_path, analysis)
+    session_store.put(run_id, "analysis", file_path, analysis)
     session_store.log_action(session_id, "store", "analysis", file_path)
     return f"Stored analysis for {file_path}"
 
@@ -86,7 +88,7 @@ def get_file_analysis(file_path: str) -> str:
     Args:
         file_path: Relative path of the file.
     """
-    result = artifacts.get("analysis", file_path)
+    result = session_store.get(run_id, "analysis", file_path)
     if result is None:
         return f"No analysis found for {file_path}"
     session_store.log_action(session_id, "get", "analysis", file_path)
@@ -95,8 +97,8 @@ def get_file_analysis(file_path: str) -> str:
 
 @mcp.tool()
 def get_all_analyses() -> str:
-    """Retrieve all stored file analyses as a combined document."""
-    all_a = artifacts.get_all("analysis")
+    """Retrieve all stored file analyses for the current run."""
+    all_a = session_store.get_all(run_id, "analysis")
     if not all_a:
         return "No analyses stored yet."
     session_store.log_action(session_id, "get_all", "analysis")
@@ -342,6 +344,15 @@ def export_to_file(artifact_type: str, path: str) -> str:
     key = Path(path).stem
     if artifact_type == "requirements" and key == "REQUIREMENTS":
         key = "project"
+    # Check SessionStore for ephemeral types, ArtifactStore for persistent
+    if artifact_type == "analysis":
+        content = session_store.get(run_id, "analysis", key)
+        if content:
+            full.parent.mkdir(parents=True, exist_ok=True)
+            full.write_text(content, encoding="utf-8")
+            session_store.log_action(session_id, "export", artifact_type, path)
+            return f"Exported {artifact_type}:{key} to {path}"
+        return f"No artifact found for {artifact_type}:{key}"
     ok = artifacts.export_to_file(artifact_type, key, full)
     if ok:
         session_store.log_action(session_id, "export", artifact_type, path)
