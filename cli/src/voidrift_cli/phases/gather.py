@@ -253,10 +253,10 @@ def _gather_from(
                 _counter["done"] += 1
                 n = _counter["done"]
             if err:
-                ui.progress(n, len(files), f"{filepath}...")
+                ui.progress(n, len(files), f"{filepath}...", end="")
                 ui._con.print(f" [yellow]⚠ {err}[/yellow]")
             else:
-                ui.progress(n, len(files), f"{filepath}...")
+                ui.progress(n, len(files), f"{filepath}...", end="")
                 ui._con.print(f" [green]✓[/green] [dim]{elapsed:.1f}s[/dim]")
             with open(log, "a") as f:
                 f.write(f"Analyzed: {filepath}\n")

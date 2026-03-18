@@ -112,7 +112,7 @@ def get_api_key(provider: str) -> str | None:
 
 def get_concurrency(model_type: str) -> int:
     """Get max concurrent workers for a model type. 0 means unbounded."""
-    defaults = {"local": 2, "cloud": 8, "gateway": 8}
+    defaults = {"local": 1, "cloud": 8, "gateway": 8}
     val = load_config().get("concurrency", {}).get(model_type)
     if val is not None:
         return int(val)

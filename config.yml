@@ -17,6 +17,6 @@ api_keys:
   gemini: ${GEMINI_API_KEY}
 
 concurrency:
-  local: 2
+  local: 1
   cloud: 8
   gateway: 8
