@@ -252,6 +252,9 @@ def _gather_from(
         tool_handlers=handlers,
         stream=True,
         on_token=_on_token,
+        extra_body={"chat_template_kwargs": {"enable_thinking": False}}
+        if model.model_type == "local"
+        else None,
     )
 
     # Build file tree from reference directory
