@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import click
@@ -207,6 +208,23 @@ def _gather_from(
     except OSError:
         pass
 
+    _blue = "\033[38;5;117m"
+    _reset = "\033[0m"
+    _at_line_start = True
+
+    def _on_token(token: str) -> None:
+        nonlocal _at_line_start
+        out = ""
+        for ch in token:
+            if _at_line_start:
+                out += "  "
+                _at_line_start = False
+            out += ch
+            if ch == "\n":
+                _at_line_start = True
+        sys.stdout.write(f"{_blue}{out}{_reset}")
+        sys.stdout.flush()
+
     agent = AgentLoop(
         model=model,
         system_prompt=(
@@ -222,6 +240,7 @@ def _gather_from(
         tools=tools,
         tool_handlers=handlers,
         stream=True,
+        on_token=_on_token,
     )
 
     # Build file tree from reference directory
