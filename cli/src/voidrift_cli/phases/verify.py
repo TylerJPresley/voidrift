@@ -133,6 +133,7 @@ def run_verify(worker: ModelConfig, architect: ModelConfig | None = None) -> int
         tools=tools,
         tool_handlers=handlers,
         stream=False,
+        log_path=log,
     )
 
     ui.stage("Analyzing results...")
@@ -185,6 +186,7 @@ def run_verify(worker: ModelConfig, architect: ModelConfig | None = None) -> int
         tools=tools,
         tool_handlers=handlers,
         stream=False,
+        log_path=log,
     )
 
     ui.stage("Architect planning fixes...")
@@ -209,6 +211,7 @@ def run_verify(worker: ModelConfig, architect: ModelConfig | None = None) -> int
             tools=tools,
             tool_handlers=handlers,
             stream=False,
+            log_path=log,
         )
         ui.stage("Generating fix tasks...")
         with Status("  ⠋ Thinking...", console=ui._con):

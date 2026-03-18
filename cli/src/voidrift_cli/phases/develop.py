@@ -168,6 +168,7 @@ def _develop_module(
             tools=tools,
             tool_handlers=handlers,
             stream=False,
+            log_path=log,
         )
 
         with Status(f"  ⠋ Working...", console=ui._con):
@@ -260,6 +261,7 @@ def _consult_architect(
         tools=tools,
         tool_handlers=handlers,
         stream=False,
+        log_path=log,
     )
 
     ui.info("Consulting architect...")

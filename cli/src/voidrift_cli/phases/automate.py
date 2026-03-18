@@ -86,6 +86,7 @@ def run_automate(worker: ModelConfig, architect: ModelConfig | None = None) -> i
         tools=tools,
         tool_handlers=handlers,
         stream=False,
+        log_path=log,
     )
 
     ui.stage(f"{mode}ing infrastructure...")

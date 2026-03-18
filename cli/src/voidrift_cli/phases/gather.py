@@ -99,6 +99,9 @@ def run_gather(
     tools = [t for t in LOCAL_TOOLS if t["function"]["name"] in allowed]
     handlers = {k: v for k, v in LOCAL_HANDLERS.items() if k in allowed}
 
+    from ..main import _interactive_loop
+    log, _ = boot_run("gather")
+
     agent = AgentLoop(
         model=model,
         system_prompt=system,
@@ -107,10 +110,9 @@ def run_gather(
         stream=True,
         max_tokens=16384,
         extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+        log_path=log,
     )
 
-    from ..main import _interactive_loop
-    log, _ = boot_run("gather")
     target_label = str(target.relative_to(Path.cwd()))
     title = f"VoidRift Gather — Feature: {feature}" if feature else "VoidRift Gather"
     extra = [f"Target: {target_label}"]

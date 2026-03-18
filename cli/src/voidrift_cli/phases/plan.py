@@ -106,6 +106,7 @@ def run_plan(
         tool_handlers=handlers,
         stream=False,
         max_tokens=32768,
+        log_path=log,
     )
 
     ui.stage("Planning architecture and tasks...")
