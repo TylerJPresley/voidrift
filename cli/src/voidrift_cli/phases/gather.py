@@ -238,7 +238,8 @@ def _gather_from(
     analysis_tools, analysis_handlers = _pick_tools({"read_source_file", "store_file_analysis"})
 
     for i, filepath in enumerate(files, 1):
-        console.print(f"  [dim]{i}/{len(files)} {filepath}[/dim]")
+        console.print(f"  [dim]{i}/{len(files)} {filepath}...[/dim]", end="")
+        start = __import__("time").time()
         agent = AgentLoop(
             model=model, stream=False, extra_body=extra, max_tokens=4096,
             system_prompt=(
@@ -250,8 +251,10 @@ def _gather_from(
         )
         try:
             agent.send(f"Analyze: {filepath}")
+            elapsed = __import__("time").time() - start
+            console.print(f" [green]✓[/green] [dim]{elapsed:.1f}s[/dim]")
         except (RuntimeError, OSError) as e:
-            console.print(f"    [yellow]⚠ {filepath}: {e}[/yellow]")
+            console.print(f" [yellow]⚠ {e}[/yellow]")
         with open(log, "a") as f:
             f.write(f"Analyzed: {filepath}\n")
 
