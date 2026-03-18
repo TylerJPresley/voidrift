@@ -38,6 +38,17 @@ Load these before starting work:
 
 **NEVER implement first and update requirements later. Requirements are the contract.**
 
+## No Bandaids
+
+Don't patch symptoms — find root causes. When something breaks:
+
+1. **Diagnose** — Identify the actual problem, not just the visible symptom
+2. **Explain** — Tell the operator what's wrong and why
+3. **Propose** — Present a real fix (or options) and get approval before coding
+4. **Implement** — Write minimal, correct code that addresses the root cause
+
+If a proper fix isn't feasible (e.g. upstream bug), say so explicitly and get operator approval before adding a workaround. Label workarounds in code with the reason and what would remove them.
+
 ## Safety Rules
 
 NEVER run without confirmation:

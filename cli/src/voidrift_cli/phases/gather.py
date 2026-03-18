@@ -212,14 +212,11 @@ def _gather_from(
     _reset = "\033[0m"
     _at_line_start = True
     _blank_lines = 0
-    _buf = ""  # Buffer to detect and suppress <tool_call> XML
 
-    def _flush_buf() -> None:
-        nonlocal _buf, _at_line_start, _blank_lines
-        if not _buf:
-            return
+    def _on_token(token: str) -> None:
+        nonlocal _at_line_start, _blank_lines
         out = ""
-        for ch in _buf:
+        for ch in token:
             if ch == "\n":
                 if _at_line_start:
                     _blank_lines += 1
@@ -235,22 +232,9 @@ def _gather_from(
                     _at_line_start = False
                     _blank_lines = 0
                 out += ch
-        _buf = ""
         if out:
             sys.stdout.write(f"{_blue}{out}{_reset}")
             sys.stdout.flush()
-
-    def _on_token(token: str) -> None:
-        nonlocal _buf
-        _buf += token
-        # Hold buffer while it might be a <tool_call> tag
-        if "<" in _buf and "</tool_call>" not in _buf and len(_buf) < 2000:
-            return
-        # If it contains tool_call XML, suppress it entirely
-        if "<tool_call>" in _buf:
-            _buf = ""
-            return
-        _flush_buf()
 
     agent = AgentLoop(
         model=model,

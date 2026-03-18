@@ -11,7 +11,6 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-import httpx
 from openai import OpenAI
 from pydantic import BaseModel, Field
 
@@ -113,11 +112,21 @@ class AgentLoop(BaseModel):
                 msg = f"Cannot connect to {base} — is the model/gateway running?"
             raise RuntimeError(msg) from e
 
-    def _run_loop(self, force_tool: bool = True) -> str:
-        """Run the agent loop until a final text response (no more tool calls).
+    # done tool definition — auto-injected when tools are present (REQ-ARCH-4)
+    _DONE_TOOL: dict = {
+        "type": "function",
+        "function": {
+            "name": "done",
+            "description": "Call this when you have finished all tool calls and are ready to give your final response.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    }
 
-        Args:
-            force_tool: If True and tools are present, set tool_choice=required.
+    def _run_loop(self) -> str:
+        """Run the agent loop until a final text response (REQ-ARCH-4).
+
+        When tools are present: tool_choice=required on every call, done() triggers
+        a final call with no tools. When no tools: single call, text response.
 
         Returns:
             Final assistant response text.
@@ -131,41 +140,72 @@ class AgentLoop(BaseModel):
                 "messages": self.messages,
                 "max_tokens": self.max_tokens,
             }
-            if self.tools and force_tool:
-                kwargs["tools"] = self.tools
+            if self.tools:
+                kwargs["tools"] = self.tools + [self._DONE_TOOL]
                 kwargs["tool_choice"] = "required"
-            elif self.tools and not force_tool and self.model.model_type != "local":
-                # Non-local models (gateway/cloud) support tool_choice=auto
-                # vLLM's parser is broken with auto, so local models skip tools
-                kwargs["tools"] = self.tools
             if self.extra_body:
                 kwargs["extra_body"] = self.extra_body
 
             if self.stream:
-                return self._stream_response(client, kwargs)
+                text, tool_calls = self._stream_response(client, kwargs)
             else:
-                response = client.chat.completions.create(**kwargs)
-                choice = response.choices[0]
-                msg = choice.message
+                text, tool_calls = self._sync_response(client, kwargs)
 
-                if msg.tool_calls:
-                    # Handle tool calls
-                    self.messages.append(msg.model_dump())
-                    for tc in msg.tool_calls:
-                        result = self._handle_tool_call(tc)
-                        self.messages.append({
-                            "role": "tool",
-                            "tool_call_id": tc.id,
-                            "content": result,
-                        })
-                    continue  # Loop back for next response
-
-                # Final text response
-                text = msg.content or ""
+            if not tool_calls:
+                # No tools or final text response
                 self.messages.append({"role": "assistant", "content": text})
                 return text
 
-    def _stream_response(self, client: OpenAI, kwargs: dict) -> str:
+            # Check if model called done()
+            done = any(tc["function"]["name"] == "done" for tc in tool_calls)
+
+            # Append assistant message with tool calls
+            self.messages.append({
+                "role": "assistant",
+                "content": text or None,
+                "tool_calls": tool_calls,
+            })
+
+            # Execute non-done tool calls
+            for tc in tool_calls:
+                name = tc["function"]["name"]
+                if name == "done":
+                    result = "OK"
+                else:
+                    result = self._handle_tool_call_dict(tc)
+                    if self.on_tool_result:
+                        self.on_tool_result(name, result)
+                self.messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc["id"],
+                    "content": result,
+                })
+
+            if done:
+                # Final call — no tools, get text summary
+                self.tools = []
+                continue
+
+    def _sync_response(self, client: OpenAI, kwargs: dict) -> tuple[str, list[dict]]:
+        """Non-streaming response.
+
+        Returns:
+            Tuple of (text, tool_calls_list).
+        """
+        response = client.chat.completions.create(**kwargs)
+        msg = response.choices[0].message
+        text = msg.content or ""
+        tool_calls = []
+        if msg.tool_calls:
+            for tc in msg.tool_calls:
+                tool_calls.append({
+                    "id": tc.id,
+                    "type": "function",
+                    "function": {"name": tc.function.name, "arguments": tc.function.arguments},
+                })
+        return text, tool_calls
+
+    def _stream_response(self, client: OpenAI, kwargs: dict) -> tuple[str, list[dict]]:
         """Stream a response, printing tokens as they arrive.
 
         Args:
@@ -173,7 +213,7 @@ class AgentLoop(BaseModel):
             kwargs: Arguments for the chat completions API call.
 
         Returns:
-            Collected response text.
+            Tuple of (collected_text, tool_calls_list).
         """
         kwargs["stream"] = True
         kwargs["stream_options"] = {"include_usage": True}
@@ -205,7 +245,6 @@ class AgentLoop(BaseModel):
             stream = client.chat.completions.create(**kwargs)
             for chunk in stream:
                 if not chunk.choices:
-                    # Final chunk may have usage data
                     if hasattr(chunk, "usage") and chunk.usage:
                         usage_data = {
                             "prompt_tokens": chunk.usage.prompt_tokens or 0,
@@ -256,84 +295,24 @@ class AgentLoop(BaseModel):
                 stop_spinner.set()
             spinner.join()
 
-        # If we got tool calls, handle them and loop
-        if collected_tool_calls:
+        tool_calls_list = [collected_tool_calls[i] for i in sorted(collected_tool_calls)]
+
+        # Emit stats on final text response (no tool calls)
+        if not tool_calls_list:
             if collected_text and not self.on_token:
                 sys.stdout.write("\n")
                 sys.stdout.flush()
-            tool_calls_list = [collected_tool_calls[i] for i in sorted(collected_tool_calls)]
-            self.messages.append({
-                "role": "assistant",
-                "content": collected_text or None,
-                "tool_calls": tool_calls_list,
-            })
-            for tc in tool_calls_list:
-                result = self._handle_tool_call_dict(tc)
-                if self.on_tool_result:
-                    self.on_tool_result(tc["function"]["name"], result)
-                self.messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc["id"],
-                    "content": result,
+            if self.on_complete:
+                elapsed = time.time() - stream_start
+                completion_tokens = usage_data.get("completion_tokens", token_count)
+                tps = completion_tokens / elapsed if elapsed > 0 else 0
+                self.on_complete({
+                    **usage_data,
+                    "elapsed": round(elapsed, 1),
+                    "tokens_per_sec": round(tps, 1),
                 })
-            # Continue the loop
-            return self._run_loop(force_tool=False)
 
-        # Fallback: parse <tool_call> XML from content (vLLM parser miss)
-        if not collected_tool_calls and self.tool_handlers and "<tool_call>" in collected_text:
-            parsed = self._parse_xml_tool_calls(collected_text)
-            if parsed:
-                self.messages.append({"role": "assistant", "content": collected_text})
-                for tc in parsed:
-                    result = self._handle_tool_call_dict(tc)
-                    if self.on_tool_result:
-                        self.on_tool_result(tc["function"]["name"], result)
-                    self.messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc["id"],
-                        "content": result,
-                    })
-                return self._run_loop(force_tool=False)
-
-        # Final text response
-        if collected_text and not self.on_token:
-            sys.stdout.write("\n")
-            sys.stdout.flush()
-
-        self.messages.append({"role": "assistant", "content": collected_text})
-
-        # Emit stats
-        if self.on_complete:
-            elapsed = time.time() - stream_start
-            completion_tokens = usage_data.get("completion_tokens", token_count)
-            tps = completion_tokens / elapsed if elapsed > 0 else 0
-            self.on_complete({
-                **usage_data,
-                "elapsed": round(elapsed, 1),
-                "tokens_per_sec": round(tps, 1),
-            })
-
-        return collected_text
-
-    @staticmethod
-    def _parse_xml_tool_calls(text: str) -> list[dict]:
-        """Parse <tool_call> XML tags into tool call dicts."""
-        import re
-        calls = []
-        for m in re.finditer(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", text, re.DOTALL):
-            try:
-                data = json.loads(m.group(1))
-                calls.append({
-                    "id": f"xml_{len(calls)}",
-                    "type": "function",
-                    "function": {
-                        "name": data["name"],
-                        "arguments": json.dumps(data.get("arguments", {})),
-                    },
-                })
-            except (json.JSONDecodeError, KeyError):
-                continue
-        return calls
+        return collected_text, tool_calls_list
 
     def _execute_tool(self, name: str, arguments: str) -> str:
         """Parse arguments and execute a tool handler by name.
@@ -358,17 +337,6 @@ class AgentLoop(BaseModel):
             return str(handler(**args))
         except Exception as e:  # Broad: tool handlers may raise any exception
             return f"Error calling {name}: {e}"
-
-    def _handle_tool_call(self, tool_call: Any) -> str:
-        """Execute a tool call from an SDK object.
-
-        Args:
-            tool_call: OpenAI tool call object with .function.name and .function.arguments.
-
-        Returns:
-            Tool result string.
-        """
-        return self._execute_tool(tool_call.function.name, tool_call.function.arguments)
 
     def _handle_tool_call_dict(self, tc: dict) -> str:
         """Execute a tool call from a dict representation.
