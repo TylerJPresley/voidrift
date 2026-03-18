@@ -110,6 +110,15 @@ def get_api_key(provider: str) -> str | None:
     return load_config().get("api_keys", {}).get(provider)
 
 
+def get_concurrency(model_type: str) -> int:
+    """Get max concurrent workers for a model type. 0 means unbounded."""
+    defaults = {"local": 2, "cloud": 8, "gateway": 8}
+    val = load_config().get("concurrency", {}).get(model_type)
+    if val is not None:
+        return int(val)
+    return defaults.get(model_type, 2)
+
+
 def voidrift_home() -> Path:
     """Return the framework config directory (public API)."""
     return _voidrift_home()

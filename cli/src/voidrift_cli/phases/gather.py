@@ -221,8 +221,10 @@ def _gather_from(
 
     import time as _time
     from concurrent.futures import ThreadPoolExecutor, as_completed
+    from ..config import get_concurrency
 
-    max_workers = 2 if model.model_type == "local" else 8
+    concurrency = get_concurrency(model.model_type)
+    max_workers = len(files) if concurrency == 0 else concurrency
     _counter = {"done": 0}
     _lock = __import__("threading").Lock()
 

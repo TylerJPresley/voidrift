@@ -15,3 +15,8 @@ kiro:
 api_keys:
   anthropic: ${ANTHROPIC_API_KEY}
   gemini: ${GEMINI_API_KEY}
+
+concurrency:
+  local: 2
+  cloud: 8
+  gateway: 8
