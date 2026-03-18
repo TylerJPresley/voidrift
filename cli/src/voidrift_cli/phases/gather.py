@@ -154,6 +154,17 @@ def _gather_from(
     if mcp_mod is not None:
         mcp_mod.artifacts.run_id = run_id
 
+    # Auto-prune old analysis runs, keep last 3 (REQ-MCP-3a)
+    import shutil
+    analyses_dir = voidrift_dir() / "analyses"
+    if analyses_dir.is_dir():
+        runs = sorted(
+            [d for d in analyses_dir.iterdir() if d.is_dir()],
+            key=lambda d: d.name,
+        )
+        for old in runs[:-3]:
+            shutil.rmtree(old)
+
     def read_from_source(path: str) -> str:
         full = (from_path / path).resolve()
         if not str(full).startswith(str(from_path.resolve())):

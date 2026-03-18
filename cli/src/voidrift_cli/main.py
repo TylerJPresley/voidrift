@@ -445,11 +445,22 @@ def log(phase, prune) -> None:
     valid_phases = ["gather", "plan", "develop", "automate", "verify"]
 
     if prune:
+        import shutil
         pattern = f"{phase}-*.log" if phase else "*.log"
         logs = sorted(d.glob(pattern))
+        # Also clean matching analysis directories (REQ-MCP-3a)
+        analyses_dir = voidrift_dir() / "analyses"
+        analyses_pruned = 0
         for l in logs:
+            run_dir = analyses_dir / l.stem
+            if run_dir.is_dir():
+                shutil.rmtree(run_dir)
+                analyses_pruned += 1
             l.unlink()
-        ui.info(f"Deleted {len(logs)} log file(s)" if logs else "No log files to prune")
+        msg = f"Deleted {len(logs)} log file(s)"
+        if analyses_pruned:
+            msg += f", {analyses_pruned} analysis run(s)"
+        ui.info(msg if logs else "No log files to prune")
         return
 
     if not phase:
