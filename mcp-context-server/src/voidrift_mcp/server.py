@@ -51,6 +51,7 @@ mcp = FastMCP(
 def _boot() -> None:
     """Load framework resources into the index on startup."""
     global session_id
+    _written_paths.clear()
     session_id = session_store.start_session(
         run_id=run_id or "unscoped",
         phase="init", project_dir=str(PROJECT_DIR)
@@ -308,6 +309,9 @@ def read_source_file(path: str) -> str:
     return full.read_text(encoding="utf-8", errors="replace")
 
 
+_written_paths: set = set()
+
+
 @mcp.tool()
 def write_file(path: str, content: str) -> str:
     """Write content to a file in the project directory.
@@ -316,6 +320,8 @@ def write_file(path: str, content: str) -> str:
         path: Relative path from the project root.
         content: File content to write.
     """
+    if path in _written_paths:
+        return f"File already written this run: {path}"
     full = PROJECT_DIR / path
     try:
         full.resolve().relative_to(PROJECT_DIR.resolve())
@@ -323,6 +329,7 @@ def write_file(path: str, content: str) -> str:
         return f"Access denied: {path} is outside the project directory"
     full.parent.mkdir(parents=True, exist_ok=True)
     full.write_text(content, encoding="utf-8")
+    _written_paths.add(path)
     session_store.log_action(session_id, "write", "file", path)
     return f"Wrote {len(content)} bytes to {path}"
 

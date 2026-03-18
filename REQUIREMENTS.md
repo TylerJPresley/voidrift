@@ -67,6 +67,7 @@
   - *Rationale:* One task at a time keeps the agent's context window focused and prevents it from skipping ahead or reordering work.
 - **REQ-MCP-9:** WHEN `complete_task(module)` is called, THE SYSTEM SHALL mark the first unchecked task as `- [x]` and write through to disk.
 - **REQ-MCP-10:** The server SHALL use in-memory index for content (parsed markdown sections) and SQLite (`~/.voidrift/sessions.db`) for session metadata and ephemeral run data (analyses, escalation context). The SQLite connection SHALL be thread-safe (`check_same_thread=False`) to support concurrent file analysis in the gather pipeline.
+- **REQ-MCP-11:** `write_file()` SHALL track paths written during the current run. IF a path has already been written in the same run, the tool SHALL reject the call with an error message (e.g. "File already written this run: <path>") and return without overwriting.
 
 ### 4.3 Framework Reference Files
 
