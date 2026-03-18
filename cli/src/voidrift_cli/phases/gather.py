@@ -283,7 +283,9 @@ def _gather_from(
             "3. Call get_skill('PROD-STRATEGY') for guidance.\n"
             f"4. Call write_file() to write the final requirements to '{target_rel}'.\n"
             "5. Call done() when finished.\n"
-            "Do NOT call the same tool more than once."
+            "Do NOT call the same tool more than once.\n\n"
+            "After calling done(), provide a summary of the requirements you wrote: "
+            "the project goal, key features, runtime environment, and constraints."
         ),
         tools=synth_tools, tool_handlers=synth_handlers,
     )
