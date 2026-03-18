@@ -39,7 +39,7 @@
 
 - **REQ-ARCH-1:** The system SHALL consist of four components: a Python CLI (`cli/`), a Python MCP Context Server (`mcp-context-server/`), a Worker CLI (`worker-cli/`), and framework reference files (`resources/`).
   - *Rationale:* Separating worker node management from phase orchestration makes the CLI model-agnostic. Every model — local, cloud, or gateway — is just a base URL to the CLI.
-- **REQ-ARCH-2:** The CLI SHALL provide subcommands: `gather`, `plan`, `develop`, `automate`, `verify`, `chat`, `status`, `log`, `unlock`, `completions`. WHEN an unknown command is given, THE SYSTEM SHALL display the error and full help text (no tracebacks). No CLI command SHALL ever display a Python traceback to the user.
+- **REQ-ARCH-2:** The CLI SHALL provide subcommands: `gather`, `plan`, `develop`, `automate`, `verify`, `chat`, `status`, `log`, `unlock`, `prune`, `completions`. WHEN an unknown command is given, THE SYSTEM SHALL display the error and full help text (no tracebacks). No CLI command SHALL ever display a Python traceback to the user.
 - **REQ-ARCH-3:** WHEN `voidrift` is run with no arguments, THE SYSTEM SHALL launch an interactive guided flow presenting available actions, model selection, and phase-specific options.
 - **REQ-ARCH-4:** The CLI SHALL implement an agent loop that sends messages to model APIs (OpenAI-compatible for local/kiro, native for cloud), handles MCP tool calls, and streams responses to the terminal. WHEN tools are provided in the API call, the agent SHALL set `tool_choice: "required"` on every call. A `done` tool SHALL be included automatically — WHEN the model calls `done()`, the agent SHALL make one final call with `tool_choice: "none"` (no tools) to get the text summary. WHILE waiting for any model response (initial or after tool calls), THE SYSTEM SHALL display a "Thinking..." spinner on stderr that clears when the response begins streaming.
 - **REQ-ARCH-5:** The CLI SHALL be model-agnostic. It SHALL resolve model aliases to `(base_url, api_key, model_id)` tuples from a models config file and connect to the endpoint directly. It SHALL NOT manage containers, SSH connections, or gateway processes.
@@ -144,6 +144,7 @@
 - **REQ-U-3:** `voidrift log <phase>` SHALL show the last 200 lines of the most recent log. `--prune` SHALL delete log files.
 - **REQ-U-4:** `voidrift unlock` SHALL remove the develop lock file and kill any running develop process.
 - **REQ-U-5:** `voidrift completions <shell>` SHALL output shell completion scripts for bash, zsh, and fish. All model, worker, and architect arguments SHALL complete from configured aliases in `models.yml`.
+- **REQ-U-6:** `voidrift prune` SHALL remove project-level ephemeral data (`.voidrift/` analyses, escalations, architect_responses, logs, stale `.develop.lock`) beyond the configured retention limit (`retention.project`, default 5). `--all` SHALL remove ALL project ephemeral data regardless of limit. `--global` SHALL prune the framework-level SessionStore (`~/.voidrift/`) beyond the configured retention limit (`retention.global`, default 30 days). `--global --all` SHALL remove ALL framework SessionStore data. Neither mode SHALL touch operator work products (REQUIREMENTS.md, ARCHITECTURE.md, TASKS.md, STATE.md, spec/) or framework config (config.yml, models.yml, worker-models.yml, resources/). WHEN `--global` is NOT set AND no `.voidrift/` directory exists in the current project, THE SYSTEM SHALL exit with a friendly error (e.g. "No .voidrift directory found — nothing to prune").
 
 ### 4.10 Model Configuration
 
@@ -212,6 +213,7 @@
 - **REQ-CFG-2:** `config.yml` SHALL contain sections for: `worker` (user, ip, api_key, hf_token), `kiro` (port, api_key), and `api_keys` (anthropic, gemini). Connection settings are literal values; secrets use env var references.
 - **REQ-CFG-3:** Framework resources (agents, skills, templates), `models.yml`, and `worker-models.yml` SHALL be read from `~/.voidrift/`. The repo is the source of truth; `make sync` copies to `~/.voidrift/`.
 - **REQ-CFG-4:** `VOIDRIFT_HOME` env var MAY override `~/.voidrift/` for testing and CI. IF not set, `~/.voidrift/` is used.
+- **REQ-CFG-5:** `config.yml` SHALL contain a `retention:` section with `project` (integer, default 5 — number of recent runs to keep) and `global` (integer, default 30 — days of session data to keep). `voidrift prune` uses these limits.
 
 ## 5. Non-Functional Requirements
 

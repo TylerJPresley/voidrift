@@ -38,6 +38,7 @@ Utility:
   status                      Show project phase status
   chat <model>                Interactive chat session
   log <phase> [--prune]       View or manage phase logs
+  prune [--global] [--all]    Clean ephemeral data
   unlock                      Remove develop lock
 
 Run 'voidrift COMMAND --help' for details."""
@@ -470,6 +471,84 @@ def log(phase, prune) -> None:
     lines = latest.read_text().splitlines()
     for line in lines[-200:]:
         ui._con.print(line)
+
+
+@cli.command()
+@click.option("--global", "global_", is_flag=True, help="Prune framework-level data (~/.voidrift)")
+@click.option("--all", "all_", is_flag=True, help="Remove all ephemeral data (ignore retention limit)")
+def prune(global_: bool, all_: bool) -> None:
+    """Clean ephemeral data (logs, analyses, escalations)."""
+    import shutil
+    from datetime import datetime, timezone, timedelta
+    from .utils import voidrift_dir
+    from .config import get_retention, voidrift_home
+
+    if global_:
+        db_path = voidrift_home() / "sessions.db"
+        if not db_path.exists():
+            ui.info("No session database found — nothing to prune")
+            return
+        import sqlite3
+        conn = sqlite3.connect(str(db_path))
+        if all_:
+            conn.execute("DELETE FROM context_log")
+            conn.execute("DELETE FROM sessions")
+            conn.commit()
+            ui.success("Deleted all session data")
+        else:
+            days = get_retention("global")
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+            cur = conn.execute("DELETE FROM sessions WHERE started_at < ?", (cutoff,))
+            conn.execute("DELETE FROM context_log WHERE session_id NOT IN (SELECT id FROM sessions)")
+            conn.commit()
+            ui.success(f"Pruned {cur.rowcount} session(s) older than {days} days")
+        conn.execute("VACUUM")
+        conn.close()
+        return
+
+    d = voidrift_dir()
+    if not d.exists():
+        ui.error("No .voidrift directory found — nothing to prune")
+        sys.exit(1)
+
+    ephemeral_dirs = ["analyses", "escalations", "architect_responses"]
+    removed_dirs = 0
+    removed_logs = 0
+
+    if all_:
+        for name in ephemeral_dirs:
+            p = d / name
+            if p.is_dir():
+                shutil.rmtree(p)
+                removed_dirs += 1
+        for log_file in (d / "logs").glob("*.log"):
+            log_file.unlink()
+            removed_logs += 1
+    else:
+        keep = get_retention("project")
+        logs = sorted((d / "logs").glob("*.log"))
+        for old in logs[:-keep] if keep else logs:
+            old.unlink()
+            removed_logs += 1
+
+    lock = d / ".develop.lock"
+    stale_lock = False
+    if lock.exists():
+        try:
+            pid = int(lock.read_text().strip().split("\n")[0])
+            os.kill(pid, 0)
+        except (ProcessLookupError, ValueError, IndexError):
+            lock.unlink()
+            stale_lock = True
+
+    parts = []
+    if removed_dirs:
+        parts.append(f"{removed_dirs} dir(s)")
+    if removed_logs:
+        parts.append(f"{removed_logs} log(s)")
+    if stale_lock:
+        parts.append("stale lock")
+    ui.success(f"Pruned {', '.join(parts)}" if parts else "Nothing to prune")
 
 
 @cli.command()

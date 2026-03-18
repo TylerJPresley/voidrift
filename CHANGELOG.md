@@ -8,6 +8,12 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- `voidrift prune` command — clean ephemeral data with configurable retention (REQ-U-6)
+  - `prune` — project logs beyond retention limit (default: keep 5)
+  - `prune --all` — all project ephemeral data (analyses, escalations, logs, stale lock)
+  - `prune --global` — framework SessionStore beyond retention limit (default: 30 days)
+  - `prune --global --all` — all framework session data
+- `retention:` config section with `project` and `global` limits (REQ-CFG-5)
 - Run ID correlation for all phases — log filename stem serves as run ID (REQ-MCP-3a)
 - `boot_run()` utility returns `(log_path, run_id)` for all phases
 - Shared interactive terminal UI for gather and chat phases (REQ-UI-1–4)

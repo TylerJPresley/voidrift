@@ -119,6 +119,15 @@ def get_concurrency(model_type: str) -> int:
     return defaults.get(model_type, 2)
 
 
+def get_retention(scope: str) -> int:
+    """Get retention limit. project=runs to keep, global=days to keep."""
+    defaults = {"project": 5, "global": 30}
+    val = load_config().get("retention", {}).get(scope)
+    if val is not None:
+        return int(val)
+    return defaults[scope]
+
+
 def voidrift_home() -> Path:
     """Return the framework config directory (public API)."""
     return _voidrift_home()

@@ -20,3 +20,7 @@ concurrency:
   local: 1
   cloud: 8
   gateway: 8
+
+retention:
+  project: 5
+  global: 30
