@@ -211,19 +211,30 @@ def _gather_from(
     _blue = "\033[38;5;117m"
     _reset = "\033[0m"
     _at_line_start = True
+    _blank_lines = 0
 
     def _on_token(token: str) -> None:
-        nonlocal _at_line_start
+        nonlocal _at_line_start, _blank_lines
         out = ""
         for ch in token:
-            if _at_line_start:
-                out += "  "
-                _at_line_start = False
-            out += ch
             if ch == "\n":
+                if _at_line_start:
+                    _blank_lines += 1
+                    if _blank_lines > 1:
+                        continue
+                else:
+                    _blank_lines = 0
                 _at_line_start = True
-        sys.stdout.write(f"{_blue}{out}{_reset}")
-        sys.stdout.flush()
+                out += ch
+            else:
+                if _at_line_start:
+                    out += "  "
+                    _at_line_start = False
+                    _blank_lines = 0
+                out += ch
+        if out:
+            sys.stdout.write(f"{_blue}{out}{_reset}")
+            sys.stdout.flush()
 
     agent = AgentLoop(
         model=model,
