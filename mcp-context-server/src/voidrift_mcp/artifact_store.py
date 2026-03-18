@@ -15,6 +15,7 @@ class ArtifactStore(BaseModel):
     """Caches project artifacts in memory, writes through to disk on store."""
 
     voidrift_dir: Path = Path(".voidrift")
+    run_id: str = ""
     _artifacts: dict[str, str] = PrivateAttr(default_factory=dict)
 
     def _disk_path(self, artifact_type: str, key: str) -> Path | None:
@@ -24,7 +25,10 @@ class ArtifactStore(BaseModel):
                 return self.voidrift_dir / "REQUIREMENTS.md"
             return self.voidrift_dir / "spec" / f"{key}.md"
         if artifact_type == "analysis":
-            return self.voidrift_dir / "analyses" / f"{key.replace('/', '_').replace(chr(92), '_')}.md"
+            base = self.voidrift_dir / "analyses"
+            if self.run_id:
+                base = base / self.run_id
+            return base / f"{key.replace('/', '_').replace(chr(92), '_')}.md"
         return None
 
     def store(self, artifact_type: str, key: str, content: str) -> None:

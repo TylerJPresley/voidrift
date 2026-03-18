@@ -145,6 +145,14 @@ def _gather_from(
         from ..tools import LOCAL_TOOLS, LOCAL_HANDLERS
         all_tools = list(LOCAL_TOOLS)
         all_handlers = dict(LOCAL_HANDLERS)
+        mcp_mod = None
+
+    log = log_path("gather")
+
+    # Scope analyses to this run (REQ-MCP-3a)
+    run_id = Path(log).stem
+    if mcp_mod is not None:
+        mcp_mod.artifacts.run_id = run_id
 
     def read_from_source(path: str) -> str:
         full = (from_path / path).resolve()
@@ -167,7 +175,6 @@ def _gather_from(
         if model.model_type == "local" else None
     )
 
-    log = log_path("gather")
     ui.phase("VoidRift Gather (Reverse Engineering)")
     ui.detail(f"Log: {log}")
     ui.detail(f"Source: {from_path}")
