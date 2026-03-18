@@ -139,66 +139,124 @@ def _gather_from(
     feature: str | None,
     force: bool,
 ) -> int:
-    """Reverse engineering mode (AC-G11).
-
-    Args:
-        model: Model configuration for the analyst role.
-        target: Path where requirements will be written.
-        from_path: Path to the existing codebase.
-        feature: Optional feature name.
-        force: Overwrite existing target file.
-
-    Returns:
-        Exit code (0 for success, 1 for failure).
-    """
-    # Check target exists
+    """Reverse engineering mode — three-stage pipeline (REQ-G-8, REQ-ARCH-7)."""
     if target.exists() and not force:
         console.print(
             f"[red]Error: {target} already exists. Use --force to overwrite, "
             f"or run without --from to revise interactively.[/red]"
         )
         return 1
-
     if not from_path.is_dir():
         err_console.print(f"[red]Error: {from_path} is not a directory[/red]")
         return 1
-
     if force and target.exists():
         target.unlink()
 
-    # Build tools: MCP content tools + CLI-native filesystem tools (REQ-MCP-4a)
+    # Build tools from MCP + CLI-native (REQ-MCP-4a)
     try:
         import voidrift_mcp.server as mcp_mod
         mcp_mod._boot()
-        tools, handlers = build_mcp_tools(mcp_mod)
+        all_tools, all_handlers = build_mcp_tools(mcp_mod)
     except ImportError:
         from ..tools import LOCAL_TOOLS, LOCAL_HANDLERS
-        tools = list(LOCAL_TOOLS)
-        handlers = dict(LOCAL_HANDLERS)
+        all_tools = list(LOCAL_TOOLS)
+        all_handlers = dict(LOCAL_HANDLERS)
 
     # Override read_source_file to read from the source codebase
-    _MAX_FILE_CHARS = 32_000  # ~8K tokens — prevent context blowout
-
     def read_from_source(path: str) -> str:
         full = (from_path / path).resolve()
         if not str(full).startswith(str(from_path.resolve())):
             return f"Access denied: {path} is outside the source directory"
         if not full.exists():
             return f"File not found: {path}"
-        text = full.read_text(encoding="utf-8", errors="replace")
-        if len(text) > _MAX_FILE_CHARS:
-            return text[:_MAX_FILE_CHARS] + f"\n\n... [TRUNCATED — file is {len(text)} chars, showing first {_MAX_FILE_CHARS}]"
-        return text
+        return full.read_text(encoding="utf-8", errors="replace")
 
-    handlers["read_source_file"] = read_from_source
+    all_handlers["read_source_file"] = read_from_source
+
+    def _pick_tools(names: set) -> tuple[list, dict]:
+        return (
+            [t for t in all_tools if t["function"]["name"] in names],
+            {k: v for k, v in all_handlers.items() if k in names},
+        )
+
+    extra = (
+        {"chat_template_kwargs": {"enable_thinking": False}}
+        if model.model_type == "local" else None
+    )
 
     log = log_path("gather")
-    console.print(f"[bold cyan]VoidRift Gather (Reverse Engineering)[/bold cyan]")
+    console.print("[bold cyan]VoidRift Gather (Reverse Engineering)[/bold cyan]")
     console.print(f"[dim]Log: {log}[/dim]")
     console.print(f"Source: {from_path}")
     console.print(f"Target: {target}")
 
-    # Load requirements template and skills via MCP tools, not direct reads (REQ-ARCH-6)
+    file_tree = _build_file_tree(from_path)
+    target_rel = str(target.relative_to(Path.cwd()))
+
+    with open(log, "a") as f:
+        f.write(f"=== Reverse engineering from {from_path} ===\n")
+
+    # --- Stage 1: Triage — pick files to analyze ---
+    console.print("\n[dim]Stage 1/3: Triaging files...[/dim]")
+    triage = AgentLoop(
+        model=model, stream=False, extra_body=extra, max_tokens=4096,
+        system_prompt=(
+            "You are a code analyst. Given a file tree, return ONLY a JSON array of "
+            "relative file paths worth analyzing for requirements. Skip build artifacts, "
+            "minified bundles, lock files, images, and generated code. "
+            "Return raw JSON, no markdown fences."
+        ),
+        tools=[], tool_handlers={},
+    )
+    try:
+        triage_response = triage.send(f"File tree:\n{file_tree}")
+    except (RuntimeError, OSError) as e:
+        err_console.print(f"[red]Triage failed: {e}[/red]")
+        return 1
+
+    import json as _json
+    try:
+        files = _json.loads(triage_response.strip())
+    except _json.JSONDecodeError:
+        # Try to extract JSON array from response
+        import re
+        m = re.search(r"\[.*\]", triage_response, re.DOTALL)
+        if m:
+            files = _json.loads(m.group())
+        else:
+            err_console.print("[red]Triage did not return a valid file list.[/red]")
+            with open(log, "a") as f:
+                f.write(f"Triage response:\n{triage_response}\n")
+            return 1
+
+    console.print(f"  [dim]{len(files)} files selected[/dim]")
+    with open(log, "a") as f:
+        f.write(f"Triage: {files}\n")
+
+    # --- Stage 2: Analysis — one agent per file ---
+    console.print("[dim]Stage 2/3: Analyzing files...[/dim]")
+    analysis_tools, analysis_handlers = _pick_tools({"read_source_file", "store_file_analysis"})
+
+    for i, filepath in enumerate(files, 1):
+        console.print(f"  [dim]{i}/{len(files)} {filepath}[/dim]")
+        agent = AgentLoop(
+            model=model, stream=False, extra_body=extra, max_tokens=4096,
+            system_prompt=(
+                "You are a code analyst. Read the file, then call store_file_analysis() "
+                "with a concise summary covering: purpose, key components/functions, "
+                "dependencies, and any requirements implied by the code."
+            ),
+            tools=analysis_tools, tool_handlers=analysis_handlers,
+        )
+        try:
+            agent.send(f"Analyze: {filepath}")
+        except (RuntimeError, OSError) as e:
+            console.print(f"    [yellow]⚠ {filepath}: {e}[/yellow]")
+        with open(log, "a") as f:
+            f.write(f"Analyzed: {filepath}\n")
+
+    # --- Stage 3: Synthesis — pull summaries, write requirements ---
+    console.print("[dim]Stage 3/3: Writing requirements...[/dim]")
 
     _blue = "\033[38;5;117m"
     _reset = "\033[0m"
@@ -228,55 +286,36 @@ def _gather_from(
             sys.stdout.write(f"{_blue}{out}{_reset}")
             sys.stdout.flush()
 
-    agent = AgentLoop(
-        model=model,
+    synth_tools, synth_handlers = _pick_tools(
+        {"get_all_analyses", "get_template", "get_skill", "write_file"}
+    )
+    synth = AgentLoop(
+        model=model, stream=True, extra_body=extra, max_tokens=8192,
+        on_token=_on_token,
         system_prompt=(
             "[ROLE: Analyst]\n\n"
-            "You are reverse-engineering requirements from an existing codebase.\n"
-            "The codebase is read-only. Treat code as ground truth, documentation as claims to verify.\n"
-            "Analyze the codebase structure, then produce requirements.\n\n"
-            "Before writing, use get_template('REQUIREMENTS-TEMPLATE') to get the output format,\n"
-            "and get_skill('PROD-STRATEGY') and get_skill('QUALITY-QA') for writing guidance.\n\n"
-            "Use read_source_file() to examine files. "
-            "Use write_file() to write the requirements when ready."
+            "You are writing requirements from file analysis summaries.\n"
+            "Use get_all_analyses() to retrieve the summaries.\n"
+            "Use get_template('REQUIREMENTS-TEMPLATE') for the output format.\n"
+            "Use get_skill('PROD-STRATEGY') and get_skill('QUALITY-QA') for guidance.\n"
+            f"Use write_file() to write the final requirements to '{target_rel}'."
         ),
-        tools=tools,
-        tool_handlers=handlers,
-        stream=True,
-        max_tokens=8192,
-        on_token=_on_token,
-        extra_body={"chat_template_kwargs": {"enable_thinking": False}}
-        if model.model_type == "local"
-        else None,
+        tools=synth_tools, tool_handlers=synth_handlers,
     )
-
-    # Build file tree from reference directory
-    file_tree = _build_file_tree(from_path)
-    prompt = (
-        f"Analyze this codebase at {from_path} and generate requirements.\n\n"
-        f"File tree:\n{file_tree}\n\n"
-        f"Use read_source_file() to examine files (use relative paths like 'README.md').\n"
-        f"When done, use write_file() to write the requirements to "
-        f"'{target.relative_to(Path.cwd())}'."
-    )
-
-    with open(log, "a") as f:
-        f.write(f"=== Reverse engineering from {from_path} ===\n")
 
     try:
-        response = agent.send(prompt)
+        response = synth.send("Write the requirements from the stored analyses.")
         with open(log, "a") as f:
-            f.write(response + "\n")
+            f.write(f"Synthesis:\n{response}\n")
     except KeyboardInterrupt:
         console.print("\n[dim]Interrupted.[/dim]")
 
     if target.exists():
-        console.print(f"\n[green]✅ Requirements written to {target.relative_to(Path.cwd())}[/green]")
+        console.print(f"\n[green]✅ Requirements written to {target_rel}[/green]")
         return 0
     else:
         err_console.print("[yellow]⚠ Requirements file was not created.[/yellow]")
         return 1
-
 
 def _build_file_tree(directory: Path, max_files: int = 500) -> str:
     """Build a file tree string, excluding common non-source directories.
