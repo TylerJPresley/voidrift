@@ -279,6 +279,22 @@ class AgentLoop(BaseModel):
             # Continue the loop
             return self._run_loop(force_tool=False)
 
+        # Fallback: parse <tool_call> XML from content (vLLM parser miss)
+        if not collected_tool_calls and self.tool_handlers and "<tool_call>" in collected_text:
+            parsed = self._parse_xml_tool_calls(collected_text)
+            if parsed:
+                self.messages.append({"role": "assistant", "content": collected_text})
+                for tc in parsed:
+                    result = self._handle_tool_call_dict(tc)
+                    if self.on_tool_result:
+                        self.on_tool_result(tc["function"]["name"], result)
+                    self.messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc["id"],
+                        "content": result,
+                    })
+                return self._run_loop(force_tool=False)
+
         # Final text response
         if collected_text and not self.on_token:
             sys.stdout.write("\n")
@@ -298,6 +314,26 @@ class AgentLoop(BaseModel):
             })
 
         return collected_text
+
+    @staticmethod
+    def _parse_xml_tool_calls(text: str) -> list[dict]:
+        """Parse <tool_call> XML tags into tool call dicts."""
+        import re
+        calls = []
+        for m in re.finditer(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", text, re.DOTALL):
+            try:
+                data = json.loads(m.group(1))
+                calls.append({
+                    "id": f"xml_{len(calls)}",
+                    "type": "function",
+                    "function": {
+                        "name": data["name"],
+                        "arguments": json.dumps(data.get("arguments", {})),
+                    },
+                })
+            except (json.JSONDecodeError, KeyError):
+                continue
+        return calls
 
     def _execute_tool(self, name: str, arguments: str) -> str:
         """Parse arguments and execute a tool handler by name.
