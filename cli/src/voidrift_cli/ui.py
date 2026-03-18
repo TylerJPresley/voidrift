@@ -54,7 +54,7 @@ def success(msg: str) -> None:
 
 def done(msg: str) -> None:
     """Final phase success."""
-    _con.print(f"\n[green]  ✓ {msg}[/green]\n")
+    _con.print(f"\n\n[green]  ✓ {msg}[/green]\n")
 
 
 def warn(msg: str) -> None:
