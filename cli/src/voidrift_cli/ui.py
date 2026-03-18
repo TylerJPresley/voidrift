@@ -54,7 +54,7 @@ def success(msg: str) -> None:
 
 def done(msg: str) -> None:
     """Final success with emoji."""
-    _con.print(f"\n[green]✅ {msg}[/green]")
+    _con.print(f"\n[dim green]▸ ✅ {msg}[/dim green]\n")
 
 
 def warn(msg: str) -> None:
