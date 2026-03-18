@@ -421,13 +421,8 @@ def _build_file_tree(directory: Path, max_files: int = 500) -> str:
     Returns:
         Newline-separated list of relative file paths.
     """
-    exclude_dirs = {".git", "node_modules", "__pycache__", ".cache", "dist", "build",
-                    ".venv", "venv", ".voidrift", ".agendev", ".aider.tags.cache.v4"}
-    skip_names = {"package-lock.json", "yarn.lock", "pnpm-lock.yaml", "package.json"}
-    skip_ext = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".woff", ".woff2",
-                ".ttf", ".eot", ".map", ".min.js", ".min.css", ".pyc", ".pyo"}
-    # Directory path fragments to exclude (matched against relative path string)
-    exclude_paths = {"static/assets", "dist/assets"}
+    exclude_dirs = {".git", "node_modules", "__pycache__", ".cache", ".venv", "venv",
+                    ".voidrift", ".agendev"}
     lines = []
     count = 0
     for p in sorted(directory.rglob("*")):
@@ -438,20 +433,8 @@ def _build_file_tree(directory: Path, max_files: int = 500) -> str:
             continue
         if p.is_file():
             rel = p.relative_to(directory)
-            rel_str = str(rel)
             if rel.parts[0].startswith("."):
                 continue
-            if p.name in skip_names:
-                continue
-            if any(rel_str.endswith(ext) for ext in skip_ext):
-                continue
-            if any(frag in rel_str for frag in exclude_paths):
-                continue
-            # Skip hashed bundle files (e.g. index-CW8_b_Xi.js)
-            if len(p.stem) > 8 and ("-" in p.stem or "." in p.stem) and p.suffix in {".js", ".css"}:
-                parts = p.stem.split("-")
-                if len(parts) >= 2 and any(len(s) >= 6 and not s.isalpha() for s in parts[1:]):
-                    continue
-            lines.append(rel_str)
+            lines.append(str(rel))
             count += 1
     return "\n".join(lines)
