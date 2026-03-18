@@ -40,6 +40,7 @@ def run_plan(
     model: ModelConfig,
     feature: str | None = None,
     fresh_start: bool = False,
+    update: bool = False,
 ) -> int:
     """Execute the plan phase.
 
@@ -47,6 +48,7 @@ def run_plan(
         model: Model configuration for the architect role.
         feature: Optional feature name to plan.
         fresh_start: Delete existing planning artifacts before starting.
+        update: Revise existing plan to align with current requirements.
 
     Returns:
         Exit code (0 for success, 1 for failure).
@@ -88,16 +90,41 @@ def run_plan(
         for f in sorted(spec_dir.glob("*.md")):
             specs.append(f"### {f.stem}\n\n{f.read_text()}")
 
-    prompt = f"Plan the implementation for this project.\n\nREQUIREMENTS:\n{requirements}"
-    if specs:
-        prompt += "\n\nFEATURE SPECS:\n" + "\n\n".join(specs)
-    if feature:
-        prompt += f"\n\nFocus on feature: {feature}"
-    prompt += (
-        "\n\nUse get_skill() to load skill conventions. "
-        "Use get_template() to load templates. "
-        "Use write_file() to create ARCHITECTURE.md and TASKS.md."
-    )
+    if update:
+        arch_path = d / "ARCHITECTURE.md"
+        tasks_path = d / "TASKS.md"
+        if not arch_path.exists() or not tasks_path.exists():
+            ui.error("--update requires existing ARCHITECTURE.md and TASKS.md. Run plan without --update first.")
+            return 1
+        prompt = (
+            "REVISE the existing plan to align with the current requirements.\n\n"
+            "Rules:\n"
+            "- Preserve completed tasks (- [x]) unless the requirement was removed.\n"
+            "- Update or remove tasks that no longer apply.\n"
+            "- Add new tasks for any unaddressed requirements.\n"
+            "- Treat the existing architecture as a starting point — revise, don't regenerate.\n\n"
+            f"CURRENT REQUIREMENTS:\n{requirements}"
+        )
+        if specs:
+            prompt += "\n\nFEATURE SPECS:\n" + "\n\n".join(specs)
+        prompt += f"\n\nEXISTING ARCHITECTURE:\n{arch_path.read_text()}"
+        prompt += f"\n\nEXISTING TASKS:\n{tasks_path.read_text()}"
+        prompt += (
+            "\n\nUse get_skill() to load skill conventions. "
+            "Use get_template() to load templates. "
+            "Use write_file() to write the revised ARCHITECTURE.md and TASKS.md."
+        )
+    else:
+        prompt = f"Plan the implementation for this project.\n\nREQUIREMENTS:\n{requirements}"
+        if specs:
+            prompt += "\n\nFEATURE SPECS:\n" + "\n\n".join(specs)
+        if feature:
+            prompt += f"\n\nFocus on feature: {feature}"
+        prompt += (
+            "\n\nUse get_skill() to load skill conventions. "
+            "Use get_template() to load templates. "
+            "Use write_file() to create ARCHITECTURE.md and TASKS.md."
+        )
 
     agent = AgentLoop(
         model=model,

@@ -108,6 +108,7 @@
 - **REQ-P-8:** Tasks SHALL NOT contain shell commands. Tasks describe file content only.
 - **REQ-P-9:** WHEN the architect writes task files, all skill tags SHALL be validated against available skill files. IF invalid tags are found, THE SYSTEM SHALL fail with an error listing invalid and valid tags.
 - **REQ-P-10:** `.voidrift/ARCHITECTURE.md` SHALL contain: Components table, Data Models, API Surface, Configuration, Dependencies, Constraints & Limitations, Glossary.
+- **REQ-P-11:** `voidrift plan <model> --update` SHALL read the current REQUIREMENTS.md, spec files, and existing ARCHITECTURE.md and TASKS.md, then instruct the model to revise the plan to align with the current requirements. The model SHALL preserve completed tasks (`- [x]`), update or remove tasks that no longer apply, and add new tasks for any unaddressed requirements. The existing architecture SHALL be treated as a starting point, not regenerated from scratch.
 
 ### 4.6 Phase 3 — Develop
 

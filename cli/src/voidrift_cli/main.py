@@ -162,11 +162,12 @@ def gather(model, feature, from_path, reference, force) -> None:
 @click.argument("model", shell_complete=_complete_model)
 @click.argument("feature", required=False)
 @click.option("--fresh-start", is_flag=True, help="Delete existing planning artifacts")
-def plan(model, feature, fresh_start) -> None:
+@click.option("--update", is_flag=True, help="Revise existing plan to match current requirements")
+def plan(model, feature, fresh_start, update) -> None:
     """Phase 2: Generate architecture and task breakdown."""
     from .phases.plan import run_plan
     mc = resolve_model(model)
-    sys.exit(run_plan(mc, feature=feature, fresh_start=fresh_start))
+    sys.exit(run_plan(mc, feature=feature, fresh_start=fresh_start, update=update))
 
 
 @cli.command()
