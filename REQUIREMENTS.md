@@ -3,7 +3,7 @@
 ## 1. Introduction
 
 - **Purpose:** A local-first AI development lifecycle tool that routes work between a worker model (primary execution) and an optional architect model (escalation and design), producing a deployable, tested project from requirements alone through five phases: Gather → Plan → Develop → Automate → Verify.
-- **Project Scope:** VoidRift provides the CLI orchestration layer, MCP context server, and framework reference files. It does NOT provide the AI models themselves (those are external: local vLLM containers or cloud APIs), nor does it provide hosting, CI/CD infrastructure, or runtime environments for generated projects.
+- **Project Scope:** VoidRift provides the CLI orchestration layer, MCP context server, framework reference files, and worker node management. AI models are external (local vLLM containers, cloud APIs, or gateway endpoints). Hosting, CI/CD infrastructure, and runtime environments for generated projects are the operator's responsibility.
 
 ## 2. User Stories
 
@@ -45,7 +45,7 @@
   - *Rationale:* `tool_choice: "required"` ensures the model uses tools when they're available rather than generating text about what it would do. The `done` tool gives the model an explicit signal to stop tool use — without it, models loop indefinitely or stop unpredictably. Stall detection prevents infinite loops when a model repeats the same failing call. Comprehensive logging enables post-run debugging without reproducing the full agent session.
 - **REQ-ARCH-5:** The CLI SHALL be model-agnostic. It SHALL resolve model aliases to `(base_url, api_key, model_id)` tuples from a models config file and connect to the endpoint directly. It SHALL NOT manage containers, SSH connections, or gateway processes.
   - *Rationale:* The worker node already exposes an OpenAI-compatible endpoint. Cloud APIs expose endpoints. Kiro Gateway exposes an endpoint. The CLI treats all three identically — the only variable is the URL.
-- **REQ-ARCH-6:** The CLI SHALL never read framework resource files (agents, skills, templates) directly. All framework context SHALL be served exclusively through MCP server tool calls.
+- **REQ-ARCH-6:** The CLI SHALL load all framework resource content (skills, templates, prompts) exclusively through MCP server tool calls.
   - *Rationale:* On-demand retrieval via MCP tools keeps context windows small. Models pull only the sections they need instead of loading full files upfront.
 - **REQ-ARCH-7:** Multi-stage phases SHALL use separate agent instances per unit of work to prevent context accumulation. Each agent starts with a clean message history. Shared state between agents SHALL be passed through MCP tools (`store_file_analysis`, `get_all_analyses`, etc.), not message history.
   - *Rationale:* A single agent reading multiple files accumulates raw content in its message history until the context window fills. Separate agents per file keep each context small and focused — the same pattern used by the develop phase (one agent per task).
@@ -114,7 +114,8 @@
 
 ### 4.5 Phase 2 — Plan
 
-- **REQ-P-1:** Plan SHALL always produce `.voidrift/ARCHITECTURE.md` and `.voidrift/TASKS.md`. IF either is missing after the first run, one retry SHALL be issued. IF the retry also fails, THE SYSTEM SHALL exit with code 1.- **REQ-P-2:** Planner output SHALL be fully hidden from the terminal. Only a spinner and status line SHALL be shown.
+- **REQ-P-1:** Plan SHALL always produce `.voidrift/ARCHITECTURE.md` and `.voidrift/TASKS.md`. IF either is missing after the first run, one retry SHALL be issued. IF the retry also fails, THE SYSTEM SHALL exit with code 1.
+- **REQ-P-2:** Planner output SHALL be fully hidden from the terminal. Only a spinner and status line SHALL be shown.
 - **REQ-P-3:** WHEN `--fresh-start` is specified, THE SYSTEM SHALL delete ARCHITECTURE.md, TASKS.md, and spec/*.md before planning.
 - **REQ-P-4:** `auto-commits: false` SHALL be set for the plan phase.
 - **REQ-P-5:** For single-module projects, tasks SHALL be written under a `## Tasks` header. For multi-module projects, tasks SHALL be grouped under `## Module: <name>` headers in a single TASKS.md.
@@ -199,7 +200,7 @@
 
 - **REQ-GIT-1:** Planning artifacts SHALL be committed in a single commit with message `"docs: add planning artifacts"`.
 - **REQ-GIT-2:** WHILE the develop phase is active, source code SHALL be committed per task with task-specific messages. WHEN multiple workers are active, commits SHALL be serialized through a lock.
-- **REQ-GIT-3:** `auto-commits: false` SHALL be set only for the plan phase.
+- **REQ-GIT-3:** `auto-commits: false` SHALL be set for the gather and plan phases.
 
 ### 4.13 Project Structure
 
@@ -222,8 +223,8 @@
   - **Operator** (`▶`): bold white. Reprinted user input in interactive sessions. Preceded by a horizontal rule (`console.rule`, `bright_black` style).
   All phases SHALL use these roles identically. A shared output module SHALL enforce the convention — phases SHALL NOT use raw `console.print` with ad-hoc styling.
 - **REQ-UI-2:** ALL phases (gather, plan, develop, automate, verify) SHALL display progress through their stages. Each phase SHALL show: a phase title line, stage transitions (e.g. `▸ Stage 1/3: Triaging files...`), per-item progress with elapsed time (e.g. `▸ 3/28 backend/main.py... ✓ 4.8s`), and a final summary line. Automated phases (plan, develop, automate, verify) SHALL show the same level of progress detail as interactive phases.
-- **REQ-UI-3:** ALL interactive conversation phases (gather, chat) SHALL use a consistent plain-terminal interface with: a dim header block (phase name, log path, model label), a `prompt_toolkit` multi-line input (blank line to submit, backspace/arrows work across lines), streamed model responses via `on_token` callback, and a dim stats line after each response showing token count, tokens/sec, and elapsed time.
-- **REQ-UI-4:** The `/write` command in gather SHALL enable file-writing tools for that turn only. Any user message starting with `/write` OR equal to common write phrases (e.g. "please write the file now", "write it", "go ahead and write") SHALL trigger tool activation. Tools SHALL be disabled by default during conversation to avoid model thinking-token overhead. Chat SHALL always have its tools available.
+- **REQ-UI-3:** The `voidrift chat` command SHALL use a plain-terminal interface with: a dim header block (phase name, log path, model label), a `prompt_toolkit` multi-line input (blank line to submit, backspace/arrows work across lines), streamed model responses via `on_token` callback, and a dim stats line after each response showing token count, tokens/sec, and elapsed time.
+- **REQ-UI-4:** Chat SHALL always have its full tool set available. IF a model request fails mid-session, THE SYSTEM SHALL print the error and return to the prompt.
 - **REQ-UI-5:** Interactive sessions SHALL handle Ctrl+C gracefully (print dim "Session ended." and exit), handle EOF on input (exit cleanly), and log all operator input and model responses to the session log file.
 
 ### 4.16 Framework Configuration
