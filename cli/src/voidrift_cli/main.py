@@ -363,28 +363,24 @@ def chat(model, doc) -> None:
     except ImportError:
         tools, handlers = [], {}
 
-    system = (
-        "[ROLE: Analyst]\n\n"
-        "You are an interactive assistant in the VoidRift framework.\n"
-        "You help with requirements gathering, feature specs, architecture refinement, and task adjustments.\n\n"
-        "You have tools to discover and read project context:\n"
-        "- list_skills(), list_templates(), list_documents() — browse what's available\n"
-        "- get_skill(), get_template(), get_requirements() — fetch specific content\n"
-        "- read_source_file() — read project files\n"
-        "- write_file() — save changes\n\n"
-        "Ask clarifying questions before writing. Do not write until the operator approves.\n"
-        "Focus on 'what' the system must do, not 'how' it will be built, unless asked."
-    )
+    _get_prompt = handlers.get("get_prompt", lambda *a: "")
+    _get_skill = handlers.get("get_skill", lambda *a: "")
+
+    skill = _get_skill("ANALYSIS-REQS")
+    system_prompt = _get_prompt("chat", "SYSTEM")
+    system = f"{skill}\n\n{system_prompt}" if skill else system_prompt
 
     if doc:
         from .utils import voidrift_dir
         doc_path = voidrift_dir() / doc
         if doc_path.exists():
-            system += f"\n\nYou are editing: {doc}\nCurrent content:\n\n{doc_path.read_text()}"
-            system += f"\n\nWhen writing changes, use write_file() with path '.voidrift/{doc}'."
+            doc_section = _get_prompt("chat", "DOC").format(
+                doc_name=doc, doc_content=doc_path.read_text()
+            )
+            system += f"\n\n{doc_section}"
         else:
             ui.warn(f"{doc} not found — starting fresh")
-            system += f"\n\nYou are creating: {doc}\nUse write_file() with path '.voidrift/{doc}'."
+            system += f"\n\n{_get_prompt('chat', 'DOC-NEW').format(doc_name=doc)}"
 
     agent = AgentLoop(
         model=mc,
