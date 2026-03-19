@@ -61,6 +61,8 @@
 - **REQ-MCP-4a:** The CLI SHALL provide local filesystem tools directly (not via MCP): `write_file(path, content)`, `read_source_file(path)`, `export_to_file(type, path)`, `list_project_artifacts()`. These tools execute on the workstation where the CLI runs.
   - *Rationale:* The MCP server may be remote. Only the CLI is guaranteed to have local filesystem access.
 - **REQ-MCP-6:** WHEN `get_template(name)` is called, THE SYSTEM SHALL retrieve the template from the in-memory index. IF the name is not found, THE SYSTEM SHALL return an error listing available templates.
+  - Given `resources/templates/REQUIREMENTS-TEMPLATE.md` is indexed, When `get_template("REQUIREMENTS-TEMPLATE")` is called, Then the template content is returned.
+  - When `get_template("NONEXISTENT")` is called, Then an error string is returned containing "not found" and a list of available template names.
 - **REQ-MCP-7:** WHEN `load_tasks(path)` is called, THE SYSTEM SHALL parse `## Module: <name>` headers to split tasks into per-module queues. Tasks without a module header SHALL be assigned to a default module. All state changes SHALL be persisted back to the single TASKS.md file on disk.
   - *Rationale:* A single file with module headers is simpler to manage than multiple files per module — no glob discovery, no file copying, and atomic write-through updates all module state at once.
 - **REQ-MCP-8:** WHEN `get_next_task(module)` is called, THE SYSTEM SHALL return the first unchecked (`- [ ]`) task for the given module, including its skill tags. The agent SHALL only ever see one task at a time.
@@ -68,10 +70,14 @@
 - **REQ-MCP-9:** WHEN `complete_task(module)` is called, THE SYSTEM SHALL mark the first unchecked task as `- [x]` and write through to disk.
 - **REQ-MCP-10:** The server SHALL use in-memory index for content (parsed markdown sections) and SQLite (`~/.voidrift/sessions.db`) for session metadata and ephemeral run data (analyses, escalation context). The SQLite connection SHALL be thread-safe (`check_same_thread=False`) to support concurrent file analysis in the gather pipeline.
 - **REQ-MCP-11:** `write_file()` SHALL track paths written during the current run. IF a path has already been written in the same run, the tool SHALL reject the call with an error message (e.g. "File already written this run: <path>") and return without overwriting.
+  - Given a run where `write_file("foo.md", "content")` has succeeded, When `write_file("foo.md", "new content")` is called, Then the tool returns an error containing "already written" and the file content is unchanged.
 - **REQ-MCP-12:** `list_skills()` SHALL return names and one-line descriptions of all available skill files loaded from the resources directory.
 - **REQ-MCP-13:** `list_templates()` SHALL return names and one-line descriptions of all available template files loaded from the resources directory.
 - **REQ-MCP-14:** `list_documents()` SHALL return a listing of all `.voidrift/` artifacts (REQUIREMENTS.md, ARCHITECTURE.md, TASKS.md, spec/*.md, etc.) with file sizes.
 - **REQ-MCP-15:** WHEN `get_prompt(phase, section)` is called, THE SYSTEM SHALL retrieve the named section from `resources/prompts/<phase>.md` using the markdown index (H2 heading match). IF the section is not found, THE SYSTEM SHALL return an error listing available sections for that phase. IF the phase file is not found, THE SYSTEM SHALL return an error listing available phase prompt files.
+  - Given `resources/prompts/gather.md` contains `## TRIAGE`, When `get_prompt("gather", "TRIAGE")` is called, Then the TRIAGE section content is returned.
+  - Given `resources/prompts/gather.md` exists, When `get_prompt("gather", "NONEXISTENT")` is called, Then an error is returned listing available section names.
+  - Given no `resources/prompts/missing.md` exists, When `get_prompt("missing", "TRIAGE")` is called, Then an error is returned listing available phase files.
 - **REQ-MCP-16:** `list_prompts(phase)` SHALL return the available section names (H2 headings) for the given phase prompt file. IF phase is omitted, SHALL return all phase names with their section lists.
 
 ### 4.3 Framework Reference Files
@@ -82,12 +88,17 @@
 - **REQ-RES-4:** WHILE the develop phase is active, skill files SHALL be loaded per-task via `get_skill()` MCP tool calls based on `[tag, ...]` annotations (per REQ-ARCH-6).
 - **REQ-RES-5:** IF a skill file referenced in a task tag does not exist, THE SYSTEM SHALL print a warning and continue without loading it.
 - **REQ-RES-6:** Phase prompt files SHALL live in `resources/prompts/<phase>.md` with H2 sections for each stage/step. The CLI SHALL load prompts via `get_prompt(phase, section)` MCP tool calls (per REQ-ARCH-6). Prompts MAY contain Python format variables (e.g. `{spec_path}`, `{group_name}`) which the CLI resolves via `.format()` before passing to the agent. A missing variable SHALL raise a `KeyError` — no silent substitution.
+  - Given a prompt containing `{group_name}`, When the CLI calls `.format(group_name="backend")`, Then `{group_name}` is replaced with `backend`.
+  - Given a prompt containing `{missing_var}`, When the CLI calls `.format(group_name="backend")`, Then a `KeyError` is raised for `missing_var`.
 - **REQ-RES-7:** The CLI SHALL construct each agent's system prompt by concatenating: (1) the phase's methodology skill (loaded once via `get_skill()`), (2) the stage prompt from `get_prompt()`, and (3) any injected context (analyses, specs). The skill is loaded once per pipeline and reused across stages.
   - *Rationale:* Three layers with distinct responsibilities: the **skill** defines *how to think* (methodology, philosophy, quality standards), the **prompt** defines *what to do* (stage-specific instructions, tool calls, output format), and the **context** provides *what to work with* (data the agent processes). New methodology guidance goes in the skill. New instructions go in the prompt. New data goes in the context. This separation prevents prompt bloat and keeps each layer independently editable.
 
 ### 4.4 Phase 1 — Gather
 
 - **REQ-G-1:** `voidrift gather <model> <path>` SHALL reverse-engineer requirements from the codebase at `<path>` using the four-stage pipeline (REQ-G-8). `--force` overwrites existing requirements.
+  - Given no `.voidrift/REQUIREMENTS.md` exists, When `voidrift gather model ./src` completes, Then `.voidrift/REQUIREMENTS.md` exists with content.
+  - Given `.voidrift/REQUIREMENTS.md` exists, When `voidrift gather model ./src` is run without `--force`, Then the command exits with an error and the file is unchanged.
+  - Given `.voidrift/REQUIREMENTS.md` exists, When `voidrift gather model ./src --force` completes, Then the file is overwritten with new content.
 - **REQ-G-8:** THE SYSTEM SHALL reverse-engineer requirements in four stages, each using a separate agent instance (per REQ-ARCH-7). Each agent's system prompt SHALL be constructed per REQ-RES-7: the ANALYSIS-REQS skill (loaded once via `get_skill("ANALYSIS-REQS")`) concatenated with the stage-specific prompt (loaded via `get_prompt("gather", "<stage>")`). All instructions SHALL live in `resources/prompts/gather.md`.
   - *Rationale:* Four stages decompose a problem too large for one context window: triage reduces the file set, per-file analysis keeps each context small, per-group synthesis produces focused specs, and the overview ties them together. Separate agents per stage prevent context accumulation (REQ-ARCH-7). Externalizing prompts to resource files allows methodology iteration without code changes.
   1. **Triage:** Agent receives the complete file tree (filtered only for directories starting with `.`) and returns a JSON object with `groups` — a dict mapping logical boundary names to lists of files worth analyzing. The triage agent SHALL select only source files, documentation, and configuration — skipping build output, compiled artifacts, dependency directories, generated code, binaries, images, lock files, and any other non-source content. The agent infers this from its knowledge of the project's language and toolchain; the CLI SHALL NOT hardcode language-specific exclusions. A second validation pass SHALL review the triage output and remove any files that were incorrectly included (e.g. hashed build bundles, lock files, binary assets). The agent SHALL auto-detect logical boundaries from directory structure (e.g. `frontend/`, `backend/`, `api/`, `shared/`). Single-application codebases SHALL use one group.
@@ -98,6 +109,8 @@
   The reference directory SHALL be strictly read-only.
 - **REQ-G-10:** Gather SHALL never auto-commit. `auto-commits: false` and `dirty-commits: false` SHALL be set.
 - **REQ-G-11:** WHEN an API call fails due to context length exceeded, THE SYSTEM SHALL display a clear error identifying the stage, the group name, and a suggestion to use a model with a larger context window. The pipeline SHALL NOT silently truncate content to fit.
+  - Given a model API returns an error containing "context length", When the agent loop catches the exception, Then a `RuntimeError` is raised with a message containing the model alias and "larger context window".
+  - Given a source tree with 600 files, When `_build_file_tree` is called with the default 500 limit, Then a `RuntimeError` is raised with the actual file count and the limit.
 
 ### 4.5 Phase 2 — Plan
 
