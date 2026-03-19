@@ -22,21 +22,22 @@ from . import ui
 HELP_TEXT = """Local-first Agentic Development Framework.
 
 Getting started:
-  voidrift gather <model>                 Gather requirements
+  voidrift gather <model> <path>          Reverse-engineer requirements
+  voidrift chat <model>                   Interactive requirements & planning
   voidrift plan <model>                   Generate architecture and tasks
   voidrift develop <worker> [<architect>] Execute implementation tasks
   voidrift verify <worker> [<architect>]  Run quality checks
 
 Phases:
-  gather <model> [<feature>] [--from <path>] [--reference <path>] [--force]
-  plan <model> [<feature>] [--fresh-start]
+  gather <model> <path> [--force]
+  plan <model> [<feature>] [--fresh-start] [--update]
   develop <worker> [<architect>] [--workers <n>]
   automate <worker> [<architect>]
   verify <worker> [<architect>]
 
 Utility:
   status                      Show project phase status
-  chat <model>                Interactive chat session
+  chat <model> [--doc <path>] Interactive session with MCP tools
   log <phase> [--prune] [-f]   View or manage phase logs
   prune [--global] [--all]    Clean ephemeral data
   unlock                      Remove develop lock
@@ -147,15 +148,13 @@ def _interactive_mode():
 
 @cli.command()
 @click.argument("model", shell_complete=_complete_model)
-@click.argument("feature", required=False)
-@click.option("--from", "from_path", help="Path to existing codebase for reverse engineering")
-@click.option("--reference", help="Path to reference codebase for interactive lookup")
-@click.option("--force", is_flag=True, help="Overwrite existing requirements when using --from")
-def gather(model, feature, from_path, reference, force) -> None:
-    """Phase 1: Gather requirements interactively."""
+@click.argument("path", type=click.Path(exists=True))
+@click.option("--force", is_flag=True, help="Overwrite existing requirements")
+def gather(model, path, force) -> None:
+    """Phase 1: Reverse-engineer requirements from a codebase."""
     from .phases.gather import run_gather
     mc = resolve_model(model)
-    sys.exit(run_gather(mc, feature=feature, from_path=from_path, reference_path=reference, force=force))
+    sys.exit(run_gather(mc, from_path=path, force=force))
 
 
 @cli.command()
@@ -347,28 +346,57 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
 
 @cli.command()
 @click.argument("model", shell_complete=_complete_model)
-def chat(model) -> None:
-    """Interactive chat session with a model."""
+@click.option("--doc", help="Scope conversation to a specific .voidrift/ artifact")
+def chat(model, doc) -> None:
+    """Interactive session with full MCP tools for requirements, planning, and refinement."""
     mc = resolve_model(model)
     from .agent import AgentLoop, build_mcp_tools
+    from .utils import boot_run
+
+    log, run_id = boot_run("chat")
 
     try:
         import voidrift_mcp.server as mcp_mod
+        mcp_mod.run_id = run_id
         mcp_mod._boot()
         tools, handlers = build_mcp_tools(mcp_mod)
     except ImportError:
         tools, handlers = [], {}
 
+    system = (
+        "[ROLE: Analyst]\n\n"
+        "You are an interactive assistant in the VoidRift framework.\n"
+        "You help with requirements gathering, feature specs, architecture refinement, and task adjustments.\n\n"
+        "You have tools to discover and read project context:\n"
+        "- list_skills(), list_templates(), list_documents() — browse what's available\n"
+        "- get_skill(), get_template(), get_requirements() — fetch specific content\n"
+        "- read_source_file() — read project files\n"
+        "- write_file() — save changes\n\n"
+        "Ask clarifying questions before writing. Do not write until the operator approves.\n"
+        "Focus on 'what' the system must do, not 'how' it will be built, unless asked."
+    )
+
+    if doc:
+        from .utils import voidrift_dir
+        doc_path = voidrift_dir() / doc
+        if doc_path.exists():
+            system += f"\n\nYou are editing: {doc}\nCurrent content:\n\n{doc_path.read_text()}"
+            system += f"\n\nWhen writing changes, use write_file() with path '.voidrift/{doc}'."
+        else:
+            ui.warn(f"{doc} not found — starting fresh")
+            system += f"\n\nYou are creating: {doc}\nUse write_file() with path '.voidrift/{doc}'."
+
     agent = AgentLoop(
         model=mc,
-        system_prompt="You are a helpful AI assistant. You have MCP tools to read/write project files.",
+        system_prompt=system,
         tools=tools,
         tool_handlers=handlers,
         stream=True,
+        log_path=log,
     )
 
-    from .utils import log_path
-    _interactive_loop(agent, mc, log_path("chat"), "VoidRift Chat")
+    title = f"VoidRift Chat — {doc}" if doc else "VoidRift Chat"
+    _interactive_loop(agent, mc, log, title)
 
 
 @cli.command()

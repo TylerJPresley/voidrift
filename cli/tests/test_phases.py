@@ -13,21 +13,6 @@ from helpers import make_openai_response
 
 
 class TestGatherPreflightChecks:
-    def test_feature_without_requirements(self, tmp_project, cloud_model):
-        from voidrift_cli.phases.gather import run_gather
-        result = run_gather(cloud_model, feature="auth")
-        assert result == 1
-
-    def test_feature_with_requirements(self, tmp_project, cloud_model, sample_requirements):
-        from voidrift_cli.phases.gather import run_gather
-        # This will try to start TUI — we just verify it gets past preflight
-        with patch("voidrift_cli.phases.gather.AgentLoop"):
-            with patch("voidrift_cli.main._interactive_loop"):
-                result = run_gather(cloud_model, feature="auth")
-        assert result == 0  # Exited cleanly
-        # Verify spec dir was created
-        assert (tmp_project / ".voidrift" / "spec").is_dir()
-
     def test_from_nonexistent_dir(self, tmp_project, cloud_model):
         from voidrift_cli.phases.gather import run_gather
         result = run_gather(cloud_model, from_path="/nonexistent/path")
@@ -420,8 +405,7 @@ class TestCLICommands:
         from voidrift_cli.main import cli
         runner = CliRunner()
         result = runner.invoke(cli, ["gather", "--help"])
-        assert "--from" in result.output
-        assert "--reference" in result.output
+        assert "PATH" in result.output
         assert "--force" in result.output
 
     def test_develop_help(self):

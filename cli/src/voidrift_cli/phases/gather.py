@@ -1,123 +1,38 @@
-"""Phase 1 — Gather: Requirements elicitation (AC-G1 through AC-G13)."""
+"""Phase 1 — Gather: Reverse-engineer requirements from a codebase (REQ-G-1, REQ-G-8)."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-import click
-
 from ..agent import AgentLoop, build_mcp_tools
 from ..models import ModelConfig
 from ..utils import (
-    ensure_voidrift_dir, voidrift_dir, log_path, boot_run, check_disk_space,
+    ensure_voidrift_dir, boot_run, check_disk_space,
 )
 from .. import ui
-
-# System prompt for the Analyst role
-ANALYST_PROMPT = """[ROLE: Analyst]
-
-You are an Analyst in the VoidRift framework. Your job is to elicit requirements through interactive conversation.
-
-Focus on "what" the system must do, not "how" it will be built.
-Ask clarifying questions before writing requirements.
-Keep responses concise — a few focused questions per turn, not exhaustive lists.
-Do not discuss technology choices unless the operator explicitly requests them.
-
-You have MCP tools available to read/write requirements and examine project artifacts.
-
-When writing REQUIREMENTS.md, use exactly these sections:
-- Goal
-- Users
-- Features
-- Runtime Environment (Local development + Production subsections)
-- Constraints
-- Out of Scope
-
-When writing feature specs (spec/<feature>.md), use exactly these sections:
-- Goal
-- User Stories (As a [role], I want [capability] so that [benefit])
-- Acceptance Criteria (Given/When/Then BDD format)
-- Non-Functional Requirements
-- Edge Cases
-
-After writing REQUIREMENTS.md, list the exact commands to run for each feature, ready to copy. Example:
-  voidrift gather {model} "feature name"
-Do not explain the command format — just list the commands.
-
-Do NOT write the file until you have sufficient information. Ask questions first.
-When you have enough information, tell the operator you're ready to write and ask them to type /write.
-"""
 
 
 def run_gather(
     model: ModelConfig,
-    feature: str | None = None,
-    from_path: str | None = None,
-    reference_path: str | None = None,
+    from_path: str,
     force: bool = False,
 ) -> int:
-    """Execute the gather phase.
+    """Execute the gather phase — reverse-engineer requirements from a codebase.
 
     Args:
         model: Model configuration for the analyst role.
-        feature: Optional feature name for a feature spec.
-        from_path: Path to existing codebase for reverse engineering.
-        reference_path: Path to reference codebase for interactive lookup.
-        force: Overwrite existing requirements when using from_path.
+        from_path: Path to existing codebase.
+        force: Overwrite existing requirements.
 
     Returns:
         Exit code (0 for success, 1 for failure).
     """
     check_disk_space()
     d = ensure_voidrift_dir()
+    target = d / "REQUIREMENTS.md"
+    source = Path(from_path)
 
-    # Determine target file (AC-G1)
-    if feature:
-        if not (d / "REQUIREMENTS.md").exists():
-            ui.error("REQUIREMENTS.md not found. Run 'voidrift gather <model>' first.")
-            return 1
-        target = d / "spec" / f"{feature}.md"
-        target.parent.mkdir(exist_ok=True)
-    else:
-        target = d / "REQUIREMENTS.md"
-
-    # Reverse engineering mode (AC-G11)
-    if from_path:
-        return _gather_from(model, target, Path(from_path), feature, force)
-
-    # Interactive mode (AC-G3, AC-G4)
-    system = ANALYST_PROMPT.replace("{model}", model.alias)
-    target_rel = str(target.relative_to(Path.cwd()))
-    system += f"\n\nWhen using write_file(), write to exactly this path: {target_rel}"
-    if reference_path:
-        system += f"\n\nA reference codebase is available at {reference_path}. You can use read_source_file() to examine it."
-    if target.exists():
-        system += f"\n\nHere is the existing requirements file for revision:\n\n{target.read_text()}"
-
-    from ..tools import LOCAL_TOOLS, LOCAL_HANDLERS
-    allowed = {"write_file", "read_source_file"} if reference_path else {"write_file"}
-    tools = [t for t in LOCAL_TOOLS if t["function"]["name"] in allowed]
-    handlers = {k: v for k, v in LOCAL_HANDLERS.items() if k in allowed}
-
-    from ..main import _interactive_loop
-    log, _ = boot_run("gather")
-
-    agent = AgentLoop(
-        model=model,
-        system_prompt=system,
-        tools=[],
-        tool_handlers=handlers,
-        stream=True,
-        max_tokens=16384,
-        extra_body={"chat_template_kwargs": {"enable_thinking": False}},
-        log_path=log,
-    )
-
-    target_label = str(target.relative_to(Path.cwd()))
-    title = f"VoidRift Gather — Feature: {feature}" if feature else "VoidRift Gather"
-    extra = [f"Target: {target_label}"]
-    _interactive_loop(agent, model, log, title, write_tools=tools, extra_header=extra)
-    return 0
+    return _gather_from(model, target, source, force)
 
 
 
@@ -125,7 +40,6 @@ def _gather_from(
     model: ModelConfig,
     target: Path,
     from_path: Path,
-    feature: str | None,
     force: bool,
 ) -> int:
     """Reverse engineering mode — four-stage pipeline (REQ-G-8, REQ-ARCH-7)."""
