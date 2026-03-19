@@ -176,24 +176,38 @@
 
 - **REQ-WK-1:** The Worker CLI (`worker-cli/`) SHALL be a separate Python package providing the `worker` command, installed independently from the VoidRift CLI.
 - **REQ-WK-2:** `worker start <alias>` SHALL SSH to the worker node, stop any running model container, start the requested model container, and poll until the API health check responds. During polling, the system SHALL check `docker ps` to detect container exit — IF the container is no longer running, THE SYSTEM SHALL exit immediately with the container's logs as error context.
+  - Given alias `qwen3-coder` is configured in `worker-models.yml`, When `worker start qwen3-coder` is run, Then the previous container is stopped, the new container starts, and the command exits after the health check passes.
+  - Given the container exits during polling, When `docker ps` shows no running container, Then the command exits with code 1 and prints the container logs.
 - **REQ-WK-3:** `worker stop` SHALL SSH to the worker node and stop the active model container.
+  - Given a model container is running, When `worker stop` is run, Then the container is stopped and the command exits with code 0.
 - **REQ-WK-4:** `worker status` SHALL report the active model (if any), container health, and API endpoint URL.
+  - Given a model container is running, When `worker status` is run, Then the output includes the model alias, health status, and endpoint URL.
+  - Given no container is running, When `worker status` is run, Then the output indicates no active model.
 - **REQ-WK-5:** `worker bench [<num_prompts>] [<req_rate>]` SHALL benchmark the active model using vLLM's benchmark tool via SSH.
 - **REQ-WK-6:** `worker models list` SHALL display configured models (from `worker-models.yml`) and cached models (from HF cache) with clear section headers.
+  - Given two models are configured and one is cached, When `worker models list` is run, Then both configured models appear under a "Configured" header and the cached model appears under a "Cached" header.
 - **REQ-WK-6a:** `worker models add <alias> <repo>` SHALL add a new model to `worker-models.yml` AND download the weights. IF the alias already exists, THE SYSTEM SHALL exit with an error.
+  - Given alias `new-model` does not exist, When `worker models add new-model org/repo` is run, Then the alias is added to `worker-models.yml` and weights are downloaded.
+  - Given alias `qwen3-coder` already exists, When `worker models add qwen3-coder org/repo` is run, Then the command exits with an error and `worker-models.yml` is unchanged.
 - **REQ-WK-6b:** `worker models remove <alias>` SHALL delete the cached weights AND move the model config to a `retired` section in `worker-models.yml`.
 - **REQ-WK-6c:** `worker models check` SHALL audit all configured models, verify cache integrity, and attempt to download missing weights for configured models. It SHALL report unconfigured models in the cache. With `--prune`, it SHALL remove unconfigured cached models.
 - **REQ-WK-7:** Only one local model container SHALL run at a time on the worker node.
+  - Given container A is running, When `worker start` launches container B, Then container A is stopped before container B starts.
 - **REQ-WK-8:** Model configurations SHALL be defined in `worker-models.yml` specifying: repository, docker image, GPU memory utilization, max model length, vLLM args, served model name, and cache mounts.
 - **REQ-WK-9:** `worker kiro start` SHALL start the Kiro Gateway container. `worker kiro stop` SHALL stop it. `worker kiro status` SHALL report health and available models.
 - **REQ-WK-10:** WHEN Kiro Gateway credentials are invalid (expired token, database permissions), THE SYSTEM SHALL stop immediately with a clear error message identifying the failure mode.
   - *Rationale:* Prevents the CLI from entering an infinite retry loop against invalid credentials. The error message directs the operator to the specific fix (re-login, chmod).
+  - Given the Kiro Gateway returns a 401 during health check, When the CLI detects the auth failure, Then the command exits with an error message identifying expired credentials.
 - **REQ-WK-11:** `worker logs [-f]` SHALL list all worker containers (running and stopped) with status, mark the active one, and prompt the user to select one. It SHALL then show that container's logs. IF no containers exist, it SHALL exit with an error.
+  - Given no containers exist on the worker node, When `worker logs` is run, Then the command exits with an error message.
 - **REQ-WK-12:** `worker info` SHALL report worker node GPU status (`nvidia-smi`), disk usage (`df -h`), and memory (`free -h`) over SSH.
 - **REQ-WK-13:** `worker images pull [<image>]` SHALL pull a vLLM docker image on the worker node. IF no image is specified, THE SYSTEM SHALL pull the default image from `worker-models.yml`. `worker images list` SHALL list docker images on the worker node.
 - **REQ-WK-14:** `worker cache clear` SHALL remove compiled kernel caches (flashinfer, vllm) on the worker node over SSH.
 - **REQ-WK-15:** `worker check` SHALL verify worker node prerequisites over SSH: Docker available, NVIDIA GPU accessible (`nvidia-smi`), `uvx` on PATH, and SSH connectivity. Each check SHALL report pass/fail. IF any check fails, THE SYSTEM SHALL exit with code 1.
+  - Given Docker is available and GPU is accessible, When `worker check` is run, Then all checks report pass and the command exits with code 0.
+  - Given SSH connectivity fails, When `worker check` is run, Then the SSH check reports fail and the command exits with code 1.
 - **REQ-WK-16:** All `worker` CLI help output SHALL follow the CLI Help Convention defined in SYSTEMS-ENG skill. WHEN an unknown command or invalid arguments are given, THE SYSTEM SHALL display the error and help text (no tracebacks).
+  - Given an unknown subcommand `worker foo`, When the command is run, Then the output contains the error and help text with no Python traceback.
 - **REQ-WK-17:** `worker completions <shell>` SHALL output shell completion scripts for bash, zsh, and fish. Alias arguments SHALL complete from configured models in `worker-models.yml`.
 
 ### 4.12 Git
