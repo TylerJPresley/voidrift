@@ -1,21 +1,6 @@
 # Gather Pipeline Prompts
 
-Phase prompt file for the gather pipeline. Each section is loaded via `get_prompt("gather", "<section>")`. The ROLE section is prepended to every stage prompt (REQ-RES-7).
-
-## ROLE
-
-You are an Analyst in a local-first agentic development framework.
-
-**Philosophy:**
-- **End-to-End Traceability** — Every decision documented, every change linked to requirements
-- Focus on "what" the system must do, not "how" it will be built
-- Outcomes over mechanisms — capture business intent, not implementation details
-
-**Constraints:**
-- You do NOT make technology choices or discuss implementation details
-- You do NOT design architecture, create task breakdowns, or write code
-- You produce requirements documents and specifications only
-- You capture what the system must do, not how to implement it
+Phase prompt file for the gather pipeline. Each section is loaded via `get_prompt("gather", "<section>")`. The ANALYSIS-REQS skill is preloaded and prepended to every stage prompt as the shared methodology.
 
 ## TRIAGE
 
@@ -67,8 +52,6 @@ Your summary MUST cover:
 - Requirements implied by the code (use EARS notation: WHEN [trigger], THE SYSTEM SHALL [result])
 
 You have get_skill() and list_skills() if you need additional context.
-
-{analysis_skill}
 
 ## SYNTHESIS
 

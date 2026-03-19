@@ -101,9 +101,10 @@ def _gather_from(
     with open(log, "a") as f:
         f.write(f"=== Reverse engineering from {from_path} ===\n")
 
-    # Load analyst role once for all stages (REQ-RES-7)
+    # Load shared methodology once for all stages (REQ-RES-7)
     _get_prompt = all_handlers.get("get_prompt", lambda *a: "")
-    analyst_role = _get_prompt("gather", "ROLE")
+    _get_skill = all_handlers.get("get_skill", lambda *a: "")
+    analyst_role = _get_skill("ANALYSIS-REQS")
 
     # --- Stage 1: Triage — identify files and logical groups ---
     ui.stage("Stage 1: Triaging files...")
@@ -170,11 +171,8 @@ def _gather_from(
         {"read_source_file", "store_file_analysis", "get_skill", "list_skills"}
     )
 
-    # Preload ANALYSIS-REQS skill and build analysis prompt
-    analysis_skill = all_handlers.get("get_skill", lambda _: "")("ANALYSIS-REQS")
-    analysis_prompt = _get_prompt("gather", "ANALYSIS").format(
-        analysis_skill=f"--- ANALYSIS-REQS SKILL ---\n\n{analysis_skill}"
-    )
+    # Build analysis prompt (skill already prepended via analyst_role)
+    analysis_prompt = _get_prompt("gather", "ANALYSIS")
     analysis_system = f"{analyst_role}\n\n{analysis_prompt}"
 
     import time as _time
