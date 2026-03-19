@@ -288,6 +288,52 @@ def _list_skills() -> list[str]:
     return [p.stem.lower() for p in sorted(skills_dir.glob("*.md"))]
 
 
+def _first_line(path: Path) -> str:
+    """Return the first non-empty, non-heading line as a description."""
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            return stripped[:120]
+    return ""
+
+
+@mcp.tool()
+def list_skills() -> str:
+    """List all available skill files with descriptions."""
+    skills_dir = RESOURCES_DIR / "skills"
+    if not skills_dir.is_dir():
+        return "No skills directory found."
+    lines = []
+    for p in sorted(skills_dir.glob("*.md")):
+        lines.append(f"- {p.stem.lower()}: {_first_line(p)}")
+    return "\n".join(lines) if lines else "No skills found."
+
+
+@mcp.tool()
+def list_templates() -> str:
+    """List all available template files with descriptions."""
+    templates_dir = RESOURCES_DIR / "templates"
+    if not templates_dir.is_dir():
+        return "No templates directory found."
+    lines = []
+    for p in sorted(templates_dir.glob("*.md")):
+        lines.append(f"- {p.stem.lower()}: {_first_line(p)}")
+    return "\n".join(lines) if lines else "No templates found."
+
+
+@mcp.tool()
+def list_documents() -> str:
+    """List all .voidrift/ project artifacts with file sizes."""
+    if not VOIDRIFT_DIR.is_dir():
+        return "No .voidrift/ directory found."
+    lines = []
+    for p in sorted(VOIDRIFT_DIR.rglob("*.md")):
+        rel = p.relative_to(VOIDRIFT_DIR)
+        size = p.stat().st_size
+        lines.append(f"- {rel} ({size:,} bytes)")
+    return "\n".join(lines) if lines else "No documents found."
+
+
 @mcp.tool()
 def read_source_file(path: str) -> str:
     """Read a source file from the project directory.
