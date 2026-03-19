@@ -268,6 +268,9 @@
 | V-MCP-5 | REQ-MCP-8 | Test | `test_task_store.py::test_get_next` — returns first unchecked |
 | V-MCP-6 | REQ-MCP-9 | Test | `test_task_store.py::test_complete_writes_through` |
 | V-MCP-7 | REQ-MCP-15 | Test | `test_server_tools.py` — prompt retrieval by phase and section |
+| V-MCP-8 | REQ-MCP-11 | Test | `test_server_tools.py` — duplicate `write_file` returns error, file unchanged |
+| V-MCP-9 | REQ-MCP-16 | Test | `test_server_tools.py` — `list_prompts` returns sections per phase |
+| V-RES-1 | REQ-RES-6 | Test | `test_phases.py` — format variable substitution in prompt templates |
 | V-ARCH-1 | REQ-ARCH-2 | Test | `test_phases.py::TestCLICommands` — subcommands exist |
 | V-ARCH-2 | REQ-ARCH-4 | Test | `test_agent.py` — agent loop sends/receives messages |
 | V-ARCH-3 | REQ-ARCH-6 | Test | `test_agent.py::TestBuildMcpTools` — tools present, no direct reads |
@@ -286,6 +289,14 @@
 | V-MC-2 | REQ-MC-2 | Test | `test_models.py::TestResolveModel::test_cloud_models` |
 | V-WK-1 | REQ-WK-2 | Test | `test_worker.py` — container start/stop via SSH |
 | V-WK-2 | REQ-WK-10 | Test | `test_worker.py::TestKiroGateway::test_validate_credentials_expired` |
+| V-WK-3 | REQ-WK-3 | Test | `test_worker.py` — stop command halts active container |
+| V-WK-4 | REQ-WK-4 | Test | `test_worker.py` — status reports model, health, and endpoint |
+| V-WK-5 | REQ-WK-6 | Test | `test_worker.py` — models list shows configured and cached sections |
+| V-WK-6 | REQ-WK-6a | Test | `test_worker.py` — models add succeeds for new alias, errors on duplicate |
+| V-WK-7 | REQ-WK-7 | Test | `test_worker.py` — start stops previous container before launching new one |
+| V-WK-8 | REQ-WK-11 | Test | `test_worker.py` — logs errors when no containers exist |
+| V-WK-9 | REQ-WK-15 | Test | `test_worker.py::TestWorkerCheck` — pass/fail per prerequisite |
+| V-WK-10 | REQ-WK-16 | Test | `test_worker.py` — unknown command shows error and help, no traceback |
 
 ---
 
