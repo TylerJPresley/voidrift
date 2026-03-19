@@ -7,20 +7,20 @@
 
 ## 2. User Stories
 
-- **As an** Operator, **I want to** run `voidrift gather` to interactively define requirements with an AI analyst, **so that** I get a complete, testable requirements document without writing it manually.
+- **As an** Operator, **I want to** run `voidrift gather <model> <path>` to reverse-engineer requirements from an existing codebase, **so that** I can onboard projects into the framework without writing requirements manually.
+- **As an** Operator, **I want to** run `voidrift chat <model>` to interactively refine requirements, architecture, and tasks with an AI analyst, **so that** I can iterate on project artifacts through conversation.
 - **As an** Operator, **I want to** run `voidrift plan` to generate architecture and task breakdowns, **so that** implementation work is pre-planned with atomic, ordered tasks.
 - **As an** Operator, **I want to** run `voidrift develop` to have an AI execute tasks automatically, **so that** code is written, tested, and committed without manual intervention.
 - **As an** Operator, **I want to** run `voidrift develop --workers 0` to process multiple modules concurrently, **so that** large projects complete faster.
 - **As an** Operator, **I want to** use local models for bulk implementation and cloud models for escalation, **so that** I minimize API costs while maintaining quality on hard problems.
 - **As an** Operator, **I want to** run `voidrift automate` to generate infrastructure-as-code, **so that** my project is deployable without manual IaC authoring.
 - **As an** Operator, **I want to** run `voidrift verify` to validate the implementation against requirements, **so that** I have confidence the project meets its acceptance criteria.
-- **As an** Operator, **I want to** reverse-engineer requirements from an existing codebase via `voidrift gather --from`, **so that** I can onboard legacy projects into the framework.
 - **As a** Developer model, **I want to** receive one task at a time via MCP tools, **so that** my context window stays small and focused.
-- **As an** Architect model, **I want to** receive only the problem description and architecture docs during escalation (not source code), **so that** I provide design guidance without implementation bias.
+- **As an** Architect model, **I want to** receive only the problem description and architecture docs during escalation, **so that** I provide design guidance without implementation bias.
 
 ## 3. External Interfaces (IEEE 29148)
 
-- **User Interfaces:** Terminal CLI (`voidrift` command). Interactive chat for gather phase. Progress indicators (spinners, elapsed time) for background phases. Rich terminal output via the `rich` library.
+- **User Interfaces:** Terminal CLI (`voidrift` command). Interactive chat via `voidrift chat`. Progress indicators (spinners, elapsed time) for automated phases. Rich terminal output via the `rich` library.
 - **Hardware Interfaces:** GPU worker node (NVIDIA GB10 or compatible) accessed via SSH for local model inference. Optional — cloud models require no hardware.
 - **Software/API Interfaces:**
   - OpenAI-compatible chat completions API (local vLLM, Kiro Gateway)
@@ -42,6 +42,7 @@
 - **REQ-ARCH-2:** The CLI SHALL provide subcommands: `gather`, `plan`, `develop`, `automate`, `verify`, `chat`, `status`, `log`, `unlock`, `prune`, `completions`. WHEN an unknown command is given, THE SYSTEM SHALL display the error and full help text (no tracebacks). No CLI command SHALL ever display a Python traceback to the user.
 - **REQ-ARCH-3:** WHEN `voidrift` is run with no arguments, THE SYSTEM SHALL launch an interactive guided flow presenting available actions, model selection, and phase-specific options.
 - **REQ-ARCH-4:** The CLI SHALL implement an agent loop that sends messages to model APIs (OpenAI-compatible for local/kiro, native for cloud), handles MCP tool calls, and streams responses to the terminal. WHEN tools are provided in the API call, the agent SHALL set `tool_choice: "required"` on every call. A `done` tool SHALL be included automatically — WHEN the model calls `done()`, the agent SHALL make one final call with `tool_choice: "none"` (no tools) to get the text summary. The agent loop SHALL detect stalls: IF the model makes the same tool call (same name and arguments) on consecutive iterations, the agent SHALL force a final text-only call. WHILE waiting for any model response (initial or after tool calls), THE SYSTEM SHALL display a "Thinking..." spinner on stderr that clears when the response begins streaming. The agent loop SHALL log all interactions to the active phase log file: system prompts, user messages, model responses, tool calls (name + arguments), and tool results.
+  - *Rationale:* `tool_choice: "required"` ensures the model uses tools when they're available rather than generating text about what it would do. The `done` tool gives the model an explicit signal to stop tool use — without it, models loop indefinitely or stop unpredictably. Stall detection prevents infinite loops when a model repeats the same failing call. Comprehensive logging enables post-run debugging without reproducing the full agent session.
 - **REQ-ARCH-5:** The CLI SHALL be model-agnostic. It SHALL resolve model aliases to `(base_url, api_key, model_id)` tuples from a models config file and connect to the endpoint directly. It SHALL NOT manage containers, SSH connections, or gateway processes.
   - *Rationale:* The worker node already exposes an OpenAI-compatible endpoint. Cloud APIs expose endpoints. Kiro Gateway exposes an endpoint. The CLI treats all three identically — the only variable is the URL.
 - **REQ-ARCH-6:** The CLI SHALL never read framework resource files (agents, skills, templates) directly. All framework context SHALL be served exclusively through MCP server tool calls.
@@ -52,11 +53,11 @@
 ### 4.2 MCP Context Server
 
 - **REQ-MCP-1:** The MCP server SHALL communicate via stdio using the MCP protocol, built with Python/FastMCP.
-- **REQ-MCP-2:** WHEN the server starts, THE SYSTEM SHALL load all framework files from `resources/` (agents, skills, templates), index them by markdown header, and serve targeted sections on demand.
+- **REQ-MCP-2:** WHEN the server starts, THE SYSTEM SHALL load all framework files from `resources/` (skills, templates, prompts), index them by markdown header, and serve targeted sections on demand.
 - **REQ-MCP-3:** The server SHALL use write-through storage for persistent artifacts (requirements, specs): `store_*` tools write to both in-memory cache and disk simultaneously. Ephemeral artifacts (analyses, escalation context) SHALL be stored in the SessionStore SQLite database (`~/.voidrift/sessions.db`), keyed by run ID.
   - *Rationale:* Persistent artifacts are operator work products that belong on disk. Ephemeral data belongs in the MCP's data store — queryable, prunable by age, and correlated by run ID.
 - **REQ-MCP-3a:** ALL phase executions SHALL be scoped to a run ID. The run ID SHALL be the log filename stem (e.g. `gather-20260318-101048`). The CLI SHALL pass the run ID to the MCP server after `_boot()` to start a session in the SessionStore. ALL ephemeral MCP data (analyses, escalation context) SHALL be stored in the SessionStore keyed by run ID. The log file serves as the run's PID file — its existence and filename are the canonical record of the run.
-- **REQ-MCP-4:** The server SHALL expose content management tools: `store_file_analysis()`, `get_file_analysis()`, `get_all_analyses()`, `store_requirements()`, `get_requirements()`, `get_skill(name, topic)`, `get_template(name)`, `get_prompt(phase, section)`, `load_tasks(path)`, `get_next_task(module)`, `complete_task(module)`, `get_task_status(module)`, `list_skills()`, `list_templates()`, `list_documents()`, `list_prompts(phase)`. The MCP server SHALL NOT perform local filesystem operations — it MAY reside on a different host than the CLI.
+- **REQ-MCP-4:** The MCP server SHALL expose content management tools as defined by REQ-MCP-6 through REQ-MCP-16. The MCP server SHALL serve framework resources from memory and ephemeral data from SQLite — it SHALL NOT perform local filesystem write operations, as it MAY reside on a different host than the CLI.
 - **REQ-MCP-4a:** The CLI SHALL provide local filesystem tools directly (not via MCP): `write_file(path, content)`, `read_source_file(path)`, `export_to_file(type, path)`, `list_project_artifacts()`. These tools execute on the workstation where the CLI runs.
   - *Rationale:* The MCP server may be remote. Only the CLI is guaranteed to have local filesystem access.
 - **REQ-MCP-6:** WHEN `get_template(name)` is called, THE SYSTEM SHALL retrieve the template from the in-memory index. IF the name is not found, THE SYSTEM SHALL return an error listing available templates.
@@ -88,6 +89,7 @@
 
 - **REQ-G-1:** `voidrift gather <model> <path>` SHALL reverse-engineer requirements from the codebase at `<path>` using the four-stage pipeline (REQ-G-8). `--force` overwrites existing requirements.
 - **REQ-G-8:** THE SYSTEM SHALL reverse-engineer requirements in four stages, each using a separate agent instance (per REQ-ARCH-7). Each agent's system prompt SHALL be constructed per REQ-RES-7: the ANALYSIS-REQS skill (loaded once via `get_skill("ANALYSIS-REQS")`) concatenated with the stage-specific prompt (loaded via `get_prompt("gather", "<stage>")`). All instructions SHALL live in `resources/prompts/gather.md`.
+  - *Rationale:* Four stages decompose a problem too large for one context window: triage reduces the file set, per-file analysis keeps each context small, per-group synthesis produces focused specs, and the overview ties them together. Separate agents per stage prevent context accumulation (REQ-ARCH-7). Externalizing prompts to resource files allows methodology iteration without code changes.
   1. **Triage:** Agent receives the complete file tree (filtered only for directories starting with `.`) and returns a JSON object with `groups` — a dict mapping logical boundary names to lists of files worth analyzing. The triage agent SHALL select only source files, documentation, and configuration — skipping build output, compiled artifacts, dependency directories, generated code, binaries, images, lock files, and any other non-source content. The agent infers this from its knowledge of the project's language and toolchain; the CLI SHALL NOT hardcode language-specific exclusions. A second validation pass SHALL review the triage output and remove any files that were incorrectly included (e.g. hashed build bundles, lock files, binary assets). The agent SHALL auto-detect logical boundaries from directory structure (e.g. `frontend/`, `backend/`, `api/`, `shared/`). Single-application codebases SHALL use one group.
   2. **Analysis:** One agent per file — reads the file via `read_source_file()`, stores a summary via `store_file_analysis()`, then exits. Each agent SHALL be preloaded with the ANALYSIS-REQS skill in its system prompt and SHALL have access to `get_skill()` and `list_skills()` to pull additional context. Each agent has a clean context containing only the single file.
   3. **Synthesis:** One agent per logical group — receives that group's full analyses in the system prompt (no truncation), fetches formatting guidance via `get_template()` and `get_skill()` (per REQ-ARCH-6), and writes a spec file via `write_file()` to `.voidrift/spec/<group>.md`. Each spec SHALL be thorough: every endpoint, component, data flow, config parameter, and error behavior from the analyses must appear as a requirement with acceptance criteria.
@@ -215,7 +217,7 @@
 
 - **REQ-CFG-1:** All framework configuration SHALL be read from `~/.voidrift/config.yml`. Config files SHALL support `${VAR}` and `${VAR:-default}` for environment variable expansion, and `${section.key}` for cross-referencing values from config.yml.
 - **REQ-CFG-2:** `config.yml` SHALL contain sections for: `worker` (user, ip, api_key, hf_token), `kiro` (port, api_key), and `api_keys` (anthropic, gemini). Connection settings are literal values; secrets use env var references.
-- **REQ-CFG-3:** Framework resources (agents, skills, templates), `models.yml`, and `worker-models.yml` SHALL be read from `~/.voidrift/`. The repo is the source of truth; `make sync` copies to `~/.voidrift/`.
+- **REQ-CFG-3:** Framework resources (skills, templates, prompts), `models.yml`, and `worker-models.yml` SHALL be read from `~/.voidrift/`. The repo is the source of truth; `make sync` copies to `~/.voidrift/`.
 - **REQ-CFG-4:** `VOIDRIFT_HOME` env var MAY override `~/.voidrift/` for testing and CI. IF not set, `~/.voidrift/` is used.
 - **REQ-CFG-5:** `config.yml` SHALL contain a `retention:` section with `project` (integer, default 5 — number of recent runs to keep) and `global` (integer, default 30 — days of session data to keep). `voidrift prune` uses these limits.
 
@@ -233,15 +235,16 @@
 |----|-------------|--------|-------------------|
 | V-MCP-1 | REQ-MCP-2 | Test | `test_server_tools.py` — framework resources loaded at boot |
 | V-MCP-2 | REQ-MCP-3 | Test | `test_artifact_store.py` — write-through and disk fallback |
-| V-MCP-3 | REQ-MCP-5 | Test | `test_server_tools.py::TestGetAgent` — role retrieval and errors |
-| V-MCP-4 | REQ-MCP-6 | Test | `test_server_tools.py::TestGetTemplate` — template retrieval |
-| V-MCP-5 | REQ-MCP-7 | Test | `test_task_store.py` — module parsing, single and multi |
-| V-MCP-6 | REQ-MCP-8 | Test | `test_task_store.py::test_get_next` — returns first unchecked |
-| V-MCP-7 | REQ-MCP-9 | Test | `test_task_store.py::test_complete_writes_through` |
+| V-MCP-3 | REQ-MCP-6 | Test | `test_server_tools.py::TestGetTemplate` — template retrieval |
+| V-MCP-4 | REQ-MCP-7 | Test | `test_task_store.py` — module parsing, single and multi |
+| V-MCP-5 | REQ-MCP-8 | Test | `test_task_store.py::test_get_next` — returns first unchecked |
+| V-MCP-6 | REQ-MCP-9 | Test | `test_task_store.py::test_complete_writes_through` |
+| V-MCP-7 | REQ-MCP-15 | Test | `test_server_tools.py` — prompt retrieval by phase and section |
 | V-ARCH-1 | REQ-ARCH-2 | Test | `test_phases.py::TestCLICommands` — subcommands exist |
 | V-ARCH-2 | REQ-ARCH-4 | Test | `test_agent.py` — agent loop sends/receives messages |
 | V-ARCH-3 | REQ-ARCH-6 | Test | `test_agent.py::TestBuildMcpTools` — tools present, no direct reads |
-| V-G-1 | REQ-G-2 | Test | `test_phases.py::TestGatherPreflightChecks` |
+| V-G-1 | REQ-G-1 | Test | `test_phases.py::TestGatherPreflightChecks` |
+| V-G-2 | REQ-G-11 | Test | `test_agent.py` — context length error detection |
 | V-P-1 | REQ-P-1 | Test | `test_phases.py::TestPlanPreflightChecks` — artifact production |
 | V-P-2 | REQ-P-6 | Analysis | Code review of generated TASKS.md for file ownership |
 | V-D-1 | REQ-D-1 | Test | `test_phases.py::TestDevelopPreflightChecks::test_missing_tasks` |
