@@ -68,6 +68,9 @@
 - **REQ-MCP-9:** WHEN `complete_task(module)` is called, THE SYSTEM SHALL mark the first unchecked task as `- [x]` and write through to disk.
 - **REQ-MCP-10:** The server SHALL use in-memory index for content (parsed markdown sections) and SQLite (`~/.voidrift/sessions.db`) for session metadata and ephemeral run data (analyses, escalation context). The SQLite connection SHALL be thread-safe (`check_same_thread=False`) to support concurrent file analysis in the gather pipeline.
 - **REQ-MCP-11:** `write_file()` SHALL track paths written during the current run. IF a path has already been written in the same run, the tool SHALL reject the call with an error message (e.g. "File already written this run: <path>") and return without overwriting.
+- **REQ-MCP-12:** `list_skills()` SHALL return names and one-line descriptions of all available skill files loaded from the resources directory.
+- **REQ-MCP-13:** `list_templates()` SHALL return names and one-line descriptions of all available template files loaded from the resources directory.
+- **REQ-MCP-14:** `list_documents()` SHALL return a listing of all `.voidrift/` artifacts (REQUIREMENTS.md, ARCHITECTURE.md, TASKS.md, spec/*.md, etc.) with file sizes.
 
 ### 4.3 Framework Reference Files
 
@@ -79,22 +82,14 @@
 
 ### 4.4 Phase 1 — Gather
 
-- **REQ-G-1:** WHEN `voidrift gather <model>` is run AND the target file exists, THE SYSTEM SHALL include it in the system prompt as context for revision. IF the file does not exist, THE SYSTEM SHALL create a new file.
-- **REQ-G-2:** WHEN `voidrift gather <model> <feature>` is run AND `.voidrift/REQUIREMENTS.md` does not exist, THE SYSTEM SHALL exit with error code 1.
-- **REQ-G-3:** The gather phase SHALL use the shared interactive terminal loop (REQ-UI-3 through REQ-UI-5). The interactive gather agent SHALL only have access to local filesystem tools (`write_file`, `read_source_file`) provided by the CLI (REQ-MCP-4a), not the full MCP tool set. Tools SHALL be disabled by default and enabled via `/write` command (REQ-UI-4). IF a model request fails mid-session, THE SYSTEM SHALL print the error and return to the prompt (not exit).
-  - *Rationale:* Exposing all 16 MCP tools in interactive mode causes local models to enter infinite tool-call loops instead of conversing. Disabling tools by default also prevents the model from burning tokens on hidden thinking when tools are present in the request.
-- **REQ-G-4:** The model SHALL ask clarifying questions before writing the output file and SHALL NOT write until it has sufficient information.
-- **REQ-G-5:** The model SHALL NOT focus on technology choices unless the operator explicitly requests them.
-- **REQ-G-6:** Full project gather SHALL produce `.voidrift/REQUIREMENTS.md` with sections: Goal, Users, Features, Runtime Environment, Constraints, Out of Scope.
-- **REQ-G-7:** Feature gather SHALL produce `.voidrift/spec/<feature>.md` with sections: Goal, User Stories, Acceptance Criteria (BDD), Non-Functional Requirements, Edge Cases.
-- **REQ-G-8:** WHEN `--from <path>` is specified, THE SYSTEM SHALL reverse-engineer requirements in four stages, each using a separate agent instance (per REQ-ARCH-7):
+- **REQ-G-1:** `voidrift gather <model> <path>` SHALL reverse-engineer requirements from the codebase at `<path>` using the four-stage pipeline (REQ-G-8). No interactive mode. `--force` overwrites existing requirements.
+- **REQ-G-8:** THE SYSTEM SHALL reverse-engineer requirements in four stages, each using a separate agent instance (per REQ-ARCH-7):
   1. **Triage:** Agent receives the complete file tree (filtered only for directories starting with `.`) and returns a JSON object with `groups` — a dict mapping logical boundary names to lists of files worth analyzing. The triage agent SHALL select only source files, documentation, and configuration — skipping build output, compiled artifacts, dependency directories, generated code, binaries, images, lock files, and any other non-source content. The agent infers this from its knowledge of the project's language and toolchain; the CLI SHALL NOT hardcode language-specific exclusions. A second validation pass SHALL review the triage output and remove any files that were incorrectly included (e.g. hashed build bundles, lock files, binary assets). The agent SHALL auto-detect logical boundaries from directory structure (e.g. `frontend/`, `backend/`, `api/`, `shared/`). Single-application codebases SHALL use one group.
   2. **Analysis:** One agent per file — reads the file via `read_source_file()`, stores a summary via `store_file_analysis()`, then exits. Each agent has a clean context containing only the single file.
   3. **Synthesis:** One agent per logical group — receives that group's analyses directly in the system prompt, fetches formatting guidance via `get_template()` and `get_skill()` (per REQ-ARCH-6), and writes a spec file via `write_file()` to `.voidrift/spec/<group>.md`. Each spec SHALL be thorough: every endpoint, component, data flow, config parameter, and error behavior from the analyses must appear as a requirement with acceptance criteria.
   4. **Overview:** A final agent retrieves all spec files and writes `.voidrift/REQUIREMENTS.md` — a project-level overview covering: system purpose, how the applications interact (API contracts, shared config), deployment topology, and cross-cutting concerns. This file references the specs for detail.
   WHEN only one group is detected, stages 3 and 4 SHALL be collapsed: a single synthesis agent writes directly to `.voidrift/REQUIREMENTS.md` with full detail (no separate spec file).
   The reference directory SHALL be strictly read-only. The system prompt for each stage SHALL contain only the role and stage-specific instructions.
-- **REQ-G-9:** WHEN `--reference <path>` is specified, THE SYSTEM SHALL load the reference codebase read-only for lookup during interactive conversation.
 - **REQ-G-10:** Gather SHALL never auto-commit. `auto-commits: false` and `dirty-commits: false` SHALL be set.
 
 ### 4.5 Phase 2 — Plan
@@ -144,7 +139,7 @@
 ### 4.9 Utility Commands
 
 - **REQ-U-1:** `voidrift status` SHALL print phase completion status with emoji indicators (✅, ⬜, 🔄) and task counts.
-- **REQ-U-2:** `voidrift chat <model>` SHALL start an interactive session with no git context (`--no-git`).
+- **REQ-U-2:** `voidrift chat <model>` SHALL start an interactive session with full MCP tool access — the central command for requirements gathering, feature specs, architecture refinement, and task adjustments. The agent SHALL have access to discovery tools (`list_skills()`, `list_templates()`, `list_documents()`), read tools (`get_skill()`, `get_template()`, `get_requirements()`, `read_source_file()`), and write tools (`write_file()`). `--doc <path>` SHALL scope the conversation to a specific `.voidrift/` artifact, loading it into context and restricting writes to that file. IF a model request fails mid-session, THE SYSTEM SHALL print the error and return to the prompt (not exit).
 - **REQ-U-3:** `voidrift log <phase>` SHALL show the last 200 lines of the most recent log. `--follow` / `-f` SHALL tail the latest log file, streaming new lines as they are written. `--prune` SHALL delete log files.
 - **REQ-U-4:** `voidrift unlock` SHALL remove the develop lock file and kill any running develop process.
 - **REQ-U-5:** `voidrift completions <shell>` SHALL output shell completion scripts for bash, zsh, and fish. All model, worker, and architect arguments SHALL complete from configured aliases in `models.yml`.
