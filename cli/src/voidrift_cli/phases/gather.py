@@ -102,9 +102,8 @@ def _gather_from(
         f.write(f"=== Reverse engineering from {from_path} ===\n")
 
     # Load analyst role once for all stages (REQ-RES-7)
-    _get_agent = all_handlers.get("get_agent", lambda *a: "")
     _get_prompt = all_handlers.get("get_prompt", lambda *a: "")
-    analyst_role = _get_agent("analyst")
+    analyst_role = _get_prompt("gather", "ROLE")
 
     # --- Stage 1: Triage — identify files and logical groups ---
     ui.stage("Stage 1: Triaging files...")
