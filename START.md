@@ -13,8 +13,8 @@ Load these before starting work:
 **ALWAYS follow this workflow for ANY change:**
 
 1. **Update REQUIREMENTS.md FIRST**
-   - Add/modify acceptance criteria (AC-*) before implementation
-   - Make ACs specific, testable, complete
+   - Load `resources/skills/ANALYSIS-REQS.md` before writing or modifying any requirement
+   - Follow EARS notation, REQ identification, rationale inclusion, and BDD acceptance criteria
    - Get user confirmation before proceeding
 
 2. **Implement to satisfy ACs**
