@@ -12,28 +12,6 @@ from ..models import ModelConfig
 from ..utils import ensure_voidrift_dir, voidrift_dir, boot_run, check_disk_space
 from .. import ui
 
-ARCHITECT_PROMPT = """[ROLE: Architect]
-
-You are an Architect in the VoidRift framework. Design the system's structure and create the implementation roadmap.
-
-You have MCP tools to read requirements, skills, and templates. Use them.
-
-CRITICAL TASK FORMAT — each task must be:
-- [ ] <Action verb> <file path>: <exact behavior> [skill1, skill2]
-
-Action verbs: Create, Update, Add, Implement, Define
-NEVER: "Design", "Plan", "Consider"
-File path: exact relative path from project root
-Exact behavior: specific inputs, outputs, return types, error handling
-Skill tags: only skills directly needed
-
-You MUST produce:
-1. .voidrift/ARCHITECTURE.md (use the architecture template)
-2. .voidrift/TASKS.md — single file. For multi-module projects, use ## Module: <name> headers.
-
-Use write_file() to create all artifacts.
-"""
-
 
 def run_plan(
     model: ModelConfig,
@@ -89,48 +67,38 @@ def run_plan(
         for f in sorted(spec_dir.glob("*.md")):
             specs.append(f"### {f.stem}\n\n{f.read_text()}")
 
+    _get_prompt = handlers.get("get_prompt", lambda *a: "")
+    _get_skill = handlers.get("get_skill", lambda *a: "")
+
+    skill = _get_skill("ARCH-DESIGN")
+    system_prompt = _get_prompt("plan", "SYSTEM")
+    system = f"{skill}\n\n{system_prompt}" if skill else system_prompt
+
+    specs_section = "FEATURE SPECS:\n" + "\n\n".join(specs) if specs else ""
+
     if update:
         arch_path = d / "ARCHITECTURE.md"
         tasks_path = d / "TASKS.md"
         if not arch_path.exists() or not tasks_path.exists():
             ui.error("--update requires existing ARCHITECTURE.md and TASKS.md. Run plan without --update first.")
             return 1
-        prompt = (
-            "Plan the implementation from the current requirements.\n\n"
-            "The existing ARCHITECTURE.md and TASKS.md are provided as context.\n"
-            "Requirements are the source of truth — plan what they say, not what the old plan said.\n\n"
-            "Rules:\n"
-            "- Preserve completed tasks (- [x]) unless the requirement was removed.\n"
-            "- Update or remove tasks that no longer apply.\n"
-            "- Add new tasks for any unaddressed requirements.\n"
-            "- Revise the architecture to match current requirements.\n"
-            "- Do NOT create ADR files.\n\n"
-            f"CURRENT REQUIREMENTS:\n{requirements}"
-        )
-        if specs:
-            prompt += "\n\nFEATURE SPECS:\n" + "\n\n".join(specs)
-        prompt += f"\n\nEXISTING ARCHITECTURE:\n{arch_path.read_text()}"
-        prompt += f"\n\nEXISTING TASKS:\n{tasks_path.read_text()}"
-        prompt += (
-            "\n\nUse get_skill() to load skill conventions. "
-            "Use get_template() to load templates. "
-            "Use write_file() to write the revised ARCHITECTURE.md and TASKS.md."
+        prompt = _get_prompt("plan", "PLAN-UPDATE").format(
+            requirements=requirements,
+            specs_section=specs_section,
+            architecture=arch_path.read_text(),
+            tasks=tasks_path.read_text(),
         )
     else:
-        prompt = f"Plan the implementation for this project.\n\nREQUIREMENTS:\n{requirements}"
-        if specs:
-            prompt += "\n\nFEATURE SPECS:\n" + "\n\n".join(specs)
-        if feature:
-            prompt += f"\n\nFocus on feature: {feature}"
-        prompt += (
-            "\n\nUse get_skill() to load skill conventions. "
-            "Use get_template() to load templates. "
-            "Use write_file() to create ARCHITECTURE.md and TASKS.md."
+        feature_section = f"Focus on feature: {feature}" if feature else ""
+        prompt = _get_prompt("plan", "PLAN").format(
+            requirements=requirements,
+            specs_section=specs_section,
+            feature_section=feature_section,
         )
 
     agent = AgentLoop(
         model=model,
-        system_prompt=ARCHITECT_PROMPT,
+        system_prompt=system,
         tools=tools,
         tool_handlers=handlers,
         stream=False,

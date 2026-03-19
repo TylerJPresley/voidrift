@@ -19,21 +19,6 @@ from ..utils import (
 )
 from .. import ui
 
-DEVELOPER_PROMPT = """[ROLE: Developer]
-
-You are a Developer in the VoidRift framework. Execute tasks atomically.
-
-You have MCP tools to read project context and write files.
-Use get_next_task() to get your current task.
-Use complete_task() when done.
-Use write_file() to create/modify source files.
-Use get_skill() to load skill conventions for the current task.
-Use read_source_file() to examine existing code.
-
-Follow the edit format: write complete file contents.
-One task at a time. Be precise and minimal.
-"""
-
 MAX_ESCALATIONS = 5
 
 
@@ -109,6 +94,10 @@ def run_develop(
 
     modules = mcp_mod.tasks.modules() if hasattr(mcp_mod, 'tasks') else ["_default"]
 
+    _get_prompt = handlers.get("get_prompt", lambda *a: "")
+    dev_system = _get_prompt("develop", "SYSTEM")
+    esc_system = _get_prompt("develop", "ESCALATION")
+
     result = 1
     try:
         if is_multi and workers != 1:
@@ -116,7 +105,7 @@ def run_develop(
 
         for module in modules:
             label = f"[{module}] " if is_multi else ""
-            result = _develop_module(worker, architect, module, label, tools, handlers, log)
+            result = _develop_module(worker, architect, module, label, tools, handlers, log, dev_system, esc_system)
             if result != 0:
                 break
     except KeyboardInterrupt:
@@ -136,6 +125,8 @@ def _develop_module(
     tools: list,
     handlers: dict,
     log: Path,
+    dev_system: str,
+    esc_system: str,
 ) -> int:
     """Execute tasks for a single module via MCP task tools (REQ-D-4)."""
     import voidrift_mcp.server as mcp_mod
@@ -164,7 +155,7 @@ def _develop_module(
 
         agent = AgentLoop(
             model=worker,
-            system_prompt=DEVELOPER_PROMPT + arch_context,
+            system_prompt=dev_system + arch_context,
             tools=tools,
             tool_handlers=handlers,
             stream=False,
@@ -206,7 +197,7 @@ def _develop_module(
                 ui.error("No architect configured. Re-run with an architect model.")
                 return 1
 
-            guidance = _consult_architect(architect, question, task.text, tools, handlers, log, mod_arg or None)
+            guidance = _consult_architect(architect, question, task.text, tools, handlers, log, esc_system, mod_arg or None)
             if guidance:
                 arch_guidance[task_num] = guidance
                 continue
@@ -238,6 +229,7 @@ def _consult_architect(
     tools: list,
     handlers: dict,
     log: Path,
+    esc_system: str,
     module: str | None = None,
 ) -> str | None:
     """Consult the architect model for guidance (REQ-D-6, REQ-D-8)."""
@@ -252,12 +244,7 @@ def _consult_architect(
 
     agent = AgentLoop(
         model=architect,
-        system_prompt=(
-            "[ROLE: Architect]\n\n"
-            "A developer is blocked and needs your guidance. "
-            "Provide design direction, not implementation code. "
-            "Be specific about file paths, interfaces, and behavior."
-        ),
+        system_prompt=esc_system,
         tools=tools,
         tool_handlers=handlers,
         stream=False,
