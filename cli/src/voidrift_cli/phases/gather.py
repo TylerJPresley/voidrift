@@ -184,7 +184,16 @@ def _gather_from(
 
     # --- Stage 2: Analysis — one agent per file, concurrent ---
     ui.stage("Stage 2: Analyzing files...")
-    analysis_tools, analysis_handlers = _pick_tools({"read_source_file", "store_file_analysis"})
+    analysis_tools, analysis_handlers = _pick_tools(
+        {"read_source_file", "store_file_analysis", "get_skill", "list_skills"}
+    )
+
+    # Preload ANALYSIS-REQS skill into system prompt
+    analysis_skill = ""
+    if mcp_mod:
+        _sections = [s for s in mcp_mod.index._sections if "skills/ANALYSIS-REQS" in s.file_path]
+        if _sections:
+            analysis_skill = "\n\n".join(s.content for s in _sections)
 
     import time as _time
     from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -202,8 +211,17 @@ def _gather_from(
             log_path=log,
             system_prompt=(
                 "You are a code analyst. Read the file, then call store_file_analysis() "
-                "with a concise summary covering: purpose, key components/functions, "
-                "dependencies, and any requirements implied by the code."
+                "with a thorough summary following the ANALYSIS-REQS methodology below.\n\n"
+                "Your summary MUST cover:\n"
+                "- Purpose and business intent (outcomes over mechanisms)\n"
+                "- Key components, functions, classes, and their responsibilities\n"
+                "- Dependencies and external integrations\n"
+                "- Data flows and state management\n"
+                "- Configuration parameters and environment variables\n"
+                "- Error handling patterns\n"
+                "- Requirements implied by the code (use EARS notation: WHEN [trigger], THE SYSTEM SHALL [result])\n\n"
+                "You have get_skill() and list_skills() if you need additional context.\n\n"
+                f"--- ANALYSIS-REQS SKILL ---\n\n{analysis_skill}"
             ),
             tools=analysis_tools, tool_handlers=analysis_handlers,
         )
@@ -293,7 +311,7 @@ def _gather_from(
         for group_name in groups:
             sp = spec_dir / f"{group_name}.md"
             if sp.exists():
-                spec_summaries.append(f"## {group_name}\n\n{sp.read_text()[:8000]}")
+                spec_summaries.append(f"## {group_name}\n\n{sp.read_text()}")
         specs_context = "\n\n---\n\n".join(spec_summaries)
 
         overview = AgentLoop(
@@ -305,8 +323,10 @@ def _gather_from(
                 "You are writing a project-level requirements overview.\n"
                 "The project has multiple components, each with its own spec file.\n"
                 "Steps:\n"
-                f"1. Call write_file() EXACTLY ONCE to write the COMPLETE overview to '{target_rel}'.\n"
-                "2. Call done() when finished.\n\n"
+                "1. Call get_template('REQUIREMENTS-TEMPLATE') for the output format.\n"
+                "2. Call get_skill('ANALYSIS-REQS') for methodology guidance.\n"
+                f"3. Call write_file() EXACTLY ONCE to write the COMPLETE overview to '{target_rel}'.\n"
+                "4. Call done() when finished.\n\n"
                 "The overview must cover:\n"
                 "- System purpose and scope\n"
                 "- How the components interact (API contracts, shared config, data flow)\n"
