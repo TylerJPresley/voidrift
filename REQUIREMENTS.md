@@ -83,6 +83,7 @@
 - **REQ-RES-5:** IF a skill file referenced in a task tag does not exist, THE SYSTEM SHALL print a warning and continue without loading it.
 - **REQ-RES-6:** Phase prompt files SHALL live in `resources/prompts/<phase>.md` with H2 sections for each stage/step. The CLI SHALL load prompts via `get_prompt(phase, section)` MCP tool calls (per REQ-ARCH-6). Prompts MAY contain Python format variables (e.g. `{spec_path}`, `{group_name}`) which the CLI resolves via `.format()` before passing to the agent. A missing variable SHALL raise a `KeyError` — no silent substitution.
 - **REQ-RES-7:** The CLI SHALL construct each agent's system prompt by concatenating: (1) the phase's methodology skill (loaded once via `get_skill()`), (2) the stage prompt from `get_prompt()`, and (3) any injected context (analyses, specs). The skill is loaded once per pipeline and reused across stages.
+  - *Rationale:* Three layers with distinct responsibilities: the **skill** defines *how to think* (methodology, philosophy, quality standards), the **prompt** defines *what to do* (stage-specific instructions, tool calls, output format), and the **context** provides *what to work with* (data the agent processes). New methodology guidance goes in the skill. New instructions go in the prompt. New data goes in the context. This separation prevents prompt bloat and keeps each layer independently editable.
 
 ### 4.4 Phase 1 — Gather
 
