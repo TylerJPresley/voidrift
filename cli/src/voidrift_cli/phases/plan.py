@@ -30,7 +30,6 @@ Skill tags: only skills directly needed
 You MUST produce:
 1. .voidrift/ARCHITECTURE.md (use the architecture template)
 2. .voidrift/TASKS.md — single file. For multi-module projects, use ## Module: <name> headers.
-3. ADR file(s) in .voidrift/adr/
 
 Use write_file() to create all artifacts.
 """
@@ -97,12 +96,15 @@ def run_plan(
             ui.error("--update requires existing ARCHITECTURE.md and TASKS.md. Run plan without --update first.")
             return 1
         prompt = (
-            "REVISE the existing plan to align with the current requirements.\n\n"
+            "Plan the implementation from the current requirements.\n\n"
+            "The existing ARCHITECTURE.md and TASKS.md are provided as context.\n"
+            "Requirements are the source of truth — plan what they say, not what the old plan said.\n\n"
             "Rules:\n"
             "- Preserve completed tasks (- [x]) unless the requirement was removed.\n"
             "- Update or remove tasks that no longer apply.\n"
             "- Add new tasks for any unaddressed requirements.\n"
-            "- Treat the existing architecture as a starting point — revise, don't regenerate.\n\n"
+            "- Revise the architecture to match current requirements.\n"
+            "- Do NOT create ADR files.\n\n"
             f"CURRENT REQUIREMENTS:\n{requirements}"
         )
         if specs:
@@ -191,8 +193,6 @@ def run_plan(
         ui.success(f"{tf.name}: {len(lines)} tasks")
     if (d / "ARCHITECTURE.md").exists():
         ui.success("ARCHITECTURE.md created")
-    for adr in sorted((d / "adr").glob("*.md")) if (d / "adr").is_dir() else []:
-        ui.success(str(adr.relative_to(d)))
 
     ui.done("Plan complete.")
     return 0
