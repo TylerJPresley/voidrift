@@ -111,7 +111,7 @@ class AgentLoop(BaseModel):
             if "Connection" in msg:
                 base = self.model.api_base or "unknown"
                 msg = f"Cannot connect to {base} — is the model/gateway running?"
-            elif "context length" in msg.lower() or "maximum context" in msg.lower() or "token" in msg.lower() and "exceed" in msg.lower():
+            elif "context length" in msg.lower() or "maximum context" in msg.lower() or ("token" in msg.lower() and "exceed" in msg.lower()):
                 msg = f"Context length exceeded. The input is too large for {self.model.alias}. Use a model with a larger context window."
             raise RuntimeError(msg) from e
 

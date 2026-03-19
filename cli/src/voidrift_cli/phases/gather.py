@@ -91,7 +91,11 @@ def _gather_from(
     ui.detail(f"Source: {from_path}")
     ui.detail(f"Target: {target}")
 
-    file_tree = _build_file_tree(from_path)
+    try:
+        file_tree = _build_file_tree(from_path)
+    except RuntimeError as e:
+        ui.error(str(e))
+        return 1
     target_rel = str(target.relative_to(Path.cwd()))
 
     with open(log, "a") as f:
@@ -189,11 +193,7 @@ def _gather_from(
     )
 
     # Preload ANALYSIS-REQS skill into system prompt
-    analysis_skill = ""
-    if mcp_mod:
-        _sections = [s for s in mcp_mod.index._sections if "skills/ANALYSIS-REQS" in s.file_path]
-        if _sections:
-            analysis_skill = "\n\n".join(s.content for s in _sections)
+    analysis_skill = all_handlers.get("get_skill", lambda _: "")("ANALYSIS-REQS")
 
     import time as _time
     from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -389,24 +389,28 @@ def _gather_from(
         return 1
 
 def _build_file_tree(directory: Path, max_files: int = 500) -> str:
-    """Build a file tree string, excluding common non-source directories.
+    """Build a file tree string, excluding dot-directories.
 
     Args:
         directory: Root directory to scan.
-        max_files: Maximum number of files to include.
+        max_files: Maximum files before raising an error.
 
     Returns:
         Newline-separated list of relative file paths.
+
+    Raises:
+        RuntimeError: If file count exceeds max_files (no silent truncation).
     """
     lines = []
-    count = 0
     for p in sorted(directory.rglob("*")):
-        if count >= max_files:
-            lines.append(f"... (truncated at {max_files} files)")
-            break
         if any(part.startswith(".") for part in p.relative_to(directory).parts):
             continue
         if p.is_file():
             lines.append(str(p.relative_to(directory)))
-            count += 1
+    if len(lines) > max_files:
+        raise RuntimeError(
+            f"Source tree has {len(lines)} files (limit {max_files}). "
+            "Triage cannot process this many files. "
+            "Point gather at a smaller subdirectory or increase the limit."
+        )
     return "\n".join(lines)
