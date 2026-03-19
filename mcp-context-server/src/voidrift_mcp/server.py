@@ -335,6 +335,53 @@ def list_documents() -> str:
 
 
 @mcp.tool()
+def get_prompt(phase: str, section: str) -> str:
+    """Retrieve a stage-specific prompt section from resources/prompts/<phase>.md.
+
+    Args:
+        phase: Phase name (e.g. 'gather', 'plan', 'develop').
+        section: H2 section name within the prompt file.
+    """
+    file_filter = f"prompts/{phase.lower()}"
+    all_secs = [s for s in index._sections if file_filter in s.file_path]
+    if not all_secs:
+        available = [p.stem.lower() for p in sorted((RESOURCES_DIR / "prompts").glob("*.md"))]
+        return f"Prompt file '{phase}' not found. Available: {', '.join(available)}"
+    for s in all_secs:
+        if s.heading.upper() == section.upper():
+            session_store.log_action(session_id, "get", "prompt", f"{phase}/{section}")
+            return s.content
+    names = [s.heading for s in all_secs]
+    return f"Section '{section}' not found in '{phase}'. Available: {', '.join(names)}"
+
+
+@mcp.tool()
+def list_prompts(phase: str = "") -> str:
+    """List available prompt sections. If phase is given, list sections for that phase. Otherwise list all phases.
+
+    Args:
+        phase: Optional phase name to filter by.
+    """
+    prompts_dir = RESOURCES_DIR / "prompts"
+    if not prompts_dir.is_dir():
+        return "No prompts directory found."
+    if phase:
+        file_filter = f"prompts/{phase.lower()}"
+        secs = [s for s in index._sections if file_filter in s.file_path]
+        if not secs:
+            available = [p.stem.lower() for p in sorted(prompts_dir.glob("*.md"))]
+            return f"Phase '{phase}' not found. Available: {', '.join(available)}"
+        return "\n".join(f"- {s.heading}" for s in secs)
+    lines = []
+    for p in sorted(prompts_dir.glob("*.md")):
+        file_filter = f"prompts/{p.stem.lower()}"
+        secs = [s for s in index._sections if file_filter in s.file_path]
+        names = ", ".join(s.heading for s in secs)
+        lines.append(f"- {p.stem.lower()}: {names}")
+    return "\n".join(lines) if lines else "No prompts found."
+
+
+@mcp.tool()
 def read_source_file(path: str) -> str:
     """Read a source file from the project directory.
 

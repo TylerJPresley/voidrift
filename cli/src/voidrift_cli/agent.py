@@ -419,6 +419,11 @@ def build_mcp_tools(mcp_server_module: Any) -> tuple[list[dict], dict[str, Calla
         get_agent,
         get_skill,
         get_template,
+        get_prompt,
+        list_skills,
+        list_templates,
+        list_documents,
+        list_prompts,
         export_to_file,
     )
 
@@ -509,6 +514,29 @@ def build_mcp_tools(mcp_server_module: Any) -> tuple[list[dict], dict[str, Calla
                 "path": {"type": "string", "description": "Relative path to write to"},
             },
             "required": ["artifact_type", "path"],
+        }),
+        "get_prompt": (get_prompt, {
+            "type": "object",
+            "properties": {
+                "phase": {"type": "string", "description": "Phase name (e.g. 'gather')"},
+                "section": {"type": "string", "description": "Section name (H2 heading)"},
+            },
+            "required": ["phase", "section"],
+        }),
+        "list_skills": (list_skills, {
+            "type": "object", "properties": {},
+        }),
+        "list_templates": (list_templates, {
+            "type": "object", "properties": {},
+        }),
+        "list_documents": (list_documents, {
+            "type": "object", "properties": {},
+        }),
+        "list_prompts": (list_prompts, {
+            "type": "object",
+            "properties": {
+                "phase": {"type": "string", "description": "Phase name to filter by", "default": ""},
+            },
         }),
     }
 

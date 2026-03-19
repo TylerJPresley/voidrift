@@ -101,31 +101,18 @@ def _gather_from(
     with open(log, "a") as f:
         f.write(f"=== Reverse engineering from {from_path} ===\n")
 
+    # Load analyst role once for all stages (REQ-RES-7)
+    _get_agent = all_handlers.get("get_agent", lambda *a: "")
+    _get_prompt = all_handlers.get("get_prompt", lambda *a: "")
+    analyst_role = _get_agent("analyst")
+
     # --- Stage 1: Triage — identify files and logical groups ---
     ui.stage("Stage 1: Triaging files...")
+    triage_prompt = _get_prompt("gather", "TRIAGE")
     triage = AgentLoop(
         model=model, stream=False, extra_body=extra, max_tokens=4096,
         log_path=log,
-        system_prompt=(
-            "You are a code analyst. Given a file tree, return ONLY a JSON object with:\n"
-            '- "groups": a dict mapping logical boundary names to lists of relative file paths.\n'
-            "  Auto-detect boundaries from directory structure (e.g. frontend/, backend/, api/, shared/).\n"
-            "  For single-application codebases, use one group named after the project.\n\n"
-            "INCLUDE ONLY these three categories:\n"
-            "1. Source files — code written by developers\n"
-            "2. Documentation — READMEs, design docs, specs\n"
-            "3. Configuration — env files, Dockerfiles, CI/CD, build configs\n\n"
-            "You MUST NOT include:\n"
-            "- Files with content hashes in their names (e.g. index-CW8_b_Xi.js) — these are compiled build output\n"
-            "- Lock files (package-lock.json, poetry.lock, Gemfile.lock, etc.)\n"
-            "- Binary files and images (.png, .jpg, .gif, .ico, .woff, .ttf)\n"
-            "- Dependency directories (node_modules, vendor, target, __pycache__)\n"
-            "- Generated HTML in build/static/dist directories\n"
-            "- Minified or bundled files\n\n"
-            "Use your knowledge of the project's language and toolchain to decide.\n"
-            "Return raw JSON, no markdown fences.\n\n"
-            'Example: {"groups": {"backend": ["backend/main.py"], "frontend": ["frontend/src/App.vue"]}}'
-        ),
+        system_prompt=f"{analyst_role}\n\n{triage_prompt}",
         tools=[], tool_handlers={},
     )
     try:
@@ -158,19 +145,11 @@ def _gather_from(
 
     # --- Validation pass — model reviews its own triage output ---
     all_files = [f for fs in groups.values() for f in fs]
+    validation_prompt = _get_prompt("gather", "TRIAGE-VALIDATION")
     validator = AgentLoop(
         model=model, stream=False, extra_body=extra, max_tokens=4096,
         log_path=log,
-        system_prompt=(
-            "You are a strict code reviewer. Given a list of files selected for source code analysis, "
-            "remove any that should NOT be analyzed:\n"
-            "- Compiled/bundled files (hashed filenames like index-CW8_b_Xi.js)\n"
-            "- Lock files (package-lock.json, poetry.lock, etc.)\n"
-            "- Binary files and images (.png, .jpg, .gif, .ico, .woff, .ttf)\n"
-            "- Generated build output (files in static/assets/, dist/, build/ directories)\n"
-            "- Minified files\n\n"
-            "Return ONLY a JSON list of files that SHOULD be kept. No markdown fences."
-        ),
+        system_prompt=f"{analyst_role}\n\n{validation_prompt}",
         tools=[], tool_handlers={},
     )
     try:
@@ -192,8 +171,12 @@ def _gather_from(
         {"read_source_file", "store_file_analysis", "get_skill", "list_skills"}
     )
 
-    # Preload ANALYSIS-REQS skill into system prompt
+    # Preload ANALYSIS-REQS skill and build analysis prompt
     analysis_skill = all_handlers.get("get_skill", lambda _: "")("ANALYSIS-REQS")
+    analysis_prompt = _get_prompt("gather", "ANALYSIS").format(
+        analysis_skill=f"--- ANALYSIS-REQS SKILL ---\n\n{analysis_skill}"
+    )
+    analysis_system = f"{analyst_role}\n\n{analysis_prompt}"
 
     import time as _time
     from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -209,20 +192,7 @@ def _gather_from(
         agent = AgentLoop(
             model=model, stream=False, extra_body=extra, max_tokens=4096,
             log_path=log,
-            system_prompt=(
-                "You are a code analyst. Read the file, then call store_file_analysis() "
-                "with a thorough summary following the ANALYSIS-REQS methodology below.\n\n"
-                "Your summary MUST cover:\n"
-                "- Purpose and business intent (outcomes over mechanisms)\n"
-                "- Key components, functions, classes, and their responsibilities\n"
-                "- Dependencies and external integrations\n"
-                "- Data flows and state management\n"
-                "- Configuration parameters and environment variables\n"
-                "- Error handling patterns\n"
-                "- Requirements implied by the code (use EARS notation: WHEN [trigger], THE SYSTEM SHALL [result])\n\n"
-                "You have get_skill() and list_skills() if you need additional context.\n\n"
-                f"--- ANALYSIS-REQS SKILL ---\n\n{analysis_skill}"
-            ),
+            system_prompt=analysis_system,
             tools=analysis_tools, tool_handlers=analysis_handlers,
         )
         try:
@@ -272,26 +242,16 @@ def _gather_from(
             ui.model_label(model.alias)
 
             group_context = _build_group_analyses(group_files)
+            synth_prompt = _get_prompt("gather", "SYNTHESIS").format(
+                group_name=group_name,
+                spec_path=spec_path,
+                group_context=f"--- FILE ANALYSES FOR {group_name.upper()} ---\n\n{group_context}",
+            )
             synth = AgentLoop(
                 model=model, stream=True, extra_body=extra, max_tokens=16384,
                 log_path=log,
                 on_token=ui.make_token_handler(),
-                system_prompt=(
-                    f"[ROLE: Analyst]\n\n"
-                    f"You are writing detailed requirements for the '{group_name}' component.\n"
-                    "Steps:\n"
-                    "1. Call get_template('REQUIREMENTS-TEMPLATE') for the output format.\n"
-                    "2. Call get_skill('PROD-STRATEGY') for guidance.\n"
-                    f"3. Call write_file() EXACTLY ONCE to write the COMPLETE requirements to '{spec_path}'.\n"
-                    "4. Call done() when finished.\n"
-                    "Do NOT call the same tool more than once.\n\n"
-                    "CRITICAL: Be THOROUGH and DETAILED.\n"
-                    "- Every endpoint, component, data flow, config parameter, and error behavior must be a requirement.\n"
-                    "- Each requirement needs specific acceptance criteria.\n"
-                    "- Do not summarize or abbreviate.\n\n"
-                    f"After calling done(), summarize the key requirements for {group_name}.\n\n"
-                    f"--- FILE ANALYSES FOR {group_name.upper()} ---\n\n{group_context}"
-                ),
+                system_prompt=f"{analyst_role}\n\n{synth_prompt}",
                 tools=synth_tools, tool_handlers=synth_handlers,
             )
             try:
@@ -314,28 +274,16 @@ def _gather_from(
                 spec_summaries.append(f"## {group_name}\n\n{sp.read_text()}")
         specs_context = "\n\n---\n\n".join(spec_summaries)
 
+        overview_prompt = _get_prompt("gather", "OVERVIEW").format(
+            target_rel=target_rel,
+            spec_refs=", ".join(f"spec/{g}.md" for g in groups),
+            specs_context=f"--- COMPONENT SPECS ---\n\n{specs_context}",
+        )
         overview = AgentLoop(
             model=model, stream=True, extra_body=extra, max_tokens=8192,
             log_path=log,
             on_token=ui.make_token_handler(),
-            system_prompt=(
-                "[ROLE: Analyst]\n\n"
-                "You are writing a project-level requirements overview.\n"
-                "The project has multiple components, each with its own spec file.\n"
-                "Steps:\n"
-                "1. Call get_template('REQUIREMENTS-TEMPLATE') for the output format.\n"
-                "2. Call get_skill('ANALYSIS-REQS') for methodology guidance.\n"
-                f"3. Call write_file() EXACTLY ONCE to write the COMPLETE overview to '{target_rel}'.\n"
-                "4. Call done() when finished.\n\n"
-                "The overview must cover:\n"
-                "- System purpose and scope\n"
-                "- How the components interact (API contracts, shared config, data flow)\n"
-                "- Deployment topology\n"
-                "- Cross-cutting concerns (auth, logging, monitoring, error handling)\n"
-                f"- References to spec files: {', '.join(f'spec/{g}.md' for g in groups)}\n\n"
-                "After calling done(), summarize the project architecture.\n\n"
-                f"--- COMPONENT SPECS ---\n\n{specs_context}"
-            ),
+            system_prompt=f"{analyst_role}\n\n{overview_prompt}",
             tools=synth_tools, tool_handlers=synth_handlers,
         )
         try:
@@ -352,26 +300,15 @@ def _gather_from(
         ui.model_label(model.alias)
 
         group_context = _build_group_analyses(all_files)
+        single_prompt = _get_prompt("gather", "SYNTHESIS-SINGLE").format(
+            target_rel=target_rel,
+            group_context=f"--- FILE ANALYSES ---\n\n{group_context}",
+        )
         synth = AgentLoop(
             model=model, stream=True, extra_body=extra, max_tokens=16384,
             log_path=log,
             on_token=ui.make_token_handler(),
-            system_prompt=(
-                "[ROLE: Analyst]\n\n"
-                "You are writing comprehensive requirements from file analysis summaries.\n"
-                "Steps:\n"
-                "1. Call get_template('REQUIREMENTS-TEMPLATE') for the output format.\n"
-                "2. Call get_skill('PROD-STRATEGY') for guidance.\n"
-                f"3. Call write_file() EXACTLY ONCE to write the COMPLETE requirements to '{target_rel}'.\n"
-                "4. Call done() when finished.\n"
-                "Do NOT call the same tool more than once.\n\n"
-                "CRITICAL: Be THOROUGH and DETAILED.\n"
-                "- Every endpoint, component, data flow, config parameter, and error behavior must be a requirement.\n"
-                "- Each requirement needs specific acceptance criteria.\n"
-                "- Do not summarize or abbreviate.\n\n"
-                "After calling done(), summarize the key requirements.\n\n"
-                f"--- FILE ANALYSES ---\n\n{group_context}"
-            ),
+            system_prompt=f"{analyst_role}\n\n{single_prompt}",
             tools=synth_tools, tool_handlers=synth_handlers,
         )
         try:
