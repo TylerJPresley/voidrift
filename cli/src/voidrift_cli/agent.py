@@ -5,6 +5,7 @@ from __future__ import annotations
 import itertools
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -125,6 +126,16 @@ class AgentLoop(BaseModel):
         },
     }
 
+    _THINK_RE = re.compile(r"<think>(.*?)</think>\s*", re.DOTALL)
+
+    def _strip_think(self, text: str) -> str:
+        """Remove <think>...</think> blocks from model output, logging content (REQ-ARCH-8)."""
+        for m in self._THINK_RE.finditer(text):
+            content = m.group(1).strip()
+            if content:
+                self._log(f"[THINKING] {content}")
+        return self._THINK_RE.sub("", text).strip()
+
     def _log(self, entry: str) -> None:
         """Append a line to the log file if log_path is set."""
         if self.log_path:
@@ -171,6 +182,7 @@ class AgentLoop(BaseModel):
                 text, tool_calls = self._sync_response(client, kwargs)
 
             if not tool_calls:
+                text = self._strip_think(text)
                 self.messages.append({"role": "assistant", "content": text})
                 self._log(f"[ASSISTANT] {text}")
                 return text
@@ -226,6 +238,7 @@ class AgentLoop(BaseModel):
             text, _ = self._stream_response(client, kwargs)
         else:
             text, _ = self._sync_response(client, kwargs)
+        text = self._strip_think(text)
         self._log(f"[ASSISTANT] {text}")
         return text
 

@@ -22,9 +22,14 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Full ARCHITECTURE.md injected into developer task prompt (REQ-D-4)
 - BDD acceptance criteria on all develop, plan, chat, and worker CLI requirements
 - Non-streaming mode for gather synthesis stages (REQ-G-12) — reliable tool call parsing
+- Non-streaming mode for all phases (REQ-ARCH-4) — vLLM streaming parser unreliable for tool calls
+- Think tag stripping from model responses (REQ-ARCH-8) — `<think>` content logged, not displayed
+- Qwen 3.5 model configs: qwen35 (35B-A3B, 262K context), qwen35-perf (122B-A10B, 65K context)
 
 ### Changed
 - Develop concurrency from config, not CLI flag — `get_concurrency()` used by both gather and develop
+- All phases use `stream=False` — streaming retained in code for future use
+- Worker bench command uses `vllm bench serve` with `random` dataset
 - Chat prompt generalized — not analyst-specific, model self-serves domain skills via `get_skill()`
 - Four-stage gather `--from` pipeline with auto-detected logical boundaries (REQ-G-8)
   - Triage detects groups (e.g. frontend, backend) from directory structure
@@ -56,6 +61,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Removed
 - `tui.py` — Textual TUI module (replaced by shared `_interactive_loop`)
 - `textual` dependency
+- Retired qwen3-8b, qwen3-coder, qwen3-coder-next, qwen3-instruct, qwen3-instruct-think models — replaced by qwen35 series
 
 - `worker-cli/` package — manages local model containers and Kiro Gateway (`worker` command)
 - `models.yml` — unified model endpoint config (alias → base_url, api_key, model_id)

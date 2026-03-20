@@ -28,6 +28,7 @@ from .models import (
     worker_info,
     _list_containers,
     worker_logs,
+    load_worker_models,
 )
 
 console = Console()
@@ -260,8 +261,10 @@ def bench(num_prompts: int, req_rate: float) -> None:
 
         rate_arg = f"--request-rate {req_rate}" if req_rate > 0 else "--request-rate inf"
         bench_cmd = (
-            f"docker exec {s['container']} python -m vllm.entrypoints.openai.api_server "
-            f"--benchmark --num-prompts {num_prompts} {rate_arg}"
+            f"docker exec {s['container']} vllm bench serve "
+            f"--base-url http://localhost:{port} "
+            f"--dataset-name random "
+            f"--num-prompts {num_prompts} {rate_arg}"
         )
         console.print("[dim]Running benchmark...[/dim]")
         rc = ssh_stream(bench_cmd, timeout=600)

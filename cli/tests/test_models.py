@@ -48,9 +48,9 @@ class TestResolveModel:
 
     def test_local_model(self):
         """Local model resolves worker.ip from config.yml."""
-        m = resolve_model("qwen3-coder")
+        m = resolve_model("qwen35")
         assert m.model_type == "local"
-        assert m.model_id == "openai/qwen3-coder"
+        assert m.model_id == "openai/qwen35"
         assert m.api_base is not None
 
     def test_kiro_model(self):
@@ -68,7 +68,7 @@ class TestResolveModel:
             resolve_model("nope")
         msg = str(exc_info.value)
         assert "claude" in msg
-        assert "qwen3-coder" in msg
+        assert "qwen35" in msg
 
 
 class TestListModels:
@@ -79,5 +79,5 @@ class TestListModels:
     def test_includes_all_types(self):
         models = list_models()
         assert "claude" in models
-        assert "qwen3-coder" in models
+        assert "qwen35" in models
         assert "kiro-sonnet" in models

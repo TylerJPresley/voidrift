@@ -35,11 +35,11 @@ from voidrift_worker.models import (
 class TestListModels:
     def test_loads_from_yaml(self):
         models = list_models()
-        assert "qwen3-coder" in models
+        assert "qwen35" in models
 
     def test_model_has_repository(self):
         models = list_models()
-        assert models["qwen3-coder"].repository
+        assert models["qwen35"].repository
 
 
 class TestLoadWorkerModels:
@@ -81,8 +81,8 @@ class TestSshStream:
 class TestStartModel:
     @patch("voidrift_worker.models.ssh_cmd")
     def test_already_running_skips(self, mock_ssh):
-        mock_ssh.return_value = MagicMock(stdout="worker-qwen3-coder\n", returncode=0)
-        start_model("qwen3-coder")
+        mock_ssh.return_value = MagicMock(stdout="worker-qwen35\n", returncode=0)
+        start_model("qwen35")
         assert mock_ssh.call_count == 1
 
     def test_unknown_model_raises(self):
@@ -93,15 +93,15 @@ class TestStartModel:
     @patch("voidrift_worker.models.httpx")
     def test_refresh_forces_restart(self, mock_httpx, mock_ssh):
         def _ssh_side_effect(cmd):
-            if "docker ps --filter name=worker-qwen3-coder --format" in cmd:
-                return MagicMock(stdout="worker-qwen3-coder", returncode=0)
+            if "docker ps --filter name=worker-qwen35 --format" in cmd:
+                return MagicMock(stdout="worker-qwen35", returncode=0)
             return MagicMock(stdout="", returncode=0)
         mock_ssh.side_effect = _ssh_side_effect
         mock_get = MagicMock(status_code=200)
         mock_httpx.get.return_value = mock_get
         mock_httpx.ConnectError = Exception
         mock_httpx.ReadTimeout = Exception
-        start_model("qwen3-coder", refresh=True)
+        start_model("qwen35", refresh=True)
         # Verify docker run was called
         run_calls = [c for c in mock_ssh.call_args_list if "docker run" in str(c)]
         assert len(run_calls) == 1
@@ -119,10 +119,10 @@ class TestGetStatus:
     @patch("voidrift_worker.config.get_worker_config", return_value={"ip": "192.168.50.100"})
     @patch("voidrift_worker.models.ssh_cmd")
     def test_active(self, mock_ssh, _mock_cfg):
-        mock_ssh.return_value = MagicMock(stdout="worker-qwen3-coder\n", returncode=0)
+        mock_ssh.return_value = MagicMock(stdout="worker-qwen35\n", returncode=0)
         s = get_status()
         assert s["active"]
-        assert s["model"] == "qwen3-coder"
+        assert s["model"] == "qwen35"
 
     @patch("voidrift_worker.config.get_worker_config", return_value={"ip": "192.168.50.100"})
     @patch("voidrift_worker.models.ssh_cmd")
@@ -181,11 +181,11 @@ class TestModelsList:
     @patch("voidrift_worker.models.ssh_cmd")
     def test_shows_configured_and_cached(self, mock_ssh, mock_status):
         mock_status.return_value = {"active": False, "model": None}
-        mock_ssh.return_value = MagicMock(stdout="model/Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8  31.2G\n", stderr="")
+        mock_ssh.return_value = MagicMock(stdout="model/Qwen/Qwen3.5-35B-A3B-FP8  31.2G\n", stderr="")
         result = models_list()
         assert "Configured Models:" in result
         assert "Cached Models:" in result
-        assert "qwen3-coder" in result
+        assert "qwen35" in result
 
 
 class TestModelsAdd:
@@ -237,8 +237,8 @@ class TestModelsCheck:
     @patch("voidrift_worker.models._get_cached_repos")
     def test_all_cached(self, mock_cached):
         mock_cached.return_value = {
-            "Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8": "31.2G",
-            "Qwen/Qwen3-8B-FP8": "9.5G",
+            "Qwen/Qwen3.5-35B-A3B-FP8": "37.5G",
+            "Qwen/Qwen3.5-122B-A10B-FP8": "122G",
         }
         results, unconfigured = models_check()
         assert all(ok for _, ok, _ in results)
@@ -255,19 +255,19 @@ class TestModelsCheck:
     @patch("voidrift_worker.models._get_cached_repos")
     def test_reports_unconfigured(self, mock_cached):
         mock_cached.return_value = {
-            "Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8": "31.2G",
-            "Qwen/Qwen3-8B-FP8": "9.5G",
-            "Qwen/Qwen3-32B-FP8": "34.3G",
+            "Qwen/Qwen3.5-35B-A3B-FP8": "37.5G",
+            "Qwen/Qwen3.5-122B-A10B-FP8": "122G",
+            "Extra/OldModel": "34.3G",
         }
         _, unconfigured = models_check()
         repos = [r for r, _ in unconfigured]
-        assert "Qwen/Qwen3-32B-FP8" in repos
+        assert "Extra/OldModel" in repos
 
     @patch("voidrift_worker.models.ssh_stream")
     @patch("voidrift_worker.models._get_cached_repos")
     def test_prune_removes_unconfigured(self, mock_cached, mock_stream):
         mock_cached.return_value = {
-            "Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8": "31.2G",
+            "Qwen/Qwen3.5-35B-A3B-FP8": "37.5G",
             "Extra/Model": "10G",
         }
         mock_stream.return_value = 0
@@ -280,14 +280,14 @@ class TestWorkerLogs:
     @patch("voidrift_worker.models.ssh_stream")
     def test_shows_logs_for_container(self, mock_stream):
         mock_stream.return_value = 0
-        worker_logs(container="worker-qwen3-coder")
-        assert "worker-qwen3-coder" in mock_stream.call_args[0][0]
+        worker_logs(container="worker-qwen35")
+        assert "worker-qwen35" in mock_stream.call_args[0][0]
         assert "--tail 200" in mock_stream.call_args[0][0]
 
     @patch("voidrift_worker.models.ssh_stream")
     def test_follow_flag(self, mock_stream):
         mock_stream.return_value = 0
-        worker_logs(follow=True, container="worker-qwen3-coder")
+        worker_logs(follow=True, container="worker-qwen35")
         assert "-f" in mock_stream.call_args[0][0]
 
     def test_no_container_raises(self):
@@ -297,12 +297,12 @@ class TestWorkerLogs:
     @patch("voidrift_worker.models.ssh_cmd")
     def test_list_containers(self, mock_ssh):
         mock_ssh.return_value = MagicMock(
-            stdout="worker-qwen3-coder|Up 5 minutes\nworker-qwen3-8b|Exited (0) 2 hours ago\n"
+            stdout="worker-qwen35|Up 5 minutes\nworker-qwen35-perf|Exited (0) 2 hours ago\n"
         )
         from voidrift_worker.models import _list_containers
         result = _list_containers()
         assert len(result) == 2
-        assert result[0]["name"] == "worker-qwen3-coder"
+        assert result[0]["name"] == "worker-qwen35"
         assert "Up" in result[0]["status"]
 
 

@@ -16,26 +16,14 @@
 
 models:
   # Local models (start with: worker start <alias>)
-  qwen3-8b:
-    model_id: "openai/qwen3-8b"
+  qwen35:
+    model_id: "openai/qwen35"
     base_url: "http://${worker.ip}:8000/v1"
     api_key: "${worker.api_key}"
     type: local
 
-  qwen3-instruct:
-    model_id: "openai/qwen3-instruct"
-    base_url: "http://${worker.ip}:8000/v1"
-    api_key: "${worker.api_key}"
-    type: local
-
-  qwen3-coder:
-    model_id: "openai/qwen3-coder"
-    base_url: "http://${worker.ip}:8000/v1"
-    api_key: "${worker.api_key}"
-    type: local
-
-  qwen3-coder-next:
-    model_id: "openai/qwen3-coder-next"
+  qwen35-perf:
+    model_id: "openai/qwen35-perf"
     base_url: "http://${worker.ip}:8000/v1"
     api_key: "${worker.api_key}"
     type: local

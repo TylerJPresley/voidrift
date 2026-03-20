@@ -386,7 +386,7 @@ def chat(model, doc) -> None:
         system_prompt=system,
         tools=tools,
         tool_handlers=handlers,
-        stream=True,
+        stream=False,
         log_path=log,
     )
 
