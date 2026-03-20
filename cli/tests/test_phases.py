@@ -41,7 +41,7 @@ class TestPlanPreflightChecks:
         # When agent.send() is called, create the artifacts the plan phase expects
         def fake_send(msg):
             (vd / "ARCHITECTURE.md").write_text("# Architecture\n\n## Overview\nTest arch")
-            (vd / "TASKS.md").write_text("- [ ] Create src/main.py: entry point [backend]\n")
+            (vd / "TASKS.md").write_text("- [ ] Create src/main.py: entry point [analysis-reqs]\n")
             return "Plan complete."
 
         mock_instance = MagicMock()
@@ -68,7 +68,7 @@ class TestPlanPreflightChecks:
                 return "Partial."
             else:
                 # Retry: create TASKS.md too
-                (vd / "TASKS.md").write_text("- [ ] Task [backend]\n")
+                (vd / "TASKS.md").write_text("- [ ] Task [analysis-reqs]\n")
                 return "Fixed."
 
         mock_instance = MagicMock()
@@ -133,7 +133,7 @@ class TestDevelopPreflightChecks:
 
     def test_workers_without_modules(self, tmp_project, cloud_model, sample_requirements):
         vd = tmp_project / ".voidrift"
-        (vd / "TASKS.md").write_text("- [ ] Task [backend]\n")
+        (vd / "TASKS.md").write_text("- [ ] Task [analysis-reqs]\n")
         from voidrift_cli.phases.develop import run_develop
         result = run_develop(cloud_model, workers=2)
         # Falls back to single worker, doesn't error
@@ -159,7 +159,7 @@ class TestDevelopPreflightChecks:
     @patch("voidrift_cli.phases.develop.AgentLoop")
     def test_develop_loop_marks_tasks(self, MockAgent, tmp_project, cloud_model, sample_requirements):
         vd = tmp_project / ".voidrift"
-        (vd / "TASKS.md").write_text("- [ ] Create src/main.py: entry [backend]\n")
+        (vd / "TASKS.md").write_text("- [ ] Create src/main.py: entry [analysis-reqs]\n")
 
         mock_instance = MagicMock()
         mock_instance.send.return_value = "Created the file."
@@ -174,7 +174,7 @@ class TestDevelopPreflightChecks:
     def test_sequential_multi_module(self, MockAgent, tmp_project, cloud_model, sample_requirements):
         vd = tmp_project / ".voidrift"
         (vd / "TASKS.md").write_text(
-            "## Module: backend\n- [ ] Task A [backend]\n"
+            "## Module: backend\n- [ ] Task A [analysis-reqs]\n"
             "## Module: frontend\n- [ ] Task B [frontend]\n"
         )
 
@@ -298,7 +298,7 @@ class TestVerify:
                 return "Fix plan."
             else:
                 # Worker writes fix tasks
-                (vd / "TASKS-fixes.md").write_text("- [ ] Fix X [backend]\n")
+                (vd / "TASKS-fixes.md").write_text("- [ ] Fix X [analysis-reqs]\n")
                 (vd / "ARCHITECT_VERIFY.md").unlink(missing_ok=True)
                 return "Fix tasks created."
 

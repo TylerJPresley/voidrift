@@ -154,6 +154,29 @@ def run_plan(
             ui.error(f"Plan failed: still missing {', '.join(missing)}")
             return 1
 
+    # Validate skill tags (REQ-P-9)
+    valid_skills = _available_skills()
+    if valid_skills:  # skip if no skills directory (framework not fully installed)
+        invalid = _validate_skill_tags(d / "TASKS.md", valid_skills)
+        if invalid:
+            ui.warn(f"Invalid skill tags: {', '.join(sorted(invalid))} — asking model to fix...")
+            fix_msg = (
+                f"TASKS.md contains invalid skill tags: {', '.join(sorted(invalid))}. "
+                f"Valid skills: {', '.join(sorted(valid_skills))}. "
+                "Please rewrite TASKS.md with only valid skill tags using write_file()."
+            )
+            with Status("  ⠋ Fixing tags...", console=ui._con):
+                try:
+                    response = agent.send(fix_msg)
+                    with open(log, "a") as f:
+                        f.write(f"\n=== TAG FIX ===\n{response}\n")
+                except (RuntimeError, OSError, ValueError) as e:
+                    ui.error(f"Tag fix failed: {e}")
+            invalid = _validate_skill_tags(d / "TASKS.md", valid_skills)
+            if invalid:
+                ui.error(f"Plan failed: still has invalid skill tags: {', '.join(sorted(invalid))}")
+                return 1
+
     # Summary
     task_files = list(d.glob("TASKS*.md"))
     for tf in task_files:
@@ -164,3 +187,26 @@ def run_plan(
 
     ui.done("Plan complete.")
     return 0
+
+
+def _available_skills() -> set[str]:
+    """Return lowercase names of all skill files in resources/skills/."""
+    from ..config import _voidrift_home
+    skills_dir = _voidrift_home() / "resources" / "skills"
+    if not skills_dir.is_dir():
+        return set()
+    return {p.stem.lower() for p in skills_dir.glob("*.md")}
+
+
+def _validate_skill_tags(tasks_path: Path, valid: set[str]) -> set[str]:
+    """Parse [tag, ...] from task lines and return any not in valid skills."""
+    import re
+    if not tasks_path.exists():
+        return set()
+    tags = set()
+    for line in tasks_path.read_text().splitlines():
+        if line.strip().startswith("- [ ]"):
+            m = re.search(r"\[([^\]]+)\]\s*$", line)
+            if m:
+                tags.update(t.strip().lower() for t in m.group(1).split(","))
+    return tags - valid
