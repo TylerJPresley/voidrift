@@ -407,6 +407,45 @@ def _get_cached_repos() -> dict[str, str]:
     return repos
 
 
+def _check_freshness(available: dict, cached: dict) -> dict[str, str]:
+    """Compare local HF cache SHAs against remote HEAD for cached models."""
+    repos = {m.repository for m in available.values() if m.repository in cached}
+    if not repos:
+        return {}
+
+    # Build a single SSH command that reads local SHAs and fetches remote SHAs
+    checks = []
+    for repo in sorted(repos):
+        cache_dir = f"models--{repo.replace('/', '--')}"
+        local_ref = f"~/.cache/huggingface/hub/{cache_dir}/refs/main"
+        remote_url = f"https://huggingface.co/api/models/{repo}/revision/main"
+        checks.append(
+            f'LOCAL=$(cat {local_ref} 2>/dev/null || echo "none"); '
+            f'REMOTE=$(curl -s --connect-timeout 3 {remote_url} 2>/dev/null '
+            f'| python3 -c "import sys,json; print(json.load(sys.stdin).get(\'sha\',\'\'))" 2>/dev/null || echo ""); '
+            f'echo "{repo}|$LOCAL|$REMOTE"'
+        )
+    cmd = "; ".join(checks)
+    try:
+        r = ssh_cmd(cmd)
+    except Exception:
+        return {}
+
+    result = {}
+    for line in (r.stdout or "").strip().splitlines():
+        parts = line.split("|", 2)
+        if len(parts) != 3:
+            continue
+        repo, local, remote = parts
+        if not remote or remote == "none":
+            result[repo] = "✓ cached"
+        elif local == remote:
+            result[repo] = "✓ current"
+        else:
+            result[repo] = "⬆ update"
+    return result
+
+
 def models_list() -> str:
     """List configured and cached models (REQ-WK-6)."""
     lines = []
@@ -417,10 +456,18 @@ def models_list() -> str:
     s = get_status()
     active = s["model"] if s["active"] else None
 
+    # Check freshness for cached models
+    freshness = _check_freshness(available, cached)
+
     lines.append("Configured Models:")
     if available:
         for alias, m in sorted(available.items()):
-            status = "✅ running" if alias == active else ("✓ cached" if m.repository in cached else "⚠ not downloaded")
+            if alias == active:
+                status = "✅ running"
+            elif m.repository not in cached:
+                status = "⚠ not downloaded"
+            else:
+                status = freshness.get(m.repository, "✓ cached")
             lines.append(f"  {alias:<20} {m.repository:<45} {status}")
     else:
         lines.append("  (none)")

@@ -221,8 +221,10 @@
   - Given a model container is running, When `worker status` is run, Then the output includes the model alias, health status, and endpoint URL.
   - Given no container is running, When `worker status` is run, Then the output indicates no active model.
 - **REQ-WK-5:** `worker bench [<num_prompts>] [<req_rate>]` SHALL benchmark the active model using vLLM's benchmark tool via SSH.
-- **REQ-WK-6:** `worker models list` SHALL display configured models (from `worker-models.yml`) and cached models (from HF cache) with clear section headers.
-  - Given two models are configured and one is cached, When `worker models list` is run, Then both configured models appear under a "Configured" header and the cached model appears under a "Cached" header.
+- **REQ-WK-6:** `worker models list` SHALL display configured models (from `worker-models.yml`) and cached models (from HF cache) with clear section headers. Each configured model SHALL show a status: `✅ running` (active container), `✓ current` (cached, matches remote HEAD SHA), `⬆ update` (cached, remote has newer revision), `⚠ not downloaded` (not cached). Remote revision checks SHALL use the HuggingFace API (`/api/models/<repo>/revision/main`). IF the API is unreachable, the status SHALL fall back to `✓ cached`.
+  - Given a configured model is cached and matches the remote HEAD SHA, When `worker models list` is run, Then the model shows `✓ current`.
+  - Given a configured model is cached but the remote HEAD SHA differs, When `worker models list` is run, Then the model shows `⬆ update`.
+  - Given the HuggingFace API is unreachable, When `worker models list` is run, Then cached models show `✓ cached` (graceful fallback).
 - **REQ-WK-6a:** `worker models add <alias> <repo>` SHALL add a new model to `worker-models.yml` AND download the weights. IF the alias already exists, THE SYSTEM SHALL exit with an error.
   - Given alias `new-model` does not exist, When `worker models add new-model org/repo` is run, Then the alias is added to `worker-models.yml` and weights are downloaded.
   - Given alias `qwen3-coder` already exists, When `worker models add qwen3-coder org/repo` is run, Then the command exits with an error and `worker-models.yml` is unchanged.
