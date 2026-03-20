@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import signal
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -96,6 +97,8 @@ def run_develop(
     dev_prompt_tpl = _get_prompt("develop", "TASK")
     esc_prompt_tpl = _get_prompt("develop", "ESCALATION")
 
+    git_lock = threading.Lock()  # REQ-D-11: serialize git operations across workers
+
     result = 1
     try:
         if is_multi:
@@ -113,7 +116,7 @@ def run_develop(
                         ui.warn("Interrupted — stopping after current task.")
                         break
                     label = f"[{module}] "
-                    result = _develop_module(worker, architect, module, label, tools, handlers, log, dev_prompt_tpl, esc_prompt_tpl, lambda: _interrupted)
+                    result = _develop_module(worker, architect, module, label, tools, handlers, log, dev_prompt_tpl, esc_prompt_tpl, git_lock, lambda: _interrupted)
                     if result != 0:
                         break
             else:
@@ -129,7 +132,7 @@ def run_develop(
                         fut = pool.submit(
                             _develop_module, worker, architect, module, label,
                             tools, handlers, log, dev_prompt_tpl, esc_prompt_tpl,
-                            lambda: _interrupted,
+                            git_lock, lambda: _interrupted,
                         )
                         futures[fut] = module
 
@@ -148,7 +151,7 @@ def run_develop(
                     ui.warn("Interrupted — stopping after current task.")
                     break
                 label = ""
-                result = _develop_module(worker, architect, module, label, tools, handlers, log, dev_prompt_tpl, esc_prompt_tpl, lambda: _interrupted)
+                result = _develop_module(worker, architect, module, label, tools, handlers, log, dev_prompt_tpl, esc_prompt_tpl, git_lock, lambda: _interrupted)
     except KeyboardInterrupt:
         _interrupted = True
         ui.warn("Interrupted — stopping after current task.")
@@ -170,6 +173,7 @@ def _develop_module(
     log: Path,
     dev_prompt_tpl: str,
     esc_prompt_tpl: str,
+    git_lock: threading.Lock,
     is_interrupted: callable = lambda: False,
 ) -> int:
     """Execute tasks for a single module via MCP task tools (REQ-D-4)."""
@@ -180,6 +184,9 @@ def _develop_module(
     d = voidrift_dir()
     mod_arg = "" if module == "_default" else module
     arch_guidance: dict[int, str] = {}  # task_num -> latest architect response
+
+    arch_file = d / "ARCHITECTURE.md"
+    architecture = arch_file.read_text()[:8000] if arch_file.exists() else "(not available)"
 
     while True:
         if is_interrupted():
@@ -203,6 +210,7 @@ def _develop_module(
 
         system = dev_prompt_tpl.format(
             task_text=task.text,
+            architecture=architecture,
             arch_context=arch_context,
         )
 
@@ -267,10 +275,11 @@ def _develop_module(
         if get_write_count() > 0:
             try:
                 import subprocess
-                git_result = subprocess.run(
-                    ["git", "diff", "--quiet", "HEAD"],
-                    capture_output=True, cwd=str(d.parent),
-                )
+                with git_lock:  # REQ-D-11: serialize git operations
+                    git_result = subprocess.run(
+                        ["git", "diff", "--quiet", "HEAD"],
+                        capture_output=True, cwd=str(d.parent),
+                    )
                 if git_result.returncode == 0:
                     ui.warn("write_file() called but git shows no changes")
                     with open(log, "a") as f:

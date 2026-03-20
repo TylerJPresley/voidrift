@@ -18,6 +18,9 @@ One task at a time. Be precise and minimal.
 TASK:
 {task_text}
 
+ARCHITECTURE (excerpt):
+{architecture}
+
 {arch_context}
 
 ## ESCALATION
