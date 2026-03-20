@@ -10,9 +10,24 @@ from pathlib import Path
 
 PROJECT_DIR = Path.cwd()
 
+# Track write_file calls per task (REQ-D-5)
+_write_count = 0
+
+
+def reset_write_count() -> None:
+    """Reset the write counter. Called before each task."""
+    global _write_count
+    _write_count = 0
+
+
+def get_write_count() -> int:
+    """Return the number of write_file calls since last reset."""
+    return _write_count
+
 
 def write_file(path: str, content: str) -> str:
     """Write content to a file in the project directory."""
+    global _write_count
     full = PROJECT_DIR / path
     try:
         full.resolve().relative_to(PROJECT_DIR.resolve())
@@ -20,6 +35,7 @@ def write_file(path: str, content: str) -> str:
         return f"Access denied: {path} is outside the project directory"
     full.parent.mkdir(parents=True, exist_ok=True)
     full.write_text(content, encoding="utf-8")
+    _write_count += 1
     return f"Wrote {len(content)} bytes to {path}"
 
 

@@ -158,6 +158,9 @@ def _develop_module(
             arch_context=arch_context,
         )
 
+        from ..tools import reset_write_count, get_write_count
+        reset_write_count()
+
         agent = AgentLoop(
             model=worker,
             system_prompt=system,
@@ -179,6 +182,53 @@ def _develop_module(
                 with open(log, "a") as f:
                     f.write(f"ERROR on task {task_num}: {e}\n")
                 return 1
+
+        # Verify writes occurred (REQ-D-5)
+        if get_write_count() == 0:
+            ui.warn("No files written — retrying task...")
+            reset_write_count()
+            with Status(f"  ⠋ Retrying...", console=ui._con):
+                try:
+                    agent2 = AgentLoop(
+                        model=worker, system_prompt=system,
+                        tools=tools, tool_handlers=handlers,
+                        stream=False, log_path=log,
+                    )
+                    response = agent2.send("Execute this task. You must call write_file() to produce output.")
+                    with open(log, "a") as f:
+                        f.write(f"\n--- Task {task_num} RETRY ---\n{response}\n")
+                except (RuntimeError, OSError, ValueError) as e:
+                    ui.error(f"Retry failed: {e}")
+
+            if get_write_count() == 0:
+                if architect:
+                    ui.warn("Still no writes after retry — escalating...")
+                    esc_dir = d / "escalations"
+                    if mod_arg:
+                        esc_dir = esc_dir / mod_arg
+                    esc_dir.mkdir(parents=True, exist_ok=True)
+                    (esc_dir / f"{task_num}.md").write_text(
+                        f"Task produced no file output after two attempts.\n\nTask: {task.text}"
+                    )
+                else:
+                    ui.warn("No writes after retry and no architect configured — skipping task")
+                    with open(log, "a") as f:
+                        f.write(f"SKIPPED task {task_num}: no writes, no architect\n")
+
+        # Git diff check (REQ-D-5) — advisory warning
+        if get_write_count() > 0:
+            try:
+                import subprocess
+                git_result = subprocess.run(
+                    ["git", "diff", "--quiet", "HEAD"],
+                    capture_output=True, cwd=str(d.parent),
+                )
+                if git_result.returncode == 0:
+                    ui.warn("write_file() called but git shows no changes")
+                    with open(log, "a") as f:
+                        f.write(f"WARNING task {task_num}: writes occurred but git diff HEAD is clean\n")
+            except (FileNotFoundError, subprocess.SubprocessError):
+                pass  # git not available or no repo — skip
 
         # Check for escalation file (REQ-D-6)
         esc_dir = d / "escalations"
