@@ -137,18 +137,25 @@
 ### 4.6 Phase 3 — Develop
 
 - **REQ-D-1:** WHEN `.voidrift/TASKS.md` does not exist, THE SYSTEM SHALL exit with an error prompting `voidrift plan`.
+  - Given no `.voidrift/TASKS.md` exists, When `voidrift develop <model>` is run, Then the command exits with an error containing "Run 'voidrift plan'".
 - **REQ-D-2:** WHEN all tasks are marked `[x]`, THE SYSTEM SHALL exit with "all tasks complete" and return 0.
+  - Given all tasks in TASKS.md are `[x]`, When `voidrift develop <model>` is run, Then the command exits with code 0 and prints "All tasks complete."
 - **REQ-D-3:** WHEN a develop session starts, THE SYSTEM SHALL create `.voidrift/.develop.lock` with PID and timestamp. IF the lock exists with a live PID, THE SYSTEM SHALL exit with error.
-- **REQ-D-4:** WHILE the develop loop is active, THE SYSTEM SHALL process the first unchecked task from TASKS.md via `get_next_task()`. WHEN no unchecked tasks remain, the loop SHALL exit.
+  - Given no lock file exists, When a develop session starts, Then `.develop.lock` is created with the current PID.
+  - Given a lock file exists with a live PID, When `voidrift develop <model>` is run, Then the command exits with an error containing the PID.
+  - Given a lock file exists with a dead PID, When `voidrift develop <model>` is run, Then the stale lock is removed and the session starts.
+- **REQ-D-4:** WHILE the develop loop is active, THE SYSTEM SHALL process the first unchecked task from TASKS.md via `get_next_task()`. WHEN no unchecked tasks remain, the loop SHALL exit. Each agent's system prompt SHALL be constructed per REQ-RES-7: the stage-specific prompt (loaded via `get_prompt("develop", "TASK")`) with the task text and any architect guidance injected via format variables. All instructions SHALL live in `resources/prompts/develop.md`.
 - **REQ-D-5:** IF the worker produces no file changes (HEAD unchanged), THE SYSTEM SHALL retry once. IF the retry also fails AND an architect is configured, THE SYSTEM SHALL escalate.
-- **REQ-D-6:** WHEN the worker escalates, THE SYSTEM SHALL consult the architect with the escalation context and inject the architect's response into the agent's message history, then retry the task. Escalations and responses are ephemeral — they exist only in the agent's message history during the run.
+- **REQ-D-6:** WHEN the worker escalates, THE SYSTEM SHALL consult the architect with the escalation context and inject the architect's response into the agent's message history, then retry the task. Escalations and responses are ephemeral — they exist only in the agent's message history during the run. The architect's system prompt SHALL be constructed per REQ-RES-7: the escalation prompt (loaded via `get_prompt("develop", "ESCALATION")`) with the question, task text, requirements, and architecture injected via format variables.
 - **REQ-D-7:** WHEN `max_escalations` (5) is exceeded for a session, THE SYSTEM SHALL mark the task `[!]` (blocked), increment `blocked_tasks`, and continue to the next task.
+  - Given 5 escalations have occurred, When the developer escalates again, Then the task is marked `[!]` and the next task begins.
 - **REQ-D-8:** WHEN architect is consulted, THE SYSTEM SHALL provide: problem description, REQUIREMENTS.md, ARCHITECTURE.md, and task text. Source code files SHALL NOT be loaded.
 - **REQ-D-9:** Task completion SHALL be managed by the MCP server's `complete_task()` tool, which marks `- [ ]` as `- [x]` and writes through to disk.
 - **REQ-D-10:** WHEN `.voidrift/TASKS.md` contains `## Module:` headers, THE SYSTEM SHALL spawn up to `--workers N` concurrent agent loops, each assigned a module. With `--workers 1` (default), modules SHALL be processed sequentially. With `--workers 0`, one worker SHALL be spawned per module.
   - *Rationale:* Single-branch execution avoids merge complexity. File ownership constraints (REQ-P-6) prevent cross-module conflicts. A commit lock (REQ-D-11) serializes git operations.
 - **REQ-D-11:** WHEN multiple workers are active, git commits SHALL be serialized through a lock to prevent index conflicts.
 - **REQ-D-12:** WHEN `--workers` is greater than 1 AND no module headers exist, THE SYSTEM SHALL print a warning and fall back to single-worker mode.
+  - Given TASKS.md has no `## Module:` headers, When `voidrift develop <model> --workers 4` is run, Then a warning is printed and the system falls back to single-worker mode.
 - **REQ-D-13:** WHEN Ctrl+C or SIGTERM is received, THE SYSTEM SHALL set an interrupted flag, send SIGTERM to active workers, allow a 2-second grace period, then SIGKILL.
 
 ### 4.7 Phase 4 — Automate
@@ -299,7 +306,9 @@
 | V-D-1 | REQ-D-1 | Test | `test_phases.py::TestDevelopPreflightChecks::test_missing_tasks` |
 | V-D-2 | REQ-D-2 | Test | `test_phases.py::TestDevelopPreflightChecks::test_all_tasks_complete` |
 | V-D-3 | REQ-D-3 | Test | `test_phases.py::TestDevelopPreflightChecks::test_lock_file_stale` |
-| V-D-4 | REQ-D-10 | Test | `test_phases.py::TestDevelopPreflightChecks::test_workers_without_modules` |
+| V-D-4 | REQ-D-7 | Test | `test_phases.py` — max escalations blocks task and continues |
+| V-D-5 | REQ-D-10 | Test | `test_phases.py::TestDevelopPreflightChecks::test_workers_without_modules` |
+| V-D-6 | REQ-D-12 | Test | `test_phases.py` — workers without module headers falls back to single |
 | V-U-1 | REQ-U-1 | Test | `test_phases.py::TestCLICommands::test_status_command` |
 | V-U-2 | REQ-U-2 | Test | `test_phases.py` — chat session loads skill, prompt, and --doc context |
 | V-U-3 | REQ-U-3 | Test | `test_phases.py::TestCLICommands::test_log_view` |
