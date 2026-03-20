@@ -305,10 +305,6 @@ def _develop_module(
 
             ui.warn(f"Escalation: {question[:200]}")
 
-            if not architect:
-                ui.error("No architect configured. Re-run with an architect model.")
-                return 1
-
             guidance = _consult_architect(architect, question, task.text, tools, handlers, log, esc_prompt_tpl, mod_arg or None)
             if guidance:
                 arch_guidance[task_num] = guidance

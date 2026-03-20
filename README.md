@@ -2,7 +2,7 @@
 
 **Local-first Agentic Development Framework**
 
-A local-first AI development lifecycle tool that routes work between a worker model (primary execution) and an optional architect model (escalation and design). The five phases — Gather → Plan → Develop → Automate → Verify — produce a deployable, tested project from requirements alone.
+A local-first AI development lifecycle tool that routes work between a primary model (task execution) and an optional architect model (escalation and design). Any model can fill either role. The five phases — Gather → Plan → Develop → Automate → Verify — produce a deployable, tested project from requirements alone.
 
 ## Setup & Configuration
 
@@ -399,9 +399,9 @@ voidrift verify qwen3-coder claude
 - **`voidrift plan <model> [<feature>] [--fresh-start] [--update]`** - Generate architecture and tasks
   - `--fresh-start` - Delete existing planning artifacts and start fresh
   - `--update` - Revise existing plan to match current requirements
-- **`voidrift develop <worker> [<architect>]`** - Execute implementation tasks
-- **`voidrift automate <worker> [<architect>]`** - Generate infrastructure code
-- **`voidrift verify <worker> [<architect>]`** - Run quality checks and validation
+- **`voidrift develop <model> [<architect>]`** - Execute implementation tasks
+- **`voidrift automate <model> [<architect>]`** - Generate infrastructure code
+- **`voidrift verify <model> [<architect>]`** - Run quality checks and validation
 
 ### Utility Commands
 

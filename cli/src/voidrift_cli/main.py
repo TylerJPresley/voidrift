@@ -25,15 +25,15 @@ Getting started:
   voidrift gather <model> <path>          Reverse-engineer requirements
   voidrift chat <model>                   Interactive requirements & planning
   voidrift plan <model>                   Generate architecture and tasks
-  voidrift develop <worker> [<architect>] Execute implementation tasks
-  voidrift verify <worker> [<architect>]  Run quality checks
+  voidrift develop <model> [<architect>]  Execute implementation tasks
+  voidrift verify <model> [<architect>]   Run quality checks
 
 Phases:
   gather <model> <path> [--force]
   plan <model> [<feature>] [--fresh-start] [--update]
-  develop <worker> [<architect>]              Execute implementation tasks
-  automate <worker> [<architect>]
-  verify <worker> [<architect>]
+  develop <model> [<architect>]              Execute implementation tasks
+  automate <model> [<architect>]
+  verify <model> [<architect>]
 
 Utility:
   status                      Show project phase status
@@ -170,36 +170,36 @@ def plan(model, feature, fresh_start, update) -> None:
 
 
 @cli.command()
-@click.argument("worker", shell_complete=_complete_model)
+@click.argument("model", shell_complete=_complete_model)
 @click.argument("architect", required=False, shell_complete=_complete_model)
-def develop(worker, architect) -> None:
+def develop(model, architect) -> None:
     """Phase 3: Execute implementation tasks."""
     from .phases.develop import run_develop
-    wm = resolve_model(worker)
-    am = resolve_model(architect) if architect else None
-    sys.exit(run_develop(wm, architect=am))
+    mc = resolve_model(model)
+    am = resolve_model(architect) if architect else mc
+    sys.exit(run_develop(mc, architect=am))
 
 
 @cli.command()
-@click.argument("worker", shell_complete=_complete_model)
+@click.argument("model", shell_complete=_complete_model)
 @click.argument("architect", required=False, shell_complete=_complete_model)
-def automate(worker, architect) -> None:
+def automate(model, architect) -> None:
     """Phase 4: Generate infrastructure-as-code."""
     from .phases.automate import run_automate
-    wm = resolve_model(worker)
-    am = resolve_model(architect) if architect else None
-    sys.exit(run_automate(wm, architect=am))
+    mc = resolve_model(model)
+    am = resolve_model(architect) if architect else mc
+    sys.exit(run_automate(mc, architect=am))
 
 
 @cli.command()
-@click.argument("worker", shell_complete=_complete_model)
+@click.argument("model", shell_complete=_complete_model)
 @click.argument("architect", required=False, shell_complete=_complete_model)
-def verify(worker, architect) -> None:
+def verify(model, architect) -> None:
     """Phase 5: Run quality checks and validation."""
     from .phases.verify import run_verify
-    wm = resolve_model(worker)
-    am = resolve_model(architect) if architect else None
-    sys.exit(run_verify(wm, architect=am))
+    mc = resolve_model(model)
+    am = resolve_model(architect) if architect else mc
+    sys.exit(run_verify(mc, architect=am))
 
 
 # ---------------------------------------------------------------------------
