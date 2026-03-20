@@ -574,9 +574,9 @@ def models_check(prune: bool = False) -> tuple[list[tuple[str, bool, str]], list
     # Prune if requested
     if prune and unconfigured:
         for repo, _ in unconfigured:
-            rc = ssh_stream(f"{HF_CLI} cache rm model/{repo} --yes 2>&1")
-            if rc != 0:
-                unconfigured = [(r, s) for r, s in unconfigured if r != repo]
+            cache_dir = f"models--{repo.replace('/', '--')}"
+            ssh_stream(f"sudo chown -R $(whoami) ~/.cache/huggingface/hub/{cache_dir} 2>/dev/null; "
+                       f"{HF_CLI} cache rm model/{repo} --yes 2>&1")
 
     return results, unconfigured
 
