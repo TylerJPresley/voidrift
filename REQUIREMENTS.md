@@ -161,6 +161,10 @@
 
 - **REQ-U-1:** `voidrift status` SHALL print phase completion status with emoji indicators (✅, ⬜, 🔄) and task counts.
 - **REQ-U-2:** `voidrift chat <model>` SHALL start an interactive session with full MCP tool access (per REQ-ARCH-6) — the central command for iterating on any `.voidrift/` artifact. The agent's system prompt SHALL be constructed per REQ-RES-7: the ANALYSIS-REQS skill as baseline methodology, the `chat/SYSTEM` prompt for behavioral rules, and optional context. The agent MAY load additional domain skills on demand via `get_skill()`. `--doc <path>` SHALL scope the conversation to a specific `.voidrift/` artifact, loading its content into the system prompt context. IF a model request fails mid-session, THE SYSTEM SHALL print the error and return to the prompt (not exit).
+  - Given a valid model alias, When `voidrift chat <model>` is run, Then an interactive session starts with the ANALYSIS-REQS skill and `chat/SYSTEM` prompt loaded.
+  - Given `--doc REQUIREMENTS.md` and the file exists, When the session starts, Then the system prompt includes the file's content.
+  - Given `--doc new-spec.md` and the file does not exist, When the session starts, Then a warning is printed and the system prompt includes the DOC-NEW section.
+  - Given a model API error during a chat turn, When the agent raises a RuntimeError, Then the error is printed and the prompt reappears.
 - **REQ-U-3:** `voidrift log <phase>` SHALL show the last 200 lines of the most recent log. `--follow` / `-f` SHALL tail the latest log file, streaming new lines as they are written. `--prune` SHALL delete log files.
 - **REQ-U-4:** `voidrift unlock` SHALL remove the develop lock file and kill any running develop process.
 - **REQ-U-5:** `voidrift completions <shell>` SHALL output shell completion scripts for bash, zsh, and fish. All model, worker, and architect arguments SHALL complete from configured aliases in `models.yml`.
@@ -239,7 +243,10 @@
 - **REQ-UI-2:** ALL phases (gather, plan, develop, automate, verify) SHALL display progress through their stages. Each phase SHALL show: a phase title line, stage transitions (e.g. `▸ Stage 1/3: Triaging files...`), per-item progress with elapsed time (e.g. `▸ 3/28 backend/main.py... ✓ 4.8s`), and a final summary line. Automated phases (plan, develop, automate, verify) SHALL show the same level of progress detail as interactive phases.
 - **REQ-UI-3:** The `voidrift chat` command SHALL use a plain-terminal interface with: a dim header block (phase name, log path, model label), a `prompt_toolkit` multi-line input (blank line to submit, backspace/arrows work across lines), streamed model responses via `on_token` callback, and a dim stats line after each response showing token count, tokens/sec, and elapsed time.
 - **REQ-UI-4:** Chat SHALL always have its full tool set available. IF a model request fails mid-session, THE SYSTEM SHALL print the error and return to the prompt.
+  - Given a chat session is active, When the operator sends a message, Then all MCP and local tools are available to the agent.
 - **REQ-UI-5:** Interactive sessions SHALL handle Ctrl+C gracefully (print dim "Session ended." and exit), handle EOF on input (exit cleanly), and log all operator input and model responses to the session log file.
+  - Given a chat session is active, When the operator presses Ctrl+C, Then "Session ended." is printed and the process exits cleanly.
+  - Given a chat session with two exchanges, When the session ends, Then the log file contains both operator inputs and both model responses.
 
 ### 4.16 Framework Configuration
 
@@ -283,8 +290,11 @@
 | V-D-3 | REQ-D-3 | Test | `test_phases.py::TestDevelopPreflightChecks::test_lock_file_stale` |
 | V-D-4 | REQ-D-10 | Test | `test_phases.py::TestDevelopPreflightChecks::test_workers_without_modules` |
 | V-U-1 | REQ-U-1 | Test | `test_phases.py::TestCLICommands::test_status_command` |
-| V-U-2 | REQ-U-3 | Test | `test_phases.py::TestCLICommands::test_log_view` |
-| V-U-3 | REQ-U-4 | Test | `test_phases.py::TestCLICommands::test_unlock_no_lock` |
+| V-U-2 | REQ-U-2 | Test | `test_phases.py` — chat session loads skill, prompt, and --doc context |
+| V-U-3 | REQ-U-3 | Test | `test_phases.py::TestCLICommands::test_log_view` |
+| V-U-4 | REQ-U-4 | Test | `test_phases.py::TestCLICommands::test_unlock_no_lock` |
+| V-UI-1 | REQ-UI-4 | Test | `test_phases.py` — chat tools available on every turn |
+| V-UI-2 | REQ-UI-5 | Test | `test_phases.py` — session log contains operator input and model responses |
 | V-MC-1 | REQ-MC-1 | Test | `test_models.py::TestResolveModel` — alias resolution from config |
 | V-MC-2 | REQ-MC-2 | Test | `test_models.py::TestResolveModel::test_cloud_models` |
 | V-WK-1 | REQ-WK-2 | Test | `test_worker.py` — container start/stop via SSH |
