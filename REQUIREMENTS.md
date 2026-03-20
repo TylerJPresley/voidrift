@@ -145,16 +145,23 @@
   - Given a lock file exists with a live PID, When `voidrift develop <model>` is run, Then the command exits with an error containing the PID.
   - Given a lock file exists with a dead PID, When `voidrift develop <model>` is run, Then the stale lock is removed and the session starts.
 - **REQ-D-4:** WHILE the develop loop is active, THE SYSTEM SHALL process the first unchecked task from TASKS.md via `get_next_task()`. WHEN no unchecked tasks remain, the loop SHALL exit. Each agent's system prompt SHALL be constructed per REQ-RES-7: the stage-specific prompt (loaded via `get_prompt("develop", "TASK")`) with the task text, the full ARCHITECTURE.md content, and any architect guidance injected via format variables. All instructions SHALL live in `resources/prompts/develop.md`.
+  - Given TASKS.md has 3 unchecked tasks, When the develop loop runs, Then tasks are processed in order via `get_next_task()` until none remain.
+  - Given ARCHITECTURE.md exists, When a task prompt is constructed, Then the full architecture content is included in the system prompt.
 - **REQ-D-5:** AFTER a task completes, THE SYSTEM SHALL verify that `write_file()` was called at least once during the task. IF no writes occurred, THE SYSTEM SHALL retry the task once. IF the retry also produces no writes AND an architect is configured, THE SYSTEM SHALL escalate. Additionally, IF git is initialized and HEAD exists, THE SYSTEM SHALL check `git diff HEAD` — if no changes are detected despite writes, THE SYSTEM SHALL log a warning.
   - Given a task completes without any `write_file()` calls, When the system checks, Then the task is retried.
   - Given a retry also produces no writes and an architect is configured, When the system checks, Then the task is escalated.
 - **REQ-D-6:** WHEN the worker escalates, THE SYSTEM SHALL consult the architect with the escalation context and inject the architect's response into the agent's message history, then retry the task. Escalations and responses are ephemeral — they exist only in the agent's message history during the run. The architect's system prompt SHALL be constructed per REQ-RES-7: the escalation prompt (loaded via `get_prompt("develop", "ESCALATION")`) with the question, task text, requirements, and architecture injected via format variables.
+  - Given a developer writes an escalation file, When the system detects it, Then the architect is consulted and the response is injected into the developer's next attempt.
 - **REQ-D-7:** WHEN `max_escalations` (5) is exceeded for a session, THE SYSTEM SHALL mark the task `[!]` (blocked), increment `blocked_tasks`, and continue to the next task.
   - Given 5 escalations have occurred, When the developer escalates again, Then the task is marked `[!]` and the next task begins.
 - **REQ-D-8:** WHEN architect is consulted, THE SYSTEM SHALL provide: problem description, REQUIREMENTS.md, ARCHITECTURE.md, and task text. Source code files SHALL NOT be loaded.
+  - Given a developer escalates, When the architect prompt is constructed, Then it contains the question, task text, full REQUIREMENTS.md, and full ARCHITECTURE.md — no source files.
 - **REQ-D-9:** Task completion SHALL be managed by the MCP server's `complete_task()` tool, which marks `- [ ]` as `- [x]` and writes through to disk.
+  - Given a task is pending `[ ]`, When the model calls `complete_task()`, Then the task is marked `[x]` in TASKS.md on disk.
 - **REQ-D-10:** WHEN `.voidrift/TASKS.md` contains `## Module:` headers, THE SYSTEM SHALL run modules concurrently using `ThreadPoolExecutor` with the concurrency limit from `get_concurrency()` for the model type (local: 1, cloud: 8, gateway: 8, configurable via `config.yml`). WHEN concurrency is 1, modules SHALL be processed sequentially. WHEN concurrency is 0, one worker SHALL be spawned per module.
   - *Rationale:* Concurrency is a model capacity concern, not a per-command flag. The same `concurrency` config used by gather applies to develop — one place to configure, consistent behavior across phases.
+  - Given TASKS.md has 3 `## Module:` headers and the model type is cloud, When develop runs, Then up to 8 modules run concurrently via ThreadPoolExecutor.
+  - Given the model type is local (concurrency 1), When develop runs with module headers, Then modules are processed sequentially.
 - **REQ-D-11:** WHEN multiple workers are active, git operations SHALL be serialized through a `threading.Lock` to prevent index conflicts.
   - *Rationale:* Concurrent `git diff` or future `git commit` calls from parallel module workers can corrupt the git index. A shared lock serializes access.
   - Given 3 modules running concurrently, When two workers trigger git diff simultaneously, Then only one executes at a time (the other blocks until the lock is released).
@@ -315,6 +322,12 @@
 | V-D-5 | REQ-D-7 | Test | `test_phases.py` — max escalations blocks task and continues |
 | V-D-5 | REQ-D-10 | Test | `test_phases.py::TestDevelopPreflightChecks::test_workers_without_modules` |
 | V-D-6 | REQ-D-12 | Test | `test_phases.py` — workers without module headers falls back to single |
+| V-D-7 | REQ-D-4 | Inspection | `develop.py::_develop_module` — task loop calls `get_next_task()`, prompt includes full ARCHITECTURE.md |
+| V-D-8 | REQ-D-6 | Inspection | `develop.py::_consult_architect` — escalation prompt via `get_prompt("develop", "ESCALATION")` |
+| V-D-9 | REQ-D-8 | Inspection | `develop.py::_consult_architect` — provides reqs + arch + task, no source files |
+| V-D-10 | REQ-D-9 | Test | `test_mcp.py` — `complete_task()` marks `[x]` and writes through to disk |
+| V-D-11 | REQ-D-11 | Inspection | `develop.py::run_develop` — `threading.Lock` passed to all `_develop_module` calls, acquired around git ops |
+| V-D-12 | REQ-D-13 | Inspection | `develop.py::run_develop` — SIGTERM/SIGINT set interrupted flag, lock cleaned in finally block |
 | V-U-1 | REQ-U-1 | Test | `test_phases.py::TestCLICommands::test_status_command` |
 | V-U-2 | REQ-U-2 | Test | `test_phases.py` — chat session loads skill, prompt, and --doc context |
 | V-U-3 | REQ-U-3 | Test | `test_phases.py::TestCLICommands::test_log_view` |
