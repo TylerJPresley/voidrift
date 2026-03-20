@@ -263,7 +263,8 @@ def bench(num_prompts: int, req_rate: float) -> None:
         bench_cmd = (
             f"docker exec {s['container']} vllm bench serve "
             f"--base-url http://localhost:{port} "
-            f"--dataset-name random "
+            f"--dataset-name sharegpt "
+            f"--dataset-path /root/.cache/huggingface/sharegpt.json "
             f"--num-prompts {num_prompts} {rate_arg}"
         )
         console.print("[dim]Running benchmark...[/dim]")

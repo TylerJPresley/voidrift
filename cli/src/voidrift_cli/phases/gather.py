@@ -168,7 +168,7 @@ def _gather_from(
     # --- Stage 2: Analysis — one agent per file, concurrent ---
     ui.stage("Stage 2: Analyzing files...")
     analysis_tools, analysis_handlers = _pick_tools(
-        {"read_source_file", "store_file_analysis", "get_skill", "list_skills"}
+        {"read_source_file", "store_file_analysis"}
     )
 
     # Build analysis prompt (skill already prepended via analyst_role)
@@ -187,7 +187,7 @@ def _gather_from(
     def _analyze_file(filepath: str) -> tuple[str, float | None, str | None]:
         start = _time.time()
         agent = AgentLoop(
-            model=model, stream=False, extra_body=extra, max_tokens=4096,
+            model=model, stream=False, extra_body=extra, max_tokens=16384,
             log_path=log,
             system_prompt=analysis_system,
             tools=analysis_tools, tool_handlers=analysis_handlers,

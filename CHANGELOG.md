@@ -28,6 +28,9 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 - Develop concurrency from config, not CLI flag — `get_concurrency()` used by both gather and develop
+- Gather analysis max_tokens bumped from 4096 to 16384 — prevents truncated tool call JSON on large files
+- Gather analysis prompt tightened — explicit tool call sequence, no redundant skill lookups
+- Gather analysis tools reduced to read_source_file + store_file_analysis only — skill already in system prompt
 - All phases use `stream=False` — streaming retained in code for future use
 - Worker bench command uses `vllm bench serve` with `random` dataset
 - Chat prompt generalized — not analyst-specific, model self-serves domain skills via `get_skill()`

@@ -40,9 +40,15 @@ Return ONLY a JSON list of files that SHOULD be kept. No markdown fences.
 
 ## ANALYSIS
 
-Read the file, then call store_file_analysis() with a thorough summary following the ANALYSIS-REQS methodology.
+Steps:
+1. Call read_source_file() to read the file.
+2. Call store_file_analysis() EXACTLY ONCE with your analysis.
+3. Call done() when finished.
 
-Your summary MUST cover:
+Do NOT call list_skills(), get_skill(), or any other tool. The methodology is already in your system prompt.
+Do NOT call store_file_analysis() more than once.
+
+Your analysis MUST cover:
 - Purpose and business intent (outcomes over mechanisms)
 - Key components, functions, classes, and their responsibilities
 - Dependencies and external integrations
@@ -50,8 +56,6 @@ Your summary MUST cover:
 - Configuration parameters and environment variables
 - Error handling patterns
 - Requirements implied by the code (use EARS notation: WHEN [trigger], THE SYSTEM SHALL [result])
-
-You have get_skill() and list_skills() if you need additional context.
 
 ## SYNTHESIS
 
