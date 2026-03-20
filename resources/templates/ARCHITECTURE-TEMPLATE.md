@@ -1,5 +1,7 @@
 # Architecture: [Project Name]
 
+<!-- Template follows the arc42 documentation standard (https://arc42.org) with C4 model diagrams (https://c4model.com). Populate every section with project-specific content. -->
+
 ## 1. Introduction and Goals
 
 State the project's purpose, primary use cases, and the key stakeholders. Keep this to one paragraph — the requirements document has the detail.

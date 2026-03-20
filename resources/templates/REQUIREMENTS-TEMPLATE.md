@@ -1,5 +1,7 @@
 # Requirements: [Feature/Bug Name]
 
+<!-- Template follows IEEE 29148 (requirements engineering) with EARS notation (Easy Approach to Requirements Syntax) for functional requirements and BDD (Given/When/Then) for acceptance criteria. -->
+
 ## 1. Introduction
 - **Purpose:** [One-sentence summary of the desired outcome]
 - **Project Scope:** [What this software will and will not do]
