@@ -200,19 +200,41 @@ def _gather_from(
 
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = {pool.submit(_analyze_file, fp): fp for fp in all_files}
-        for future in as_completed(futures):
-            filepath, elapsed, err = future.result()
-            with _lock:
-                _counter["done"] += 1
-                n = _counter["done"]
-            if err:
-                ui.progress(n, len(all_files), f"{filepath}...", end="")
-                ui._con.print(f" [yellow]⚠ {err}[/yellow]")
-            else:
-                ui.progress(n, len(all_files), f"{filepath}...", end="")
-                ui._con.print(f" [green]✓[/green] [dim]{elapsed:.1f}s[/dim]")
-            with open(log, "a") as f:
-                f.write(f"Analyzed: {filepath}\n")
+        from rich.live import Live
+        from rich.spinner import Spinner
+        from rich.text import Text
+        from rich.console import Group
+        from rich.markup import escape as _esc
+
+        completed_lines: list[Text] = []
+
+        with Live(Spinner("dots", text=f"  {len(all_files)} files analyzing...", style="dim"),
+                   console=ui._con, refresh_per_second=10) as live:
+            for future in as_completed(futures):
+                filepath, elapsed, err = future.result()
+                with _lock:
+                    _counter["done"] += 1
+                    n = _counter["done"]
+                if err:
+                    completed_lines.append(Text.from_markup(
+                        f"[dim]  {n}/{len(all_files)} {_esc(filepath)}...[/dim]"
+                        f" [yellow]⚠ {_esc(err)}[/yellow]"
+                    ))
+                else:
+                    completed_lines.append(Text.from_markup(
+                        f"[dim]  {n}/{len(all_files)} {_esc(filepath)}...[/dim]"
+                        f" [green]✓[/green] [dim]{elapsed:.1f}s[/dim]"
+                    ))
+                remaining = len(all_files) - n
+                if remaining:
+                    live.update(Group(
+                        *completed_lines,
+                        Spinner("dots", text=f"  {remaining} file{'s' if remaining != 1 else ''} analyzing...", style="dim"),
+                    ))
+                else:
+                    live.update(Group(*completed_lines))
+                with open(log, "a") as f:
+                    f.write(f"Analyzed: {filepath}\n")
 
     # Retrieve all analyses from SessionStore for building per-group context
     all_analyses = mcp_mod.session_store.get_all(run_id, "analysis") if mcp_mod else {}
