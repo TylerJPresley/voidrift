@@ -114,9 +114,12 @@
 
 ### 4.5 Phase 2 — Plan
 
-- **REQ-P-1:** Plan SHALL always produce `.voidrift/ARCHITECTURE.md` and `.voidrift/TASKS.md`. IF either is missing after the first run, one retry SHALL be issued. IF the retry also fails, THE SYSTEM SHALL exit with code 1.
+- **REQ-P-1:** Plan SHALL always produce `.voidrift/ARCHITECTURE.md` and `.voidrift/TASKS.md`. IF either is missing after the first run, one retry SHALL be issued. IF the retry also fails, THE SYSTEM SHALL exit with code 1. The agent's system prompt SHALL be constructed per REQ-RES-7: the ARCH-DESIGN skill (loaded once via `get_skill("ARCH-DESIGN")`) concatenated with the stage-specific prompt (loaded via `get_prompt("plan", "<stage>")`). All instructions SHALL live in `resources/prompts/plan.md`.
+  - Given REQUIREMENTS.md exists, When `voidrift plan <model>` completes successfully, Then both ARCHITECTURE.md and TASKS.md exist in `.voidrift/`.
+  - Given the model fails to produce ARCHITECTURE.md on the first run, When the retry also fails, Then the command exits with code 1 and names the missing artifact.
 - **REQ-P-2:** Planner output SHALL be fully hidden from the terminal. Only a spinner and status line SHALL be shown.
 - **REQ-P-3:** WHEN `--fresh-start` is specified, THE SYSTEM SHALL delete ARCHITECTURE.md, TASKS.md, and spec/*.md before planning.
+  - Given ARCHITECTURE.md and TASKS.md exist, When `voidrift plan <model> --fresh-start` is run, Then both files are deleted before the planning agent starts.
 - **REQ-P-4:** `auto-commits: false` SHALL be set for the plan phase.
 - **REQ-P-5:** For single-module projects, tasks SHALL be written under a `## Tasks` header. For multi-module projects, tasks SHALL be grouped under `## Module: <name>` headers in a single TASKS.md.
 - **REQ-P-6:** In multi-module projects, each file path SHALL appear in exactly one module's task group. No file SHALL be created or modified by tasks in more than one module.
@@ -125,6 +128,8 @@
 - **REQ-P-9:** WHEN the architect writes task files, all skill tags SHALL be validated against available skill files. IF invalid tags are found, THE SYSTEM SHALL fail with an error listing invalid and valid tags.
 - **REQ-P-10:** `.voidrift/ARCHITECTURE.md` SHALL contain: Components table, Data Models, API Surface, Configuration, Dependencies, Constraints & Limitations, Glossary.
 - **REQ-P-11:** `voidrift plan <model> --update` SHALL read the current REQUIREMENTS.md, spec files, and existing ARCHITECTURE.md and TASKS.md, then plan from the current requirements. The existing artifacts are context to preserve completed work — requirements are the source of truth. The model SHALL preserve completed tasks (`- [x]`), update or remove tasks that no longer apply, and add new tasks for any unaddressed requirements. The existing architecture SHALL be treated as a starting point, not regenerated from scratch.
+  - Given ARCHITECTURE.md and TASKS.md exist, When `voidrift plan <model> --update` completes, Then requirements are the source of truth and completed tasks are preserved.
+  - Given no ARCHITECTURE.md exists, When `voidrift plan <model> --update` is run, Then the command exits with an error.
 
 ### 4.6 Phase 3 — Develop
 
@@ -283,8 +288,10 @@
 | V-ARCH-3 | REQ-ARCH-6 | Test | `test_agent.py::TestBuildMcpTools` — tools present, no direct reads |
 | V-G-1 | REQ-G-1 | Test | `test_phases.py::TestGatherPreflightChecks` |
 | V-G-2 | REQ-G-11 | Test | `test_agent.py` — context length error detection |
-| V-P-1 | REQ-P-1 | Test | `test_phases.py::TestPlanPreflightChecks` — artifact production |
-| V-P-2 | REQ-P-6 | Analysis | Code review of generated TASKS.md for file ownership |
+| V-P-1 | REQ-P-1 | Test | `test_phases.py::TestPlanPreflightChecks` — artifact production and retry |
+| V-P-2 | REQ-P-3 | Test | `test_phases.py` — fresh-start deletes existing artifacts |
+| V-P-3 | REQ-P-6 | Analysis | Code review of generated TASKS.md for file ownership |
+| V-P-4 | REQ-P-11 | Test | `test_phases.py` — update mode requires existing artifacts |
 | V-D-1 | REQ-D-1 | Test | `test_phases.py::TestDevelopPreflightChecks::test_missing_tasks` |
 | V-D-2 | REQ-D-2 | Test | `test_phases.py::TestDevelopPreflightChecks::test_all_tasks_complete` |
 | V-D-3 | REQ-D-3 | Test | `test_phases.py::TestDevelopPreflightChecks::test_lock_file_stale` |
