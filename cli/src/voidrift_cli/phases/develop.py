@@ -95,8 +95,8 @@ def run_develop(
     modules = mcp_mod.tasks.modules() if hasattr(mcp_mod, 'tasks') else ["_default"]
 
     _get_prompt = handlers.get("get_prompt", lambda *a: "")
-    dev_system = _get_prompt("develop", "SYSTEM")
-    esc_system = _get_prompt("develop", "ESCALATION")
+    dev_prompt_tpl = _get_prompt("develop", "TASK")
+    esc_prompt_tpl = _get_prompt("develop", "ESCALATION")
 
     result = 1
     try:
@@ -105,7 +105,7 @@ def run_develop(
 
         for module in modules:
             label = f"[{module}] " if is_multi else ""
-            result = _develop_module(worker, architect, module, label, tools, handlers, log, dev_system, esc_system)
+            result = _develop_module(worker, architect, module, label, tools, handlers, log, dev_prompt_tpl, esc_prompt_tpl)
             if result != 0:
                 break
     except KeyboardInterrupt:
@@ -125,8 +125,8 @@ def _develop_module(
     tools: list,
     handlers: dict,
     log: Path,
-    dev_system: str,
-    esc_system: str,
+    dev_prompt_tpl: str,
+    esc_prompt_tpl: str,
 ) -> int:
     """Execute tasks for a single module via MCP task tools (REQ-D-4)."""
     import voidrift_mcp.server as mcp_mod
@@ -151,11 +151,16 @@ def _develop_module(
 
         arch_context = ""
         if task_num in arch_guidance:
-            arch_context = f"\n\nArchitect guidance:\n{arch_guidance[task_num]}"
+            arch_context = f"Architect guidance:\n{arch_guidance[task_num]}"
+
+        system = dev_prompt_tpl.format(
+            task_text=task.text,
+            arch_context=arch_context,
+        )
 
         agent = AgentLoop(
             model=worker,
-            system_prompt=dev_system + arch_context,
+            system_prompt=system,
             tools=tools,
             tool_handlers=handlers,
             stream=False,
@@ -165,7 +170,7 @@ def _develop_module(
         with Status(f"  ⠋ Working...", console=ui._con):
             start_time = time.time()
             try:
-                response = agent.send(task.text)
+                response = agent.send("Execute this task.")
                 elapsed = time.time() - start_time
                 with open(log, "a") as f:
                     f.write(f"\n--- Task {task_num}: {label} ({elapsed:.1f}s) ---\n{response}\n")
@@ -197,7 +202,7 @@ def _develop_module(
                 ui.error("No architect configured. Re-run with an architect model.")
                 return 1
 
-            guidance = _consult_architect(architect, question, task.text, tools, handlers, log, esc_system, mod_arg or None)
+            guidance = _consult_architect(architect, question, task.text, tools, handlers, log, esc_prompt_tpl, mod_arg or None)
             if guidance:
                 arch_guidance[task_num] = guidance
                 continue
@@ -229,22 +234,24 @@ def _consult_architect(
     tools: list,
     handlers: dict,
     log: Path,
-    esc_system: str,
+    esc_prompt_tpl: str,
     module: str | None = None,
 ) -> str | None:
     """Consult the architect model for guidance (REQ-D-6, REQ-D-8)."""
     d = voidrift_dir()
-    context_parts = [f"Question from developer:\n{question}\n\nTask:\n{task_text}"]
     req = d / "REQUIREMENTS.md"
-    if req.exists():
-        context_parts.append(f"REQUIREMENTS.md:\n{req.read_text()[:8000]}")
     arch = d / "ARCHITECTURE.md"
-    if arch.exists():
-        context_parts.append(f"ARCHITECTURE.md:\n{arch.read_text()[:8000]}")
+
+    system = esc_prompt_tpl.format(
+        question=question,
+        task_text=task_text,
+        requirements=req.read_text()[:8000] if req.exists() else "(not found)",
+        architecture=arch.read_text()[:8000] if arch.exists() else "(not found)",
+    )
 
     agent = AgentLoop(
         model=architect,
-        system_prompt=esc_system,
+        system_prompt=system,
         tools=tools,
         tool_handlers=handlers,
         stream=False,
@@ -254,7 +261,7 @@ def _consult_architect(
     ui.info("Consulting architect...")
     with Status("  ⠋ Thinking...", console=ui._con):
         try:
-            response = agent.send("\n\n".join(context_parts))
+            response = agent.send("Provide guidance for this blocked task.")
             with open(log, "a") as f:
                 f.write(f"\n--- Architect consultation ---\n{response}\n")
             return response
