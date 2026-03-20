@@ -245,8 +245,9 @@ def _gather_from(
                 group_context=f"--- FILE ANALYSES FOR {group_name.upper()} ---\n\n{group_context}",
             )
             synth = AgentLoop(
-                model=model, stream=False, extra_body=extra, max_tokens=16384,
+                model=model, stream=True, extra_body=extra, max_tokens=16384,
                 log_path=log,
+                on_token=ui.make_token_handler(),
                 system_prompt=f"{analyst_role}\n\n{synth_prompt}",
                 tools=synth_tools, tool_handlers=synth_handlers,
             )
@@ -276,8 +277,9 @@ def _gather_from(
             specs_context=f"--- COMPONENT SPECS ---\n\n{specs_context}",
         )
         overview = AgentLoop(
-            model=model, stream=False, extra_body=extra, max_tokens=8192,
+            model=model, stream=True, extra_body=extra, max_tokens=8192,
             log_path=log,
+            on_token=ui.make_token_handler(),
             system_prompt=f"{analyst_role}\n\n{overview_prompt}",
             tools=synth_tools, tool_handlers=synth_handlers,
         )
@@ -300,8 +302,9 @@ def _gather_from(
             group_context=f"--- FILE ANALYSES ---\n\n{group_context}",
         )
         synth = AgentLoop(
-            model=model, stream=False, extra_body=extra, max_tokens=16384,
+            model=model, stream=True, extra_body=extra, max_tokens=16384,
             log_path=log,
+            on_token=ui.make_token_handler(),
             system_prompt=f"{analyst_role}\n\n{single_prompt}",
             tools=synth_tools, tool_handlers=synth_handlers,
         )
