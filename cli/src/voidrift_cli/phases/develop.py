@@ -186,7 +186,7 @@ def _develop_module(
     arch_guidance: dict[int, str] = {}  # task_num -> latest architect response
 
     arch_file = d / "ARCHITECTURE.md"
-    architecture = arch_file.read_text()[:8000] if arch_file.exists() else "(not available)"
+    architecture = arch_file.read_text() if arch_file.exists() else "(not available)"
 
     while True:
         if is_interrupted():
@@ -352,8 +352,8 @@ def _consult_architect(
     system = esc_prompt_tpl.format(
         question=question,
         task_text=task_text,
-        requirements=req.read_text()[:8000] if req.exists() else "(not found)",
-        architecture=arch.read_text()[:8000] if arch.exists() else "(not found)",
+        requirements=req.read_text() if req.exists() else "(not found)",
+        architecture=arch.read_text() if arch.exists() else "(not found)",
     )
 
     agent = AgentLoop(

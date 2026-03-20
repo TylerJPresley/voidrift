@@ -18,7 +18,7 @@ One task at a time. Be precise and minimal.
 TASK:
 {task_text}
 
-ARCHITECTURE (excerpt):
+ARCHITECTURE:
 {architecture}
 
 {arch_context}
@@ -35,8 +35,8 @@ Question from developer:
 Task:
 {task_text}
 
-REQUIREMENTS (excerpt):
+REQUIREMENTS:
 {requirements}
 
-ARCHITECTURE (excerpt):
+ARCHITECTURE:
 {architecture}
