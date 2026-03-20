@@ -370,8 +370,11 @@ For free Claude models via Kiro Gateway, see [Kiro Gateway Setup](#kiro-gateway-
 cd ~/Projects/my-project
 git init
 
-# 2. Gather requirements
-voidrift gather claude
+# 2. Reverse-engineer requirements from existing code
+voidrift gather claude /path/to/existing/project
+
+# Or start fresh with interactive chat
+voidrift chat claude
 
 # 3. Plan architecture and tasks
 voidrift plan claude
@@ -391,12 +394,11 @@ voidrift verify qwen3-coder claude
 
 ### Phase Commands
 
-- **`voidrift gather <model> [<feature>] [--from <path>] [--reference <path>] [--force]`** - Gather requirements interactively
-  - `--from <path>` - Reverse engineer requirements from existing codebase (non-interactive, auto-generates)
-  - `--reference <path>` - Load reference codebase for lookup during interactive session
-  - `--force` - Overwrite existing requirements when using --from (default: error if file exists)
-- **`voidrift plan <model> [<feature>] [--fresh-start]`** - Generate architecture and tasks
+- **`voidrift gather <model> <path> [--force]`** - Reverse-engineer requirements from existing codebase
+  - `--force` - Overwrite existing requirements (default: error if file exists)
+- **`voidrift plan <model> [<feature>] [--fresh-start] [--update]`** - Generate architecture and tasks
   - `--fresh-start` - Delete existing planning artifacts and start fresh
+  - `--update` - Revise existing plan to match current requirements
 - **`voidrift develop <worker> [<architect>]`** - Execute implementation tasks
 - **`voidrift automate <worker> [<architect>]`** - Generate infrastructure code
 - **`voidrift verify <worker> [<architect>]`** - Run quality checks and validation
@@ -404,8 +406,9 @@ voidrift verify qwen3-coder claude
 ### Utility Commands
 
 - **`voidrift status`** - Show project phase status
-- **`voidrift chat <model>`** - Interactive chat session with any model
-- **`voidrift log <phase> [--prune]`** - View or manage phase log files
+- **`voidrift chat <model> [--doc <path>]`** - Interactive chat session with MCP tools
+- **`voidrift log <phase> [--prune] [-f]`** - View or manage phase log files
+- **`voidrift prune [--global] [--all]`** - Clean ephemeral data (logs, stale locks, session DB)
 - **`voidrift unlock`** - Remove develop lock and kill running process
 
 ### Worker Commands
@@ -479,46 +482,26 @@ your-project/
 ## Workflow
 
 ### 1. Gather Phase
-Produce requirements through interactive conversation:
-```bash
-voidrift gather claude
-voidrift gather claude authentication  # Feature spec
-```
-
-**Reverse Engineering from Existing Code:**
-Build requirements from an existing codebase (non-interactive):
+Reverse-engineer requirements from an existing codebase:
 ```bash
 # From new project directory
 cd ~/Projects/my-new-project
 git init
 
 # Auto-generate requirements from existing code
-voidrift gather claude --from /path/to/existing/project
+voidrift gather claude /path/to/existing/project
 
 # Overwrite existing requirements (if needed)
-voidrift gather claude --from /path/to/existing/project --force
-
-# Then refine interactively if needed
-voidrift gather claude
+voidrift gather claude /path/to/existing/project --force
 ```
 
-The Analyst will automatically:
-- Analyze the codebase structure (read-only, respects .gitignore)
-- Infer what the system does and how it behaves
-- Generate REQUIREMENTS.md in your new project directory
-- Error if file exists (use --force to overwrite)
+The model will automatically:
+- Triage the codebase structure (read-only, respects .gitignore)
+- Analyze source files concurrently
+- Synthesize REQUIREMENTS.md in your new project directory
+- Error if file exists (use `--force` to overwrite)
 
-**Reference Mode for Interactive Refinement:**
-Load a reference codebase during interactive requirements gathering:
-```bash
-# Interactive session with reference code available
-voidrift gather claude --reference /path/to/existing/project
-```
-
-The Analyst can examine the reference code to:
-- Look up existing functionality and patterns
-- Clarify technical constraints
-- Reference similar features during conversation
+For interactive requirements work, use `voidrift chat <model>` instead.
 
 ### 2. Plan Phase
 Generate architecture and task breakdown:
@@ -734,7 +717,7 @@ The framework consists of four components:
 1. **VoidRift CLI** (`cli/`) — Model-agnostic phase orchestrator. Resolves model aliases to endpoint URLs from `models.yml`, runs the agent loop, handles MCP tool calls. Does NOT manage containers, SSH, or gateway processes.
 2. **MCP Context Server** (`mcp-context-server/`) — FastMCP server that stores, retrieves, and exports project artifacts and framework resources. The model pulls context on demand via tool calls instead of loading full files.
 3. **Worker CLI** (`worker-cli/`) — Manages local model containers and Kiro Gateway. SSH to worker node, docker lifecycle, benchmarks, health checks. Provides the `worker` command.
-4. **Framework Resources** (`resources/`) — Role-specific agent files, skill conventions, and document templates.
+4. **Framework Resources** (`resources/`) — Prompt files, skill conventions, and document templates.
 
 ### Three-Role System
 
@@ -759,11 +742,11 @@ AI models operate in one of three roles, explicitly assigned at runtime:
 - Executes tasks from TASKS.md atomically
 - Writes code, tests, documentation, and boilerplate
 - Makes one fix attempt, then escalates when blocked
-- Receives: task description, source files, skill conventions, STATE.md
+- Receives: task description, full ARCHITECTURE.md, skill conventions, architect guidance (if escalated)
 - Does NOT: run shell commands during develop, make architectural decisions
 
 **Role Assignment:**
-The framework assigns roles via `[ROLE: X]` prefix in task messages. Models receive the full "playbook" (AGENT.md) but know their current "position" for each invocation.
+The framework assigns roles through the three-layer prompt architecture (REQ-RES-7). Each phase loads a skill file (how to think) and a stage-specific prompt (what to do) with context injected via format variables. Prompts live in `resources/prompts/`, skills in `resources/skills/`.
 
 **Example:** `voidrift develop qwen3-coder claude`
 - `qwen3-coder` = Developer (implements tasks)
@@ -774,23 +757,27 @@ The framework assigns roles via `[ROLE: X]` prefix in task messages. Models rece
 
 ### Framework Resources
 
-**`resources/agents/` — Role-Specific Guidance**
-- `ANALYST.md` — Analyst role: requirements elicitation, collaborative mode
-- `ARCHITECT.md` — Architect role: design, planning, escalation guidance
-- `DEVELOPER.md` — Developer role: implementation, task execution
-- Each role file is loaded only during relevant phases to prevent role confusion
+**`resources/prompts/` — Phase Prompts**
+- `gather.md` — Triage, analysis, and synthesis stage prompts
+- `chat.md` — Interactive session system prompt and doc-scoped variants
+- `plan.md` — Architecture planning and plan-update prompts
+- `develop.md` — Task execution and escalation prompts
+- Each prompt file contains sections loaded via `get_prompt(phase, section)`
 
 **`resources/skills/` — Domain Conventions**
 - 15 skill files covering specialized domains
 - Technology-specific standards and canonical patterns
-- Loaded contextually per task tag during develop phase
+- Loaded as skill layer in gather/chat/plan; loaded on demand per task tag during develop
 - Available skills: `AI-ETHICS`, `ARCH-DESIGN`, `CLOUD-OPS`, `DATA-ENG`, `EMBEDDED-ENG`, `GAME-ENG`, `ML-ENG`, `MOBILE-ENG`, `PROD-STRATEGY`, `QUALITY-QA`, `RELIABILITY-ENG`, `SECURITY-TRUST`, `SYSTEMS-ENG`, `WEB-ENG`, `WORKFLOW`
 
 **`resources/templates/` — Document Scaffolding**
-- `ARCHITECTURE-TEMPLATE.md` — Architecture document template
+- `ARCHITECTURE-TEMPLATE.md` — Arc42 + C4 architecture document template
 - `DESIGN-TEMPLATE.md` — Feature design template
 - `EDIT-FORMAT.md` — File editing format instructions
-- `REQUIREMENTS-TEMPLATE.md` — Requirements document template
+- `REQUIREMENTS-TEMPLATE.md` — IEEE 29148 + EARS + BDD requirements template
+
+**`resources/agents/` — Legacy Role Guidance (deprecated)**
+- `ANALYST.md`, `ARCHITECT.md`, `DEVELOPER.md` — Superseded by prompt/skill pattern
 
 ### MCP Context Server
 
@@ -807,8 +794,9 @@ The MCP server provides 16 tools that the model calls on demand:
 | `get_next_task` | Return the next unchecked task for a module |
 | `complete_task` | Mark next task done, write through to disk |
 | `get_task_status` | Return done/blocked/remaining counts |
-| `get_agent` | Retrieve role-specific agent file by role and optional topic |
+| `get_agent` | Retrieve role-specific agent file (legacy) |
 | `get_skill` | Retrieve skill file content by name and optional topic |
+| `get_prompt` | Retrieve phase prompt section by phase and section name |
 | `get_template` | Retrieve template file by name |
 | `read_source_file` | Read a source file from the project directory |
 | `write_file` | Write content to a file in the project directory |
@@ -1030,14 +1018,11 @@ voidrift develop qwen3-coder claude
 ## Documentation
 
 - **Requirements:** `REQUIREMENTS.md` — IEEE 29148 / EARS format requirements for all framework components
-- **Role-Specific Guidance:**
-  - `resources/agents/ANALYST.md` — Analyst role (gather phase): Requirements elicitation, collaborative mode
-  - `resources/agents/ARCHITECT.md` — Architect role (plan phase, escalations): Design and planning
-  - `resources/agents/DEVELOPER.md` — Developer role (develop/automate/verify): Implementation and execution
+- **Phase Prompts:** `resources/prompts/*.md` — Externalized prompts for gather, chat, plan, and develop phases
 - **Skill Files:** `resources/skills/*.md` — 15 domain-specific technology stacks and conventions
-- **Templates:** `resources/templates/*.md` — Document scaffolding for requirements, architecture, and design
+- **Templates:** `resources/templates/*.md` — Document scaffolding for requirements (IEEE 29148 + EARS + BDD), architecture (arc42 + C4), and design
 
-Each role file is loaded only during relevant phases to prevent role confusion and minimize context window usage.
+Each phase loads its prompts via `get_prompt()` and skills via `get_skill()` following the three-layer prompt architecture (REQ-RES-7).
 
 ## Tried Local Models
 
@@ -1072,7 +1057,7 @@ Decision: Unacceptable latency in practice on this system. Granite 4.0-H-Small u
 
 ```bash
 make install    # Install both packages (editable)
-make test       # Run all 180 tests
+make test       # Run all 204 tests
 make build      # Build distribution packages
 ```
 
@@ -1102,7 +1087,8 @@ voidrift/
 │   │   └── session_store.py     # SQLite session metadata
 │   └── tests/                   # MCP server tests (pytest)
 ├── resources/                    # Framework reference files
-│   ├── agents/                  # Role-specific guidance (3 files)
+│   ├── agents/                  # Legacy role guidance (deprecated, 3 files)
+│   ├── prompts/                 # Phase prompts (4 files)
 │   ├── skills/                  # Domain conventions (15 files)
 │   └── templates/               # Document scaffolding (5 files)
 ├── REQUIREMENTS.md              # IEEE 29148 / EARS format requirements
