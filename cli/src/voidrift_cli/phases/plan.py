@@ -71,8 +71,6 @@ def run_plan(
     _get_skill = handlers.get("get_skill", lambda *a: "")
 
     skill = _get_skill("ARCH-DESIGN")
-    system_prompt = _get_prompt("plan", "SYSTEM")
-    system = f"{skill}\n\n{system_prompt}" if skill else system_prompt
 
     specs_section = "FEATURE SPECS:\n" + "\n\n".join(specs) if specs else ""
 
@@ -82,7 +80,7 @@ def run_plan(
         if not arch_path.exists() or not tasks_path.exists():
             ui.error("--update requires existing ARCHITECTURE.md and TASKS.md. Run plan without --update first.")
             return 1
-        prompt = _get_prompt("plan", "PLAN-UPDATE").format(
+        stage_prompt = _get_prompt("plan", "PLAN-UPDATE").format(
             requirements=requirements,
             specs_section=specs_section,
             architecture=arch_path.read_text(),
@@ -90,11 +88,13 @@ def run_plan(
         )
     else:
         feature_section = f"Focus on feature: {feature}" if feature else ""
-        prompt = _get_prompt("plan", "PLAN").format(
+        stage_prompt = _get_prompt("plan", "PLAN").format(
             requirements=requirements,
             specs_section=specs_section,
             feature_section=feature_section,
         )
+
+    system = f"{skill}\n\n{stage_prompt}" if skill else stage_prompt
 
     agent = AgentLoop(
         model=model,
@@ -109,7 +109,7 @@ def run_plan(
     ui.stage("Planning architecture and tasks...")
     with Status("  ⠋ Thinking...", console=ui._con):
         try:
-            response = agent.send(prompt)
+            response = agent.send("Create the architecture and task breakdown.")
             with open(log, "a") as f:
                 f.write(response + "\n")
         except (RuntimeError, OSError, ValueError) as e:
