@@ -135,8 +135,8 @@ class TestDevelopPreflightChecks:
         vd = tmp_project / ".voidrift"
         (vd / "TASKS.md").write_text("- [ ] Task [analysis-reqs]\n")
         from voidrift_cli.phases.develop import run_develop
-        result = run_develop(cloud_model, workers=2)
-        # Falls back to single worker, doesn't error
+        result = run_develop(cloud_model)
+        # Single module, processes sequentially
         assert result in (0, 1)
 
     def test_lock_file_stale(self, tmp_project, cloud_model, sample_requirements, sample_tasks):
@@ -413,4 +413,4 @@ class TestCLICommands:
         from voidrift_cli.main import cli
         runner = CliRunner()
         result = runner.invoke(cli, ["develop", "--help"])
-        assert "--workers" in result.output
+        assert "Execute implementation tasks" in result.output

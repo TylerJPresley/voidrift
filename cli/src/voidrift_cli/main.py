@@ -31,7 +31,7 @@ Getting started:
 Phases:
   gather <model> <path> [--force]
   plan <model> [<feature>] [--fresh-start] [--update]
-  develop <worker> [<architect>] [--workers <n>]
+  develop <worker> [<architect>]              Execute implementation tasks
   automate <worker> [<architect>]
   verify <worker> [<architect>]
 
@@ -172,13 +172,12 @@ def plan(model, feature, fresh_start, update) -> None:
 @cli.command()
 @click.argument("worker", shell_complete=_complete_model)
 @click.argument("architect", required=False, shell_complete=_complete_model)
-@click.option("--workers", default=1, help="Number of concurrent module workers (0 = one per module)")
-def develop(worker, architect, workers) -> None:
+def develop(worker, architect) -> None:
     """Phase 3: Execute implementation tasks."""
     from .phases.develop import run_develop
     wm = resolve_model(worker)
     am = resolve_model(architect) if architect else None
-    sys.exit(run_develop(wm, architect=am, workers=workers))
+    sys.exit(run_develop(wm, architect=am))
 
 
 @cli.command()

@@ -11,7 +11,7 @@
 - **As an** Operator, **I want to** run `voidrift chat <model>` to interactively refine requirements, architecture, and tasks with an AI analyst, **so that** I can iterate on project artifacts through conversation.
 - **As an** Operator, **I want to** run `voidrift plan` to generate architecture and task breakdowns, **so that** implementation work is pre-planned with atomic, ordered tasks.
 - **As an** Operator, **I want to** run `voidrift develop` to have an AI execute tasks automatically, **so that** code is written, tested, and committed without manual intervention.
-- **As an** Operator, **I want to** run `voidrift develop --workers 0` to process multiple modules concurrently, **so that** large projects complete faster.
+- **As an** Operator, **I want to** use concurrency configuration to process multiple modules in parallel, **so that** large projects complete faster.
 - **As an** Operator, **I want to** use local models for bulk implementation and cloud models for escalation, **so that** I minimize API costs while maintaining quality on hard problems.
 - **As an** Operator, **I want to** run `voidrift automate` to generate infrastructure-as-code, **so that** my project is deployable without manual IaC authoring.
 - **As an** Operator, **I want to** run `voidrift verify` to validate the implementation against requirements, **so that** I have confidence the project meets its acceptance criteria.
@@ -153,11 +153,11 @@
   - Given 5 escalations have occurred, When the developer escalates again, Then the task is marked `[!]` and the next task begins.
 - **REQ-D-8:** WHEN architect is consulted, THE SYSTEM SHALL provide: problem description, REQUIREMENTS.md, ARCHITECTURE.md, and task text. Source code files SHALL NOT be loaded.
 - **REQ-D-9:** Task completion SHALL be managed by the MCP server's `complete_task()` tool, which marks `- [ ]` as `- [x]` and writes through to disk.
-- **REQ-D-10:** WHEN `.voidrift/TASKS.md` contains `## Module:` headers, THE SYSTEM SHALL spawn up to `--workers N` concurrent agent loops, each assigned a module. With `--workers 1` (default), modules SHALL be processed sequentially. With `--workers 0`, the concurrency limit SHALL be determined by `get_concurrency()` for the model type (local: 1, cloud: 8, gateway: 8, configurable via `config.yml`). Concurrency SHALL use `ThreadPoolExecutor`, matching the gather phase pattern.
-  - *Rationale:* Single-branch execution avoids merge complexity. File ownership constraints (REQ-P-6) prevent cross-module conflicts. Concurrency limits respect model capacity — local models handle fewer parallel requests than cloud APIs.
+- **REQ-D-10:** WHEN `.voidrift/TASKS.md` contains `## Module:` headers, THE SYSTEM SHALL run modules concurrently using `ThreadPoolExecutor` with the concurrency limit from `get_concurrency()` for the model type (local: 1, cloud: 8, gateway: 8, configurable via `config.yml`). WHEN concurrency is 1, modules SHALL be processed sequentially. WHEN concurrency is 0, one worker SHALL be spawned per module.
+  - *Rationale:* Concurrency is a model capacity concern, not a per-command flag. The same `concurrency` config used by gather applies to develop — one place to configure, consistent behavior across phases.
 - **REQ-D-11:** WHEN multiple workers are active, git commits SHALL be serialized through a lock to prevent index conflicts.
-- **REQ-D-12:** WHEN `--workers` is greater than 1 AND no module headers exist, THE SYSTEM SHALL print a warning and fall back to single-worker mode.
-  - Given TASKS.md has no `## Module:` headers, When `voidrift develop <model> --workers 4` is run, Then a warning is printed and the system falls back to single-worker mode.
+- **REQ-D-12:** WHEN the concurrency config is greater than 1 AND no module headers exist in TASKS.md, THE SYSTEM SHALL process tasks sequentially (single module behavior).
+  - Given TASKS.md has no `## Module:` headers, When develop runs with cloud concurrency config of 8, Then tasks are processed sequentially.
 - **REQ-D-13:** WHEN Ctrl+C or SIGTERM is received, THE SYSTEM SHALL set an interrupted flag and stop after the current task completes. The lock file SHALL be cleaned up in all cases. WHEN multiple workers are active (REQ-D-10), THE SYSTEM SHALL send SIGTERM to active workers, allow a 2-second grace period, then SIGKILL.
   - Given a develop session is running a task, When Ctrl+C is pressed, Then the current task finishes and the session exits with the lock file removed.
 

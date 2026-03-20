@@ -397,8 +397,7 @@ voidrift verify qwen3-coder claude
   - `--force` - Overwrite existing requirements when using --from (default: error if file exists)
 - **`voidrift plan <model> [<feature>] [--fresh-start]`** - Generate architecture and tasks
   - `--fresh-start` - Delete existing planning artifacts and start fresh
-- **`voidrift develop <worker> [<architect>] [--workers N]`** - Execute implementation tasks
-  - `--workers N` - Number of concurrent module workers (0 = one per module, default: 1)
+- **`voidrift develop <worker> [<architect>]`** - Execute implementation tasks
 - **`voidrift automate <worker> [<architect>]`** - Generate infrastructure code
 - **`voidrift verify <worker> [<architect>]`** - Run quality checks and validation
 
@@ -530,11 +529,11 @@ voidrift plan claude
 ### 3. Develop Phase
 Execute tasks with worker model, escalate to architect when blocked:
 ```bash
-# Sequential (default)
+# Sequential (default for local models)
 voidrift develop qwen3-coder claude
 
-# Multi-module concurrent
-voidrift develop qwen3-coder claude --workers 0
+# Multi-module concurrent (automatic for cloud models)
+voidrift develop claude
 ```
 
 ### 4. Automate Phase

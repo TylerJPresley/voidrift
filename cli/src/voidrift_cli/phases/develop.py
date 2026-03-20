@@ -25,14 +25,12 @@ MAX_ESCALATIONS = 5
 def run_develop(
     worker: ModelConfig,
     architect: ModelConfig | None = None,
-    workers: int = 1,
 ) -> int:
     """Execute the develop phase.
 
     Args:
         worker: Model configuration for the developer role.
         architect: Optional model for escalation consultations.
-        workers: Number of concurrent module workers (0 = one per module).
 
     Returns:
         Exit code (0 for success, 1 for failure).
@@ -48,10 +46,6 @@ def run_develop(
     if not task_file:
         ui.error("No task files found. Run 'voidrift plan <model>' first.")
         return 1
-
-    if workers != 1 and not is_multi:
-        ui.warn("No module headers found. Falling back to single worker.")
-        workers = 1
 
     done_count, blocked, total = count_tasks(task_file)
     if done_count + blocked >= total and total > 0:
@@ -104,51 +98,57 @@ def run_develop(
 
     result = 1
     try:
-        if is_multi and workers != 1:
+        if is_multi:
             from concurrent.futures import ThreadPoolExecutor, as_completed
             from ..config import get_concurrency
 
-            if workers == 0:
-                max_w = get_concurrency(worker.model_type)
-                if max_w == 0:
-                    max_w = len(modules)
-            else:
-                max_w = min(workers, len(modules))
+            max_w = get_concurrency(worker.model_type)
+            if max_w == 0:
+                max_w = len(modules)
 
-            ui.info(f"Running {len(modules)} modules with {max_w} concurrent worker(s)")
-            results = {}
-
-            with ThreadPoolExecutor(max_workers=max_w) as pool:
-                futures = {}
+            if max_w == 1:
+                # Sequential — same as single module
                 for module in modules:
                     if _interrupted:
+                        ui.warn("Interrupted — stopping after current task.")
                         break
                     label = f"[{module}] "
-                    fut = pool.submit(
-                        _develop_module, worker, architect, module, label,
-                        tools, handlers, log, dev_prompt_tpl, esc_prompt_tpl,
-                        lambda: _interrupted,
-                    )
-                    futures[fut] = module
+                    result = _develop_module(worker, architect, module, label, tools, handlers, log, dev_prompt_tpl, esc_prompt_tpl, lambda: _interrupted)
+                    if result != 0:
+                        break
+            else:
+                ui.info(f"Running {len(modules)} modules with {max_w} concurrent worker(s)")
+                results = {}
 
-                for fut in as_completed(futures):
-                    mod = futures[fut]
-                    try:
-                        results[mod] = fut.result()
-                    except Exception as e:
-                        ui.error(f"[{mod}] failed: {e}")
-                        results[mod] = 1
+                with ThreadPoolExecutor(max_workers=max_w) as pool:
+                    futures = {}
+                    for module in modules:
+                        if _interrupted:
+                            break
+                        label = f"[{module}] "
+                        fut = pool.submit(
+                            _develop_module, worker, architect, module, label,
+                            tools, handlers, log, dev_prompt_tpl, esc_prompt_tpl,
+                            lambda: _interrupted,
+                        )
+                        futures[fut] = module
 
-            result = 1 if any(r != 0 for r in results.values()) else 0
+                    for fut in as_completed(futures):
+                        mod = futures[fut]
+                        try:
+                            results[mod] = fut.result()
+                        except Exception as e:
+                            ui.error(f"[{mod}] failed: {e}")
+                            results[mod] = 1
+
+                result = 1 if any(r != 0 for r in results.values()) else 0
         else:
             for module in modules:
                 if _interrupted:
                     ui.warn("Interrupted — stopping after current task.")
                     break
-                label = f"[{module}] " if is_multi else ""
+                label = ""
                 result = _develop_module(worker, architect, module, label, tools, handlers, log, dev_prompt_tpl, esc_prompt_tpl, lambda: _interrupted)
-                if result != 0:
-                    break
     except KeyboardInterrupt:
         _interrupted = True
         ui.warn("Interrupted — stopping after current task.")
