@@ -273,7 +273,7 @@ class TestModelsCheck:
         mock_stream.return_value = 0
         _, unconfigured = models_check(prune=True)
         assert len(unconfigured) == 1
-        assert "cache rm Extra/Model" in mock_stream.call_args[0][0]
+        assert "cache rm model/Extra/Model" in mock_stream.call_args[0][0]
 
 
 class TestWorkerLogs:
