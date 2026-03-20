@@ -22,6 +22,12 @@ models:
     api_key: "${worker.api_key}"
     type: local
 
+  qwen35-nvfp4:
+    model_id: "openai/qwen35-nvfp4"
+    base_url: "http://${worker.ip}:8000/v1"
+    api_key: "${worker.api_key}"
+    type: local
+
   qwen35-perf:
     model_id: "openai/qwen35-perf"
     base_url: "http://${worker.ip}:8000/v1"
