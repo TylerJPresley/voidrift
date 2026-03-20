@@ -158,7 +158,8 @@
 - **REQ-D-11:** WHEN multiple workers are active, git commits SHALL be serialized through a lock to prevent index conflicts.
 - **REQ-D-12:** WHEN `--workers` is greater than 1 AND no module headers exist, THE SYSTEM SHALL print a warning and fall back to single-worker mode.
   - Given TASKS.md has no `## Module:` headers, When `voidrift develop <model> --workers 4` is run, Then a warning is printed and the system falls back to single-worker mode.
-- **REQ-D-13:** WHEN Ctrl+C or SIGTERM is received, THE SYSTEM SHALL set an interrupted flag, send SIGTERM to active workers, allow a 2-second grace period, then SIGKILL.
+- **REQ-D-13:** WHEN Ctrl+C or SIGTERM is received, THE SYSTEM SHALL set an interrupted flag and stop after the current task completes. The lock file SHALL be cleaned up in all cases. WHEN multiple workers are active (REQ-D-10), THE SYSTEM SHALL send SIGTERM to active workers, allow a 2-second grace period, then SIGKILL.
+  - Given a develop session is running a task, When Ctrl+C is pressed, Then the current task finishes and the session exits with the lock file removed.
 
 ### 4.7 Phase 4 — Automate
 

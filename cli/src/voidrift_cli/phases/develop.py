@@ -72,10 +72,14 @@ def run_develop(
 
     lock.write_text(f"{os.getpid()}\n{datetime.now().isoformat()}")
 
-    def _handle_sigterm(signum: int, frame: object) -> None:
-        raise KeyboardInterrupt
+    _interrupted = False
 
-    prev_handler = signal.signal(signal.SIGTERM, _handle_sigterm)
+    def _handle_sigterm(signum: int, frame: object) -> None:
+        nonlocal _interrupted
+        _interrupted = True
+
+    prev_sigterm = signal.signal(signal.SIGTERM, _handle_sigterm)
+    prev_sigint = signal.signal(signal.SIGINT, _handle_sigterm)
 
     ui.phase("VoidRift Develop")
     log, run_id = boot_run("develop")
@@ -104,14 +108,19 @@ def run_develop(
             ui.warn("Multi-worker mode not yet implemented. Running sequentially.")
 
         for module in modules:
+            if _interrupted:
+                ui.warn("Interrupted — stopping after current task.")
+                break
             label = f"[{module}] " if is_multi else ""
-            result = _develop_module(worker, architect, module, label, tools, handlers, log, dev_prompt_tpl, esc_prompt_tpl)
+            result = _develop_module(worker, architect, module, label, tools, handlers, log, dev_prompt_tpl, esc_prompt_tpl, lambda: _interrupted)
             if result != 0:
                 break
     except KeyboardInterrupt:
-        ui.warn("Interrupted.")
+        _interrupted = True
+        ui.warn("Interrupted — stopping after current task.")
     finally:
-        signal.signal(signal.SIGTERM, prev_handler)
+        signal.signal(signal.SIGTERM, prev_sigterm)
+        signal.signal(signal.SIGINT, prev_sigint)
         lock.unlink(missing_ok=True)
 
     return result
@@ -127,6 +136,7 @@ def _develop_module(
     log: Path,
     dev_prompt_tpl: str,
     esc_prompt_tpl: str,
+    is_interrupted: callable = lambda: False,
 ) -> int:
     """Execute tasks for a single module via MCP task tools (REQ-D-4)."""
     import voidrift_mcp.server as mcp_mod
@@ -138,6 +148,10 @@ def _develop_module(
     arch_guidance: dict[int, str] = {}  # task_num -> latest architect response
 
     while True:
+        if is_interrupted():
+            ui.warn(f"{prefix}Interrupted — exiting module.")
+            return 1
+
         task = mcp_mod.tasks.get_next(mod_arg)
         if not task:
             break
