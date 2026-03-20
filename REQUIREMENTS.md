@@ -111,6 +111,10 @@
 - **REQ-G-11:** WHEN an API call fails due to context length exceeded, THE SYSTEM SHALL display a clear error identifying the stage, the group name, and a suggestion to use a model with a larger context window. The pipeline SHALL NOT silently truncate content to fit.
   - Given a model API returns an error containing "context length", When the agent loop catches the exception, Then a `RuntimeError` is raised with a message containing the model alias and "larger context window".
   - Given a source tree with 600 files, When `_build_file_tree` is called with the default 500 limit, Then a `RuntimeError` is raised with the actual file count and the limit.
+- **REQ-G-12:** WHEN a gather stage requires tool calls (synthesis, overview), THE SYSTEM SHALL use non-streaming mode (`stream=False`) for the agent instance. Stages that do not require tool calls (triage, analysis text output) MAY use streaming.
+  - *Rationale:* vLLM's streaming tool call parser does not reliably separate text content from tool calls when the model outputs both in the same response. Non-streaming mode allows vLLM to parse the complete response at once, ensuring tool calls like `write_file()` are correctly extracted and executed. The analysis stage already uses non-streaming successfully.
+  - Given a synthesis agent calls `write_file()` to create a spec, When the agent runs with `stream=False`, Then the tool call is parsed correctly and the file is written to disk.
+  - Given an overview agent calls `write_file()` to create REQUIREMENTS.md, When the agent runs with `stream=False`, Then the tool call is parsed correctly and the file is written to disk.
 
 ### 4.5 Phase 2 — Plan
 
@@ -310,6 +314,7 @@
 | V-ARCH-3 | REQ-ARCH-6 | Test | `test_agent.py::TestBuildMcpTools` — tools present, no direct reads |
 | V-G-1 | REQ-G-1 | Test | `test_phases.py::TestGatherPreflightChecks` |
 | V-G-2 | REQ-G-11 | Test | `test_agent.py` — context length error detection |
+| V-G-3 | REQ-G-12 | Inspection | `gather.py` — synthesis and overview agents use `stream=False` |
 | V-P-1 | REQ-P-1 | Test | `test_phases.py::TestPlanPreflightChecks` — artifact production and retry |
 | V-P-2 | REQ-P-3 | Test | `test_phases.py` — fresh-start deletes existing artifacts |
 | V-P-3 | REQ-P-6 | Analysis | Code review of generated TASKS.md for file ownership |

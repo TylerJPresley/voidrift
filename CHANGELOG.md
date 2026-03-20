@@ -8,6 +8,24 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- Three-layer prompt architecture across all phases (REQ-RES-7): skill + prompt + context
+  - `resources/prompts/chat.md` — interactive session prompts (SYSTEM, DOC, DOC-NEW)
+  - `resources/prompts/plan.md` — architecture planning prompts (PLAN, PLAN-UPDATE)
+  - `resources/prompts/develop.md` — task execution and escalation prompts (TASK, ESCALATION)
+- Skill tag validation after plan (REQ-P-9): invalid tags sent back to model for one fix attempt
+- Architecture template to arc42 standard with C4 diagram placeholders (REQ-P-10)
+- Standard references in templates: arc42+C4 for architecture, IEEE 29148+EARS+BDD for requirements
+- Write verification in develop (REQ-D-5): write_file() call counter + git diff advisory
+- Graceful shutdown in develop (REQ-D-13): SIGTERM/SIGINT set interrupted flag, clean exit
+- Concurrent multi-module develop via ThreadPoolExecutor + get_concurrency() (REQ-D-10)
+- Git operation lock for concurrent workers (REQ-D-11)
+- Full ARCHITECTURE.md injected into developer task prompt (REQ-D-4)
+- BDD acceptance criteria on all develop, plan, chat, and worker CLI requirements
+- Non-streaming mode for gather synthesis stages (REQ-G-12) — reliable tool call parsing
+
+### Changed
+- Develop concurrency from config, not CLI flag — `get_concurrency()` used by both gather and develop
+- Chat prompt generalized — not analyst-specific, model self-serves domain skills via `get_skill()`
 - Four-stage gather `--from` pipeline with auto-detected logical boundaries (REQ-G-8)
   - Triage detects groups (e.g. frontend, backend) from directory structure
   - Per-group synthesis agents write focused spec files to `.voidrift/spec/<group>.md`
@@ -51,7 +69,6 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - MCP tools: `load_tasks`, `get_next_task`, `complete_task`, `get_task_status` for task management
 - MCP tools: `get_agent(role, topic)`, `get_template(name)` for targeted resource retrieval
 - Write-through `ArtifactStore` — stores to memory and disk simultaneously, disk fallback on cache miss
-- `--workers N` CLI flag (default 1, 0 = one per module)
 - IEEE 29148 rationale annotations on key requirements (replaces ADRs)
 
 ### Changed
@@ -102,7 +119,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `get_next_task()` and `mark_task()` from CLI utils — MCP server handles these
 - `get_framework_resource()` MCP tool — replaced by `get_agent()` and `get_template()`
 - `get_conventions()` MCP tool — CONVENTIONS.md deleted from resources
-- `--parallel`, `--retry`, `--overwrite` CLI flags — replaced by `--workers N`
+- `--parallel`, `--retry`, `--overwrite` CLI flags — replaced by config-based concurrency
 - `_develop_parallel()`, `_develop_loop()`, `_develop_sequential()` — replaced by `_develop_module()`
 - Worktree-based parallel execution (AC-D36 through AC-D53)
 - Multiple `TASKS-<module>.md` file pattern
