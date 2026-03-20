@@ -293,7 +293,8 @@
 | V-P-1 | REQ-P-1 | Test | `test_phases.py::TestPlanPreflightChecks` — artifact production and retry |
 | V-P-2 | REQ-P-3 | Test | `test_phases.py` — fresh-start deletes existing artifacts |
 | V-P-3 | REQ-P-6 | Analysis | Code review of generated TASKS.md for file ownership |
-| V-P-4 | REQ-P-11 | Test | `test_phases.py` — update mode requires existing artifacts |
+| V-P-4 | REQ-P-9 | Test | `test_phases.py` — invalid skill tags rejected, model gets retry |
+| V-P-5 | REQ-P-11 | Test | `test_phases.py` — update mode requires existing artifacts |
 | V-D-1 | REQ-D-1 | Test | `test_phases.py::TestDevelopPreflightChecks::test_missing_tasks` |
 | V-D-2 | REQ-D-2 | Test | `test_phases.py::TestDevelopPreflightChecks::test_all_tasks_complete` |
 | V-D-3 | REQ-D-3 | Test | `test_phases.py::TestDevelopPreflightChecks::test_lock_file_stale` |
