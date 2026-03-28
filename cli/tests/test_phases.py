@@ -761,6 +761,149 @@ class TestDevelopRetryEscalation:
         assert result in (0, 1)  # Doesn't crash
 
 
+class TestChatSession:
+    """V-U-2: chat loads ANALYSIS-REQS skill + chat/SYSTEM prompt.
+    V-UI-1: chat tools available on every turn.
+    V-UI-2: session log contains operator input and model responses."""
+
+    def test_chat_phase_tools_include_required_handlers(self, tmp_project):
+        """V-U-2: build_mcp_tools with phase='chat' exposes get_skill and get_prompt."""
+        import voidrift_mcp.server as mcp_mod
+        mcp_mod._boot()
+        from voidrift_cli.agent import build_mcp_tools
+        tools, handlers = build_mcp_tools(mcp_mod, phase="chat")
+        assert "get_skill" in handlers
+        assert "get_prompt" in handlers
+        tool_names = {t["function"]["name"] for t in tools}
+        assert "get_skill" in tool_names
+
+    def test_chat_analysis_reqs_skill_is_available(self, tmp_project):
+        """V-U-2: get_skill('ANALYSIS-REQS') returns non-empty content in chat context."""
+        import voidrift_mcp.server as mcp_mod
+        mcp_mod._boot()
+        from voidrift_cli.agent import build_mcp_tools
+        _, handlers = build_mcp_tools(mcp_mod, phase="chat")
+        skill_content = handlers["get_skill"]("ANALYSIS-REQS")
+        assert len(skill_content) > 10
+        assert "not found" not in skill_content.lower()
+
+    def test_chat_system_prompt_is_available(self, tmp_project):
+        """V-U-2: get_prompt('chat', 'SYSTEM') returns non-empty content."""
+        import voidrift_mcp.server as mcp_mod
+        mcp_mod._boot()
+        from voidrift_cli.agent import build_mcp_tools
+        _, handlers = build_mcp_tools(mcp_mod, phase="chat")
+        system_prompt = handlers["get_prompt"]("chat", "SYSTEM")
+        assert len(system_prompt) > 10
+        assert "not found" not in system_prompt.lower()
+
+    def test_chat_doc_option_injects_file_content(self, tmp_project, voidrift_dir, cloud_model):
+        """V-U-2: --doc injects the artifact's content into the system prompt."""
+        from unittest.mock import patch, MagicMock
+        from click.testing import CliRunner
+        from voidrift_cli.main import cli
+
+        doc_content = "# Requirements\n\nBuild a thing."
+        (voidrift_dir / "REQUIREMENTS.md").write_text(doc_content)
+
+        captured = {}
+
+        class FakeAgent:
+            def __init__(self, **kwargs):
+                captured["system_prompt"] = kwargs.get("system_prompt", "")
+                self.tools = kwargs.get("tools", [])
+                self.tool_handlers = kwargs.get("tool_handlers", {})
+                self.messages = []
+
+        with patch("voidrift_cli.agent.AgentLoop", FakeAgent):
+            with patch("voidrift_cli.main._interactive_loop"):
+                with patch("voidrift_cli.main.resolve_model", return_value=cloud_model):
+                    runner = CliRunner()
+                    runner.invoke(cli, ["chat", cloud_model.alias, "--doc", "REQUIREMENTS.md"])
+
+        assert "Build a thing." in captured.get("system_prompt", ""), \
+            "Doc content should appear in system prompt when --doc is specified"
+
+    @patch("voidrift_cli.agent.OpenAI")
+    def test_ui1_tools_present_on_every_api_call(self, MockOpenAI, cloud_model, tmp_path):
+        """V-UI-1: In auto mode, tools are passed to the API on every call."""
+        from voidrift_cli.agent import AgentLoop
+        mock_client = MagicMock()
+        MockOpenAI.return_value = mock_client
+
+        from helpers import make_openai_response, make_tool_call
+        # First call: use a tool; second call: final text answer
+        tc = make_tool_call("get_skill", '{"name": "backend-eng"}')
+        tool_resp = make_openai_response(content=None, tool_calls=[tc])
+        tool_resp.choices[0].message.content = None
+        final_resp = make_openai_response("Here is my answer.")
+        mock_client.chat.completions.create.side_effect = [tool_resp, final_resp]
+
+        tool_def = {"type": "function", "function": {"name": "get_skill", "parameters": {}}}
+        agent = AgentLoop(
+            model=cloud_model,
+            system_prompt="Chat assistant",
+            tools=[tool_def],
+            tool_handlers={"get_skill": lambda name="": "skill content"},
+            stream=False,
+            tool_choice="auto",
+        )
+        agent.send("Tell me about backend-eng")
+
+        # Both API calls should have had tools in kwargs
+        for call in mock_client.chat.completions.create.call_args_list:
+            kwargs = call[1]
+            assert "tools" in kwargs, "tools must be present in every API call for chat (auto) mode"
+            assert kwargs.get("tool_choice") == "auto"
+
+    @patch("voidrift_cli.agent.OpenAI")
+    def test_ui2_log_contains_user_and_assistant(self, MockOpenAI, cloud_model, tmp_path):
+        """V-UI-2: session log contains [USER] input and [ASSISTANT] response."""
+        from voidrift_cli.agent import AgentLoop
+        from helpers import make_openai_response
+        mock_client = MagicMock()
+        MockOpenAI.return_value = mock_client
+        mock_client.chat.completions.create.return_value = make_openai_response("Chat reply.")
+
+        log_file = tmp_path / "chat.log"
+        agent = AgentLoop(
+            model=cloud_model,
+            system_prompt="You are a chat assistant.",
+            stream=False,
+            tool_choice="auto",
+            log_path=log_file,
+        )
+        agent.send("Hello from operator")
+
+        log_content = log_file.read_text()
+        assert "[USER]" in log_content
+        assert "Hello from operator" in log_content
+        assert "[ASSISTANT]" in log_content
+        assert "Chat reply." in log_content
+
+    @patch("voidrift_cli.agent.OpenAI")
+    def test_ui2_log_contains_system_prompt(self, MockOpenAI, cloud_model, tmp_path):
+        """V-UI-2: session log records the system prompt."""
+        from voidrift_cli.agent import AgentLoop
+        from helpers import make_openai_response
+        mock_client = MagicMock()
+        MockOpenAI.return_value = mock_client
+        mock_client.chat.completions.create.return_value = make_openai_response("reply")
+
+        log_file = tmp_path / "chat.log"
+        agent = AgentLoop(
+            model=cloud_model,
+            system_prompt="Distinctive system prompt content",
+            stream=False,
+            log_path=log_file,
+        )
+        agent.send("test")
+
+        log_content = log_file.read_text()
+        assert "[SYSTEM]" in log_content
+        assert "Distinctive system prompt content" in log_content
+
+
 class TestDevelopMaxEscalations:
     """V-D-5: After MAX_ESCALATIONS, task is blocked and loop continues."""
 
