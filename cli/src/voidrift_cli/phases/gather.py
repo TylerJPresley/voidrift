@@ -386,18 +386,37 @@ def _gather_from(
     # Retrieve all analyses from SessionStore
     all_analyses = mcp_mod.session_store.get_all(run_id, "analysis") if mcp_mod else {}
 
-    # Write operator-readable analysis log — one section per file, in category order
+    # Write operator-readable analysis output — index + per-file detail files
+    analysis_dir = d / "analysis"
+    analysis_dir.mkdir(exist_ok=True)
+
+    # Per-file analysis files mirroring the source tree
+    for cat in CATEGORIES:
+        for fp in sorted(categories.get(cat, [])):
+            analysis_text = all_analyses.get(fp, "")
+            if not analysis_text:
+                continue
+            dest = analysis_dir / (fp + ".md")
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(
+                f"# {fp}\n\n**Category:** {cat}\n\n{analysis_text.strip()}\n",
+                encoding="utf-8",
+            )
+
+    # Index file — categories, file counts, and links to individual analyses
     analysis_log = d / "ANALYSIS.md"
     with open(analysis_log, "w", encoding="utf-8") as _af:
         _af.write(f"# Gather Analysis\n\nSource: `{from_path}`\n\n")
+        total_analyzed = sum(1 for fp in all_analyses if all_analyses[fp])
+        _af.write(f"{total_analyzed} files analyzed.\n\n")
         for cat in CATEGORIES:
-            cat_files = sorted(categories.get(cat, []))
-            cat_analyses = [(fp, all_analyses[fp]) for fp in cat_files if all_analyses.get(fp)]
-            if not cat_analyses:
+            cat_files = sorted(fp for fp in categories.get(cat, []) if all_analyses.get(fp))
+            if not cat_files:
                 continue
-            _af.write(f"## {cat.capitalize()}\n\n")
-            for fp, analysis in cat_analyses:
-                _af.write(f"### {fp}\n\n{analysis.strip()}\n\n")
+            _af.write(f"## {cat.capitalize()} ({len(cat_files)})\n\n")
+            for fp in cat_files:
+                _af.write(f"- [{fp}](analysis/{fp}.md)\n")
+            _af.write("\n")
 
     # --- Stage 3: Synthesize requirements from all analyzed files (category order per REQ-G-8) ---
     all_analyzed = [
@@ -465,6 +484,8 @@ def _gather_from(
         files_created = [str(target.relative_to(Path.cwd()))]
         if analysis_log.exists():
             files_created.append(str(analysis_log.relative_to(Path.cwd())))
+        for af in sorted(analysis_dir.rglob("*.md")):
+            files_created.append(str(af.relative_to(Path.cwd())))
         total = len([f for fs in categories.values() for f in fs])
         src_count = len(categories.get("source", []))
         append_state(
