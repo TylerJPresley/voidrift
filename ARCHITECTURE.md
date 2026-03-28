@@ -131,10 +131,14 @@ Each phase sees only the tools relevant to its role (REQ-ARCH-9). Gather cannot 
 ### 4.1 Gather phase
 
 ```
-CLI: build file tree → create agent → send triage prompt
-MCP: store_file_analysis() ← each per-file agent writes
-CLI: for each analysis → create synthesis agent → read_framework_file(REQUIREMENTS.md)
-                                                → write_framework_file(REQUIREMENTS.md)
+CLI: build file tree → triage agent (categorize) → validation pass (prune bad entries)
+     for each file (concurrent):
+       if file > input_limit → split into overlapping chunks → analyze each chunk separately
+                             → consolidate chunk analyses (if >1 chunk)
+       else → agent reads via read_source_file() → store_file_analysis()
+CLI: write .voidrift/ANALYSIS.md (index) + .voidrift/analysis/<file>.md (per-file) ← operator review
+CLI: for each analysis → synthesis agent → store_requirements()
+     consolidation agent → get_template(REQUIREMENTS-TEMPLATE) → write_framework_file(REQUIREMENTS.md)
 ```
 
 ### 4.2 Plan phase
@@ -194,7 +198,7 @@ Two log roots, two intents:
 
 | Store | Location | Contents | Lifetime |
 |---|---|---|---|
-| Project artifacts | `<project>/.voidrift/` | REQUIREMENTS.md, ARCHITECTURE.md, TASKS.md, spec/, arch/ | Project |
+| Project artifacts | `<project>/.voidrift/` | REQUIREMENTS.md, ANALYSIS.md, analysis/, ARCHITECTURE.md, TASKS.md, spec/, arch/ | Project |
 | Phase logs | `<project>/.voidrift/logs/` | `<phase>-<timestamp>.log` — full agent dialog | Until `voidrift prune` |
 | System log | `~/.voidrift/logs/voidrift.log` | CLI invocations, phase outcomes | Rotating (1MB × 5) |
 | MCP log | `~/.voidrift/logs/mcp.log` | Boot events, file writes, tool errors | Rotating (1MB × 5) |

@@ -153,7 +153,7 @@ voidrift gather <model> <path>             # error if .voidrift/REQUIREMENTS.md 
 voidrift gather <model> <path> --overwrite # remove previous gather artifacts first
 ```
 
-Produces: `REQUIREMENTS.md`, `spec/<module>.md`
+Produces: `REQUIREMENTS.md`, `ANALYSIS.md` (index), `analysis/<file>.md` (per-file), `spec/<module>.md`
 
 Gather never auto-commits. Respects `.gitignore`. Use `voidrift chat <model>` to iterate on requirements interactively.
 
@@ -465,6 +465,8 @@ After running phases, your project will have:
 your-project/
 ├── .voidrift/
 │   ├── REQUIREMENTS.md      # System-level requirements         ← Gather
+│   ├── ANALYSIS.md          # Analysis index (categories, links) ← Gather
+│   ├── analysis/<file>.md   # Per-file source analysis          ← Gather
 │   ├── spec/<module>.md     # Per-module requirements           ← Gather
 │   ├── ARCHITECTURE.md      # System map, cross-module contracts ← Plan
 │   ├── arch/<module>.md     # Module design, components, interfaces ← Plan
