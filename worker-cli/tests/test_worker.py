@@ -247,42 +247,50 @@ class TestModelsRemove:
 
 
 class TestModelsCheck:
+    _FAKE_MODELS = {
+        "alias-a": MagicMock(repository="Org/ModelA"),
+        "alias-b": MagicMock(repository="Org/ModelB"),
+    }
+
+    @patch("voidrift_worker.models.list_models")
     @patch("voidrift_worker.models._get_cached_repos")
-    def test_all_cached(self, mock_cached):
-        mock_cached.return_value = {
-            "Qwen/Qwen3.5-35B-A3B-FP8": "37.5G",
-            "Qwen/Qwen2.5-VL-72B-Instruct-FP8": "72G",
-            "Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8": "29G",
-        }
+    def test_all_cached(self, mock_cached, mock_list):
+        mock_list.return_value = self._FAKE_MODELS
+        mock_cached.return_value = {"Org/ModelA": "37.5G", "Org/ModelB": "72G"}
         results, unconfigured = models_check()
         assert all(ok for _, ok, _ in results)
 
+    @patch("voidrift_worker.models.list_models")
     @patch("voidrift_worker.models.ssh_stream")
     @patch("voidrift_worker.models._get_cached_repos")
-    def test_downloads_missing(self, mock_cached, mock_stream):
+    def test_downloads_missing(self, mock_cached, mock_stream, mock_list):
+        mock_list.return_value = self._FAKE_MODELS
         mock_cached.return_value = {}
         mock_stream.return_value = 0
         results, _ = models_check()
         assert all(ok for _, ok, _ in results)
         assert mock_stream.call_count == len(results)
 
+    @patch("voidrift_worker.models.list_models")
     @patch("voidrift_worker.models._get_cached_repos")
-    def test_reports_unconfigured(self, mock_cached):
+    def test_reports_unconfigured(self, mock_cached, mock_list):
+        mock_list.return_value = self._FAKE_MODELS
         mock_cached.return_value = {
-            "Qwen/Qwen3.5-35B-A3B-FP8": "37.5G",
-            "Qwen/Qwen2.5-VL-72B-Instruct-FP8": "72G",
-            "Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8": "29G",
+            "Org/ModelA": "37.5G",
+            "Org/ModelB": "72G",
             "Extra/OldModel": "34.3G",
         }
         _, unconfigured = models_check()
         repos = [r for r, _ in unconfigured]
         assert "Extra/OldModel" in repos
 
+    @patch("voidrift_worker.models.list_models")
     @patch("voidrift_worker.models.ssh_stream")
     @patch("voidrift_worker.models._get_cached_repos")
-    def test_prune_removes_unconfigured(self, mock_cached, mock_stream):
+    def test_prune_removes_unconfigured(self, mock_cached, mock_stream, mock_list):
+        mock_list.return_value = self._FAKE_MODELS
         mock_cached.return_value = {
-            "Qwen/Qwen3.5-35B-A3B-FP8": "37.5G",
+            "Org/ModelA": "37.5G",
             "Extra/Model": "10G",
         }
         mock_stream.return_value = 0
