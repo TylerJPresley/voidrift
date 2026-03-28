@@ -386,6 +386,19 @@ def _gather_from(
     # Retrieve all analyses from SessionStore
     all_analyses = mcp_mod.session_store.get_all(run_id, "analysis") if mcp_mod else {}
 
+    # Write operator-readable analysis log — one section per file, in category order
+    analysis_log = d / "ANALYSIS.md"
+    with open(analysis_log, "w", encoding="utf-8") as _af:
+        _af.write(f"# Gather Analysis\n\nSource: `{from_path}`\n\n")
+        for cat in CATEGORIES:
+            cat_files = sorted(categories.get(cat, []))
+            cat_analyses = [(fp, all_analyses[fp]) for fp in cat_files if all_analyses.get(fp)]
+            if not cat_analyses:
+                continue
+            _af.write(f"## {cat.capitalize()}\n\n")
+            for fp, analysis in cat_analyses:
+                _af.write(f"### {fp}\n\n{analysis.strip()}\n\n")
+
     # --- Stage 3: Synthesize requirements from all analyzed files (category order per REQ-G-8) ---
     all_analyzed = [
         (fp, cat, all_analyses.get(fp, ""))
@@ -450,6 +463,8 @@ def _gather_from(
         from ..utils import append_state
         analyzed = [(fp, cat) for cat in CATEGORIES for fp in sorted(categories.get(cat, []))]
         files_created = [str(target.relative_to(Path.cwd()))]
+        if analysis_log.exists():
+            files_created.append(str(analysis_log.relative_to(Path.cwd())))
         total = len([f for fs in categories.values() for f in fs])
         src_count = len(categories.get("source", []))
         append_state(
@@ -460,6 +475,8 @@ def _gather_from(
             analyzed_files=analyzed,
         )
         ui.done(f"Requirements written to {str(target.relative_to(Path.cwd()))}")
+        if analysis_log.exists():
+            ui.detail(f"Analysis log: {str(analysis_log.relative_to(Path.cwd()))}")
         return 0
     else:
         ui.warn("Requirements file was not created.")
