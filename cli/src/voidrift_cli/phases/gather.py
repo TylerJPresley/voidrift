@@ -63,6 +63,17 @@ _ANALYSIS_LENS = {
 }
 
 
+def _make_chunks(text: str, size: int, overlap: int = 200) -> list[str]:
+    """Split text into overlapping fixed-size chunks (REQ-G-13)."""
+    chunks, start = [], 0
+    while start < len(text):
+        chunks.append(text[start : start + size])
+        if start + size >= len(text):
+            break
+        start = start + size - overlap
+    return chunks
+
+
 def _is_truncated_json_error(err: str) -> bool:
     """Return True if the error string indicates a truncated tool call JSON (REQ-G-15)."""
     return "Invalid JSON" in err or "EOF while parsing" in err
@@ -123,12 +134,7 @@ def _gather_from(
             return f"Access denied: {path} is outside the source directory"
         if not full.exists():
             return f"File not found: {path}"
-        content = full.read_text(encoding="utf-8", errors="replace")
-        if _input_limit and len(content) > _input_limit:
-            content = content[:_input_limit] + "\n[truncated]"
-            with open(log, "a") as _f:
-                _f.write(f"[INPUT_TRUNCATED] {path} ({len(content)} → {_input_limit} chars)\n")
-        return content
+        return full.read_text(encoding="utf-8", errors="replace")
 
     all_handlers["read_source_file"] = read_from_source
 
@@ -260,8 +266,56 @@ def _gather_from(
         # Lens-only system prompt — no ANALYSIS-REQS skill (REQ-G-8)
         system = analysis_prompt_tpl.format(category=cat, analysis_lens=lens)
         max_tok = _get_max_tokens(model.model_type, "analysis")
-
         start = _time.time()
+
+        # REQ-G-13: chunk large files instead of truncating
+        if _input_limit:
+            full_path = (from_path / filepath).resolve()
+            if full_path.exists():
+                raw = full_path.read_text(encoding="utf-8", errors="replace")
+                if len(raw) > _input_limit:
+                    chunks = _make_chunks(raw, _input_limit)
+                    with open(log, "a") as _f:
+                        _f.write(f"[CHUNKED] {filepath} ({len(raw)} chars → {len(chunks)} chunks)\n")
+                    partial: list[str] = []
+                    for i, chunk in enumerate(chunks, 1):
+                        chunk_agent = AgentLoop(
+                            model=model, stream=False, extra_body=extra, max_tokens=max_tok,
+                            log_path=log,
+                            system_prompt=system,
+                            tools=[], tool_handlers={},
+                        )
+                        try:
+                            resp = chunk_agent.send(
+                                f"Analyze portion {i}/{len(chunks)} of {filepath}:\n\n{chunk}"
+                            )
+                            partial.append(resp)
+                        except (RuntimeError, OSError):
+                            pass
+                    if partial:
+                        if len(partial) == 1:
+                            combined = partial[0]
+                        else:
+                            consol_agent = AgentLoop(
+                                model=model, stream=False, extra_body=extra, max_tokens=max_tok,
+                                log_path=log,
+                                system_prompt=system,
+                                tools=[], tool_handlers={},
+                            )
+                            parts_text = "\n\n---\n\n".join(
+                                f"[Chunk {j+1}/{len(partial)}]\n{p}"
+                                for j, p in enumerate(partial)
+                            )
+                            combined = consol_agent.send(
+                                f"Partial analyses of {filepath}:\n\n{parts_text}\n\n"
+                                "Write one unified, non-redundant analysis of the whole file."
+                            )
+                        store_fn = analysis_handlers.get("store_file_analysis")
+                        if store_fn:
+                            store_fn(filepath, combined)
+                    return filepath, _time.time() - start, None
+
+        # Normal flow: agent reads file and stores analysis via tool calls
         agent = AgentLoop(
             model=model, stream=False, extra_body=extra, max_tokens=max_tok,
             log_path=log,

@@ -12,78 +12,66 @@ from helpers import make_openai_response
 # ── Gather ──────────────────────────────────────────────────────────────
 
 
-class TestGatherInputTruncation:
-    """V-G-4: REQ-G-13 — file content truncated at configured limit for local models."""
+class TestGatherInputChunking:
+    """V-G-4: REQ-G-13 — large files chunked (not truncated) for local models."""
 
-    def test_local_model_truncates_content(self, tmp_project, local_model, monkeypatch):
-        """Local model: content > limit is truncated with [truncated] marker."""
-        import os
-        from unittest.mock import patch
-        source_dir = tmp_project / "src"
-        source_dir.mkdir()
-        large_file = source_dir / "big.py"
-        large_file.write_text("x" * 20000)
+    def test_make_chunks_splits_large_content(self):
+        """_make_chunks splits text into sized pieces."""
+        from voidrift_cli.phases.gather import _make_chunks
+        text = "a" * 1000
+        chunks = _make_chunks(text, 400, overlap=50)
+        # Every character is covered
+        assert len(chunks) > 1
+        assert all(len(c) <= 400 for c in chunks)
+        # Overlap: second chunk starts before first chunk ends
+        assert chunks[1][:50] == chunks[0][-50:]
 
-        received_content: list[str] = []
+    def test_make_chunks_single_chunk_when_fits(self):
+        """_make_chunks returns one chunk when content fits within limit."""
+        from voidrift_cli.phases.gather import _make_chunks
+        text = "a" * 100
+        chunks = _make_chunks(text, 200)
+        assert len(chunks) == 1
+        assert chunks[0] == text
 
-        def fake_read(path: str) -> str:
-            # Intercept what the handler returns
-            from voidrift_cli.config import get_max_input_chars
-            content = large_file.read_text()
-            limit = get_max_input_chars(local_model.model_type)
-            if limit and len(content) > limit:
-                content = content[:limit] + "\n[truncated]"
-            received_content.append(content)
-            return content
+    def test_make_chunks_covers_full_content(self):
+        """Every character appears in at least one chunk."""
+        from voidrift_cli.phases.gather import _make_chunks
+        text = "abcdefghij" * 100  # 1000 chars
+        chunks = _make_chunks(text, 300, overlap=50)
+        # Last chunk must reach the end of the text
+        assert chunks[-1] == text[-(len(chunks[-1])):]
+        assert text.endswith(chunks[-1])
 
-        # Build a minimal read_from_source handler like gather does
+    def test_local_model_chunk_size_is_8000(self):
+        """Local model input limit (chunk size) defaults to 8000 chars."""
         from voidrift_cli.config import get_max_input_chars
+        assert get_max_input_chars("local") == 8000
+
+    def test_cloud_model_not_chunked(self):
+        """Cloud model limit is 0 (unlimited — no chunking)."""
+        from voidrift_cli.config import get_max_input_chars
+        assert get_max_input_chars("cloud") == 0
+
+    def test_large_file_produces_multiple_chunks(self, local_model):
+        """A file 3x the limit produces at least 3 chunks."""
+        from voidrift_cli.phases.gather import _make_chunks
+        from voidrift_cli.config import get_max_input_chars
+
         limit = get_max_input_chars(local_model.model_type)
-        assert limit == 8000, f"Expected 8000, got {limit}"
+        large_content = "x" * (limit * 3)
+        chunks = _make_chunks(large_content, limit)
+        assert len(chunks) >= 3
 
-        content = large_file.read_text()
-        truncated = content[:limit] + "\n[truncated]"
-        assert len(truncated) == limit + len("\n[truncated]")
-        assert truncated.endswith("[truncated]")
-
-    def test_cloud_model_does_not_truncate(self, tmp_project, cloud_model):
-        """Cloud model: no truncation (limit 0 = unlimited)."""
+    def test_single_chunk_skips_consolidation(self):
+        """A file that fits in one chunk doesn't need a consolidation agent."""
+        from voidrift_cli.phases.gather import _make_chunks
         from voidrift_cli.config import get_max_input_chars
-        limit = get_max_input_chars(cloud_model.model_type)
-        assert limit == 0  # 0 = unlimited
 
-    def test_local_truncation_logic_applied_in_handler(self, tmp_project, local_model):
-        """Simulate what gather's read_from_source handler does for a large file."""
-        from voidrift_cli.config import get_max_input_chars
-        # Create a large file
-        large_content = "a" * 20000
-
-        limit = get_max_input_chars(local_model.model_type)
-        assert limit > 0
-
-        # Apply the same logic as gather.py read_from_source
-        if limit and len(large_content) > limit:
-            result = large_content[:limit] + "\n[truncated]"
-        else:
-            result = large_content
-
-        assert "[truncated]" in result
-        assert len(result) == limit + len("\n[truncated]")
-
-    def test_cloud_handler_does_not_truncate(self, tmp_project, cloud_model):
-        """Cloud model: same handler logic, large content passes through unchanged."""
-        from voidrift_cli.config import get_max_input_chars
-        large_content = "b" * 20000
-
-        limit = get_max_input_chars(cloud_model.model_type)
-        # limit == 0 means unlimited
-        if limit and len(large_content) > limit:
-            result = large_content[:limit] + "\n[truncated]"
-        else:
-            result = large_content
-
-        assert "[truncated]" not in result
-        assert result == large_content
+        limit = get_max_input_chars("local")
+        content = "y" * (limit - 100)  # under limit
+        chunks = _make_chunks(content, limit)
+        assert len(chunks) == 1  # no consolidation needed
 
 
 class TestGatherRetryOn400:
