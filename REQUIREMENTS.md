@@ -569,6 +569,13 @@ Two log roots, two intents:
 | V-WK-8 | REQ-WK-11 | Test | `test_worker.py` — logs errors when no containers exist |
 | V-WK-9 | REQ-WK-15 | Test | `test_worker.py::TestWorkerCheck` — pass/fail per prerequisite |
 | V-WK-10 | REQ-WK-16 | Test | `test_worker.py` — unknown command shows error and help, no traceback |
+| V-WK-11 | REQ-WK-6b | Test | `test_worker.py::TestModelsRemove` — retires alias and deletes cached weights |
+| V-WK-12 | REQ-WK-6c | Test | `test_worker.py::TestModelsCheck` — audits cache, downloads missing, reports unconfigured, prunes with --prune |
+| V-WK-13 | REQ-WK-9 | Test | `test_worker.py::TestGateway` — kiro start/stop/status and credential validation |
+| V-WK-14 | REQ-WK-12 | Test | `test_worker.py::TestWorkerInfo` — reports GPU/disk/memory via SSH |
+| V-WK-15 | REQ-WK-13 | Test | `test_worker.py::TestImagesAdd`, `TestImagesRemove`, `TestImagesList` — image source CRUD |
+| V-WK-16 | REQ-WK-14 | Test | `test_worker.py::TestCacheClear` — clears flashinfer and vllm caches over SSH |
+| V-WK-17 | REQ-WK-17 | Test | `test_worker.py::TestCompletions` — bash/zsh/fish scripts generated, invalid shell rejected |
 
 ---
 

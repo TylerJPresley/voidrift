@@ -398,6 +398,67 @@ class TestCacheClear:
         assert "vllm" in mock_stream.call_args[0][0]
 
 
+class TestCompletions:
+    """REQ-WK-17: worker completions <shell> outputs shell completion scripts."""
+
+    def test_bash_completion_runs(self):
+        """completions bash exits 0 (subprocess call is the implementation)."""
+        from click.testing import CliRunner
+        from unittest.mock import patch, MagicMock
+        from voidrift_worker.main import cli
+
+        mock_result = MagicMock(stdout="# bash completion\n", returncode=0)
+        with patch("subprocess.run", return_value=mock_result):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["completions", "bash"])
+        assert result.exit_code == 0
+
+    def test_zsh_completion_runs(self):
+        """completions zsh exits 0."""
+        from click.testing import CliRunner
+        from unittest.mock import patch, MagicMock
+        from voidrift_worker.main import cli
+
+        mock_result = MagicMock(stdout="# zsh completion\n", returncode=0)
+        with patch("subprocess.run", return_value=mock_result):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["completions", "zsh"])
+        assert result.exit_code == 0
+
+    def test_fish_completion_runs(self):
+        """completions fish exits 0."""
+        from click.testing import CliRunner
+        from unittest.mock import patch, MagicMock
+        from voidrift_worker.main import cli
+
+        mock_result = MagicMock(stdout="# fish completion\n", returncode=0)
+        with patch("subprocess.run", return_value=mock_result):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["completions", "fish"])
+        assert result.exit_code == 0
+
+    def test_invalid_shell_rejected(self):
+        """completions with unknown shell exits non-zero."""
+        from click.testing import CliRunner
+        from voidrift_worker.main import cli
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["completions", "powershell"])
+        assert result.exit_code != 0
+
+    def test_output_is_echoed(self):
+        """Completion output from subprocess is echoed to stdout."""
+        from click.testing import CliRunner
+        from unittest.mock import patch, MagicMock
+        from voidrift_worker.main import cli
+
+        mock_result = MagicMock(stdout="complete -F _worker worker\n", returncode=0)
+        with patch("subprocess.run", return_value=mock_result):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["completions", "bash"])
+        assert "complete" in result.output
+
+
 class TestWorkerCheck:
     @patch("voidrift_worker.models.ssh_cmd")
     def test_all_pass(self, mock_ssh):
