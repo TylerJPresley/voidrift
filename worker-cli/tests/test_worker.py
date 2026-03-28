@@ -11,8 +11,12 @@ from voidrift_worker.models import (
     cache_clear,
     get_gateway_status,
     get_status,
-    images_list,
-    images_pull,
+    images_add,
+    images_build,
+    images_docker_list,
+    images_remove,
+    images_source_list,
+    images_update,
     list_models,
     load_worker_models,
     models_add,
@@ -82,8 +86,14 @@ class TestStartModel:
     @patch("voidrift_worker.models.ssh_cmd")
     def test_already_running_skips(self, mock_ssh):
         mock_ssh.return_value = MagicMock(stdout="worker-qwen35\n", returncode=0)
-        start_model("qwen35")
-        assert mock_ssh.call_count == 1
+        # Write state file so start_model sees it as already running
+        from voidrift_worker.models import _save_active_container, _active_container_path
+        _save_active_container("worker-qwen35", "qwen35")
+        try:
+            start_model("qwen35")
+            assert mock_ssh.call_count == 1
+        finally:
+            _active_container_path().unlink(missing_ok=True)
 
     def test_unknown_model_raises(self):
         with pytest.raises(ValueError, match="Unknown model"):
@@ -110,8 +120,11 @@ class TestStartModel:
 class TestStopModel:
     @patch("voidrift_worker.models.ssh_cmd")
     def test_stop_calls_ssh(self, mock_ssh):
+        from voidrift_worker.models import _clear_active_container
+        _clear_active_container()
         mock_ssh.return_value = MagicMock(returncode=0)
         stop_model()
+        # No tracked container: 2 prefix safety-net calls (stop + rm)
         assert mock_ssh.call_count == 2
 
 
@@ -238,7 +251,8 @@ class TestModelsCheck:
     def test_all_cached(self, mock_cached):
         mock_cached.return_value = {
             "Qwen/Qwen3.5-35B-A3B-FP8": "37.5G",
-            "Qwen/Qwen3.5-122B-A10B-FP8": "122G",
+            "Qwen/Qwen2.5-VL-72B-Instruct-FP8": "72G",
+            "Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8": "29G",
         }
         results, unconfigured = models_check()
         assert all(ok for _, ok, _ in results)
@@ -256,7 +270,8 @@ class TestModelsCheck:
     def test_reports_unconfigured(self, mock_cached):
         mock_cached.return_value = {
             "Qwen/Qwen3.5-35B-A3B-FP8": "37.5G",
-            "Qwen/Qwen3.5-122B-A10B-FP8": "122G",
+            "Qwen/Qwen2.5-VL-72B-Instruct-FP8": "72G",
+            "Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8": "29G",
             "Extra/OldModel": "34.3G",
         }
         _, unconfigured = models_check()
@@ -314,27 +329,62 @@ class TestWorkerInfo:
         assert "GPU" in result
 
 
-class TestImagesPull:
+class TestImagesAdd:
     @patch("voidrift_worker.models.ssh_stream")
-    def test_default_image(self, mock_stream):
+    @patch("voidrift_worker.models._save_worker_images")
+    @patch("voidrift_worker.models.load_worker_images", return_value={"sources": {}})
+    def test_add_git_source(self, mock_load, mock_save, mock_stream):
         mock_stream.return_value = 0
-        rc = images_pull()
+        rc = images_add("eugr", "https://github.com/eugr/spark-vllm-docker.git")
         assert rc == 0
-        assert "docker pull" in mock_stream.call_args[0][0]
+        saved = mock_save.call_args[0][0]
+        assert saved["sources"]["eugr"]["type"] == "git"
+        assert mock_stream.call_count == 2  # clone + build
 
     @patch("voidrift_worker.models.ssh_stream")
-    def test_explicit_image(self, mock_stream):
+    @patch("voidrift_worker.models._save_worker_images")
+    @patch("voidrift_worker.models.load_worker_images", return_value={"sources": {}})
+    def test_add_docker_source(self, mock_load, mock_save, mock_stream):
         mock_stream.return_value = 0
-        rc = images_pull("vllm/vllm-openai:latest")
+        rc = images_add("scitrera", "scitrera/dgx-spark-vllm:0.17.0-t5")
         assert rc == 0
-        assert "vllm/vllm-openai:latest" in mock_stream.call_args[0][0]
+        saved = mock_save.call_args[0][0]
+        assert saved["sources"]["scitrera"]["type"] == "docker"
+
+    @patch("voidrift_worker.models.load_worker_images", return_value={"sources": {"eugr": {}}})
+    def test_add_duplicate_errors(self, mock_load):
+        with pytest.raises(RuntimeError, match="already exists"):
+            images_add("eugr", "https://example.com/repo.git")
+
+
+class TestImagesRemove:
+    @patch("voidrift_worker.models.ssh_stream")
+    @patch("voidrift_worker.models._save_worker_images")
+    @patch("voidrift_worker.models.load_worker_images", return_value={
+        "sources": {"eugr": {"type": "git", "clone_path": "~/opt/eugr", "image_name": "vllm-node"}}
+    })
+    @patch("voidrift_worker.models.load_worker_models", return_value={"models": {}})
+    def test_remove_no_refs(self, mock_models, mock_images, mock_save, mock_stream):
+        mock_stream.return_value = 0
+        rc = images_remove("eugr")
+        assert rc == 0
+
+    @patch("voidrift_worker.models.load_worker_images", return_value={
+        "sources": {"eugr": {"type": "git"}}
+    })
+    @patch("voidrift_worker.models.load_worker_models", return_value={
+        "default_image": "eugr", "models": {"qwen35": {}}
+    })
+    def test_remove_with_refs_requires_force(self, mock_models, mock_images):
+        with pytest.raises(RuntimeError, match="--force"):
+            images_remove("eugr")
 
 
 class TestImagesList:
     @patch("voidrift_worker.models.ssh_cmd")
-    def test_returns_output(self, mock_ssh):
+    def test_docker_list(self, mock_ssh):
         mock_ssh.return_value = MagicMock(stdout="REPOSITORY  TAG  SIZE\nvllm  latest  8G\n", stderr="")
-        result = images_list()
+        result = images_docker_list()
         assert "vllm" in result
 
 

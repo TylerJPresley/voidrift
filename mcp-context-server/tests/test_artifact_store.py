@@ -47,10 +47,11 @@ class TestArtifactStore:
         store.store("requirements", "project", "# My Reqs")
         assert (tmp_path / "REQUIREMENTS.md").read_text() == "# My Reqs"
 
-    def test_write_through_feature_spec(self, tmp_path):
+    def test_feature_requirements_memory_only(self, tmp_path):
         store = ArtifactStore(voidrift_dir=tmp_path)
         store.store("requirements", "auth", "# Auth Feature")
-        assert (tmp_path / "spec" / "auth.md").read_text() == "# Auth Feature"
+        assert store.get("requirements", "auth") == "# Auth Feature"
+        assert not (tmp_path / "spec").exists()
 
     def test_analysis_memory_only(self, tmp_path):
         store = ArtifactStore(voidrift_dir=tmp_path)

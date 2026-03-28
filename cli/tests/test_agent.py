@@ -3,6 +3,7 @@
 import json
 from unittest.mock import patch, MagicMock, call
 
+import openai
 import pytest
 
 from voidrift_cli.agent import AgentLoop, build_mcp_tools
@@ -175,6 +176,177 @@ class TestAgentClientConfig:
             assert "generativelanguage" in kwargs["base_url"]
 
 
+class TestRetryLogic:
+    """Tests for REQ-ARCH-10: exponential backoff retry on transient errors."""
+
+    def _make_agent(self, cloud_model):
+        return AgentLoop(model=cloud_model, stream=False)
+
+    def test_req_arch10_retries_connection_error(self, cloud_model, tmp_path):
+        """REQ-ARCH-10: connection errors are retried up to 3 attempts."""
+        agent = self._make_agent(cloud_model)
+        conn_err = openai.APIConnectionError(request=MagicMock())
+        success = make_openai_response("ok")
+        with patch("voidrift_cli.agent.OpenAI") as MockOpenAI:
+            with patch("voidrift_cli.agent.time.sleep"):
+                mock_client = MagicMock()
+                MockOpenAI.return_value = mock_client
+                mock_client.chat.completions.create.side_effect = [conn_err, success]
+                result = agent.send("test")
+        assert result == "ok"
+        assert mock_client.chat.completions.create.call_count == 2
+
+    def test_req_arch10_retries_rate_limit(self, cloud_model):
+        """REQ-ARCH-10: 429 rate limit responses are retried."""
+        agent = self._make_agent(cloud_model)
+        rate_err = openai.RateLimitError("rate limited", response=MagicMock(), body={})
+        success = make_openai_response("ok")
+        with patch("voidrift_cli.agent.OpenAI") as MockOpenAI:
+            with patch("voidrift_cli.agent.time.sleep"):
+                mock_client = MagicMock()
+                MockOpenAI.return_value = mock_client
+                mock_client.chat.completions.create.side_effect = [rate_err, success]
+                result = agent.send("test")
+        assert result == "ok"
+
+    def test_req_arch10_no_retry_on_auth_error(self, cloud_model):
+        """REQ-ARCH-10: auth errors (401) are NOT retried."""
+        agent = self._make_agent(cloud_model)
+        auth_err = openai.AuthenticationError("unauthorized", response=MagicMock(), body={})
+        with patch("voidrift_cli.agent.OpenAI") as MockOpenAI:
+            with patch("voidrift_cli.agent.time.sleep") as mock_sleep:
+                mock_client = MagicMock()
+                MockOpenAI.return_value = mock_client
+                mock_client.chat.completions.create.side_effect = auth_err
+                with pytest.raises(RuntimeError):
+                    agent.send("test")
+        mock_sleep.assert_not_called()
+        assert mock_client.chat.completions.create.call_count == 1
+
+    def test_req_arch10_no_retry_on_context_length(self, cloud_model):
+        """REQ-ARCH-10: context length errors are NOT retried."""
+        agent = self._make_agent(cloud_model)
+        ctx_err = Exception("context length exceeded")
+        with patch("voidrift_cli.agent.OpenAI") as MockOpenAI:
+            with patch("voidrift_cli.agent.time.sleep") as mock_sleep:
+                mock_client = MagicMock()
+                MockOpenAI.return_value = mock_client
+                mock_client.chat.completions.create.side_effect = ctx_err
+                with pytest.raises(RuntimeError):
+                    agent.send("test")
+        mock_sleep.assert_not_called()
+
+    def test_req_arch10_exhausted_raises(self, cloud_model):
+        """REQ-ARCH-10: when all retry attempts fail, the exception is raised."""
+        agent = self._make_agent(cloud_model)
+        conn_err = openai.APIConnectionError(request=MagicMock())
+        with patch("voidrift_cli.agent.OpenAI") as MockOpenAI:
+            with patch("voidrift_cli.agent.time.sleep"):
+                mock_client = MagicMock()
+                MockOpenAI.return_value = mock_client
+                mock_client.chat.completions.create.side_effect = conn_err
+                with pytest.raises((openai.APIConnectionError, RuntimeError)):
+                    agent.send("test")
+        assert mock_client.chat.completions.create.call_count == 3
+
+    def test_req_arch10_retry_logged(self, cloud_model, tmp_path):
+        """REQ-ARCH-10: each retry attempt is logged to the phase log."""
+        log_file = tmp_path / "test.log"
+        agent = AgentLoop(model=cloud_model, stream=False, log_path=log_file)
+        conn_err = openai.APIConnectionError(request=MagicMock())
+        success = make_openai_response("done")
+        with patch("voidrift_cli.agent.OpenAI") as MockOpenAI:
+            with patch("voidrift_cli.agent.time.sleep"):
+                mock_client = MagicMock()
+                MockOpenAI.return_value = mock_client
+                mock_client.chat.completions.create.side_effect = [conn_err, success]
+                agent.send("hi")
+        log_content = log_file.read_text()
+        assert "[RETRY]" in log_content
+
+
+class TestThinkTagStripping:
+    """V-ARCH-4: REQ-ARCH-8 — <think> tags stripped and logged as [THINKING]."""
+
+    def _make_agent(self, cloud_model, tmp_path):
+        log = tmp_path / "test.log"
+        return AgentLoop(model=cloud_model, stream=False, log_path=log), log
+
+    def test_strips_think_tags_from_output(self, cloud_model, tmp_path):
+        """<think>...</think> blocks are removed from the returned text."""
+        agent, _ = self._make_agent(cloud_model, tmp_path)
+        result = agent._strip_think("<think>internal reasoning</think>Final answer.")
+        assert "<think>" not in result
+        assert "internal reasoning" not in result
+        assert "Final answer." in result
+
+    def test_logs_think_content(self, cloud_model, tmp_path):
+        """Think content is logged with [THINKING] prefix."""
+        agent, log = self._make_agent(cloud_model, tmp_path)
+        agent._strip_think("<think>log this thought</think>Output.")
+        log_content = log.read_text()
+        assert "[THINKING]" in log_content
+        assert "log this thought" in log_content
+
+    def test_orphaned_close_tag_stripped(self, cloud_model, tmp_path):
+        """Leading orphaned </think> (no opening tag) is handled gracefully."""
+        agent, _ = self._make_agent(cloud_model, tmp_path)
+        result = agent._strip_think("some preamble</think>actual output")
+        assert "</think>" not in result
+        assert "actual output" in result
+
+    def test_empty_think_block_removed(self, cloud_model, tmp_path):
+        """Empty <think></think> blocks are removed without error."""
+        agent, _ = self._make_agent(cloud_model, tmp_path)
+        result = agent._strip_think("<think></think>Clean output.")
+        assert "<think>" not in result
+        assert "Clean output." in result
+
+    def test_multiple_think_blocks_stripped(self, cloud_model, tmp_path):
+        """Multiple think blocks in one response are all removed."""
+        agent, _ = self._make_agent(cloud_model, tmp_path)
+        text = "<think>first</think>middle<think>second</think>end"
+        result = agent._strip_think(text)
+        assert "first" not in result
+        assert "second" not in result
+        assert "middle" in result
+        assert "end" in result
+
+
+class TestContextLengthError:
+    """V-G-2: REQ-ARCH-10 — context length error message includes model alias."""
+
+    @patch("voidrift_cli.agent.OpenAI")
+    def test_context_length_error_message(self, MockOpenAI, cloud_model):
+        """Context length exceeded raises RuntimeError with alias and 'larger context window'."""
+        mock_client = MagicMock()
+        MockOpenAI.return_value = mock_client
+        mock_client.chat.completions.create.side_effect = Exception(
+            "maximum context length exceeded"
+        )
+
+        agent = AgentLoop(model=cloud_model, stream=False)
+        with pytest.raises(RuntimeError) as exc_info:
+            agent.send("test message")
+
+        msg = str(exc_info.value)
+        assert "larger context window" in msg
+
+    @patch("voidrift_cli.agent.OpenAI")
+    def test_context_length_error_includes_alias(self, MockOpenAI, cloud_model):
+        """Context length error message names the model alias."""
+        mock_client = MagicMock()
+        MockOpenAI.return_value = mock_client
+        mock_client.chat.completions.create.side_effect = Exception("token limit exceeded")
+
+        agent = AgentLoop(model=cloud_model, stream=False)
+        with pytest.raises(RuntimeError) as exc_info:
+            agent.send("test message")
+
+        msg = str(exc_info.value)
+        assert cloud_model.alias in msg
+
+
 class TestBuildMcpTools:
     def test_returns_tools_and_handlers(self):
         import voidrift_mcp.server as mcp_mod
@@ -203,11 +375,50 @@ class TestBuildMcpTools:
             "store_file_analysis", "get_file_analysis", "get_all_analyses",
             "store_requirements", "get_requirements",
             "load_tasks", "get_next_task", "complete_task", "get_task_status",
-            "get_agent", "get_skill", "get_template", "get_prompt",
+            "get_skill", "get_template", "get_prompt",
             "list_skills", "list_templates", "list_documents", "list_prompts",
-            "read_source_file", "write_file", "export_to_file",
-            "list_project_artifacts",
+            "read_source_file", "write_source_file", "read_framework_file", "write_framework_file",
+            "export_to_file", "list_project_artifacts",
         ]
         tool_names = {t["function"]["name"] for t in tools}
         for name in expected:
             assert name in tool_names, f"Missing tool: {name}"
+
+    def test_develop_phase_excludes_task_tools(self):
+        """V-ARCH-5: develop phase must not expose task management tools (REQ-ARCH-9)."""
+        import voidrift_mcp.server as mcp_mod
+        mcp_mod._boot()
+        tools, handlers = build_mcp_tools(mcp_mod, phase="develop")
+        tool_names = {t["function"]["name"] for t in tools}
+        excluded = {"load_tasks", "get_next_task", "complete_task", "get_task_status"}
+        for name in excluded:
+            assert name not in tool_names, f"Task tool '{name}' must not be in develop phase"
+
+    def test_develop_phase_has_source_tools(self):
+        """V-ARCH-5: develop phase includes source file read/write tools."""
+        import voidrift_mcp.server as mcp_mod
+        mcp_mod._boot()
+        tools, handlers = build_mcp_tools(mcp_mod, phase="develop")
+        tool_names = {t["function"]["name"] for t in tools}
+        assert "read_source_file" in tool_names
+        assert "write_source_file" in tool_names
+
+    def test_plan_phase_excludes_source_write(self):
+        """V-ARCH-5: plan phase excludes write_source_file."""
+        import voidrift_mcp.server as mcp_mod
+        mcp_mod._boot()
+        tools, handlers = build_mcp_tools(mcp_mod, phase="plan")
+        tool_names = {t["function"]["name"] for t in tools}
+        assert "write_source_file" not in tool_names
+        # Plan should include write_framework_file
+        assert "write_framework_file" in tool_names
+
+    def test_handlers_still_registered_for_filtered_tools(self):
+        """V-ARCH-5: filtered tools still have handlers (for programmatic use)."""
+        import voidrift_mcp.server as mcp_mod
+        mcp_mod._boot()
+        _, handlers = build_mcp_tools(mcp_mod, phase="develop")
+        # load_tasks is filtered from the tool list but handler must exist
+        assert "load_tasks" in handlers
+        assert "get_next_task" in handlers
+        assert "complete_task" in handlers

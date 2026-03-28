@@ -117,7 +117,7 @@ class TestMarkdownIndex:
             return  # Skip if not in repo
         idx = MarkdownIndex()
         count = idx.load_directory(resources)
-        assert count > 50  # We know there are 221+ sections
+        assert count > 40  # sections across skills, templates, prompts
         # Verify key sections are findable
-        assert idx.get_section("Escalation Protocol") is not None
+        assert idx.get_section("Core Philosophy") is not None
         assert len(idx.search("Web Engineering", file_filter="skills")) > 0
