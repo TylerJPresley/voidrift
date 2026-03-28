@@ -75,7 +75,7 @@ def stats(parts: list[str]) -> None:
 
 def tool_start(name: str) -> None:
     """Tool call starting."""
-    _con.print(f"\n[dim]  ⚙ {_esc(name)}()[/dim]", end="")
+    _con.print(f"\n[dim]  ⚙ {_esc(name)}()[/dim]")
 
 
 def tool_done(result: str) -> None:
@@ -88,6 +88,26 @@ def tool_done(result: str) -> None:
 def model_label(alias: str) -> None:
     """Model attribution line before response."""
     _con.print(f"\n[dim italic]  ◆ {alias}[/dim italic]\n")
+
+
+def model_text(text: str) -> None:
+    """Print a complete model response (non-streaming)."""
+    if _has_markdown(text):
+        from rich.markdown import Markdown
+        from rich.padding import Padding
+        _con.print(Padding(Markdown(text), (0, 0, 0, 2)))
+    else:
+        for line in text.splitlines():
+            _con.print(f"  {_esc(line)}")
+
+
+def _has_markdown(text: str) -> bool:
+    """Quick check for common markdown formatting."""
+    import re
+    for p in (r'^#{1,6}\s', r'\*\*\w', r'```'):
+        if re.search(p, text, re.MULTILINE):
+            return True
+    return False
 
 
 def model_token(token: str) -> None:

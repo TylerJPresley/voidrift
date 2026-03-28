@@ -8,6 +8,127 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- `voidrift skills` command group with six subcommands: `list`, `search`, `review`, `install`, `remove`, `approve` (REQ-SKL-1 through REQ-SKL-5) — manages skills across north-star, domain, and project layers from the CLI; `install` runs synthesis pipeline when `skills.repos` and `skills.synthesis_model` are configured, otherwise copies from local layer; `search` queries repo manifests in addition to local layers (REQ-SKL-6); `review` lists pending skills when no name given
+- `resources/skills/BACKEND-ENG.md` — north-star skill for VoidRift framework development (Python/Click/FastMCP/pytest/AgentLoop conventions); use `[backend-eng]` tag on framework development tasks
+- Per-phase `max_tokens` budget via `get_max_tokens(model_type, phase)` (REQ-CFG-6, REQ-CFG-7) — analysis=2000, synthesis=2000, consolidation=8192, task=4000, triage=4096, plan=32768; configurable per model type in `limits:` section of config.yml
+- Per-model input truncation via `get_max_input_chars(model_type)` — local models capped at 8000 chars per file before analysis; cloud/gateway unlimited (REQ-G-13)
+- Gather auto-retry on truncated JSON: detects "Invalid JSON / EOF while parsing" 400 errors, retries with `max_tokens // 2` and a 5-bullet brief prompt (REQ-G-15)
+- Config helper tests (`cli/tests/test_config.py`) — 14 tests covering `get_max_tokens` and `get_max_input_chars` across all model types, phases, and config overrides
+
+### Fixed
+- Gather: replaced `"gitwildmatch"` with `"gitignore"` in `_build_file_tree()` — suppresses pathspec DeprecationWarning
+- Gather: analysis/synthesis agents now use lens-only system prompts (not full ANALYSIS-REQS + system_context blob) — reduces context usage for local models per REQ-G-8
+- Gather: conciseness constraint added to ANALYSIS prompt — max 15 bullet points, requirements-relevant only (REQ-G-14)
+- Develop: removed `load_tasks`, `get_next_task`, `complete_task`, `get_task_status` from per-task developer agent tool set — these are called via Python API by the outer loop, not by the agent; narrows agent surface per REQ-ARCH-9
+- Develop: removed `system_context` pre-load prepended to `dev_prompt_tpl` — agents fetch context on demand via MCP tools per REQ-D-4
+- Develop: removed skill pre-loading from `_develop_module` — skills are now fetched on demand via `get_skill()` when the agent reads the task prompt step; updated TASK prompt to explicit step 3 (`get_skill("name")` on demand)
+- Develop: added explicit "Do NOT call complete_task()" instruction to TASK prompt (REQ-D-9 AC)
+- Gather: promoted `_is_truncated_json_error` to module level for testability (REQ-G-15)
+- Tests: added V-G-4 (input truncation) and V-G-6 (retry on 400) test classes — 8 new tests covering REQ-G-13 and REQ-G-15
+
+### Changed
+- MCP context server migrated from `mcp[cli]` bundled FastMCP to standalone `fastmcp>=3.1.1` (PrefectHQ) — REQ-MCP-1; industry-standard package following MCP spec independently of Anthropic SDK release cycle
+- `get_skill()` now searches three layers in order: project (`.voidrift/skills/`) → domain (`~/.voidrift/domain-skills/`) → north star (`~/.voidrift/resources/skills/`) per REQ-SKL-2; project skills fully replace lower-layer skills with same name
+- `list_skills()` now returns all skills grouped by layer (North Star, Domain, Domain pending, Project) per REQ-MCP-12 and REQ-SKL-8
+- All 16 north-star skill files in `resources/skills/` now include YAML frontmatter (`name`, `description` fields) compatible with standalone fastmcp skill discovery
+
+### Added
+- `DOMAIN-SKILL-TEMPLATE.md` — authoring guide and format definition for domain skills; used by synthesis agent during `voidrift skills install` (REQ-SKL-7)
+- Skills system requirements (REQ-SKL-1 through REQ-SKL-8) — two-layer skill architecture (north-star global + domain/project), three-layer `get_skill()` search order with project overrides, `voidrift skills` subcommand group, synthesis pipeline via configured model and repos, pending/approve workflow, `DOMAIN-SKILL-TEMPLATE.md`
+- MCP server log at `~/.voidrift/logs/mcp.log` (REQ-LOG-5) — RotatingFileHandler 1MB/5 backups, logs boot events (run ID, project dir), `write_file()` calls (path, byte count); separate intent from `voidrift.log` (CLI invocations vs. MCP server internals)
+- Agent loop retry logic with exponential backoff (REQ-ARCH-10) — retries on connection errors, HTTP 5xx, and 429 rate limits; 3 attempts, 1s base delay, 2× multiplier, 30s cap; no retry on auth errors or context length errors; each retry logged to phase log
+- `ARCHITECTURE.md` at repo root — documents bounded contexts, component responsibilities, data flows, key design decisions, and state/persistence summary; referenced from README.md and START.md documentation checklist
+
+### Fixed
+- Develop: removed dead reads of `ARCHITECTURE.md` and `REQUIREMENTS.md` in `_develop_module` — variables were passed as unused kwargs to `.format()` since the TASK template has no `{architecture}` or `{requirements}` placeholders; model loads context on demand via `read_framework_file()` per REQ-D-4
+- Gather synthesis: expanded to all categories (was source-only) — tests, config, infrastructure, documentation, and assets now produce structured EARS requirements via `store_requirements()` before consolidation; consolidation receives uniform structured input instead of a source/raw-analysis split
+- Gather synthesis: replaced hardcoded source lens string with `_ANALYSIS_LENS.get(cat)` — each category now gets its full category-specific analysis lens matching the analysis stage
+- Plan: extracted duplicate task format block to `_TASK_FORMAT` constant in plan.py — single source of truth injected into both PLAN and PLAN-UPDATE via `{task_format}` format variable
+- Chat SYSTEM: rephrased "STOP" directive to positive instruction — "wait for the operator's response before continuing"
+- Chat DOC: expanded from 3 lines to include editing guidance — targeted changes, structural preservation, requirements alignment, full-file write instruction, confirm-before-write
+
+### Added
+- Develop phase writes STATE.md entry on completion (REQ-PS-3) — session-level file tracking via `_session_files` in tools.py, aggregated across per-task resets; `append_state` called at run_develop exit
+- Static context window fallback table for cloud models (Anthropic 200K, Gemini 1M) — enables context% display and `/compact` 10% ceiling when model endpoint doesn't expose `max_model_len`
+- `VERIFY.md` and corrected `STATE.md` entries in system.md artifact table — STATE.md is produced by Gather, Plan, and Develop; ARCHITECTURE.md consumed by Develop
+
+### Changed
+- Interactive mode (`voidrift` with no args) now prompts for path when gather is selected (REQ-ARCH-3) — was crashing with missing argument error
+- Log truncation increased from 500 to 2000 chars for system prompt, user messages, and tool results — improves post-run debugging of synthesis and complex prompts
+
+### Added
+- Image source management for worker-cli (REQ-WK-13, REQ-WK-13a)
+  - `worker-images.yml` config with `git` and `docker` source types
+  - `worker images list` — show sources and Docker images on worker
+  - `worker images add <alias> <url>` — auto-detect type, clone+build or pull
+  - `worker images remove <alias> [--force]` — delete all assets from worker
+  - `worker images update <alias>` — git pull+rebuild or docker pull
+  - `worker images build <alias>` — explicit rebuild for git sources
+- Recipe-based model launching (REQ-WK-8) — `worker start` uses `run-recipe.sh` for git image sources with recipes
+- Active container state tracking (`~/.voidrift/.active-container`) — `bench`, `status`, `stop`, `logs` work with any container name
+- `--served-model-name` and `vllm_args` forwarded to recipes as extra args via `--`
+- `image_source` and `recipe` fields on `ModelConfig`
+- Per-phase tool filtering in `build_mcp_tools()` (REQ-ARCH-9) — each phase sees only relevant tools
+- Domain-separated filesystem tools (REQ-MCP-4a) — `write_source_file`/`read_source_file` for project tree, `write_framework_file`/`read_framework_file` for `.voidrift/` artifacts. Structural separation replaces runtime path guards.
+- Module architecture files (REQ-P-1) — Plan produces `arch/<module>.md` with component internals, data models, interfaces (exposed and consumed). Module names match TASKS.md headers.
+- Developer on-demand context loading (REQ-D-4) — developer agent loads `arch/<module>.md` and `spec/<module>.md` via `read_framework_file` tool calls during execution, not pre-loaded in system prompt
+- Stall nudge mechanism (REQ-ARCH-4) — model gets 2 nudges before write tools are kept and read tools stripped
+- Direct skill tag stripping in plan phase (REQ-P-9) — invalid tags removed deterministically
+- Valid skill names injected into plan prompt (REQ-P-9) — model can't invent nonexistent tags
+- `/compact` command in chat (REQ-U-7) — summarizes conversation history to free context, result ≤10% of context window
+- Context window percentage in chat prompt (REQ-UI-6) — `[25%] >` with white/yellow/red color thresholds
+- Log file access blocked from model — `read_source_file` rejects `.voidrift/logs/` paths, `list_project_artifacts` excludes logs
+- Placeholder content rejection — `write_source_file`/`write_framework_file` reject `"..."`, `"TODO"`, empty content
+- Duplicate write guard (REQ-MCP-11) — both write tools prevent overwriting files already written this run
+- Shared framework context via `system.md` (REQ-RES-7) — phase lifecycle, artifact manifest with producer/consumer/role, prepended to all phase prompts
+- Plan prompt produces `arch/<module>.md` for multi-module projects — module design detail with cross-module interface contracts
+
+### Changed
+- `write_file` split into `write_source_file` + `write_framework_file` (REQ-MCP-4a) — domain boundary is structural, no runtime path guards
+- `read_framework_file` added for `.voidrift/` artifact access (REQ-MCP-4a)
+- `--fresh-start` clears `arch/` instead of `spec/` (REQ-P-3) — gather-produced specs preserved
+- Plan prompt step sequence reordered — `get_template` fetched right before architecture write, `list_skills` fetched right before task write, prevents context burial
+- All prompt files use positive instructions only — no "NEVER", "do NOT", "don't"
+- Prompt role lines standardized — `**Role:** <title> — <one-line description>` format across all phases
+- Chat tool results show only tool name (`✓ get_requirements`) instead of full content
+- Chat token stats print after response, not before
+- Chat spinner runs continuously — starts on submit, restarts after tool results, stops before render
+- Chat model responses use default terminal color (was blue) — visual distinction from `◆` label and padding
+- Tool descriptions reference discovery tools (`list_skills()`, `list_templates()`, `list_prompts()`) instead of hardcoded examples
+- Recipe launches use `Popen` (non-blocking) instead of `ssh_stream` — recipes run vLLM in foreground
+- Recipe SSH output redirected to DEVNULL — no log bleed into terminal after startup
+- Container stop adds `docker rm -f` and 3s wait for GPU memory release
+- Streaming think-tag filter variables initialized before `try` block — fixes `UnboundLocalError` on API failure
+- `get_requirements` removed from plan phase tools — requirements already injected in system prompt
+- REQ-P-12 narrowed — tasks SHALL NOT target `.voidrift/` paths; dot-prefixed project config files (`.github/`, `.dockerignore`) are valid develop targets
+- qwen35 tool call parser changed from `qwen3_coder` to `qwen3_xml` to match unsloth chat template format
+- README: Available Models updated (qwen35, qwen25 replace retired models), Per-Phase Prompt Architecture replaces Three-Role System, MCP tools table updated (20 tools with signatures), retired models section added, per-phase tool filtering table added
+
+### Removed
+- `on_token` partial tool call text leak — handler changed to no-op in chat
+- Duplicate tool display in chat — removed `tool_start()` call, only `✓` line on completion
+- Hardcoded examples from tool parameter descriptions (`e.g. 'backend'` etc.)
+- Dead code: unused `_token_handler = ui.make_token_handler()` in chat loop
+- Three-role system (analyst/architect/developer) references from README and docs
+
+### Added
+- `tool_choice` parameter on AgentLoop — `"required"` (default) for automated phases, `"auto"` for chat (REQ-ARCH-4)
+- Streaming think-tag filter — buffers tokens inside `<think>` blocks, handles orphaned `</think>` with 200-char flush threshold (REQ-ARCH-8)
+- REQ-P-12: tasks must target project source files only — no dot-prefixed paths (`.voidrift/`, `.git/`, etc.)
+- `.gitignore` support in gather file tree — excludes gitignored paths before triage sees them (REQ-G-8)
+- `pathspec` dependency for `.gitignore` pattern matching
+- Write prefix guard on `write_file()` — gather, plan, and chat auto-correct paths to `.voidrift/` (REQ-MCP-4a)
+- `model_text()` in `ui.py` for printing complete non-streamed responses in light blue with 2-space indent
+
+### Changed
+- Chat uses `tool_choice: "auto"` and streaming — model decides when to call tools, tokens display as they arrive (REQ-U-2)
+- Task completion managed by framework, not model — develop prompt says "Do NOT call complete_task()" (REQ-D-9)
+- Chat system prompt constrains writes to `.voidrift/` paths only
+- REQ-G-8 triage: dot-filtering now covers files and directories (was directories only)
+- REQ-G-8 synthesis: specs must be derived exclusively from analyses — no invented paths or behaviors
+- Plan and plan-update prompts: task file paths must not start with `.`
+
+### Added
 - Three-layer prompt architecture across all phases (REQ-RES-7): skill + prompt + context
   - `resources/prompts/chat.md` — interactive session prompts (SYSTEM, DOC, DOC-NEW)
   - `resources/prompts/plan.md` — architecture planning prompts (PLAN, PLAN-UPDATE)

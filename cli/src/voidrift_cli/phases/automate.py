@@ -80,7 +80,7 @@ def run_automate(worker: ModelConfig, architect: ModelConfig | None = None) -> i
         system_prompt=(
             "[ROLE: Developer]\n\n"
             "Generate or review infrastructure-as-code. "
-            "Use write_file() to create/modify IaC files. "
+            "Use write_source_file() to create/modify IaC files. "
             "Use read_source_file() to examine existing files."
         ),
         tools=tools,

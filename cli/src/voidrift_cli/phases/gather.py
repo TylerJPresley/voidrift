@@ -11,46 +11,95 @@ from ..utils import (
 )
 from .. import ui
 
+# Predefined categories (REQ-G-8 stage 1)
+CATEGORIES = ("source", "tests", "config", "infrastructure", "documentation", "assets")
+
+# Category-specific analysis lenses (REQ-G-8 stage 2)
+_ANALYSIS_LENS = {
+    "source": (
+        "Analyze for functional requirements:\n"
+        "- Purpose and business intent (outcomes over mechanisms)\n"
+        "- Key components, functions, classes, and their responsibilities\n"
+        "- Dependencies and external integrations\n"
+        "- Data flows and state management\n"
+        "- Error handling patterns\n"
+        "- Requirements implied by the code (use EARS notation: WHEN [trigger], THE SYSTEM SHALL [result])"
+    ),
+    "tests": (
+        "Analyze for behavioral expectations and acceptance criteria:\n"
+        "- What behavior each test validates\n"
+        "- Expected inputs, outputs, and error conditions\n"
+        "- Edge cases and boundary conditions\n"
+        "- Implicit requirements revealed by assertions"
+    ),
+    "config": (
+        "Analyze for constraints and toolchain requirements:\n"
+        "- Build system and dependency constraints\n"
+        "- Environment variables and configuration parameters\n"
+        "- Version requirements and compatibility constraints\n"
+        "- Development workflow requirements"
+    ),
+    "infrastructure": (
+        "Analyze for deployment and operational requirements:\n"
+        "- Deployment topology and runtime environment\n"
+        "- Resource constraints (CPU, memory, storage)\n"
+        "- Networking, ports, and service dependencies\n"
+        "- CI/CD pipeline requirements"
+    ),
+    "documentation": (
+        "Analyze for documented design intent and decisions:\n"
+        "- Stated purpose and scope\n"
+        "- Architectural decisions and rationale\n"
+        "- User-facing contracts and API documentation\n"
+        "- Known limitations and future plans"
+    ),
+    "assets": (
+        "Analyze for data requirements:\n"
+        "- Schema definitions and data models\n"
+        "- Migration patterns and versioning\n"
+        "- Localization and internationalization needs\n"
+        "- Static resource dependencies"
+    ),
+}
+
+
+def _is_truncated_json_error(err: str) -> bool:
+    """Return True if the error string indicates a truncated tool call JSON (REQ-G-15)."""
+    return "Invalid JSON" in err or "EOF while parsing" in err
+
 
 def run_gather(
     model: ModelConfig,
     from_path: str,
-    force: bool = False,
+    overwrite: bool = False,
 ) -> int:
-    """Execute the gather phase — reverse-engineer requirements from a codebase.
-
-    Args:
-        model: Model configuration for the analyst role.
-        from_path: Path to existing codebase.
-        force: Overwrite existing requirements.
-
-    Returns:
-        Exit code (0 for success, 1 for failure).
-    """
+    """Execute the gather phase — reverse-engineer requirements from a codebase."""
     check_disk_space()
     d = ensure_voidrift_dir()
     target = d / "REQUIREMENTS.md"
     source = Path(from_path)
 
-    return _gather_from(model, target, source, force)
-
+    return _gather_from(model, target, source, overwrite)
 
 
 def _gather_from(
     model: ModelConfig,
     target: Path,
     from_path: Path,
-    force: bool,
+    overwrite: bool,
 ) -> int:
-    """Reverse engineering mode — four-stage pipeline (REQ-G-8, REQ-ARCH-7)."""
-    if target.exists() and not force:
-        ui.error(f"{target} already exists. Use --force to overwrite.")
+    """Reverse engineering mode — three-stage pipeline (REQ-G-8, REQ-ARCH-7)."""
+    if target.exists() and not overwrite:
+        ui.error(f"{target} already exists. Use --overwrite to replace.")
         return 1
     if not from_path.is_dir():
         ui.error(f"{from_path} is not a directory")
         return 1
-    if force and target.exists():
-        target.unlink()
+    if overwrite:
+        from ..utils import undo_phase
+        deleted = undo_phase("gather")
+        if deleted:
+            ui.info(f"Removed {len(deleted)} files from previous gather.")
 
     log, run_id = boot_run("gather")
 
@@ -58,12 +107,15 @@ def _gather_from(
         import voidrift_mcp.server as mcp_mod
         mcp_mod.run_id = run_id
         mcp_mod._boot()
-        all_tools, all_handlers = build_mcp_tools(mcp_mod)
+        all_tools, all_handlers = build_mcp_tools(mcp_mod, phase="gather")
     except ImportError:
         from ..tools import LOCAL_TOOLS, LOCAL_HANDLERS
         all_tools = list(LOCAL_TOOLS)
         all_handlers = dict(LOCAL_HANDLERS)
         mcp_mod = None
+
+    from ..config import get_max_input_chars
+    _input_limit = get_max_input_chars(model.model_type)
 
     def read_from_source(path: str) -> str:
         full = (from_path / path).resolve()
@@ -71,7 +123,12 @@ def _gather_from(
             return f"Access denied: {path} is outside the source directory"
         if not full.exists():
             return f"File not found: {path}"
-        return full.read_text(encoding="utf-8", errors="replace")
+        content = full.read_text(encoding="utf-8", errors="replace")
+        if _input_limit and len(content) > _input_limit:
+            content = content[:_input_limit] + "\n[truncated]"
+            with open(log, "a") as _f:
+                _f.write(f"[INPUT_TRUNCATED] {path} ({len(content)} → {_input_limit} chars)\n")
+        return content
 
     all_handlers["read_source_file"] = read_from_source
 
@@ -96,17 +153,18 @@ def _gather_from(
     except RuntimeError as e:
         ui.error(str(e))
         return 1
-    target_rel = str(target.relative_to(Path.cwd()))
 
     with open(log, "a") as f:
         f.write(f"=== Reverse engineering from {from_path} ===\n")
 
-    # Load shared methodology once for all stages (REQ-RES-7)
+    # Load methodology for triage/consolidation only — analysis/synthesis use lens-only (REQ-G-8)
     _get_prompt = all_handlers.get("get_prompt", lambda *a: "")
     _get_skill = all_handlers.get("get_skill", lambda *a: "")
-    analyst_role = _get_skill("ANALYSIS-REQS")
+    analyst_role = _get_skill("ANALYSIS-REQS")  # used by triage and consolidation only
 
-    # --- Stage 1: Triage — identify files and logical groups ---
+    import json as _json
+
+    # --- Stage 1: Triage — categorize files ---
     ui.stage("Stage 1: Triaging files...")
     triage_prompt = _get_prompt("gather", "TRIAGE")
     triage = AgentLoop(
@@ -121,7 +179,6 @@ def _gather_from(
         ui.error(f"Triage failed: {e}")
         return 1
 
-    import json as _json
     try:
         triage_data = _json.loads(triage_response.strip())
     except _json.JSONDecodeError:
@@ -135,16 +192,20 @@ def _gather_from(
                 f.write(f"Triage response:\n{triage_response}\n")
             return 1
 
-    # Normalize: support old flat list format or new groups format
-    if "groups" in triage_data:
-        groups: dict[str, list[str]] = triage_data["groups"]
-    elif isinstance(triage_data, list):
-        groups = {"project": triage_data}
-    else:
-        groups = {"project": list(triage_data.values())[0] if triage_data else []}
+    # Normalize into categories dict
+    categories: dict[str, list[str]] = {}
+    for cat in CATEGORIES:
+        files = triage_data.get(cat, [])
+        if isinstance(files, list):
+            categories[cat] = files
+        elif isinstance(files, dict):
+            # Flatten if model returned sub-groups
+            categories[cat] = [f for fs in files.values() for f in fs]
+        else:
+            categories[cat] = []
 
     # --- Validation pass — model reviews its own triage output ---
-    all_files = [f for fs in groups.values() for f in fs]
+    all_files = [f for fs in categories.values() for f in fs]
     validation_prompt = _get_prompt("gather", "TRIAGE-VALIDATION")
     validator = AgentLoop(
         model=model, stream=False, extra_body=extra, max_tokens=4096,
@@ -154,26 +215,33 @@ def _gather_from(
     )
     try:
         val_response = validator.send(f"Files to review:\n{_json.dumps(all_files)}")
-        keep = set(_json.loads(val_response.strip()))
-        groups = {g: [f for f in fs if f in keep] for g, fs in groups.items()}
-        groups = {g: fs for g, fs in groups.items() if fs}  # drop empty groups
+        val_data = _json.loads(val_response.strip())
+        if isinstance(val_data, dict):
+            val_data = next(iter(val_data.values()), [])
+        keep = set(val_data)
+        categories = {c: [f for f in fs if f in keep] for c, fs in categories.items()}
     except Exception:
-        pass  # validation is best-effort; proceed with original triage
+        pass  # validation is best-effort
 
-    all_files = [f for files in groups.values() for f in files]
-    ui.info(f"{len(all_files)} files in {len(groups)} group(s): {', '.join(groups.keys())}")
+    # Build file-to-category mapping for analysis
+    file_category: dict[str, str] = {}
+    for cat, files in categories.items():
+        for f in files:
+            file_category[f] = cat
+
+    all_files = list(file_category.keys())
+    cat_counts = {c: len(fs) for c, fs in categories.items() if fs}
+    ui.info(f"{len(all_files)} files: {', '.join(f'{c}({n})' for c, n in cat_counts.items())}")
     with open(log, "a") as f:
-        f.write(f"Triage: {_json.dumps(groups)}\n")
+        f.write(f"Triage: {_json.dumps(categories)}\n")
 
-    # --- Stage 2: Analysis — one agent per file, concurrent ---
+    # --- Stage 2: Analysis — one agent per file, category-aware ---
     ui.stage("Stage 2: Analyzing files...")
     analysis_tools, analysis_handlers = _pick_tools(
         {"read_source_file", "store_file_analysis"}
     )
 
-    # Build analysis prompt (skill already prepended via analyst_role)
-    analysis_prompt = _get_prompt("gather", "ANALYSIS")
-    analysis_system = f"{analyst_role}\n\n{analysis_prompt}"
+    analysis_prompt_tpl = _get_prompt("gather", "ANALYSIS")
 
     import time as _time
     from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -184,19 +252,44 @@ def _gather_from(
     _counter = {"done": 0}
     _lock = __import__("threading").Lock()
 
+    from ..config import get_max_tokens as _get_max_tokens
+
     def _analyze_file(filepath: str) -> tuple[str, float | None, str | None]:
+        cat = file_category.get(filepath, "source")
+        lens = _ANALYSIS_LENS.get(cat, _ANALYSIS_LENS["source"])
+        # Lens-only system prompt — no ANALYSIS-REQS skill (REQ-G-8)
+        system = analysis_prompt_tpl.format(category=cat, analysis_lens=lens)
+        max_tok = _get_max_tokens(model.model_type, "analysis")
+
         start = _time.time()
         agent = AgentLoop(
-            model=model, stream=False, extra_body=extra, max_tokens=16384,
+            model=model, stream=False, extra_body=extra, max_tokens=max_tok,
             log_path=log,
-            system_prompt=analysis_system,
+            system_prompt=system,
             tools=analysis_tools, tool_handlers=analysis_handlers,
         )
         try:
             agent.send(f"Analyze: {filepath}")
             return filepath, _time.time() - start, None
         except (RuntimeError, OSError) as e:
-            return filepath, None, str(e)
+            err_str = str(e)
+            # REQ-G-15: retry on truncated tool call JSON
+            if _is_truncated_json_error(err_str):
+                with open(log, "a") as _f:
+                    _f.write(f"[TRUNCATED_JSON] {filepath} — retrying with halved tokens\n")
+                retry_agent = AgentLoop(
+                    model=model, stream=False, extra_body=extra,
+                    max_tokens=max(max_tok // 2, 256),
+                    log_path=log,
+                    system_prompt=system,
+                    tools=analysis_tools, tool_handlers=analysis_handlers,
+                )
+                try:
+                    retry_agent.send(f"Analyze: {filepath}\nBe very brief — 5 bullet points maximum.")
+                    return filepath, _time.time() - start, None
+                except (RuntimeError, OSError) as e2:
+                    return filepath, None, str(e2)
+            return filepath, None, err_str
 
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = {pool.submit(_analyze_file, fp): fp for fp in all_files}
@@ -236,130 +329,110 @@ def _gather_from(
                 with open(log, "a") as f:
                     f.write(f"Analyzed: {filepath}\n")
 
-    # Retrieve all analyses from SessionStore for building per-group context
+    # Retrieve all analyses from SessionStore
     all_analyses = mcp_mod.session_store.get_all(run_id, "analysis") if mcp_mod else {}
 
-    def _build_group_analyses(file_list: list[str]) -> str:
-        parts = []
-        for fp in sorted(file_list):
-            content = all_analyses.get(fp, "")
-            if content:
-                parts.append(f"## {fp}\n\n{content}")
-        return "\n\n---\n\n".join(parts)
+    # --- Stage 3: Synthesize requirements from all analyzed files (category order per REQ-G-8) ---
+    all_analyzed = [
+        (fp, cat, all_analyses.get(fp, ""))
+        for cat in CATEGORIES
+        for fp in sorted(categories.get(cat, []))
+        if all_analyses.get(fp, "")
+    ]
 
-    synth_tools, synth_handlers = _pick_tools(
-        {"get_template", "get_skill", "write_file"}
-    )
-    multi = len(groups) > 1
+    ui.stage(f"Stage 3: Synthesizing requirements from {len(all_analyzed)} files...")
 
-    if multi:
-        # --- Stage 3: Per-group synthesis ---
-        total_stages = len(groups) + 1
-        for i, (group_name, group_files) in enumerate(groups.items(), 1):
-            spec_path = f".voidrift/spec/{group_name}.md"
-            ui.stage(f"Stage 3.{i}/{total_stages}: Writing {group_name} spec...")
-            ui.model_label(model.alias)
+    extract_tools, extract_handlers = _pick_tools({"store_requirements"})
 
-            group_context = _build_group_analyses(group_files)
-            synth_prompt = _get_prompt("gather", "SYNTHESIS").format(
-                group_name=group_name,
-                spec_path=spec_path,
-                group_context=f"--- FILE ANALYSES FOR {group_name.upper()} ---\n\n{group_context}",
-            )
-            synth = AgentLoop(
-                model=model, stream=False, extra_body=extra, max_tokens=16384,
+    try:
+        for i, (fp, cat, analysis) in enumerate(all_analyzed, 1):
+            ui.stage(f"Stage 3: {i}/{len(all_analyzed)} — {fp}")
+            lens = _ANALYSIS_LENS.get(cat, _ANALYSIS_LENS["source"])
+            # Lens-only system prompt for synthesis agents (REQ-G-8)
+            synth_prompt = _get_prompt("gather", "SYNTHESIS").format(category_lens=lens)
+            agent = AgentLoop(
+                model=model, stream=False, extra_body=extra,
+                max_tokens=_get_max_tokens(model.model_type, "synthesis"),
                 log_path=log,
-                system_prompt=f"{analyst_role}\n\n{synth_prompt}",
-                tools=synth_tools, tool_handlers=synth_handlers,
+                system_prompt=synth_prompt,
+                tools=extract_tools, tool_handlers=extract_handlers,
             )
-            try:
-                response = synth.send(f"Write detailed requirements for the {group_name} component.")
-                with open(log, "a") as f:
-                    f.write(f"Synthesis ({group_name}):\n{response}\n")
-            except KeyboardInterrupt:
-                ui.info("Interrupted.")
-                return 1
+            response = agent.send(f"[{cat}] {fp}:\n\n{analysis}")
+            with open(log, "a") as f:
+                f.write(f"Synthesize ({i}/{len(all_analyzed)} {fp}):\n{response}\n")
 
-        # --- Stage 4: Overview ---
-        ui.stage(f"Stage 4: Writing project overview...")
+        # --- Stage 4: Consolidation — structured requirements from all categories ---
+        ui.stage("Stage 4: Consolidating requirements...")
         ui.model_label(model.alias)
 
-        spec_dir = Path.cwd() / ".voidrift" / "spec"
-        spec_summaries = []
-        for group_name in groups:
-            sp = spec_dir / f"{group_name}.md"
-            if sp.exists():
-                spec_summaries.append(f"## {group_name}\n\n{sp.read_text()}")
-        specs_context = "\n\n---\n\n".join(spec_summaries)
+        stored_reqs = []
+        for cat in CATEGORIES:
+            for fp in sorted(categories.get(cat, [])):
+                req = mcp_mod.artifacts.get("requirements", fp) if mcp_mod else None
+                if req:
+                    stored_reqs.append(f"### {fp} [{cat}]\n\n{req}")
+        all_requirements_text = "\n\n---\n\n".join(stored_reqs)
 
-        overview_prompt = _get_prompt("gather", "OVERVIEW").format(
-            target_rel=target_rel,
-            spec_refs=", ".join(f"spec/{g}.md" for g in groups),
-            specs_context=f"--- COMPONENT SPECS ---\n\n{specs_context}",
+        consol_tools, consol_handlers = _pick_tools({"get_template", "write_framework_file"})
+        consol_prompt = _get_prompt("gather", "CONSOLIDATION").format(
+            all_requirements=all_requirements_text,
         )
-        overview = AgentLoop(
-            model=model, stream=False, extra_body=extra, max_tokens=8192,
+        agent = AgentLoop(
+            model=model, stream=False, extra_body=extra, max_tokens=_get_max_tokens(model.model_type, "consolidation"),
             log_path=log,
-            system_prompt=f"{analyst_role}\n\n{overview_prompt}",
-            tools=synth_tools, tool_handlers=synth_handlers,
+            system_prompt=f"{analyst_role}\n\n{consol_prompt}",
+            tools=consol_tools, tool_handlers=consol_handlers,
         )
-        try:
-            response = overview.send("Write the project-level requirements overview.")
-            with open(log, "a") as f:
-                f.write(f"Overview:\n{response}\n")
-        except KeyboardInterrupt:
-            ui.info("Interrupted.")
-            return 1
+        response = agent.send("Consolidate the extracted requirements into REQUIREMENTS.md.")
+        with open(log, "a") as f:
+            f.write(f"Consolidation:\n{response}\n")
 
-    else:
-        # Single group — write directly to REQUIREMENTS.md
-        ui.stage("Stage 3: Writing requirements...")
-        ui.model_label(model.alias)
-
-        group_context = _build_group_analyses(all_files)
-        single_prompt = _get_prompt("gather", "SYNTHESIS-SINGLE").format(
-            target_rel=target_rel,
-            group_context=f"--- FILE ANALYSES ---\n\n{group_context}",
-        )
-        synth = AgentLoop(
-            model=model, stream=False, extra_body=extra, max_tokens=16384,
-            log_path=log,
-            system_prompt=f"{analyst_role}\n\n{single_prompt}",
-            tools=synth_tools, tool_handlers=synth_handlers,
-        )
-        try:
-            response = synth.send("Write the requirements from the file analyses.")
-            with open(log, "a") as f:
-                f.write(f"Synthesis:\n{response}\n")
-        except KeyboardInterrupt:
-            ui.info("Interrupted.")
+    except KeyboardInterrupt:
+        ui.info("Interrupted.")
+        return 1
 
     if target.exists():
-        ui.done(f"Requirements written to {target_rel}")
+        # Write state entry (REQ-PS-3)
+        from ..utils import append_state
+        analyzed = [(fp, cat) for cat in CATEGORIES for fp in sorted(categories.get(cat, []))]
+        files_created = [str(target.relative_to(Path.cwd()))]
+        total = len([f for fs in categories.values() for f in fs])
+        src_count = len(categories.get("source", []))
+        append_state(
+            phase="gather",
+            model_alias=model.alias,
+            summary=f"Analyzed {total} files ({src_count} source). Wrote REQUIREMENTS.md.",
+            files_created=files_created,
+            analyzed_files=analyzed,
+        )
+        ui.done(f"Requirements written to {str(target.relative_to(Path.cwd()))}")
         return 0
     else:
         ui.warn("Requirements file was not created.")
         return 1
 
+
 def _build_file_tree(directory: Path, max_files: int = 500) -> str:
-    """Build a file tree string, excluding dot-directories.
+    """Build a file tree string, respecting .gitignore and excluding dot-paths."""
+    import pathspec
 
-    Args:
-        directory: Root directory to scan.
-        max_files: Maximum files before raising an error.
+    gitignore = directory / ".gitignore"
+    spec = (
+        pathspec.PathSpec.from_lines("gitignore", gitignore.read_text().splitlines())
+        if gitignore.is_file()
+        else pathspec.PathSpec.from_lines("gitignore", [])
+    )
 
-    Returns:
-        Newline-separated list of relative file paths.
-
-    Raises:
-        RuntimeError: If file count exceeds max_files (no silent truncation).
-    """
     lines = []
     for p in sorted(directory.rglob("*")):
-        if any(part.startswith(".") for part in p.relative_to(directory).parts):
+        if not p.is_file():
             continue
-        if p.is_file():
-            lines.append(str(p.relative_to(directory)))
+        rel = p.relative_to(directory)
+        if any(part.startswith(".") for part in rel.parts):
+            continue
+        if spec.match_file(str(rel)):
+            continue
+        lines.append(str(rel))
     if len(lines) > max_files:
         raise RuntimeError(
             f"Source tree has {len(lines)} files (limit {max_files}). "

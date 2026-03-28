@@ -1,3 +1,8 @@
+---
+name: WORKFLOW
+description: Atomic commits, worktree isolation, verifiable units of work, and clean branching for development workflow.
+---
+
 # Domain: Collaboration Workflow (WORKFLOW)
 
 ## Core Philosophy

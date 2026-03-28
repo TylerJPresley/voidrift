@@ -12,8 +12,6 @@ from .models import (
     cache_clear,
     get_gateway_status,
     get_status,
-    images_list,
-    images_pull,
     models_add,
     models_check,
     models_list,
@@ -145,9 +143,15 @@ def completions_cmd(shell: str) -> None:
       worker completions fish > ~/.config/fish/completions/worker.fish
     """
     import os
+    import subprocess
     env_var = "_WORKER_COMPLETE"
-    script = os.popen(f"{env_var}={shell}_source worker").read()
-    click.echo(script)
+    result = subprocess.run(
+        ["worker"],
+        env={**os.environ, env_var: f"{shell}_source"},
+        capture_output=True,
+        text=True,
+    )
+    click.echo(result.stdout)
 
 
 # --- Container lifecycle ---
@@ -237,38 +241,93 @@ def logs(follow: bool) -> None:
 @cli.command()
 @click.argument("num_prompts", default=100, type=int)
 @click.argument("req_rate", default=0, type=float)
-def bench(num_prompts: int, req_rate: float) -> None:
-    """Run vLLM benchmark. Default: 100 prompts at max rate.
+@click.option("--dataset", default="sharegpt", show_default=True,
+              type=click.Choice(["sharegpt", "random", "sonnet"]),
+              help="Benchmark dataset.")
+def bench(num_prompts: int, req_rate: float, dataset: str) -> None:
+    """Run vLLM benchmark and record results to BENCHMARKS.md.
 
     \b
     Examples:
       worker bench              # 100 prompts, max rate
       worker bench 100 1        # 100 prompts, 1 req/s
+      worker bench 200 2 --dataset random
     """
+    from datetime import datetime, timezone
+    from .bench import (
+        fetch_vllm_version, fetch_kv_tokens, parse_bench_output,
+        make_config_cell, make_ttft_cell, make_tpot_cell,
+        make_resources_cell, make_run_cell, format_row, update_benchmarks,
+        _shorten_image,
+    )
+    from .models import ssh_stream_capture
+
     s = get_status()
     if not s["active"]:
         err_console.print("[red]No active container. Run 'worker start <alias>' first.[/red]")
         sys.exit(1)
 
+    alias = s["model"]
+    container = s["container"]
     console.print(f"[bold cyan]Worker Bench[/bold cyan] — {num_prompts} prompts")
-    console.print(f"Container: {s['container']}")
+    console.print(f"Container: {container}")
 
     try:
-        config = load_worker_models()
-        port = config.get("worker", {}).get("port", 8000)
+        worker_config = load_worker_models()
+        port = worker_config.get("worker", {}).get("port", 8000)
         r = ssh_cmd(f"curl -s http://localhost:{port}/v1/models")
         console.print(f"Models API: {r.stdout[:200]}")
 
+        # Resolve model config for this alias
+        model_cfg = worker_config.get("models", {}).get(alias, {})
+        repository = model_cfg.get("repository", alias)
+
+        # Resolve docker image string
+        from .models import _resolve_docker_image
+        default_image = worker_config.get("default_image")
+        image_str = _shorten_image(_resolve_docker_image(model_cfg, default_image))
+
         rate_arg = f"--request-rate {req_rate}" if req_rate > 0 else "--request-rate inf"
+        dataset_args = (
+            f"--dataset-name {dataset} "
+            + (f"--dataset-path /root/.cache/huggingface/sharegpt.json " if dataset == "sharegpt" else "")
+        )
         bench_cmd = (
-            f"docker exec {s['container']} vllm bench serve "
+            f"docker exec {container} vllm bench serve "
             f"--base-url http://localhost:{port} "
-            f"--dataset-name sharegpt "
-            f"--dataset-path /root/.cache/huggingface/sharegpt.json "
+            f"{dataset_args}"
             f"--num-prompts {num_prompts} {rate_arg}"
         )
         console.print("[dim]Running benchmark...[/dim]")
-        rc = ssh_stream(bench_cmd, timeout=600)
+        rc, output = ssh_stream_capture(bench_cmd, timeout=600)
+
+        if rc == 0 and output:
+            # Gather metadata
+            vllm_ver = fetch_vllm_version(container)
+            from .config import get_worker_config
+            worker_ip = get_worker_config().get("ip", "localhost")
+            kv_tokens = fetch_kv_tokens(worker_ip, port)
+
+            # Parse results
+            data = parse_bench_output(output)
+            date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+            row = format_row(
+                model=repository,
+                date=date,
+                vllm_version=vllm_ver,
+                image=image_str,
+                config_cell=make_config_cell(model_cfg),
+                throughput=data.get("throughput_tok_s"),
+                ttft_cell=make_ttft_cell(data),
+                tpot_cell=make_tpot_cell(data),
+                resources_cell=make_resources_cell(kv_tokens),
+                run_cell=make_run_cell(data, num_prompts, req_rate, dataset),
+            )
+
+            bench_file = update_benchmarks(row, repository)
+            console.print(f"\n✅ Results recorded → {bench_file}")
+
         sys.exit(rc)
     except subprocess.TimeoutExpired:
         err_console.print("[red]Benchmark timed out[/red]")
@@ -371,38 +430,97 @@ def models_check_cmd(prune: bool) -> None:
 
 @cli.group("images", cls=OrderedGroup)
 def images_group() -> None:
-    """Manage vLLM docker images on the worker node.
+    """Manage vLLM image sources on the worker node.
 
     \b
     Examples:
-      worker images pull           # default image from config
-      worker images pull vllm/vllm-openai:latest-aarch64-cu130
+      worker images list
+      worker images add eugr https://github.com/eugr/spark-vllm-docker.git
+      worker images add scitrera scitrera/dgx-spark-vllm:0.17.0-t5
+      worker images update eugr
+      worker images remove eugr
+      worker images build eugr
     """
 
 
-@images_group.command("pull")
-@click.argument("image", required=False)
-def images_pull_cmd(image: str | None) -> None:
-    """Pull a vLLM image. Without IMAGE, pulls the default from config."""
+@images_group.command("list")
+def images_list_cmd() -> None:
+    """List configured image sources and docker images on worker."""
+    from voidrift_worker.models import images_source_list, images_docker_list
     try:
-        label = image or "default image"
-        console.print(f"Pulling {label}...")
-        rc = images_pull(image)
-        if rc == 0:
-            console.print("✅ Image pulled.")
+        sources = images_source_list()
+        if sources:
+            console.print("[bold]Image Sources[/bold]")
+            for alias, src in sources.items():
+                src_type = src.get("type", "?")
+                refs = src.get("models", [])
+                ref_str = f" → {', '.join(refs)}" if refs else ""
+                if src_type == "git":
+                    console.print(f"  {alias} [dim](git: {src.get('url', '?')})[/dim]{ref_str}")
+                else:
+                    console.print(f"  {alias} [dim](docker: {src.get('image', '?')})[/dim]{ref_str}")
+            console.print()
         else:
-            sys.exit(rc)
+            console.print("[dim]No image sources configured.[/dim]\n")
+        console.print("[bold]Docker Images on Worker[/bold]")
+        console.print(images_docker_list())
     except RuntimeError as e:
         err_console.print(f"[red]Error: {e}[/red]")
         sys.exit(1)
 
 
-@images_group.command("list")
-def images_list_cmd() -> None:
-    """List docker images on the worker node."""
+@images_group.command("add")
+@click.argument("alias")
+@click.argument("url")
+def images_add_cmd(alias: str, url: str) -> None:
+    """Add an image source. Clones/pulls and builds on worker."""
+    from voidrift_worker.models import images_add
     try:
-        output = images_list()
-        console.print(output)
+        console.print(f"Adding image source '{alias}'...")
+        images_add(alias, url)
+        console.print(f"✅ Image source '{alias}' added and built.")
+    except RuntimeError as e:
+        err_console.print(f"[red]Error: {e}[/red]")
+        sys.exit(1)
+
+
+@images_group.command("remove")
+@click.argument("alias")
+@click.option("--force", is_flag=True, help="Remove even if models reference this source.")
+def images_remove_cmd(alias: str, force: bool) -> None:
+    """Remove an image source and all assets from worker."""
+    from voidrift_worker.models import images_remove
+    try:
+        images_remove(alias, force=force)
+        console.print(f"✅ Image source '{alias}' removed.")
+    except RuntimeError as e:
+        err_console.print(f"[red]Error: {e}[/red]")
+        sys.exit(1)
+
+
+@images_group.command("update")
+@click.argument("alias")
+def images_update_cmd(alias: str) -> None:
+    """Update an image source (git pull + rebuild, or docker pull)."""
+    from voidrift_worker.models import images_update
+    try:
+        console.print(f"Updating '{alias}'...")
+        images_update(alias)
+        console.print(f"✅ Image source '{alias}' updated.")
+    except RuntimeError as e:
+        err_console.print(f"[red]Error: {e}[/red]")
+        sys.exit(1)
+
+
+@images_group.command("build")
+@click.argument("alias")
+def images_build_cmd(alias: str) -> None:
+    """Rebuild the Docker image for a git source."""
+    from voidrift_worker.models import images_build
+    try:
+        console.print(f"Building '{alias}'...")
+        images_build(alias)
+        console.print(f"✅ Image for '{alias}' built.")
     except RuntimeError as e:
         err_console.print(f"[red]Error: {e}[/red]")
         sys.exit(1)

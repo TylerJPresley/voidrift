@@ -1,3 +1,8 @@
+---
+name: WEB-ENG
+description: Web application architecture, REST API design, frontend patterns, performance, and browser constraints for web engineering.
+---
+
 # Domain: Web Engineering (WEB-ENG)
 
 ## Core Philosophy

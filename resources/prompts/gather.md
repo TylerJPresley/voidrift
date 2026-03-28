@@ -4,114 +4,66 @@ Phase prompt file for the gather pipeline. Each section is loaded via `get_promp
 
 ## TRIAGE
 
-Given a file tree, return ONLY a JSON object with:
-- "groups": a dict mapping logical boundary names to lists of relative file paths.
-  Auto-detect boundaries from directory structure (e.g. frontend/, backend/, api/, shared/).
-  For single-application codebases, use one group named after the project.
+**Role:** File Triage Analyst — categorize project files for requirements analysis.
 
-INCLUDE ONLY these three categories:
-1. Source files — code written by developers
-2. Documentation — READMEs, design docs, specs
-3. Configuration — env files, Dockerfiles, CI/CD, build configs
+Given a file tree, return ONLY a JSON object with files sorted into these categories:
 
-You MUST NOT include:
-- Files with content hashes in their names (e.g. index-CW8_b_Xi.js) — these are compiled build output
-- Lock files (package-lock.json, poetry.lock, Gemfile.lock, etc.)
-- Binary files and images (.png, .jpg, .gif, .ico, .woff, .ttf)
-- Dependency directories (node_modules, vendor, target, __pycache__)
-- Generated HTML in build/static/dist directories
-- Minified or bundled files
+- **source**: Application code written by developers (the product itself)
+- **tests**: Test files that validate the source
+- **config**: Build and project configuration (Makefiles, pyproject.toml, tsconfig, .env.example)
+- **infrastructure**: Deployment, CI/CD, IaC (Dockerfiles, docker-compose, terraform, GitHub Actions)
+- **documentation**: Human-readable docs (READMEs, ADRs, guides, changelogs)
+- **assets**: Static resources consumed by the application (migrations, seeds, images, fonts, localization)
 
-Use your knowledge of the project's language and toolchain to decide.
-Return raw JSON, no markdown fences.
+Use your knowledge of the project's toolchain to distinguish source from build output, generated files, binaries, lock files, and dependency directories.
 
-Example: {{"groups": {{"backend": ["backend/main.py"], "frontend": ["frontend/src/App.vue"]}}}}
+All categories are flat file lists. Return raw JSON, no markdown fences.
+
+Example:
+{{"source": ["src/main.py", "src/routes.py"], "tests": ["tests/test_api.py"], "config": ["pyproject.toml"], "infrastructure": ["Dockerfile"], "documentation": ["README.md"], "assets": []}}
 
 ## TRIAGE-VALIDATION
 
-You are a strict code reviewer. Given a list of files selected for source code analysis, remove any that should NOT be analyzed:
-- Compiled/bundled files (hashed filenames like index-CW8_b_Xi.js)
-- Lock files (package-lock.json, poetry.lock, etc.)
-- Binary files and images (.png, .jpg, .gif, .ico, .woff, .ttf)
-- Generated build output (files in static/assets/, dist/, build/ directories)
-- Minified files
+**Role:** Code Reviewer — validate file categorization for requirements analysis.
 
-Return ONLY a JSON list of files that SHOULD be kept. No markdown fences.
+Given a list of files, return ONLY the files that are human-written content worth analyzing. Use your knowledge of the project's toolchain to identify and remove compiled output, generated bundles, lock files, binaries, and minified files.
+
+Return ONLY a JSON list of files to keep. No markdown fences.
 
 ## ANALYSIS
 
-Steps:
-1. Call read_source_file() to read the file.
-2. Call store_file_analysis() EXACTLY ONCE with your analysis.
-3. Call done() when finished.
+**Role:** Source Analyst — analyze a single {category} file for requirements extraction.
 
-Do NOT call list_skills(), get_skill(), or any other tool. The methodology is already in your system prompt.
-Do NOT call store_file_analysis() more than once.
+Steps (use only these tools, in this order):
+1. Call `read_source_file()` to read the file.
+2. Call `store_file_analysis()` once with your analysis.
+3. Call `done()`.
 
-Your analysis MUST cover:
-- Purpose and business intent (outcomes over mechanisms)
-- Key components, functions, classes, and their responsibilities
-- Dependencies and external integrations
-- Data flows and state management
-- Configuration parameters and environment variables
-- Error handling patterns
-- Requirements implied by the code (use EARS notation: WHEN [trigger], THE SYSTEM SHALL [result])
+{analysis_lens}
+
+Output format: bullet points only, maximum 15 items. Focus on requirements-relevant observations. Omit implementation detail, style commentary, and anything not traceable to a system behavior.
 
 ## SYNTHESIS
 
-You are writing detailed requirements for the '{group_name}' component.
-Steps:
-1. Call get_template('REQUIREMENTS-TEMPLATE') for the output format.
-2. Call get_skill('PROD-STRATEGY') for guidance.
-3. Call write_file() EXACTLY ONCE to write the COMPLETE requirements to '{spec_path}'.
-4. Call done() when finished.
-Do NOT call the same tool more than once.
+**Role:** Requirements Extractor — distill requirements from a single file analysis.
 
-CRITICAL: Be THOROUGH and DETAILED.
-- Every endpoint, component, data flow, config parameter, and error behavior must be a requirement.
-- Each requirement needs specific acceptance criteria.
-- Do not summarize or abbreviate.
+Given a file analysis, extract a concise list of requirements. Use EARS notation (WHEN [trigger], THE SYSTEM SHALL [result]). Each requirement gets one line of rationale.
 
-After calling done(), summarize the key requirements for {group_name}.
+Derive requirements exclusively from what the analysis describes.
 
-{group_context}
+Store your extracted requirements using `store_requirements()` with the file path as the key. Then call `done()`.
 
-## SYNTHESIS-SINGLE
+{category_lens}
 
-You are writing comprehensive requirements from file analysis summaries.
-Steps:
-1. Call get_template('REQUIREMENTS-TEMPLATE') for the output format.
-2. Call get_skill('PROD-STRATEGY') for guidance.
-3. Call write_file() EXACTLY ONCE to write the COMPLETE requirements to '{target_rel}'.
-4. Call done() when finished.
-Do NOT call the same tool more than once.
+## CONSOLIDATION
 
-CRITICAL: Be THOROUGH and DETAILED.
-- Every endpoint, component, data flow, config parameter, and error behavior must be a requirement.
-- Each requirement needs specific acceptance criteria.
-- Do not summarize or abbreviate.
+**Role:** Requirements Author — consolidate extracted requirements into a final requirements document.
 
-After calling done(), summarize the key requirements.
+Steps (follow this order):
+1. Review all the extracted requirements provided below.
+2. Call `get_template('REQUIREMENTS-TEMPLATE')` for the output format.
+3. Consolidate into a single coherent requirements document: merge duplicates, resolve contradictions, organize by functional area, ensure every requirement has acceptance criteria.
+4. Call `write_framework_file("REQUIREMENTS.md")` with the complete consolidated requirements.
+5. Call `done()`.
 
-{group_context}
-
-## OVERVIEW
-
-You are writing a project-level requirements overview.
-The project has multiple components, each with its own spec file.
-Steps:
-1. Call get_template('REQUIREMENTS-TEMPLATE') for the output format.
-2. Call get_skill('ANALYSIS-REQS') for methodology guidance.
-3. Call write_file() EXACTLY ONCE to write the COMPLETE overview to '{target_rel}'.
-4. Call done() when finished.
-
-The overview must cover:
-- System purpose and scope
-- How the components interact (API contracts, shared config, data flow)
-- Deployment topology
-- Cross-cutting concerns (auth, logging, monitoring, error handling)
-- References to spec files: {spec_refs}
-
-After calling done(), summarize the project architecture.
-
-{specs_context}
+{all_requirements}

@@ -1,3 +1,8 @@
+---
+name: ARCH-DESIGN
+description: System architecture and design principles: component boundaries, API contracts, state management, and decision rationale.
+---
+
 # Domain: Architecture & Design (ARCH-DESIGN)
 
 ## Core Philosophy

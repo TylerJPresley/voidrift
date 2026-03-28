@@ -28,10 +28,7 @@ Load these before starting work:
 
 4. **Update documentation**
    - README.md for framework-level changes
-   - cli/README.md for CLI-specific changes
-   - mcp-context-server/README.md for MCP server changes
-   - AGENT.md for agent behavior changes
-   - CONVENTIONS.md for operational rules
+   - ARCHITECTURE.md for component, data flow, or design decision changes
    - CHANGELOG.md for all notable changes
 
 5. **Commit with AC references**
@@ -70,18 +67,17 @@ ALWAYS:
 
 ## Framework Context
 
-Python monorepo with two packages:
+Python monorepo with three packages:
 - `cli/` — Click-based CLI providing the `voidrift` command (entry point: voidrift_cli.main:cli)
 - `mcp-context-server/` — FastMCP server for project artifacts and framework resources
-- `resources/` — Framework guidance files (AGENT*.md, CONVENTIONS.md, skills/, templates/)
-- Three roles: Analyst, Architect, Developer
+- `worker-cli/` — Click-based CLI providing the `worker` command for GPU node management
+- `resources/` — Framework guidance files (skills/, templates/, prompts/)
 - Five phases: Gather → Plan → Develop → Automate → Verify
-- Local worker models (vLLM) + cloud architect models
-- Guidance: AGENT.md (playbook), CONVENTIONS.md (rulebook)
-- Runtime role assignment via [ROLE: X]
+- Per-phase prompts replace static role files — a phase can have multiple distinct agent invocations
+- Local worker models (vLLM) + Kiro Gateway + cloud APIs, all as OpenAI-compatible endpoints
 - Pydantic models, Google-style docstrings, src/ layout
 - Build: hatchling, VERSION file (shared), Makefile
-- Tests: pytest, 202 tests across cli/tests/, mcp-context-server/tests/, and worker-cli/tests/
+- Tests: pytest across cli/tests/, mcp-context-server/tests/, worker-cli/tests/
 
 ## When User Requests a Feature
 
@@ -95,19 +91,27 @@ Python monorepo with two packages:
 When building the framework itself, consult `resources/skills/` and follow them. This validates the skills work in practice.
 
 Relevant skills for framework development:
+- **ANALYSIS-REQS** — Requirements authoring, EARS notation, BDD acceptance criteria, traceability
 - **SYSTEMS-ENG** — CLI conventions (stdout/stderr, signals, POSIX, packaging)
-- **PROD-STRATEGY** — Documentation as code, user-centric docs, onboarding, conventional commits
+- **ARCH-DESIGN** — Component design, API contracts, state management, decision rationale
 - **QUALITY-QA** — TDD, no completion claims without evidence, regression tests
-- **ARCH-DESIGN** — API standards, health checks, state management, decision rationale
-- **RELIABILITY-ENG** — Eliminate toil, observability, error budgets
-- **CLOUD-OPS** — IaC standards, secrets management, environment parity
+- **RELIABILITY-ENG** — Eliminate toil, observability, retry logic, error budgets
+- **PROD-STRATEGY** — Documentation as code, user-centric docs, onboarding, conventional commits
+- **CLOUD-OPS** — Container lifecycle, secrets management, SSH operations, environment parity
+- **WORKFLOW** — Atomic commits, worktree isolation, verifiable units of work
 
 Skills are authoritative. Don't just reference them — follow them. If a skill says "use stdout for results, stderr for errors", do it. If a skill seems wrong or incomplete, raise it with the operator before changing anything.
+
+## Prompt Authoring
+
+When writing or editing prompts in `resources/prompts/`:
+- Use positive instructions only. Tell the model what to do, not what to avoid. Negative instructions ("NEVER", "do NOT", "don't") waste context tokens and are less effective than clear positive direction.
+- Keep prompts compact. Every token in the system prompt competes with the model's working memory for the task.
 
 ## Change Management
 
 After implementing, explicitly check:
-- Does this affect REQUIREMENTS.md, README.md, AGENT.md, or CONVENTIONS.md?
+- Does this affect REQUIREMENTS.md, README.md, or ARCHITECTURE.md?
 - Update CHANGELOG.md with the change
-- Run `make test` to verify 202 tests pass
+- Run `make test` to verify all tests pass
 - Don't consider work complete until documentation is updated

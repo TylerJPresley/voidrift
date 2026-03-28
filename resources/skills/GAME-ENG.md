@@ -1,3 +1,8 @@
+---
+name: GAME-ENG
+description: Game loop architecture, performance constraints, state management, and rendering patterns for game development.
+---
+
 # Domain: Game Engineering (GAME-ENG)
 
 ## Core Philosophy

@@ -1,3 +1,8 @@
+---
+name: QUALITY-QA
+description: Test-driven development, evidence-based completion, regression testing, and quality assurance patterns.
+---
+
 # Domain: Quality & Verification (QUALITY-QA)
 
 ## The Iron Law

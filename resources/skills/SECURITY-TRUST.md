@@ -1,3 +1,8 @@
+---
+name: SECURITY-TRUST
+description: Authentication, authorization, threat modeling, least privilege, and secure-by-default security and trust principles.
+---
+
 # Domain: Security & Trust (SECURITY-TRUST)
 
 ## Core Philosophy

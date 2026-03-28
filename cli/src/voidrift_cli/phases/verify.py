@@ -124,7 +124,7 @@ def run_verify(worker: ModelConfig, architect: ModelConfig | None = None) -> int
         system_prompt=(
             "[ROLE: Developer]\n\n"
             "Analyze test results and produce a verification report.\n"
-            "Use write_file() to write .voidrift/VERIFY.md with exactly these sections:\n"
+            "Use write_framework_file() to write .voidrift/VERIFY.md with exactly these sections:\n"
             "- Test Results\n- Lint & Static Analysis\n- Infrastructure\n"
             "- Requirements Coverage (table: criterion | status | evidence)\n"
             "- Issues (numbered list)\n"
@@ -181,7 +181,7 @@ def run_verify(worker: ModelConfig, architect: ModelConfig | None = None) -> int
             "[ROLE: Architect]\n\n"
             "Review verification failures and create a remediation plan. "
             "Categorize each issue as: fixable task, acceptable tradeoff, or out-of-scope. "
-            "Use write_file() to write your response to .voidrift/ARCHITECT_VERIFY.md"
+            "Use write_framework_file() to write your response to .voidrift/ARCHITECT_VERIFY.md"
         ),
         tools=tools,
         tool_handlers=handlers,

@@ -1,3 +1,8 @@
+---
+name: SYSTEMS-ENG
+description: CLI conventions, stdout/stderr separation, POSIX compliance, signal handling, and packaging for systems engineering.
+---
+
 # Domain: Systems Engineering (SYSTEMS-ENG)
 
 ## Core Philosophy

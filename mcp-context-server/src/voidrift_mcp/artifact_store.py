@@ -19,10 +19,8 @@ class ArtifactStore(BaseModel):
 
     def _disk_path(self, artifact_type: str, key: str) -> Path | None:
         """Map artifact type+key to a disk path, or None if memory-only."""
-        if artifact_type == "requirements":
-            if key == "project":
-                return self.voidrift_dir / "REQUIREMENTS.md"
-            return self.voidrift_dir / "spec" / f"{key}.md"
+        if artifact_type == "requirements" and key == "project":
+            return self.voidrift_dir / "REQUIREMENTS.md"
         return None
 
     def store(self, artifact_type: str, key: str, content: str) -> None:

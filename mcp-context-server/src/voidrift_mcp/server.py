@@ -6,10 +6,12 @@ Communicates via stdio using the MCP protocol.
 
 from __future__ import annotations
 
+import logging
 import os
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from mcp.server.fastmcp import FastMCP
+from fastmcp import FastMCP
 
 from .artifact_store import ArtifactStore
 from .markdown_parser import MarkdownIndex
@@ -21,8 +23,47 @@ from .task_store import TaskStore
 # ---------------------------------------------------------------------------
 VOIDRIFT_HOME = Path(os.environ.get("VOIDRIFT_HOME", Path.home() / ".voidrift"))
 RESOURCES_DIR = VOIDRIFT_HOME / "resources"
+DOMAIN_SKILLS_DIR = VOIDRIFT_HOME / "domain-skills"
 PROJECT_DIR = Path.cwd()
 VOIDRIFT_DIR = PROJECT_DIR / ".voidrift"
+PROJECT_SKILLS_DIR = VOIDRIFT_DIR / "skills"
+
+# ---------------------------------------------------------------------------
+# Logging (REQ-LOG-5)
+# ---------------------------------------------------------------------------
+
+
+def _setup_mcp_log() -> None:
+    """Initialize the MCP server log at ~/.voidrift/logs/mcp.log."""
+    log_dir = VOIDRIFT_HOME / "logs"
+    try:
+        log_dir.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return
+    logger = logging.getLogger("voidrift.mcp")
+    if logger.handlers:
+        return
+    logger.setLevel(logging.DEBUG)
+    handler = RotatingFileHandler(
+        log_dir / "mcp.log",
+        maxBytes=1 * 1024 * 1024,
+        backupCount=5,
+        encoding="utf-8",
+    )
+    handler.setFormatter(logging.Formatter(
+        "%(asctime)s %(levelname)s %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S",
+    ))
+    logger.addHandler(handler)
+    logger.propagate = False
+
+
+def _mcp_log() -> logging.Logger:
+    logger = logging.getLogger("voidrift.mcp")
+    if not logger.handlers:
+        _setup_mcp_log()
+    return logger
+
 
 # ---------------------------------------------------------------------------
 # Shared state
@@ -51,6 +92,8 @@ mcp = FastMCP(
 def _boot() -> None:
     """Load framework resources into the index on startup."""
     global session_id
+    _setup_mcp_log()
+    _mcp_log().info("boot run_id=%s project=%s", run_id or "unscoped", PROJECT_DIR)
     _written_paths.clear()
     session_id = session_store.start_session(
         run_id=run_id or "unscoped",
@@ -62,6 +105,7 @@ def _boot() -> None:
             session_id, "load_resources", "framework", str(RESOURCES_DIR),
             f"Loaded {count} sections",
         )
+        _mcp_log().info("loaded %d resource sections from %s", count, RESOURCES_DIR)
 
 
 # ---------------------------------------------------------------------------
@@ -214,34 +258,11 @@ def get_task_status(module: str = "") -> str:
 
 
 @mcp.tool()
-def get_agent(role: str, topic: str = "") -> str:
-    """Retrieve a role-specific agent file, optionally filtered to a topic.
-
-    Args:
-        role: Role name ('analyst', 'architect', or 'developer').
-        topic: Optional heading within the agent file to retrieve.
-    """
-    file_filter = f"agents/{role.upper()}"
-    if topic:
-        results = index.search(topic, file_filter=file_filter)
-        if results:
-            session_store.log_action(session_id, "get", "agent", f"{role}/{topic}")
-            return "\n\n---\n\n".join(r.content for r in results)
-        return f"No section matching '{topic}' in agent '{role}'"
-    all_secs = [s for s in index._sections if file_filter in s.file_path]
-    if all_secs:
-        session_store.log_action(session_id, "get", "agent", role)
-        return "\n\n".join(s.content for s in all_secs)
-    available = [p.stem.lower() for p in sorted((RESOURCES_DIR / "agents").glob("*.md"))]
-    return f"Agent '{role}' not found. Available roles: {', '.join(available)}"
-
-
-@mcp.tool()
 def get_template(name: str) -> str:
     """Retrieve a template file by name.
 
     Args:
-        name: Template name (e.g. 'adr-template', 'architecture-template').
+        name: Template name as returned by list_templates().
     """
     file_filter = f"templates/{name.upper()}"
     all_secs = [s for s in index._sections if file_filter in s.file_path]
@@ -252,61 +273,116 @@ def get_template(name: str) -> str:
     return f"Template '{name}' not found. Available: {', '.join(available)}"
 
 
+def _find_skill_file(name: str) -> Path | None:
+    """Search for a skill file across all three layers (REQ-SKL-2).
+
+    Search order: project (.voidrift/skills/) → domain (~/.voidrift/domain-skills/)
+    → north star (~/.voidrift/resources/skills/). Returns the first match.
+    """
+    upper = name.upper()
+    for skills_dir in (PROJECT_SKILLS_DIR, DOMAIN_SKILLS_DIR, RESOURCES_DIR / "skills"):
+        candidate = skills_dir / f"{upper}.md"
+        if candidate.is_file():
+            return candidate
+    return None
+
+
 @mcp.tool()
 def get_skill(name: str, topic: str = "") -> str:
     """Retrieve a skill file's content, optionally filtered to a specific topic.
 
+    Searches project skills, domain skills, and north-star skills in order (REQ-SKL-2).
+
     Args:
-        name: Skill name (e.g. 'backend', 'frontend', 'infra').
+        name: Skill name as returned by list_skills().
         topic: Optional heading within the skill to retrieve.
     """
-    file_filter = f"skills/{name.upper()}"
+    skill_path = _find_skill_file(name)
+    if skill_path is None:
+        available = ", ".join(_list_skill_names())
+        _mcp_log().warning("skill not found: %s", name)
+        return f"Skill '{name}' not found. Available skills: {available}"
+
+    content = skill_path.read_text(encoding="utf-8")
+
+    # Strip YAML frontmatter if present
+    if content.startswith("---\n"):
+        end = content.find("\n---\n", 4)
+        if end != -1:
+            content = content[end + 5:]
+
     if topic:
-        results = index.search(topic, file_filter=file_filter)
-        if results:
+        # Filter to sections matching the topic heading
+        lines = content.splitlines()
+        matched: list[str] = []
+        in_section = False
+        for line in lines:
+            if line.startswith("## ") or line.startswith("# "):
+                in_section = topic.lower() in line.lower()
+            if in_section:
+                matched.append(line)
+        if matched:
             session_store.log_action(session_id, "get", "skill", f"{name}/{topic}")
-            return "\n\n---\n\n".join(r.content for r in results)
+            return "\n".join(matched)
         return f"No section matching '{topic}' in skill '{name}'"
-    # Return all headings for this skill
-    headings = index.list_headings(file_filter=file_filter)
-    if not headings:
-        return f"Skill '{name}' not found. Available skills: {', '.join(_list_skills())}"
-    # Return full content
-    sections = index.search("", file_filter=file_filter)
-    # Actually return all sections since empty query won't match
-    all_secs = [s for s in index._sections if file_filter in s.file_path]
-    if all_secs:
-        session_store.log_action(session_id, "get", "skill", name)
-        return "\n\n".join(s.content for s in all_secs)
-    return f"Skill '{name}' not found."
 
-
-def _list_skills() -> list[str]:
-    skills_dir = RESOURCES_DIR / "skills"
-    if not skills_dir.is_dir():
-        return []
-    return [p.stem.lower() for p in sorted(skills_dir.glob("*.md"))]
+    session_store.log_action(session_id, "get", "skill", name)
+    return content
 
 
 def _first_line(path: Path) -> str:
-    """Return the first non-empty, non-heading line as a description."""
-    for line in path.read_text(encoding="utf-8").splitlines():
+    """Return the first non-empty, non-heading, non-frontmatter line as a description."""
+    content = path.read_text(encoding="utf-8")
+    # Check for YAML frontmatter description field first
+    if content.startswith("---\n"):
+        end = content.find("\n---\n", 4)
+        if end != -1:
+            for line in content[4:end].splitlines():
+                if line.startswith("description:"):
+                    return line[len("description:"):].strip()[:120]
+    for line in content.splitlines():
         stripped = line.strip()
-        if stripped and not stripped.startswith("#"):
+        if stripped and not stripped.startswith("#") and not stripped.startswith("---"):
             return stripped[:120]
     return ""
 
 
+def _list_skill_names() -> list[str]:
+    """Return deduplicated skill names visible in search order (project → domain → north-star)."""
+    seen: set[str] = set()
+    names: list[str] = []
+    for skills_dir in (PROJECT_SKILLS_DIR, DOMAIN_SKILLS_DIR, RESOURCES_DIR / "skills"):
+        if skills_dir.is_dir():
+            for p in sorted(skills_dir.glob("*.md")):
+                key = p.stem.upper()
+                if key not in seen:
+                    seen.add(key)
+                    names.append(p.stem.lower())
+    return names
+
+
 @mcp.tool()
 def list_skills() -> str:
-    """List all available skill files with descriptions."""
-    skills_dir = RESOURCES_DIR / "skills"
-    if not skills_dir.is_dir():
-        return "No skills directory found."
-    lines = []
-    for p in sorted(skills_dir.glob("*.md")):
-        lines.append(f"- {p.stem.lower()}: {_first_line(p)}")
-    return "\n".join(lines) if lines else "No skills found."
+    """List all available skill files grouped by layer (north star, domain, project)."""
+    sections: list[str] = []
+
+    def _layer_lines(skills_dir: Path, label: str) -> list[str]:
+        if not skills_dir.is_dir():
+            return []
+        lines = []
+        for p in sorted(skills_dir.glob("*.md")):
+            lines.append(f"  - {p.stem.lower()}: {_first_line(p)}")
+        if lines:
+            return [f"{label}:"] + lines
+        return []
+
+    sections += _layer_lines(RESOURCES_DIR / "skills", "North Star")
+    sections += _layer_lines(DOMAIN_SKILLS_DIR, "Domain")
+    pending = DOMAIN_SKILLS_DIR / "pending"
+    sections += _layer_lines(pending, "Domain (pending)")
+    sections += _layer_lines(PROJECT_SKILLS_DIR, "Project")
+
+    return "\n".join(sections) if sections else "No skills found."
 
 
 @mcp.tool()
@@ -339,7 +415,7 @@ def get_prompt(phase: str, section: str) -> str:
     """Retrieve a stage-specific prompt section from resources/prompts/<phase>.md.
 
     Args:
-        phase: Phase name (e.g. 'gather', 'plan', 'develop').
+        phase: Phase name as returned by list_prompts().
         section: H2 section name within the prompt file.
     """
     file_filter = f"prompts/{phase.lower()}"
@@ -424,6 +500,7 @@ def write_file(path: str, content: str) -> str:
     full.write_text(content, encoding="utf-8")
     _written_paths.add(path)
     session_store.log_action(session_id, "write", "file", path)
+    _mcp_log().info("write path=%s bytes=%d", path, len(content))
     return f"Wrote {len(content)} bytes to {path}"
 
 
@@ -432,7 +509,7 @@ def export_to_file(artifact_type: str, path: str) -> str:
     """Export a stored artifact to a file on disk.
 
     Args:
-        artifact_type: Type of artifact (e.g. 'analysis', 'requirements').
+        artifact_type: Artifact type — 'analysis' or 'requirements'.
         path: Relative path to write to.
     """
     full = PROJECT_DIR / path

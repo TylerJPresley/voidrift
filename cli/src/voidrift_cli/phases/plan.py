@@ -13,10 +13,26 @@ from ..utils import ensure_voidrift_dir, voidrift_dir, boot_run, check_disk_spac
 from .. import ui
 
 
+# Task format description — single source of truth injected into both PLAN and PLAN-UPDATE prompts.
+# Uses {{valid_skills}} (double-braces) so the outer .format() doesn't consume it; callers must
+# call _TASK_FORMAT.format(valid_skills=...) to produce the final string.
+_TASK_FORMAT = """\
+**Task format** — each line in TASKS.md must be:
+`- [ ] <Action verb> <file path>: <exact behavior>. <rationale or user story context> [skill1, skill2]`
+
+- Action verbs: Create, Update, Add, Implement, Define.
+- File path: exact relative path from project root to a project source file (e.g. `src/main.py`, `.github/workflows/ci.yml`). All paths target the project tree — `.voidrift/` artifacts are produced by you (the architect) directly via `write_framework_file()`, not as developer tasks.
+- Exact behavior: specific inputs, outputs, return types, error handling. Include acceptance criteria, expected behavior, and error cases.
+- Rationale: WHY this task exists — the user story, requirement, or design decision it satisfies.
+- Skill tags: ONLY from this list: {valid_skills}. Format: `[skill1, skill2]`
+
+The developer agent implements ONE task at a time with limited context. Each task description must be self-contained — include enough detail that a developer can implement without reading the full requirements. Tasks that say only "implement X" or "create Y" without specifying exact behavior are insufficient."""
+
+
 def run_plan(
     model: ModelConfig,
     feature: str | None = None,
-    fresh_start: bool = False,
+    overwrite: bool = False,
     update: bool = False,
 ) -> int:
     """Execute the plan phase.
@@ -24,7 +40,7 @@ def run_plan(
     Args:
         model: Model configuration for the architect role.
         feature: Optional feature name to plan.
-        fresh_start: Delete existing planning artifacts before starting.
+        overwrite: Remove previous plan artifacts (per STATE.md) before starting.
         update: Revise existing plan to align with current requirements.
 
     Returns:
@@ -39,12 +55,11 @@ def run_plan(
 
     ui.phase("VoidRift Plan")
 
-    if fresh_start:
-        for f in [d / "ARCHITECTURE.md"] + list(d.glob("TASKS*.md")):
-            f.unlink(missing_ok=True)
-        for f in (d / "spec").glob("*.md"):
-            f.unlink()
-        ui.info("Cleared existing planning artifacts.")
+    if overwrite:
+        from ..utils import undo_phase
+        deleted = undo_phase("plan")
+        if deleted:
+            ui.info(f"Cleared {len(deleted)} files from previous plan.")
 
     log, run_id = boot_run("plan")
     ui.detail(f"Log: {log}")
@@ -56,7 +71,7 @@ def run_plan(
         import voidrift_mcp.server as mcp_mod
         mcp_mod.run_id = run_id
         mcp_mod._boot()
-        tools, handlers = build_mcp_tools(mcp_mod)
+        tools, handlers = build_mcp_tools(mcp_mod, phase="plan")
     except ImportError:
         tools, handlers = [], {}
 
@@ -73,6 +88,11 @@ def run_plan(
     skill = _get_skill("ARCH-DESIGN")
 
     specs_section = "FEATURE SPECS:\n" + "\n\n".join(specs) if specs else ""
+    valid_skills = ", ".join(sorted(_available_skills())) if _available_skills() else ""
+    task_format = _TASK_FORMAT.format(valid_skills=valid_skills)
+
+    # Load shared framework context (REQ-RES-7)
+    system_context = _get_prompt("system", "CONTEXT")
 
     if update:
         arch_path = d / "ARCHITECTURE.md"
@@ -85,6 +105,7 @@ def run_plan(
             specs_section=specs_section,
             architecture=arch_path.read_text(),
             tasks=tasks_path.read_text(),
+            task_format=task_format,
         )
     else:
         feature_section = f"Focus on feature: {feature}" if feature else ""
@@ -92,9 +113,10 @@ def run_plan(
             requirements=requirements,
             specs_section=specs_section,
             feature_section=feature_section,
+            task_format=task_format,
         )
 
-    system = f"{skill}\n\n{stage_prompt}" if skill else stage_prompt
+    system = "\n\n".join(p for p in [system_context, skill, stage_prompt] if p)
 
     agent = AgentLoop(
         model=model,
@@ -132,7 +154,7 @@ def run_plan(
 
         retry_msg = (
             f"You did not produce all required artifacts. Missing: {', '.join(missing)}. "
-            "Please create them now using write_file()."
+            "Please create them now using write_framework_file()."
         )
         with Status("  ⠋ Retrying...", console=ui._con):
             try:
@@ -154,28 +176,13 @@ def run_plan(
             ui.error(f"Plan failed: still missing {', '.join(missing)}")
             return 1
 
-    # Validate skill tags (REQ-P-9)
+    # Validate skill tags (REQ-P-9) — strip invalid tags directly
     valid_skills = _available_skills()
-    if valid_skills:  # skip if no skills directory (framework not fully installed)
+    if valid_skills:
         invalid = _validate_skill_tags(d / "TASKS.md", valid_skills)
         if invalid:
-            ui.warn(f"Invalid skill tags: {', '.join(sorted(invalid))} — asking model to fix...")
-            fix_msg = (
-                f"TASKS.md contains invalid skill tags: {', '.join(sorted(invalid))}. "
-                f"Valid skills: {', '.join(sorted(valid_skills))}. "
-                "Please rewrite TASKS.md with only valid skill tags using write_file()."
-            )
-            with Status("  ⠋ Fixing tags...", console=ui._con):
-                try:
-                    response = agent.send(fix_msg)
-                    with open(log, "a") as f:
-                        f.write(f"\n=== TAG FIX ===\n{response}\n")
-                except (RuntimeError, OSError, ValueError) as e:
-                    ui.error(f"Tag fix failed: {e}")
-            invalid = _validate_skill_tags(d / "TASKS.md", valid_skills)
-            if invalid:
-                ui.error(f"Plan failed: still has invalid skill tags: {', '.join(sorted(invalid))}")
-                return 1
+            _strip_invalid_tags(d / "TASKS.md", invalid)
+            ui.warn(f"Stripped invalid skill tags: {', '.join(sorted(invalid))}")
 
     # Summary
     task_files = list(d.glob("TASKS*.md"))
@@ -184,6 +191,26 @@ def run_plan(
         ui.success(f"{tf.name}: {len(lines)} tasks")
     if (d / "ARCHITECTURE.md").exists():
         ui.success("ARCHITECTURE.md created")
+
+    # Write state entry (REQ-PS-3)
+    from ..utils import append_state
+    files_created = []
+    if (d / "ARCHITECTURE.md").exists():
+        files_created.append(".voidrift/ARCHITECTURE.md")
+    for tf in task_files:
+        files_created.append(f".voidrift/{tf.name}")
+    for af in sorted((d / "arch").glob("*.md")):
+        files_created.append(f".voidrift/arch/{af.name}")
+    task_count = sum(
+        len([l for l in tf.read_text().splitlines() if l.strip().startswith("- [ ]")])
+        for tf in task_files
+    )
+    append_state(
+        phase="plan",
+        model_alias=model.alias,
+        summary=f"Wrote ARCHITECTURE.md, {len(files_created) - 1} supporting files, {task_count} tasks.",
+        files_created=files_created,
+    )
 
     ui.done("Plan complete.")
     return 0
@@ -210,3 +237,22 @@ def _validate_skill_tags(tasks_path: Path, valid: set[str]) -> set[str]:
             if m:
                 tags.update(t.strip().lower() for t in m.group(1).split(","))
     return tags - valid
+
+
+def _strip_invalid_tags(tasks_path: Path, invalid: set[str]) -> None:
+    """Remove invalid skill tags from task lines in-place."""
+    import re
+    lines = tasks_path.read_text().splitlines()
+    out = []
+    for line in lines:
+        if line.strip().startswith("- [ ]"):
+            m = re.search(r"\[([^\]]+)\]\s*$", line)
+            if m:
+                tags = [t.strip() for t in m.group(1).split(",")
+                        if t.strip().lower() not in invalid]
+                if tags:
+                    line = line[:m.start()] + "[" + ", ".join(tags) + "]"
+                else:
+                    line = line[:m.start()].rstrip()
+        out.append(line)
+    tasks_path.write_text("\n".join(out) + "\n")

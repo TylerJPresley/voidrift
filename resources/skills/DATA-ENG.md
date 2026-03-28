@@ -1,3 +1,8 @@
+---
+name: DATA-ENG
+description: Data pipeline design, storage patterns, processing constraints, and data quality principles for data engineering work.
+---
+
 # Domain: Data Engineering (DATA-ENG)
 
 ## Core Philosophy

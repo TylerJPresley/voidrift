@@ -1,3 +1,8 @@
+---
+name: MOBILE-ENG
+description: Mobile application architecture, platform constraints, offline patterns, and UX principles for mobile development.
+---
+
 # Domain: Mobile Engineering (MOBILE-ENG)
 
 ## Core Philosophy

@@ -1,3 +1,8 @@
+---
+name: CLOUD-OPS
+description: Container lifecycle management, secrets handling, SSH operations, and environment parity for cloud infrastructure operations.
+---
+
 # Domain: Cloud Operations (CLOUD-OPS)
 
 ## Core Philosophy (AWS Well-Architected)

@@ -1,3 +1,8 @@
+---
+name: AI-ETHICS
+description: Responsible AI development principles: fairness, transparency, bias mitigation, and ethical constraints for AI systems.
+---
+
 # Domain: AI Safety & Ethics (AI-ETHICS)
 
 ## Safety Hierarchy (Anthropic-inspired)

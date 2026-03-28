@@ -1,3 +1,8 @@
+---
+name: ML-ENG
+description: Machine learning pipeline design, model lifecycle management, evaluation patterns, and reproducibility for ML engineering.
+---
+
 # Domain: Machine Learning Engineering (ML-ENG)
 
 ## Core Philosophy

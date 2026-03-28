@@ -1,3 +1,8 @@
+---
+name: ANALYSIS-REQS
+description: Requirements authoring using EARS notation, BDD acceptance criteria, and traceability for evidence-based requirement discovery.
+---
+
 # Analysis & Requirements (ANALYSIS-REQS)
 
 ## Core Philosophy

@@ -29,8 +29,8 @@ Getting started:
   voidrift verify <model> [<architect>]   Run quality checks
 
 Phases:
-  gather <model> <path> [--force]
-  plan <model> [<feature>] [--fresh-start] [--update]
+  gather <model> <path> [--overwrite]
+  plan <model> [<feature>] [--overwrite] [--update]
   develop <model> [<architect>]              Execute implementation tasks
   automate <model> [<architect>]
   verify <model> [<architect>]
@@ -82,6 +82,10 @@ def _complete_model(ctx, param, incomplete):
 
 def main() -> None:
     """Entry point with clean error handling."""
+    from .utils import setup_system_log, get_system_logger
+    setup_system_log()
+    log = get_system_logger()
+    log.info("invoked: %s", " ".join(sys.argv[1:]))
     try:
         cli(standalone_mode=False)
     except SystemExit:
@@ -96,8 +100,23 @@ def main() -> None:
     except click.Abort:
         sys.exit(130)
     except Exception as e:
+        log.exception("unhandled exception")
         ui.error(str(e))
         sys.exit(1)
+
+
+def _active_model_alias() -> str | None:
+    """Return the alias of the currently running local model, or None (REQ-ARCH-3).
+
+    Reads ~/.voidrift/.active-container written by worker start.
+    Second line of the file is the model alias.
+    """
+    from .config import voidrift_home
+    p = voidrift_home() / ".active-container"
+    if not p.exists():
+        return None
+    lines = p.read_text().strip().splitlines()
+    return lines[1].strip() if len(lines) > 1 else None
 
 
 def _interactive_mode():
@@ -120,13 +139,23 @@ def _interactive_mode():
 
     models = list_models()
     ui._con.print(f"\nAvailable models: {', '.join(models)}")
+
+    # Default to the active local model, or the first configured model (REQ-ARCH-3)
+    default_model = _active_model_alias() or (models[0] if models else "")
     try:
-        model_name = Prompt.ask("Model", default="qwen3-coder")
+        model_name = Prompt.ask("Model", default=default_model) if default_model else Prompt.ask("Model")
     except (KeyboardInterrupt, EOFError):
         return
 
     # Build and run command
     args = [action, model_name]
+
+    if action == "gather":
+        try:
+            path = Prompt.ask("Path to analyze", default=".")
+            args.append(path)
+        except (KeyboardInterrupt, EOFError):
+            return
 
     if action == "develop":
         try:
@@ -149,24 +178,24 @@ def _interactive_mode():
 @cli.command()
 @click.argument("model", shell_complete=_complete_model)
 @click.argument("path", type=click.Path(exists=True))
-@click.option("--force", is_flag=True, help="Overwrite existing requirements")
-def gather(model, path, force) -> None:
+@click.option("--overwrite", is_flag=True, help="Remove previous gather artifacts and start fresh")
+def gather(model, path, overwrite) -> None:
     """Phase 1: Reverse-engineer requirements from a codebase."""
     from .phases.gather import run_gather
     mc = resolve_model(model)
-    sys.exit(run_gather(mc, from_path=path, force=force))
+    sys.exit(run_gather(mc, from_path=path, overwrite=overwrite))
 
 
 @cli.command()
 @click.argument("model", shell_complete=_complete_model)
 @click.argument("feature", required=False)
-@click.option("--fresh-start", is_flag=True, help="Delete existing planning artifacts")
+@click.option("--overwrite", is_flag=True, help="Remove previous plan artifacts and start fresh")
 @click.option("--update", is_flag=True, help="Revise existing plan to match current requirements")
-def plan(model, feature, fresh_start, update) -> None:
+def plan(model, feature, overwrite, update) -> None:
     """Phase 2: Generate architecture and task breakdown."""
     from .phases.plan import run_plan
     mc = resolve_model(model)
-    sys.exit(run_plan(mc, feature=feature, fresh_start=fresh_start, update=update))
+    sys.exit(run_plan(mc, feature=feature, overwrite=overwrite, update=update))
 
 
 @cli.command()
@@ -207,6 +236,31 @@ def verify(model, architect) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _query_max_context(mc) -> int | None:
+    """Query max_model_len from the model's /v1/models endpoint (REQ-MC-3).
+
+    Falls back to mc.max_context (from models.yml) for cloud models that
+    don't expose max_model_len on their endpoint.
+    """
+    try:
+        from openai import OpenAI
+        kwargs: dict = {"timeout": 5}
+        if mc.api_base:
+            kwargs["base_url"] = mc.api_base
+        if mc.api_key:
+            kwargs["api_key"] = mc.api_key
+        else:
+            kwargs["api_key"] = "no-key"
+        client = OpenAI(**kwargs)
+        models = client.models.list()
+        for m in models.data:
+            if hasattr(m, "max_model_len"):
+                return m.max_model_len
+    except Exception:
+        pass
+    return mc.max_context
+
+
 def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None):
     """Shared interactive terminal loop (REQ-UI-1, REQ-UI-2, REQ-UI-4)."""
     from .agent import AgentLoop
@@ -219,33 +273,47 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
     ui.detail(f"Log: {log}")
     ui.detail(f"Model: {model_label}")
 
-    _token_handler = ui.make_token_handler()
+    # Query context window size from model API (REQ-UI-6)
+    max_ctx = _query_max_context(mc)
+
+    def _estimate_tokens(messages):
+        """Rough token estimate: chars / 4."""
+        return sum(len(m.get("content") or "") for m in messages) // 4
+
+    def _context_prompt():
+        """Build colored context percentage prompt (REQ-UI-6)."""
+        from prompt_toolkit import ANSI
+        if not max_ctx:
+            return ANSI("\n> ")
+        pct = min(100, _estimate_tokens(agent.messages) * 100 // max_ctx)
+        if pct > 80:
+            color = "\033[31m"  # red
+        elif pct > 60:
+            color = "\033[33m"  # yellow
+        else:
+            color = "\033[37m"  # white
+        return ANSI(f"\n{color}[{pct}%]\033[0m > ")
 
     def on_token(token):
-        _stop_tool_spinner()
-        _token_handler(token)
+        pass
+
+    _stats_parts = []
 
     def on_complete(stats):
-        _stop_tool_spinner()
-        parts = []
+        nonlocal _stats_parts
+        _stats_parts = []
         if stats.get("completion_tokens"):
-            parts.append(f"{stats['completion_tokens']} tokens")
+            _stats_parts.append(f"{stats['completion_tokens']} tokens")
         if stats.get("tokens_per_sec"):
-            parts.append(f"{stats['tokens_per_sec']} tok/s")
+            _stats_parts.append(f"{stats['tokens_per_sec']} tok/s")
         if stats.get("elapsed"):
-            parts.append(f"{stats['elapsed']}s")
-        if parts:
-            ui.stats(parts)
+            _stats_parts.append(f"{stats['elapsed']}s")
 
     _tool_spinner = None
     _tool_stop = None
 
-    def on_tool_call(name):
+    def _start_spinner():
         nonlocal _tool_spinner, _tool_stop
-        if _tool_stop:
-            _tool_stop.set()
-            _tool_spinner.join()
-        ui.tool_start(name)
         _tool_stop = threading.Event()
         def _spin():
             for ch in itertools.cycle("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"):
@@ -258,6 +326,13 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
         _tool_spinner = threading.Thread(target=_spin, daemon=True)
         _tool_spinner.start()
 
+    def on_tool_call(name):
+        nonlocal _tool_spinner, _tool_stop
+        if _tool_stop:
+            _tool_stop.set()
+            _tool_spinner.join()
+        _start_spinner()
+
     def _stop_tool_spinner():
         nonlocal _tool_spinner, _tool_stop
         if _tool_stop:
@@ -268,7 +343,8 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
 
     def on_tool_result(name, result):
         _stop_tool_spinner()
-        ui.tool_done(result)
+        ui.tool_done(name)
+        _start_spinner()
 
     agent.on_token = on_token
     agent.on_complete = on_complete
@@ -295,11 +371,44 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
     try:
         while True:
             try:
-                user_input = session.prompt("\n> ").strip()
+                user_input = session.prompt(_context_prompt()).strip()
             except EOFError:
                 break
             if not user_input or user_input.lower() in ("quit", "exit", "/quit"):
                 break
+
+            # /compact — summarize history to free context (REQ-U-7)
+            if user_input.lower().strip() == "/compact":
+                if len(agent.messages) <= 1:
+                    ui.info("Nothing to compact.")
+                    continue
+                _stop_tool_spinner()
+                ui.info("Compacting conversation...")
+                target = max_ctx // 10 if max_ctx else 8000
+                compact_prompt = (
+                    "Summarize this conversation concisely. Capture: key decisions made, "
+                    "artifacts discussed or modified, any pending work or open questions. "
+                    f"Keep the summary under {target} tokens."
+                )
+                try:
+                    from openai import OpenAI
+                    client = agent._get_client()
+                    resp = client.chat.completions.create(
+                        model=agent._model_name(),
+                        messages=agent.messages + [{"role": "user", "content": compact_prompt}],
+                        max_tokens=target,
+                    )
+                    summary = resp.choices[0].message.content or ""
+                    # Replace history: keep system prompt, add summary
+                    sys_msg = agent.messages[0]
+                    agent.messages = [sys_msg, {"role": "system", "content": f"[Conversation summary]\n{summary}"}]
+                    pct = _estimate_tokens(agent.messages) * 100 // max_ctx if max_ctx else 0
+                    ui.info(f"Compacted to {pct}% of context window.")
+                    with open(log, "a") as f:
+                        f.write(f"\n[COMPACT] {summary}\n")
+                except Exception as e:
+                    ui.error(f"Compact failed: {e}")
+                continue
 
             # /write enables tools for this turn (REQ-UI-3)
             if write_tools is not None:
@@ -323,12 +432,18 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
                 f.write(f"\n> {user_input}\n")
 
             ui.model_label(mc.alias)
-            _token_handler = ui.make_token_handler()  # reset per turn
+            _start_spinner()
             try:
                 response = agent.send(user_input)
             except RuntimeError as e:
+                _stop_tool_spinner()
                 ui.error(str(e))
                 continue
+
+            _stop_tool_spinner()
+            ui.model_text(response)
+            if _stats_parts:
+                ui.stats(_stats_parts)
 
             with open(log, "a") as f:
                 f.write(f"\n{response}\n")
@@ -358,7 +473,7 @@ def chat(model, doc) -> None:
         import voidrift_mcp.server as mcp_mod
         mcp_mod.run_id = run_id
         mcp_mod._boot()
-        tools, handlers = build_mcp_tools(mcp_mod)
+        tools, handlers = build_mcp_tools(mcp_mod, phase="chat")
     except ImportError:
         tools, handlers = [], {}
 
@@ -366,8 +481,17 @@ def chat(model, doc) -> None:
     _get_skill = handlers.get("get_skill", lambda *a: "")
 
     skill = _get_skill("ANALYSIS-REQS")
+    system_context = _get_prompt("system", "CONTEXT")
     system_prompt = _get_prompt("chat", "SYSTEM")
-    system = f"{skill}\n\n{system_prompt}" if skill else system_prompt
+
+    # Load project state for lifecycle awareness (REQ-PS-3)
+    from .utils import voidrift_dir
+    state_file = voidrift_dir() / "STATE.md"
+    project_state = ""
+    if state_file.exists():
+        project_state = f"**Project state:**\n\n{state_file.read_text()}"
+
+    system = "\n\n".join(p for p in [system_context, skill, system_prompt, project_state] if p)
 
     if doc:
         from .utils import voidrift_dir
@@ -386,7 +510,8 @@ def chat(model, doc) -> None:
         system_prompt=system,
         tools=tools,
         tool_handlers=handlers,
-        stream=False,
+        stream=True,
+        tool_choice="auto",
         log_path=log,
     )
 
@@ -614,6 +739,10 @@ def unlock() -> None:
     lock.unlink()
 
 
+from .phases.skills import skills_cmd
+cli.add_command(skills_cmd)
+
+
 @cli.command("completions")
 @click.argument("shell", type=click.Choice(["bash", "zsh", "fish"]))
 def completions_cmd(shell: str) -> None:
@@ -625,9 +754,15 @@ def completions_cmd(shell: str) -> None:
       voidrift completions zsh > ~/.zfunc/_voidrift
       voidrift completions fish > ~/.config/fish/completions/voidrift.fish
     """
+    import subprocess
     env_var = "_VOIDRIFT_COMPLETE"
-    script = os.popen(f"{env_var}={shell}_source voidrift").read()
-    click.echo(script)
+    result = subprocess.run(
+        ["voidrift"],
+        env={**os.environ, env_var: f"{shell}_source"},
+        capture_output=True,
+        text=True,
+    )
+    click.echo(result.stdout)
 
 
 if __name__ == "__main__":

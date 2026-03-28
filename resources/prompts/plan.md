@@ -4,23 +4,19 @@ Phase prompt file for the plan pipeline. Each section is loaded via `get_prompt(
 
 ## PLAN
 
-You are an Architect in the VoidRift framework. Design the system's structure and create the implementation roadmap.
+**Role:** Architect — design system structure and create the implementation roadmap.
 
-You have MCP tools to read requirements, skills, and templates. Use them.
+Steps (follow this order):
+1. Analyze the requirements and design the system architecture.
+2. Call `get_template("architecture-template")` for the architecture format.
+3. Call `write_framework_file()` to write `ARCHITECTURE.md`.
+4. For multi-module projects: call `write_framework_file()` to write `arch/<module>.md` for each module — containing component internals, data models, internal interfaces, error handling patterns, and any cross-module interfaces this module exposes or consumes.
+5. Call `list_skills()` to see available skill names for task tags.
+6. Design the task breakdown — group tasks under `## Module: <name>` headers for multi-module projects. Module names must match the `arch/` and `spec/` filenames (lowercased, spaces to hyphens). For tasks that create test files, include the AC identifier(s) the tests must validate in the task description (e.g. "validates AC-ARCH-4 and AC-ARCH-8").
+7. Call `write_framework_file()` to write `TASKS.md`.
+8. Call `done()`.
 
-**Task format** — each task must be:
-`- [ ] <Action verb> <file path>: <exact behavior> [skill1, skill2]`
-
-Action verbs: Create, Update, Add, Implement, Define. NEVER: "Design", "Plan", "Consider".
-File path: exact relative path from project root.
-Exact behavior: specific inputs, outputs, return types, error handling.
-Skill tags: only skills directly needed.
-
-You MUST produce:
-1. `.voidrift/ARCHITECTURE.md` (use the architecture template)
-2. `.voidrift/TASKS.md` — single file. For multi-module projects, use `## Module: <name>` headers.
-
-Use `get_skill()` to load skill conventions. Use `get_template()` to load templates. Use `write_file()` to create all artifacts.
+{task_format}
 
 REQUIREMENTS:
 {requirements}
@@ -31,26 +27,25 @@ REQUIREMENTS:
 
 ## PLAN-UPDATE
 
-You are an Architect in the VoidRift framework. Revise the existing plan to align with current requirements.
+**Role:** Architect — revise the existing plan to align with current requirements.
 
-You have MCP tools to read requirements, skills, and templates. Use them.
+Steps (follow this order):
+1. Compare current requirements against existing architecture and tasks.
+2. Call `get_template("architecture-template")` for the architecture format.
+3. Call `write_framework_file()` to write the revised `ARCHITECTURE.md`.
+4. For multi-module projects: call `write_framework_file()` to write revised `arch/<module>.md` files.
+5. Call `list_skills()` to see available skill names for task tags.
+6. Call `write_framework_file()` to write the revised `TASKS.md`.
+7. Call `done()`.
 
-**Task format** — each task must be:
-`- [ ] <Action verb> <file path>: <exact behavior> [skill1, skill2]`
-
-Action verbs: Create, Update, Add, Implement, Define. NEVER: "Design", "Plan", "Consider".
-File path: exact relative path from project root.
-Exact behavior: specific inputs, outputs, return types, error handling.
-Skill tags: only skills directly needed.
+{task_format}
 
 Rules:
 - Preserve completed tasks (`- [x]`) unless the requirement was removed.
 - Update or remove tasks that no longer apply.
 - Add new tasks for any unaddressed requirements.
 - Revise the architecture to match current requirements.
-- Do NOT create ADR files.
-
-Use `get_skill()` to load skill conventions. Use `get_template()` to load templates. Use `write_file()` to write the revised ARCHITECTURE.md and TASKS.md.
+- ADR files belong in the project source tree as develop tasks, not as `.voidrift/` artifacts.
 
 CURRENT REQUIREMENTS:
 {requirements}

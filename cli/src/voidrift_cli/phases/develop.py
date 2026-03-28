@@ -16,7 +16,7 @@ from ..models import ModelConfig
 from ..utils import (
     ensure_voidrift_dir, voidrift_dir, boot_run, check_disk_space,
     check_requirements_exist, check_task_files, count_tasks,
-    truncate_task_label,
+    truncate_task_label, append_state,
 )
 from .. import ui
 
@@ -67,6 +67,9 @@ def run_develop(
 
     lock.write_text(f"{os.getpid()}\n{datetime.now().isoformat()}")
 
+    from ..tools import reset_session_files, get_session_files
+    reset_session_files()
+
     _interrupted = False
 
     def _handle_sigterm(signum: int, frame: object) -> None:
@@ -87,7 +90,7 @@ def run_develop(
         mcp_mod.run_id = run_id
         mcp_mod._boot()
         mcp_mod.load_tasks(str(task_file))
-        tools, handlers = build_mcp_tools(mcp_mod)
+        tools, handlers = build_mcp_tools(mcp_mod, phase="develop")
     except ImportError:
         tools, handlers = [], {}
 
@@ -160,6 +163,11 @@ def run_develop(
         signal.signal(signal.SIGINT, prev_sigint)
         lock.unlink(missing_ok=True)
 
+    # Record phase entry in STATE.md (REQ-PS-3)
+    files_written = get_session_files()
+    summary = "completed" if result == 0 else ("interrupted" if _interrupted else "failed")
+    append_state("develop", worker.alias, summary, files_created=files_written or None)
+
     return result
 
 
@@ -185,9 +193,6 @@ def _develop_module(
     mod_arg = "" if module == "_default" else module
     arch_guidance: dict[int, str] = {}  # task_num -> latest architect response
 
-    arch_file = d / "ARCHITECTURE.md"
-    architecture = arch_file.read_text() if arch_file.exists() else "(not available)"
-
     while True:
         if is_interrupted():
             ui.warn(f"{prefix}Interrupted — exiting module.")
@@ -210,7 +215,6 @@ def _develop_module(
 
         system = dev_prompt_tpl.format(
             task_text=task.text,
-            architecture=architecture,
             arch_context=arch_context,
         )
 
@@ -250,7 +254,7 @@ def _develop_module(
                         tools=tools, tool_handlers=handlers,
                         stream=False, log_path=log,
                     )
-                    response = agent2.send("Execute this task. You must call write_file() to produce output.")
+                    response = agent2.send("Execute this task. You must call write_source_file() to produce output.")
                     with open(log, "a") as f:
                         f.write(f"\n--- Task {task_num} RETRY ---\n{response}\n")
                 except (RuntimeError, OSError, ValueError) as e:
@@ -281,7 +285,7 @@ def _develop_module(
                         capture_output=True, cwd=str(d.parent),
                     )
                 if git_result.returncode == 0:
-                    ui.warn("write_file() called but git shows no changes")
+                    ui.warn("write_source_file() called but git shows no changes")
                     with open(log, "a") as f:
                         f.write(f"WARNING task {task_num}: writes occurred but git diff HEAD is clean\n")
             except (FileNotFoundError, subprocess.SubprocessError):

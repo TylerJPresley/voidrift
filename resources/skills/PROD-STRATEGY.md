@@ -1,3 +1,8 @@
+---
+name: PROD-STRATEGY
+description: Documentation as code, user-centric product thinking, onboarding principles, and conventional commits for product strategy.
+---
+
 # Domain: Product Strategy (PROD-STRATEGY)
 
 ## Core Philosophy

@@ -12,6 +12,8 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
+import openai
+
 from openai import OpenAI
 from pydantic import BaseModel, Field
 
@@ -39,6 +41,7 @@ class AgentLoop(BaseModel):
     messages: list[dict] = Field(default_factory=list)
     stream: bool = True
     max_tokens: int = 16384
+    tool_choice: str = "required"
     extra_body: dict | None = None
     on_token: Callable[[str], None] | None = None
     on_complete: Callable[[dict], None] | None = None
@@ -127,6 +130,7 @@ class AgentLoop(BaseModel):
     }
 
     _THINK_RE = re.compile(r"<think>(.*?)</think>\s*", re.DOTALL)
+    _THINK_ORPHAN_RE = re.compile(r"^(.*?)</think>\s*", re.DOTALL)
 
     def _strip_think(self, text: str) -> str:
         """Remove <think>...</think> blocks from model output, logging content (REQ-ARCH-8)."""
@@ -134,7 +138,23 @@ class AgentLoop(BaseModel):
             content = m.group(1).strip()
             if content:
                 self._log(f"[THINKING] {content}")
-        return self._THINK_RE.sub("", text).strip()
+        text = self._THINK_RE.sub("", text)
+        # Handle orphaned </think> (closing tag without opening)
+        m = self._THINK_ORPHAN_RE.match(text)
+        if m:
+            content = m.group(1).strip()
+            if content:
+                self._log(f"[THINKING] {content}")
+            text = text[m.end():]
+        return text.strip()
+
+    def _emit_token(self, text: str) -> None:
+        """Emit a token to the callback or stdout."""
+        if self.on_token:
+            self.on_token(text)
+        else:
+            sys.stdout.write(text)
+            sys.stdout.flush()
 
     def _log(self, entry: str) -> None:
         """Append a line to the log file if log_path is set."""
@@ -156,13 +176,14 @@ class AgentLoop(BaseModel):
         client = self._get_client()
         model_name = self._model_name()
         last_call_sig: str | None = None
+        stall_nudges = 0
 
         # Log system prompt and latest user message
         if self.log_path:
             for m in self.messages:
                 if m["role"] == "system":
-                    self._log(f"[SYSTEM] {m['content'][:500]}")
-            self._log(f"[USER] {self.messages[-1]['content'][:500]}")
+                    self._log(f"[SYSTEM] {m['content'][:2000]}")
+            self._log(f"[USER] {self.messages[-1]['content'][:2000]}")
 
         while True:
             kwargs: dict[str, Any] = {
@@ -171,8 +192,12 @@ class AgentLoop(BaseModel):
                 "max_tokens": self.max_tokens,
             }
             if self.tools:
-                kwargs["tools"] = self.tools + [self._DONE_TOOL]
-                kwargs["tool_choice"] = "required"
+                if self.tool_choice == "auto":
+                    kwargs["tools"] = self.tools
+                    kwargs["tool_choice"] = "auto"
+                else:
+                    kwargs["tools"] = self.tools + [self._DONE_TOOL]
+                    kwargs["tool_choice"] = "required"
             if self.extra_body:
                 kwargs["extra_body"] = self.extra_body
 
@@ -193,7 +218,23 @@ class AgentLoop(BaseModel):
                 for tc in tool_calls
             )
             if call_sig == last_call_sig:
-                break  # stalled — force final text call
+                stall_nudges += 1
+                self._log(f"[STALL] Repeated call ({stall_nudges}): {call_sig}")
+                if stall_nudges >= 2:
+                    break  # give up after 2 nudges
+                # Inject a nudge instead of stripping tools — the model
+                # is looping on reads and needs to move to writes.
+                self.messages.append({
+                    "role": "user",
+                    "content": (
+                        "You are repeating the same tool calls. You already have "
+                        "all the information you need. Compose the COMPLETE content "
+                        "for each file, then call write_source_file() or write_framework_file() with the FULL content. "
+                        "Do NOT use placeholder content like '...' or 'TODO'."
+                    ),
+                })
+                last_call_sig = None  # reset so next iteration isn't auto-stall
+                continue
             last_call_sig = call_sig
 
             done = any(tc["function"]["name"] == "done" for tc in tool_calls)
@@ -213,7 +254,7 @@ class AgentLoop(BaseModel):
                     result = self._handle_tool_call_dict(tc)
                     if self.on_tool_result:
                         self.on_tool_result(name, result)
-                self._log(f"[TOOL_RESULT] {name} -> {result[:500]}")
+                self._log(f"[TOOL_RESULT] {name} -> {result[:2000]}")
                 self.messages.append({
                     "role": "tool",
                     "tool_call_id": tc["id"],
@@ -224,31 +265,102 @@ class AgentLoop(BaseModel):
                 self.tools = []
                 continue
 
-        # Stalled — force a final text call with no tools
+        # Stalled — force final call with only write tools
         self._log("[STALL] Forcing final text call")
-        self.tools = []
+        self.tools = [t for t in self.tools if t["function"]["name"] in ("write_source_file", "write_framework_file", "done")]
+        if not self.tools:
+            self.tools = []
         kwargs = {
             "model": model_name,
             "messages": self.messages,
             "max_tokens": self.max_tokens,
         }
+        if self.tools:
+            kwargs["tools"] = self.tools + [self._DONE_TOOL]
+            kwargs["tool_choice"] = "required"
         if self.extra_body:
             kwargs["extra_body"] = self.extra_body
         if self.stream:
-            text, _ = self._stream_response(client, kwargs)
+            text, tool_calls = self._stream_response(client, kwargs)
         else:
-            text, _ = self._sync_response(client, kwargs)
+            text, tool_calls = self._sync_response(client, kwargs)
+
+        # Process any write_file/done calls from the final attempt
+        if tool_calls:
+            self.messages.append({
+                "role": "assistant",
+                "content": text or None,
+                "tool_calls": tool_calls,
+            })
+            for tc in tool_calls:
+                name = tc["function"]["name"]
+                self._log(f"[TOOL_CALL] {name}({tc['function'].get('arguments', '')})")
+                if name == "done":
+                    result = "OK"
+                else:
+                    result = self._handle_tool_call_dict(tc)
+                    if self.on_tool_result:
+                        self.on_tool_result(name, result)
+                self._log(f"[TOOL_RESULT] {name} -> {result[:2000]}")
+                self.messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc["id"],
+                    "content": result,
+                })
+            text = ""
+
         text = self._strip_think(text)
         self._log(f"[ASSISTANT] {text}")
         return text
 
+    _RETRY_MAX = 3
+    _RETRY_BASE = 1.0
+    _RETRY_MULT = 2.0
+    _RETRY_CAP = 30.0
+
+    def _is_retryable(self, exc: Exception) -> bool:
+        """Return True if the exception warrants a retry (REQ-ARCH-10)."""
+        msg = str(exc).lower()
+        # Never retry context length or auth errors
+        if "context length" in msg or "maximum context" in msg:
+            return False
+        if ("token" in msg and "exceed" in msg):
+            return False
+        if isinstance(exc, openai.AuthenticationError):
+            return False
+        # Retry on connection errors and rate limits
+        if isinstance(exc, (openai.APIConnectionError, openai.RateLimitError)):
+            return True
+        # Retry on 5xx and 429
+        if isinstance(exc, openai.APIStatusError):
+            return exc.status_code == 429 or exc.status_code >= 500
+        # Retry on generic connection failures
+        if "connection" in msg or "timeout" in msg:
+            return True
+        return False
+
     def _sync_response(self, client: OpenAI, kwargs: dict) -> tuple[str, list[dict]]:
-        """Non-streaming response.
+        """Non-streaming response with exponential backoff retry (REQ-ARCH-10).
 
         Returns:
             Tuple of (text, tool_calls_list).
         """
-        response = client.chat.completions.create(**kwargs)
+        last_exc: Exception | None = None
+        response = None
+        delay = self._RETRY_BASE
+        for attempt in range(1, self._RETRY_MAX + 1):
+            try:
+                response = client.chat.completions.create(**kwargs)
+                break
+            except Exception as exc:
+                last_exc = exc
+                if not self._is_retryable(exc) or attempt == self._RETRY_MAX:
+                    raise
+                self._log(f"[RETRY] attempt {attempt}/{self._RETRY_MAX} after {delay:.0f}s: {exc}")
+                time.sleep(delay)
+                delay = min(delay * self._RETRY_MULT, self._RETRY_CAP)
+        if response is None:
+            raise last_exc  # type: ignore[misc]
         msg = response.choices[0].message
         text = msg.content or ""
         tool_calls = []
@@ -279,10 +391,8 @@ class AgentLoop(BaseModel):
         usage_data: dict = {}
         stream_start = time.time()
 
-        # Spinner until first token arrives (blank line for spacing)
-        if self.on_token:
-            self.on_token("\n")
-        else:
+        # Spinner until first token arrives
+        if not self.on_token:
             sys.stderr.write("\n")
             sys.stderr.flush()
         stop_spinner = threading.Event()
@@ -297,8 +407,39 @@ class AgentLoop(BaseModel):
         spinner = threading.Thread(target=_spin, daemon=True)
         spinner.start()
 
+        in_think = True
+        think_buf = ""
+        pending = ""
+
+        # Retry wrapper for the stream creation (REQ-ARCH-10)
+        _s_delay = self._RETRY_BASE
+        _s_last_exc: Exception | None = None
+        _stream_obj = None
+        for _s_attempt in range(1, self._RETRY_MAX + 1):
+            try:
+                _stream_obj = client.chat.completions.create(**kwargs)
+                break
+            except Exception as _s_exc:
+                _s_last_exc = _s_exc
+                if not self._is_retryable(_s_exc) or _s_attempt == self._RETRY_MAX:
+                    raise
+                self._log(f"[RETRY] attempt {_s_attempt}/{self._RETRY_MAX} after {_s_delay:.0f}s: {_s_exc}")
+                time.sleep(_s_delay)
+                _s_delay = min(_s_delay * self._RETRY_MULT, self._RETRY_CAP)
+        if _stream_obj is None:
+            raise _s_last_exc  # type: ignore[misc]
+
         try:
-            stream = client.chat.completions.create(**kwargs)
+            stream = _stream_obj
+            # Stateful filter for <think> tags in streaming.
+            # Start assuming we're in a think block — models often emit
+            # thinking content without an opening <think> tag.  If we
+            # accumulate more than a threshold without seeing </think>,
+            # flush the buffer as real content (it wasn't thinking).
+            in_think = True
+            think_buf = ""
+            _THINK_FLUSH = 200  # chars before we decide it's not thinking
+
             for chunk in stream:
                 if not chunk.choices:
                     if hasattr(chunk, "usage") and chunk.usage:
@@ -315,13 +456,65 @@ class AgentLoop(BaseModel):
                     if not stop_spinner.is_set():
                         stop_spinner.set()
                         spinner.join()
-                    if self.on_token:
-                        self.on_token(delta.content)
-                    else:
-                        sys.stdout.write(delta.content)
-                        sys.stdout.flush()
                     collected_text += delta.content
                     token_count += 1
+
+                    # Filter think tags from streamed output
+                    pending += delta.content
+                    while pending:
+                        if in_think:
+                            end_idx = pending.find("</think>")
+                            if end_idx != -1:
+                                think_buf += pending[:end_idx]
+                                if think_buf.strip():
+                                    self._log(f"[THINKING] {think_buf.strip()}")
+                                think_buf = ""
+                                in_think = False
+                                pending = pending[end_idx + 8:]
+                                # Skip whitespace after closing tag
+                                pending = pending.lstrip()
+                            elif len(think_buf) + len(pending) > _THINK_FLUSH:
+                                # Too much content without </think> — not thinking
+                                in_think = False
+                                self._emit_token(think_buf + pending)
+                                think_buf = ""
+                                pending = ""
+                            else:
+                                think_buf += pending
+                                pending = ""
+                        else:
+                            # Check for orphaned </think> (no opening tag)
+                            end_idx = pending.find("</think>")
+                            start_idx = pending.find("<think>")
+                            if end_idx != -1 and (start_idx == -1 or end_idx < start_idx):
+                                # Orphaned closing tag — everything before it is thinking
+                                before = pending[:end_idx]
+                                if before.strip():
+                                    self._log(f"[THINKING] {before.strip()}")
+                                pending = pending[end_idx + 8:].lstrip()
+                            elif start_idx != -1:
+                                # Emit text before the tag
+                                before = pending[:start_idx]
+                                if before:
+                                    self._emit_token(before)
+                                in_think = True
+                                pending = pending[start_idx + 7:]
+                            elif "<" in pending and not pending.endswith(">"):
+                                # Might be a partial tag — hold it
+                                last_lt = pending.rfind("<")
+                                partial = pending[last_lt:]
+                                if "<think>"[:len(partial)] == partial or "</think>"[:len(partial)] == partial:
+                                    before = pending[:last_lt]
+                                    if before:
+                                        self._emit_token(before)
+                                    pending = partial
+                                    break
+                                else:
+                                    self._emit_token(pending)
+                                    pending = ""
+                            else:
+                                self._emit_token(pending)
+                                pending = ""
 
                 # Accumulate tool calls
                 if delta.tool_calls:
@@ -347,6 +540,11 @@ class AgentLoop(BaseModel):
                             if tc_delta.function.arguments:
                                 tc["function"]["arguments"] += tc_delta.function.arguments
         finally:
+            # Flush any remaining pending text (e.g. partial tag that never completed)
+            if pending and not in_think:
+                self._emit_token(pending)
+            if in_think and think_buf.strip():
+                self._log(f"[THINKING] {think_buf.strip()}")
             if not stop_spinner.is_set():
                 stop_spinner.set()
             spinner.join()
@@ -406,15 +604,41 @@ class AgentLoop(BaseModel):
         return self._execute_tool(tc["function"]["name"], tc["function"]["arguments"])
 
 
-def build_mcp_tools(mcp_server_module: Any) -> tuple[list[dict], dict[str, Callable]]:
+def build_mcp_tools(mcp_server_module: Any, phase: str = "") -> tuple[list[dict], dict[str, Callable]]:
     """Build OpenAI-format tool definitions from the MCP server's registered tools.
 
     Args:
         mcp_server_module: The imported ``voidrift_mcp.server`` module.
+        phase: Phase name to filter tools. Empty string returns all tools.
 
     Returns:
         Tuple of (tool_definitions, tool_handlers) for use with AgentLoop.
     """
+    # Per-phase tool filtering — which MCP tools each phase can see
+    _PHASE_TOOLS: dict[str, set[str]] = {
+        "gather": {
+            "store_file_analysis", "get_file_analysis", "get_all_analyses",
+            "store_requirements", "get_requirements", "export_to_file",
+            "get_skill", "get_template", "list_skills", "list_templates",
+            "read_source_file", "read_framework_file", "write_framework_file",
+        },
+        "plan": {
+            "get_skill", "get_template", "list_skills", "list_templates",
+            "read_framework_file", "write_framework_file",
+        },
+        "develop": {
+            "get_skill", "list_skills",
+            "read_source_file", "write_source_file", "read_framework_file",
+        },
+        "chat": {
+            "get_requirements", "get_task_status",
+            "get_skill", "get_template", "list_skills", "list_templates",
+            "list_documents", "list_project_artifacts",
+            "read_source_file", "write_source_file",
+            "read_framework_file", "write_framework_file",
+        },
+    }
+    allowed = _PHASE_TOOLS.get(phase) if phase else None
     tools = []
     handlers = {}
 
@@ -429,7 +653,6 @@ def build_mcp_tools(mcp_server_module: Any) -> tuple[list[dict], dict[str, Calla
         get_next_task,
         complete_task,
         get_task_status,
-        get_agent,
         get_skill,
         get_template,
         get_prompt,
@@ -497,26 +720,18 @@ def build_mcp_tools(mcp_server_module: Any) -> tuple[list[dict], dict[str, Calla
                 "module": {"type": "string", "description": "Module name (empty for all modules)", "default": ""},
             },
         }),
-        "get_agent": (get_agent, {
-            "type": "object",
-            "properties": {
-                "role": {"type": "string", "description": "Role name ('analyst', 'architect', or 'developer')"},
-                "topic": {"type": "string", "description": "Optional heading within the agent file", "default": ""},
-            },
-            "required": ["role"],
-        }),
         "get_skill": (get_skill, {
             "type": "object",
             "properties": {
-                "name": {"type": "string", "description": "Skill name (e.g. 'backend')"},
-                "topic": {"type": "string", "description": "Optional heading within the skill", "default": ""},
+                "name": {"type": "string", "description": "Skill name as returned by list_skills()"},
+                "topic": {"type": "string", "description": "Optional H2 heading within the skill to retrieve a specific section", "default": ""},
             },
             "required": ["name"],
         }),
         "get_template": (get_template, {
             "type": "object",
             "properties": {
-                "name": {"type": "string", "description": "Template name (e.g. 'adr-template')"},
+                "name": {"type": "string", "description": "Template name as returned by list_templates()"},
             },
             "required": ["name"],
         }),
@@ -531,8 +746,8 @@ def build_mcp_tools(mcp_server_module: Any) -> tuple[list[dict], dict[str, Calla
         "get_prompt": (get_prompt, {
             "type": "object",
             "properties": {
-                "phase": {"type": "string", "description": "Phase name (e.g. 'gather')"},
-                "section": {"type": "string", "description": "Section name (H2 heading)"},
+                "phase": {"type": "string", "description": "Phase name as returned by list_prompts()"},
+                "section": {"type": "string", "description": "Section name (H2 heading) as returned by list_prompts(phase)"},
             },
             "required": ["phase", "section"],
         }),
@@ -554,6 +769,10 @@ def build_mcp_tools(mcp_server_module: Any) -> tuple[list[dict], dict[str, Calla
     }
 
     for name, (func, params) in tool_map.items():
+        if allowed is not None and name not in allowed:
+            # Still register handler so phases can call it programmatically
+            handlers[name] = func
+            continue
         # Strip 'default' from properties — Anthropic rejects it
         for prop in params.get("properties", {}).values():
             prop.pop("default", None)
@@ -569,7 +788,12 @@ def build_mcp_tools(mcp_server_module: Any) -> tuple[list[dict], dict[str, Calla
 
     # Include CLI-native filesystem tools (REQ-MCP-4a)
     from .tools import LOCAL_TOOLS, LOCAL_HANDLERS
-    tools.extend(LOCAL_TOOLS)
-    handlers.update(LOCAL_HANDLERS)
+    for tool_def in LOCAL_TOOLS:
+        name = tool_def["function"]["name"]
+        if allowed is not None and name not in allowed:
+            handlers[name] = LOCAL_HANDLERS[name]
+            continue
+        tools.append(tool_def)
+        handlers[name] = LOCAL_HANDLERS[name]
 
     return tools, handlers

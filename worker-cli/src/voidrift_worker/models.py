@@ -20,6 +20,62 @@ def _worker_models_path() -> Path:
     return voidrift_home() / "worker-models.yml"
 
 
+def _active_container_path() -> Path:
+    """Return path to the active container state file."""
+    from .config import voidrift_home
+    return voidrift_home() / ".active-container"
+
+
+def _save_active_container(name: str, alias: str) -> None:
+    """Record the active container name and model alias."""
+    _active_container_path().write_text(f"{name}\n{alias}\n")
+
+
+def _read_active_container() -> tuple[str | None, str | None]:
+    """Read the active container name and model alias, or (None, None)."""
+    p = _active_container_path()
+    if not p.exists():
+        return None, None
+    lines = p.read_text().strip().splitlines()
+    name = lines[0] if lines else None
+    alias = lines[1] if len(lines) > 1 else None
+    return name, alias
+
+
+def _clear_active_container() -> None:
+    """Remove the active container state file."""
+    p = _active_container_path()
+    if p.exists():
+        p.unlink()
+
+
+def _worker_images_path() -> Path:
+    """Return path to worker-images.yml."""
+    from .config import voidrift_home
+    return voidrift_home() / "worker-images.yml"
+
+
+def load_worker_images() -> dict:
+    """Load worker-images.yml.
+
+    Returns:
+        Parsed YAML dict with 'sources' key, or empty dict if file not found.
+    """
+    p = _worker_images_path()
+    if not p.exists():
+        return {}
+    with open(p) as f:
+        return yaml.safe_load(f) or {}
+
+
+def _save_worker_images(data: dict) -> None:
+    """Write worker-images.yml."""
+    p = _worker_images_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    with open(p, "w") as f:
+        yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+
+
 def load_worker_models() -> dict:
     """Load worker-models.yml.
 
@@ -39,10 +95,32 @@ class ModelConfig(BaseModel):
     alias: str
     repository: str
     served_model_name: str
-    docker_image: str = "scitrera/dgx-spark-vllm:0.17.0-t5"
+    docker_image: str = ""
+    image_source: str = ""
+    recipe: str = ""
     gpu_memory_utilization: float = 0.90
     max_model_len: int = 65536
     vllm_args: list[str] = Field(default_factory=list)
+
+
+def _resolve_docker_image(model_cfg: dict, default_image: str | None) -> str:
+    """Resolve the Docker image for a model (REQ-WK-8).
+
+    Checks model-level 'image', then top-level 'default_image', then
+    resolves the alias against worker-images.yml to get the actual
+    Docker image name.
+    """
+    alias = model_cfg.get("image") or default_image
+    if not alias:
+        return model_cfg.get("docker_image", "")
+    sources = load_worker_images().get("sources", {})
+    src = sources.get(alias)
+    if not src:
+        return alias  # treat as literal docker image string
+    if src.get("type") == "docker":
+        return src.get("image", alias)
+    # git source — return the built image name
+    return src.get("image_name", "vllm-node")
 
 
 def list_models() -> dict[str, ModelConfig]:
@@ -52,14 +130,18 @@ def list_models() -> dict[str, ModelConfig]:
         Dict of alias → ModelConfig.
     """
     config = load_worker_models()
+    default_image = config.get("default_image")
     models = config.get("models", {})
     result = {}
     for alias, m in models.items():
+        image_alias = m.get("image") or default_image or ""
         result[alias] = ModelConfig(
             alias=alias,
             repository=m.get("repository", ""),
             served_model_name=m.get("served_model_name", alias),
-            docker_image=m.get("docker_image", "scitrera/dgx-spark-vllm:0.17.0-t5"),
+            docker_image=_resolve_docker_image(m, default_image),
+            image_source=image_alias,
+            recipe=m.get("recipe", ""),
             gpu_memory_utilization=m.get("gpu_memory_utilization", 0.90),
             max_model_len=m.get("max_model_len", 65536),
             vllm_args=m.get("vllm_args", []),
@@ -125,6 +207,46 @@ def ssh_stream(cmd: str, timeout: int = 600) -> int:
     return result.returncode
 
 
+def ssh_stream_capture(cmd: str, timeout: int = 600) -> tuple[int, str]:
+    """Run a command on the worker node via SSH, streaming to stdout and capturing.
+
+    Args:
+        cmd: Shell command string to execute remotely.
+        timeout: Max seconds to wait (default 600).
+
+    Returns:
+        (exit_code, captured_stdout)
+    """
+    proc = subprocess.Popen(
+        ["ssh", "-o", "ConnectTimeout=5", _ssh_target(), _SSH_PATH_PREFIX + cmd],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    lines: list[str] = []
+    try:
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            sys.stdout.write(line)
+            sys.stdout.flush()
+            lines.append(line)
+        proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        raise
+    return proc.returncode, "".join(lines)
+
+
+def _get_recipe_source(model: ModelConfig) -> dict | None:
+    """Return the git image source if model has a recipe, else None."""
+    if not model.recipe or not model.image_source:
+        return None
+    sources = load_worker_images().get("sources", {})
+    src = sources.get(model.image_source)
+    if src and src.get("type") == "git":
+        return src
+    return None
+
+
 def start_model(alias: str, refresh: bool = False) -> None:
     """Start a local model container on the worker node (REQ-WK-2, REQ-WK-7).
 
@@ -145,82 +267,117 @@ def start_model(alias: str, refresh: bool = False) -> None:
     worker = config.get("worker", {})
     prefix = worker.get("container_prefix", "worker-")
     container_name = f"{prefix}{alias}"
-
-    # Check if already running
-    if not refresh:
-        try:
-            r = ssh_cmd(f"docker ps --filter name={container_name} --format '{{{{.Names}}}}'")
-            if container_name in r.stdout:
-                return
-        except (subprocess.SubprocessError, OSError):
-            pass
-
-    # Stop existing worker containers (REQ-WK-7)
-    try:
-        running = ssh_cmd(f"docker ps --filter 'name={prefix}' --format '{{{{.Names}}}}'")
-        if running.stdout.strip():
-            old = running.stdout.strip()
-            sys.stderr.write(f"Stopping {old}...\n")
-            ssh_cmd(f"docker ps --filter 'name={prefix}' -q | xargs -r docker stop")
-            ssh_cmd(f"docker ps -a --filter 'name={prefix}' -q | xargs -r docker rm")
-    except (subprocess.SubprocessError, OSError):
-        pass
-
-    # Build docker run command
     from .config import get_worker_config
     worker_cfg = get_worker_config()
     port = worker.get("port", 8000)
-    docker_opts = worker.get("docker_options", ["--privileged", "--gpus all", "--network host"])
-    cache_mounts = worker.get("cache_mounts", [])
 
-    # Remove any stale container with the same name
-    ssh_cmd(f"docker rm -f {container_name} 2>/dev/null || true")
+    # Check if already running
+    if not refresh:
+        prev_name, prev_alias = _read_active_container()
+        if prev_name and prev_alias == alias:
+            try:
+                r = ssh_cmd(f"docker ps --filter name={prev_name} --format '{{{{.Names}}}}'")
+                if prev_name in r.stdout:
+                    return
+            except (subprocess.SubprocessError, OSError):
+                pass
 
-    cmd_parts = ["docker", "run", "-d", f"--name {container_name}"]
-    for opt in docker_opts:
-        cmd_parts.append(opt)
-    hf_token = worker_cfg.get("hf_token", "")
-    if hf_token:
-        cmd_parts.append(f"-e HF_TOKEN={hf_token}")
-    for mount in cache_mounts:
-        cmd_parts.append(f"-v {mount}")
-    cmd_parts.append(model.docker_image)
-    cmd_parts.append(f"vllm serve {model.repository}")
-    cmd_parts.append(f"--served-model-name {model.served_model_name}")
-    cmd_parts.append(f"--gpu-memory-utilization {model.gpu_memory_utilization}")
-    cmd_parts.append(f"--max-model-len {model.max_model_len}")
-    cmd_parts.append(f"--port {port}")
-    for arg in model.vllm_args:
-        # Plain args pass through fine; quote only if shell-special
-        if arg == shlex.quote(arg):
-            cmd_parts.append(arg)
-        else:
-            # Needs quoting for the remote shell (SSH transport)
-            cmd_parts.append(shlex.quote(arg))
-
+    # Stop existing worker containers (REQ-WK-7)
+    recipe_src = _get_recipe_source(model)
     try:
-        r = ssh_cmd(" ".join(cmd_parts))
-        if r.returncode != 0:
-            raise RuntimeError(f"Failed to start container: {r.stderr}")
-    except subprocess.TimeoutExpired:
-        raise RuntimeError("SSH timeout starting container")
+        # Stop previously tracked container
+        prev_name, _ = _read_active_container()
+        if prev_name:
+            sys.stderr.write(f"Stopping {prev_name}...\n")
+            ssh_cmd(f"docker stop {shlex.quote(prev_name)} 2>/dev/null; "
+                    f"docker rm -f {shlex.quote(prev_name)} 2>/dev/null || true")
+            _clear_active_container()
+            # Wait for GPU memory to release
+            time.sleep(3)
+        # Also stop any prefixed containers (safety net)
+        running = ssh_cmd(f"docker ps --filter 'name={prefix}' --format '{{{{.Names}}}}'")
+        if running.stdout.strip():
+            ssh_cmd(f"docker ps --filter 'name={prefix}' -q | xargs -r docker stop")
+            ssh_cmd(f"docker ps -a --filter 'name={prefix}' -q | xargs -r docker rm -f")
+    except (subprocess.SubprocessError, OSError):
+        pass
 
-    # Wait for API ready, checking container health (REQ-WK-2)
+    # Recipe path: use run-recipe.sh from the git source (REQ-WK-8)
+    recipe_proc = None
+    if recipe_src:
+        clone_path = recipe_src.get("clone_path", f"~/opt/{model.image_source}")
+        run_cmd = recipe_src.get("run_cmd", "./run-recipe.sh")
+        extra_args = []
+        if model.served_model_name and model.served_model_name != model.repository:
+            extra_args += ["--served-model-name", model.served_model_name]
+        extra_args += model.vllm_args
+        extra = ""
+        if extra_args:
+            extra = " -- " + " ".join(shlex.quote(a) for a in extra_args)
+        recipe_cmd = f"cd {clone_path} && {run_cmd} {shlex.quote(model.recipe)} --solo{extra}"
+        # Recipe runs vLLM in foreground — launch in background, poll API for readiness
+        recipe_proc = subprocess.Popen(
+            ["ssh", "-o", "ConnectTimeout=5", _ssh_target(), _SSH_PATH_PREFIX + recipe_cmd],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        active_container = "vllm_node"
+    else:
+        # Standard docker run path
+        docker_opts = worker.get("docker_options", ["--privileged", "--gpus all", "--network host"])
+        cache_mounts = worker.get("cache_mounts", [])
+
+        ssh_cmd(f"docker rm -f {container_name} 2>/dev/null || true")
+
+        # Pull image if not already on worker — docker run would pull inline and
+        # exceed ssh_cmd's 30s timeout for large images (REQ-WK-2)
+        img = model.docker_image
+        check = ssh_cmd(
+            f"docker image inspect {shlex.quote(img)} --type image >/dev/null 2>&1 && echo ok || echo missing"
+        )
+        if "missing" in check.stdout:
+            sys.stderr.write(f"Pulling {img}...\n")
+            rc = ssh_stream(f"docker pull {shlex.quote(img)}", timeout=300)
+            if rc != 0:
+                raise RuntimeError(f"Failed to pull image: {img}")
+
+        cmd_parts = ["docker", "run", "-d", f"--name {container_name}"]
+        for opt in docker_opts:
+            cmd_parts.append(opt)
+        hf_token = worker_cfg.get("hf_token", "")
+        if hf_token:
+            cmd_parts.append(f"-e HF_TOKEN={hf_token}")
+        for mount in cache_mounts:
+            cmd_parts.append(f"-v {mount}")
+        cmd_parts.append(model.docker_image)
+        cmd_parts.append(f"vllm serve {model.repository}")
+        cmd_parts.append(f"--served-model-name {model.served_model_name}")
+        cmd_parts.append(f"--gpu-memory-utilization {model.gpu_memory_utilization}")
+        cmd_parts.append(f"--max-model-len {model.max_model_len}")
+        cmd_parts.append(f"--port {port}")
+        for arg in model.vllm_args:
+            if arg == shlex.quote(arg):
+                cmd_parts.append(arg)
+            else:
+                cmd_parts.append(shlex.quote(arg))
+
+        try:
+            r = ssh_cmd(" ".join(cmd_parts))
+            if r.returncode != 0:
+                raise RuntimeError(f"Failed to start container: {r.stderr}")
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("SSH timeout starting container")
+        active_container = container_name
+
+    # Wait for API ready (REQ-WK-2)
+    _save_active_container(active_container, alias)
     worker_ip = worker_cfg.get("ip", "")
     url = f"http://{worker_ip}:{port}/v1/models"
-    start_time = time.time()
-    while time.time() - start_time < 300:
-        # Check container is still running
-        try:
-            ps = ssh_cmd(f"docker ps --filter name={container_name} --format '{{{{.Names}}}}'")
-            if container_name not in ps.stdout:
-                logs = ssh_cmd(f"docker logs --tail 30 {container_name} 2>&1")
-                raise RuntimeError(
-                    f"Container {container_name} exited during startup.\n{logs.stdout}"
-                )
-        except subprocess.SubprocessError:
-            pass
-        # Check API health
+    while True:
+        # Check if recipe process died
+        if recipe_src and recipe_proc.poll() is not None:
+            rc = recipe_proc.returncode
+            if rc != 0:
+                raise RuntimeError(f"Recipe '{model.recipe}' failed with exit code {rc}")
         try:
             r = httpx.get(url, timeout=5)
             if r.status_code == 200:
@@ -228,18 +385,24 @@ def start_model(alias: str, refresh: bool = False) -> None:
         except (httpx.ConnectError, httpx.ReadTimeout):
             pass
         time.sleep(2)
-    raise RuntimeError(f"Model at {url} did not become ready within 300s")
 
 
 def stop_model() -> None:
     """Stop the active model container (REQ-WK-3)."""
+    name, _ = _read_active_container()
     config = load_worker_models()
     prefix = config.get("worker", {}).get("container_prefix", "worker-")
     try:
+        if name:
+            ssh_cmd(f"docker stop {shlex.quote(name)} 2>/dev/null; "
+                    f"docker rm {shlex.quote(name)} 2>/dev/null || true")
+        # Safety net: also stop any prefixed containers
         ssh_cmd(f"docker ps --filter 'name={prefix}' -q | xargs -r docker stop")
         ssh_cmd(f"docker ps -a --filter 'name={prefix}' -q | xargs -r docker rm")
     except (subprocess.SubprocessError, OSError) as e:
         raise RuntimeError(f"Failed to stop container: {e}") from e
+    finally:
+        _clear_active_container()
 
 
 def get_status() -> dict:
@@ -255,19 +418,35 @@ def get_status() -> dict:
     port = worker.get("port", 8000)
     worker_ip = get_worker_config().get("ip", "")
 
-    try:
-        r = ssh_cmd(f"docker ps --filter 'name={prefix}' --format '{{{{.Names}}}}'")
-        container = r.stdout.strip().split("\n")[0] if r.stdout.strip() else None
-    except (subprocess.SubprocessError, OSError, RuntimeError):
-        container = None
+    # Read tracked container
+    tracked_name, tracked_alias = _read_active_container()
+    container = None
+    alias = None
+
+    if tracked_name:
+        try:
+            r = ssh_cmd(f"docker ps --filter 'name={tracked_name}' --format '{{{{.Names}}}}'")
+            if tracked_name in r.stdout:
+                container = tracked_name
+                alias = tracked_alias
+        except (subprocess.SubprocessError, OSError, RuntimeError):
+            pass
+
+    # Fallback: scan for prefixed containers
+    if not container:
+        try:
+            r = ssh_cmd(f"docker ps --filter 'name={prefix}' --format '{{{{.Names}}}}'")
+            container = r.stdout.strip().split("\n")[0] if r.stdout.strip() else None
+            if container:
+                alias = container.replace(prefix, "") if container.startswith(prefix) else container
+        except (subprocess.SubprocessError, OSError, RuntimeError):
+            pass
 
     if not container:
+        _clear_active_container()
         return {"active": False, "container": None, "model": None, "url": None}
 
-    # Extract alias from container name
-    alias = container.replace(prefix, "") if container.startswith(prefix) else container
     url = f"http://{worker_ip}:{port}/v1"
-
     return {"active": True, "container": container, "model": alias, "url": url}
 
 
@@ -616,20 +795,162 @@ def worker_info() -> str:
     return r.stdout or r.stderr
 
 
-def images_pull(image: str | None = None) -> int:
-    """Pull a docker image on the worker node (REQ-WK-13)."""
-    if image is None:
-        config = load_worker_models()
-        models_cfg = config.get("models", {})
-        if models_cfg:
-            first = next(iter(models_cfg.values()))
-            image = first.get("docker_image", "scitrera/dgx-spark-vllm:0.17.0-t5")
-        else:
-            image = "scitrera/dgx-spark-vllm:0.17.0-t5"
-    return ssh_stream(f"docker pull {image}", timeout=600)
+def _detect_image_type(url: str) -> str:
+    """Auto-detect image source type from URL."""
+    if url.endswith(".git") or "github.com" in url or "gitlab.com" in url:
+        return "git"
+    return "docker"
 
 
-def images_list() -> str:
+def images_source_list() -> dict:
+    """List configured image sources with status (REQ-WK-13).
+
+    Returns:
+        Dict of alias → source config with 'models' key listing referencing models.
+    """
+    sources = load_worker_images().get("sources", {})
+    config = load_worker_models()
+    default_image = config.get("default_image")
+    models = config.get("models", {})
+    # Find which models reference each source
+    for alias, src in sources.items():
+        refs = [m for m, cfg in models.items()
+                if cfg.get("image", default_image) == alias]
+        src["models"] = refs
+    return sources
+
+
+def images_add(alias: str, url: str) -> int:
+    """Add an image source, clone/pull, and build (REQ-WK-13).
+
+    Returns:
+        Exit code (0 for success).
+    """
+    data = load_worker_images()
+    sources = data.setdefault("sources", {})
+    if alias in sources:
+        raise RuntimeError(f"Image source '{alias}' already exists.")
+
+    src_type = _detect_image_type(url)
+    if src_type == "git":
+        clone_path = f"~/opt/{alias}"
+        sources[alias] = {
+            "type": "git",
+            "url": url,
+            "build_cmd": "./build-and-copy.sh",
+            "image_name": "vllm-node",
+            "clone_path": clone_path,
+        }
+        _save_worker_images(data)
+        # Clone on worker
+        rc = ssh_stream(f"git clone {shlex.quote(url)} {clone_path}", timeout=120)
+        if rc != 0:
+            raise RuntimeError(f"Failed to clone {url} on worker.")
+        # Build
+        rc = ssh_stream(f"cd {clone_path} && ./build-and-copy.sh", timeout=1800)
+        if rc != 0:
+            raise RuntimeError(f"Failed to build image for '{alias}' on worker.")
+    else:
+        sources[alias] = {
+            "type": "docker",
+            "image": url,
+        }
+        _save_worker_images(data)
+        rc = ssh_stream(f"docker pull {shlex.quote(url)}", timeout=600)
+        if rc != 0:
+            raise RuntimeError(f"Failed to pull {url} on worker.")
+    return 0
+
+
+def images_remove(alias: str, force: bool = False) -> int:
+    """Remove an image source and all assets from worker (REQ-WK-13).
+
+    Returns:
+        Exit code (0 for success).
+    """
+    data = load_worker_images()
+    sources = data.get("sources", {})
+    if alias not in sources:
+        raise RuntimeError(f"Image source '{alias}' not found.")
+
+    # Check model references
+    config = load_worker_models()
+    default_image = config.get("default_image")
+    models = config.get("models", {})
+    refs = [m for m, cfg in models.items()
+            if cfg.get("image", default_image) == alias]
+    if refs and not force:
+        raise RuntimeError(
+            f"Models reference '{alias}': {', '.join(refs)}. Use --force to remove."
+        )
+
+    src = sources[alias]
+    if src.get("type") == "git":
+        clone_path = src.get("clone_path", f"~/opt/{alias}")
+        image_name = src.get("image_name", "vllm-node")
+        ssh_stream(f"rm -rf {clone_path}")
+        ssh_stream(f"docker rmi {shlex.quote(image_name)} 2>/dev/null")
+    else:
+        image = src.get("image", "")
+        if image:
+            ssh_stream(f"docker rmi {shlex.quote(image)} 2>/dev/null")
+
+    del sources[alias]
+    _save_worker_images(data)
+    return 0
+
+
+def images_update(alias: str) -> int:
+    """Update an image source and rebuild/pull (REQ-WK-13).
+
+    Returns:
+        Exit code (0 for success).
+    """
+    sources = load_worker_images().get("sources", {})
+    if alias not in sources:
+        raise RuntimeError(f"Image source '{alias}' not found.")
+
+    src = sources[alias]
+    if src.get("type") == "git":
+        clone_path = src.get("clone_path", f"~/opt/{alias}")
+        build_cmd = src.get("build_cmd", "./build-and-copy.sh")
+        rc = ssh_stream(f"cd {clone_path} && git pull", timeout=120)
+        if rc != 0:
+            raise RuntimeError(f"Failed to update repo for '{alias}'.")
+        rc = ssh_stream(f"cd {clone_path} && {build_cmd}", timeout=1800)
+        if rc != 0:
+            raise RuntimeError(f"Failed to rebuild image for '{alias}'.")
+    else:
+        image = src.get("image", "")
+        rc = ssh_stream(f"docker pull {shlex.quote(image)}", timeout=600)
+        if rc != 0:
+            raise RuntimeError(f"Failed to pull {image}.")
+    return 0
+
+
+def images_build(alias: str) -> int:
+    """Build the Docker image for a git source (REQ-WK-13).
+
+    Returns:
+        Exit code (0 for success).
+    """
+    sources = load_worker_images().get("sources", {})
+    if alias not in sources:
+        raise RuntimeError(f"Image source '{alias}' not found.")
+
+    src = sources[alias]
+    if src.get("type") != "git":
+        raise RuntimeError(f"'{alias}' is a docker source — use 'worker images update' to pull.")
+
+    clone_path = src.get("clone_path", f"~/opt/{alias}")
+    build_cmd = src.get("build_cmd", "./build-and-copy.sh")
+    rc = ssh_stream(f"cd {clone_path} && {build_cmd}", timeout=1800)
+    if rc != 0:
+        raise RuntimeError(f"Failed to build image for '{alias}'.")
+    return 0
+
+
+def images_docker_list() -> str:
     """List docker images on the worker node (REQ-WK-13)."""
     r = ssh_cmd("docker images --format 'table {{.Repository}}\\t{{.Tag}}\\t{{.Size}}'")
     return r.stdout or r.stderr

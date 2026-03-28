@@ -1,3 +1,8 @@
+---
+name: RELIABILITY-ENG
+description: Eliminate toil, observability, retry logic, error budgets, and SLO-based reliability engineering principles.
+---
+
 # Domain: Reliability Engineering (RELIABILITY-ENG)
 
 ## Core Philosophy (Google SRE)

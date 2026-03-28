@@ -1,13 +1,16 @@
 # Model endpoint configuration for VoidRift CLI (REQ-MC-1, REQ-MC-3)
 #
-# Each entry maps a model alias to its endpoint. The CLI resolves
-# aliases to (base_url, api_key, model_id) tuples — it never manages
-# containers, SSH, or gateway processes.
+# Local models are auto-discovered from worker-models.yml — no entry needed here.
+# Add an explicit entry only to override a worker model's endpoint or model_id.
 #
 # Endpoint types:
-#   local   — Worker node vLLM (managed by worker-cli)
 #   cloud   — Provider APIs (Anthropic, Google)
 #   gateway — Kiro Gateway (managed by worker-cli)
+#
+# Optional fields:
+#   max_context — context window size (integer). Used when the model's API does
+#                 not expose max_model_len. Required for cloud models; not needed
+#                 for local (vLLM exposes it) or gateway (endpoint exposes it).
 #
 # Variable expansion:
 #   ${section.key}  — Reference from config.yml (e.g., ${worker.ip})
@@ -15,45 +18,30 @@
 #   ${VAR:-default} — Environment variable with default
 
 models:
-  # Local models (start with: worker start <alias>)
-  qwen35:
-    model_id: "openai/qwen35"
-    base_url: "http://${worker.ip}:8000/v1"
-    api_key: "${worker.api_key}"
-    type: local
-
-  qwen35-nvfp4:
-    model_id: "openai/qwen35-nvfp4"
-    base_url: "http://${worker.ip}:8000/v1"
-    api_key: "${worker.api_key}"
-    type: local
-
-  qwen35-perf:
-    model_id: "openai/qwen35-perf"
-    base_url: "http://${worker.ip}:8000/v1"
-    api_key: "${worker.api_key}"
-    type: local
-
   # Cloud models
   claude:
     model_id: "anthropic/claude-opus-4-6"
     type: cloud
     provider: anthropic
+    max_context: 200000
 
   haiku:
     model_id: "anthropic/claude-haiku-4.5-20251001"
     type: cloud
     provider: anthropic
+    max_context: 200000
 
   gemini:
     model_id: "gemini/gemini-2.5-pro"
     type: cloud
     provider: gemini
+    max_context: 1048576
 
   gemini-flash:
     model_id: "gemini/gemini-2.5-flash"
     type: cloud
     provider: gemini
+    max_context: 1048576
 
   # Kiro Gateway models (start with: worker kiro start)
   kiro-sonnet:
