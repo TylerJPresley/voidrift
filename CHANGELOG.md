@@ -13,6 +13,10 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Per-phase `max_tokens` budget via `get_max_tokens(model_type, phase)` (REQ-CFG-6, REQ-CFG-7) — analysis=2000, synthesis=2000, consolidation=8192, task=4000, triage=4096, plan=32768; configurable per model type in `limits:` section of config.yml
 - Gather operator analysis output: `.voidrift/ANALYSIS.md` (index — categories, file counts, links) + `.voidrift/analysis/<source-path>.md` (one file per analyzed source file, mirroring source tree structure); path printed on completion for immediate access
 - Per-model input chunking via `get_max_input_chars(model_type)` — local models split files into 8000-char overlapping chunks (200-char overlap) instead of truncating; each chunk analyzed separately, multi-chunk results consolidated before storage; cloud/gateway unlimited (REQ-G-13)
+- REQ-G-16: Stage 4 consolidation agent now receives extracted requirements in the user message instead of the system prompt — keeps system prompt small and maximises output budget for the generated REQUIREMENTS.md
+
+### Fixed
+- Gather Stage 4 consolidation: extended REQ-G-15 truncated JSON retry to cover consolidation in addition to per-file analysis; on 400 "Invalid JSON / EOF" the consolidation retries with halved `max_tokens` and a conciseness hint
 - Gather auto-retry on truncated JSON: detects "Invalid JSON / EOF while parsing" 400 errors, retries with `max_tokens // 2` and a 5-bullet brief prompt (REQ-G-15)
 - Config helper tests (`cli/tests/test_config.py`) — 14 tests covering `get_max_tokens` and `get_max_input_chars` across all model types, phases, and config overrides
 

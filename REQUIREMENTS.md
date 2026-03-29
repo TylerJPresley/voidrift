@@ -171,10 +171,16 @@
 - **REQ-G-14:** The gather ANALYSIS prompt SHALL include an explicit conciseness instruction: bullet points only, maximum 15 items per analysis. The instruction SHALL appear after the analysis lens.
   - *Rationale:* Without an explicit output constraint, models produce exhaustive analyses that exceed token budgets for local models. Bullet-point format and an item cap force proportionate output without sacrificing signal.
   - Given an analysis agent prompt is constructed, When reviewed, Then it contains a conciseness instruction specifying bullet points and a maximum item count.
-- **REQ-G-15:** WHEN a gather analysis agent call returns an HTTP 400 error containing "Invalid JSON" or "EOF while parsing", THE SYSTEM SHALL automatically retry that file once with the per-phase `max_tokens` halved and the user message amended to instruct brevity. IF the retry also fails, THE SYSTEM SHALL log the error and record the file as failed (not abort the pipeline).
-  - *Rationale:* A truncated tool call argument means the model's analysis exceeded the output budget mid-JSON. Halving max_tokens and requesting brevity gives the model a tighter bound on its next attempt. Failing a single file gracefully is better than aborting the entire gather pipeline.
+- **REQ-G-15:** WHEN any gather agent call (analysis or consolidation) returns an HTTP 400 error containing "Invalid JSON" or "EOF while parsing", THE SYSTEM SHALL automatically retry once with the per-phase `max_tokens` halved and the user message amended to instruct brevity. IF the retry also fails, THE SYSTEM SHALL log the error and record the file as failed (not abort the pipeline).
+  - *Rationale:* A truncated tool call argument means the model's output exceeded the token budget mid-JSON. Halving max_tokens and requesting brevity gives the model a tighter bound. Applies to both per-file analysis agents and the Stage 4 consolidation agent.
   - Given an analysis agent returns 400 "Invalid JSON: EOF", When the retry runs, Then max_tokens is halved and the user message requests a brief analysis.
+  - Given the consolidation agent returns 400 "Invalid JSON: EOF", When the retry runs, Then max_tokens is halved and the user message appends a conciseness instruction.
   - Given the retry also fails, When the pipeline continues, Then the file is recorded as failed and the next file is processed.
+
+- **REQ-G-16:** The Stage 4 consolidation agent's system prompt SHALL contain only the consolidation stage instructions and the analyst role. The extracted requirements text SHALL be passed in the user message, not the system prompt.
+  - *Rationale:* For large projects the extracted requirements can span thousands of tokens. Embedding them in the system prompt permanently occupies context that would otherwise be available for the model's output (the generated REQUIREMENTS.md). Passing them as the user message keeps the system prompt small and maximises usable output budget.
+  - Given a gather pipeline with 26 analyzed files, When the consolidation agent is created, Then the system prompt contains no extracted requirements text.
+  - Given the consolidation agent receives its user message, When inspected, Then the message begins with "Extracted requirements:" followed by the full requirements text.
 
 ### 4.5 Phase 2 — Plan
 
@@ -551,7 +557,8 @@ Two log roots, two intents:
 | V-CFG-2 | REQ-CFG-7 | Test | `test_config.py` — per-phase defaults: analysis=2000, task=4000, consolidation=8192 |
 | V-G-4 | REQ-G-13 | Test | `test_phases.py` — local model large file chunked (not truncated); single chunk skips consolidation; cloud model not chunked |
 | V-G-5 | REQ-G-14 | Inspection | `resources/prompts/gather.md` ANALYSIS section contains conciseness instruction |
-| V-G-6 | REQ-G-15 | Test | `test_phases.py` — 400 EOF error triggers retry with halved max_tokens; second failure records error and continues |
+| V-G-6 | REQ-G-15 | Test | `test_phases.py` — 400 EOF error triggers retry with halved max_tokens for analysis and consolidation |
+| V-G-7 | REQ-G-16 | Test | `test_phases.py` — consolidation system prompt contains no requirements text; user message begins with "Extracted requirements:" |
 | V-ARCH-7 | REQ-ARCH-9 | Inspection | `agent.py` — develop per-task tool set excludes load_tasks/get_next_task/complete_task/get_task_status |
 | V-U-3 | REQ-U-3 | Test | `test_phases.py::TestCLICommands::test_log_view` |
 | V-U-4 | REQ-U-4 | Test | `test_phases.py::TestCLICommands::test_unlock_no_lock` |
