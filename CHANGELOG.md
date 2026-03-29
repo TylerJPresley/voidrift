@@ -7,6 +7,11 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- Makefile `test` and `install` targets now use `uv` instead of `python3`/`pip`; `cli/README.md` and `mcp-context-server/README.md` install instructions updated to `uv pip install -e .`
+- `make setup` target added — runs `install` then `sync` as a single onboarding command
+- Default config assets (`config.yml`, `models.yml`, `worker-models.yml`) moved from repo root to `defaults/`; `make sync` updated accordingly
+
 ### Added
 - `voidrift skills` command group with six subcommands: `list`, `search`, `review`, `install`, `remove`, `approve` (REQ-SKL-1 through REQ-SKL-5) — manages skills across north-star, domain, and project layers from the CLI; `install` runs synthesis pipeline when `skills.repos` and `skills.synthesis_model` are configured, otherwise copies from local layer; `search` queries repo manifests in addition to local layers (REQ-SKL-6); `review` lists pending skills when no name given
 - `resources/skills/BACKEND-ENG.md` — north-star skill for VoidRift framework development (Python/Click/FastMCP/pytest/AgentLoop conventions); use `[backend-eng]` tag on framework development tasks

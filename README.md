@@ -40,8 +40,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for component design, data flows, and key
 ```bash
 git clone <repo-url> ~/Projects/voidrift
 cd ~/Projects/voidrift
-make install      # installs cli/, mcp-context-server/, worker-cli/ (editable)
-make sync         # copies resources/ and config files to ~/.voidrift/
+make setup        # installs packages and syncs resources to ~/.voidrift/
 ```
 
 Verify:
@@ -524,10 +523,11 @@ Benchmark table standard — columns:
 ## Development
 
 ```bash
+make setup      # install packages + sync resources to ~/.voidrift/
 make install    # install all packages (editable)
+make sync       # sync resources/ to ~/.voidrift/
 make test       # run all tests
 make build      # build distribution packages
-make sync       # sync resources/ to ~/.voidrift/
 ```
 
 ### Repository Layout
@@ -558,7 +558,10 @@ voidrift/
 │   ├── prompts/                  # system.md + per-phase prompts (5 files)
 │   ├── skills/                   # Domain methodology (16 files)
 │   └── templates/                # Document scaffolding (4 files)
-├── models.yml                    # Cloud and gateway model aliases
+├── defaults/                     # Default configs synced to ~/.voidrift/ by make sync
+│   ├── config.yml
+│   ├── models.yml                # Cloud and gateway model aliases
+│   └── worker-models.yml         # Local model configs
 ├── REQUIREMENTS.md               # IEEE 29148 / EARS requirements
 ├── ARCHITECTURE.md               # Component design, data flows, design decisions
 ├── CHANGELOG.md
