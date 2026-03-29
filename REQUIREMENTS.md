@@ -281,6 +281,16 @@
 - **REQ-U-4:** `voidrift unlock` SHALL remove the develop lock file and kill any running develop process.
 - **REQ-U-5:** `voidrift completions <shell>` SHALL output shell completion scripts for bash, zsh, and fish. All model, worker, and architect arguments SHALL complete from configured aliases in `models.yml`.
 - **REQ-U-6:** `voidrift prune` SHALL remove project-level ephemeral data (`.voidrift/` logs, stale `.develop.lock`) beyond the configured retention limit (`retention.project`, default 5). `--all` SHALL remove the entire `.voidrift/` directory — a clean slate. `--global` SHALL prune the framework-level SessionStore (`~/.voidrift/`) beyond the configured retention limit (`retention.global`, default 30 days). `--global --all` SHALL remove ALL framework SessionStore data. WHEN `--global` is NOT set AND no `.voidrift/` directory exists in the current project, THE SYSTEM SHALL exit with a friendly error (e.g. "No .voidrift directory found — nothing to prune").
+- **REQ-U-8:** WHEN the chat agent calls `web_fetch(url)`, THE SYSTEM SHALL fetch the URL via HTTP GET, strip markup, summarize the content via an isolated sub-agent with its own context window, cache the summary in the MCP session store (kind=`web_cache`, key=url), and return the summary to the chat agent. Subsequent calls with the same URL within the same session SHALL return the cached summary without re-fetching. The `web_fetch` tool SHALL be available only in the chat phase.
+  - *Rationale:* Raw page content can be hundreds of KB — inserting it directly into the chat agent's context would consume most of the available window. An isolated sub-agent processes the raw content and returns only a concise summary, keeping the chat agent's context small regardless of page size. Caching eliminates redundant fetches within a session.
+  - Given a valid URL, When the chat agent calls `web_fetch(url)`, Then the URL is printed to the terminal and the operator is prompted to allow or deny the request before any HTTP connection is made.
+  - Given the operator denies a fetch, When `web_fetch(url)` is called, Then a denial message is returned to the chat agent and no HTTP request is made.
+  - Given the operator allows a fetch, When `web_fetch(url)` is called, Then the page is fetched, a sub-agent summarizes it (≤300 words), and the summary is returned to the chat agent.
+  - Given `web_fetch(url)` was previously called in the current session, When called again with the same URL, Then the cached summary is returned without prompting the operator or making an HTTP request.
+  - Given a URL that fails (HTTP error, timeout, DNS failure), When `web_fetch(url)` is called, Then an error description is returned — no exception propagates to the chat agent.
+  - Given raw page content enters the sub-agent, When the sub-agent returns, Then only the summary appears in the chat agent's context — raw HTML/text does not.
+  - Given any non-chat phase, When `build_mcp_tools` is called, Then `web_fetch` is not present in the returned tool list.
+
 - **REQ-U-7:** WHEN the operator types `/compact` during a chat session, THE SYSTEM SHALL summarize the conversation history to free context. The agent SHALL send the current message history to the model with a summarization prompt, replace all user/assistant/tool messages with a single system message containing the summary, and preserve the original system prompt. The resulting message history (system prompt + summary) SHALL NOT exceed 10% of the model's context window. The summary SHALL capture key decisions, artifacts discussed, and any pending work. The context window size SHALL be queried from the model's API at session start — no hardcoded limits.
   - *Rationale:* Long chat sessions accumulate context from tool results (file contents, analyses, requirements) until the context window fills. Summarization preserves session continuity without restarting. The 10% ceiling leaves 90% of the context available for the next exchange.
   - Given a chat session with 50K tokens of history, When the operator types `/compact`, Then the history is replaced with a summary and the total message size is ≤10% of the model's max context.
@@ -577,6 +587,7 @@ Two log roots, two intents:
 | V-WK-15 | REQ-WK-13 | Test | `test_worker.py::TestImagesAdd`, `TestImagesRemove`, `TestImagesList` — image source CRUD |
 | V-WK-16 | REQ-WK-14 | Test | `test_worker.py::TestCacheClear` — clears flashinfer and vllm caches over SSH |
 | V-WK-17 | REQ-WK-17 | Test | `test_worker.py::TestCompletions` — bash/zsh/fish scripts generated, invalid shell rejected |
+| V-U-8 | REQ-U-8 | Test | `test_phases.py::TestChatWebFetch` — cache hit skips HTTP, HTTP error returns message, summary cached after fetch, tool absent from non-chat phases |
 
 ---
 

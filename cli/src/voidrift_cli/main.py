@@ -261,7 +261,7 @@ def _query_max_context(mc) -> int | None:
     return mc.max_context
 
 
-def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None):
+def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None, web_fetch_kwargs=None):
     """Shared interactive terminal loop (REQ-UI-1, REQ-UI-2, REQ-UI-4)."""
     from .agent import AgentLoop
 
@@ -340,6 +340,27 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
             _tool_spinner.join()
             _tool_stop = None
             _tool_spinner = None
+
+    # Rebuild web_fetch handler with a confirm_fn that stops the spinner before
+    # prompting, so the permission prompt renders cleanly (REQ-U-8).
+    if web_fetch_kwargs:
+        import click as _click
+        from .tools import make_web_fetch_handler as _make_wf
+
+        def _spinner_confirm(url: str) -> bool:
+            _stop_tool_spinner()
+            ui._con.print(f"\n[dim]web_fetch →[/dim] [cyan]{url}[/cyan]")
+            try:
+                allowed = _click.confirm("  Allow fetch?", default=False)
+            except _click.Abort:
+                allowed = False
+            if allowed:
+                _start_spinner()  # resume while fetch + summarise runs
+            return allowed
+
+        agent.tool_handlers["web_fetch"] = _make_wf(
+            **web_fetch_kwargs, confirm_fn=_spinner_confirm
+        )
 
     def on_tool_result(name, result):
         _stop_tool_spinner()
@@ -480,6 +501,19 @@ def chat(model, doc) -> None:
     _get_prompt = handlers.get("get_prompt", lambda *a: "")
     _get_skill = handlers.get("get_skill", lambda *a: "")
 
+    # Override web_fetch placeholder with real implementation (REQ-U-8).
+    # confirm_fn is injected by _interactive_loop after spinner functions are defined
+    # so that the spinner stops cleanly before the permission prompt appears.
+    from .tools import make_web_fetch_handler
+    _web_fetch_kwargs = dict(
+        mc=mc,
+        session_store=mcp_mod.session_store if mcp_mod else None,
+        run_id=run_id,
+        log=log,
+        get_prompt_fn=_get_prompt,
+    )
+    handlers["web_fetch"] = make_web_fetch_handler(**_web_fetch_kwargs)
+
     skill = _get_skill("ANALYSIS-REQS")
     system_context = _get_prompt("system", "CONTEXT")
     system_prompt = _get_prompt("chat", "SYSTEM")
@@ -516,7 +550,7 @@ def chat(model, doc) -> None:
     )
 
     title = f"VoidRift Chat — {doc}" if doc else "VoidRift Chat"
-    _interactive_loop(agent, mc, log, title)
+    _interactive_loop(agent, mc, log, title, web_fetch_kwargs=_web_fetch_kwargs)
 
 
 @cli.command()

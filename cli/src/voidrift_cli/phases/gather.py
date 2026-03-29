@@ -13,8 +13,9 @@ from .. import ui
 
 # Predefined categories (REQ-G-8 stage 1)
 CATEGORIES = ("source", "tests", "config", "infrastructure", "documentation", "assets")
+_NON_SOURCE = ("tests", "config", "infrastructure", "documentation", "assets")
 
-# Category-specific analysis lenses (REQ-G-8 stage 2)
+# Category-specific analysis lenses (REQ-G-8 stage 3 — source analysis)
 _ANALYSIS_LENS = {
     "source": (
         "Analyze for functional requirements:\n"
@@ -75,7 +76,7 @@ def _make_chunks(text: str, size: int, overlap: int = 200) -> list[str]:
 
 
 def _is_truncated_json_error(err: str) -> bool:
-    """Return True if the error string indicates a truncated tool call JSON (REQ-G-15)."""
+    """Return True if the error string indicates a truncated tool call JSON."""
     return "Invalid JSON" in err or "EOF while parsing" in err
 
 
@@ -99,7 +100,14 @@ def _gather_from(
     from_path: Path,
     overwrite: bool,
 ) -> int:
-    """Reverse engineering mode — three-stage pipeline (REQ-G-8, REQ-ARCH-7)."""
+    """Reverse engineering mode — four-stage pipeline (REQ-G-8, REQ-ARCH-7).
+
+    Stages:
+      1. Triage — categorize files into source vs context categories
+      2. Context Build — one agent per non-source category, direct response
+      3. Source Analysis — one agent per source file, context injected, direct response
+      4. Final Pass — CLI pre-fetches template, model returns markdown, CLI writes file
+    """
     if target.exists() and not overwrite:
         ui.error(f"{target} already exists. Use --overwrite to replace.")
         return 1
@@ -125,7 +133,7 @@ def _gather_from(
         all_handlers = dict(LOCAL_HANDLERS)
         mcp_mod = None
 
-    from ..config import get_max_input_chars
+    from ..config import get_max_input_chars, get_max_tokens as _get_max_tokens
     _input_limit = get_max_input_chars(model.model_type)
 
     def read_from_source(path: str) -> str:
@@ -163,12 +171,16 @@ def _gather_from(
     with open(log, "a") as f:
         f.write(f"=== Reverse engineering from {from_path} ===\n")
 
-    # Load methodology for triage/consolidation only — analysis/synthesis use lens-only (REQ-G-8)
     _get_prompt = all_handlers.get("get_prompt", lambda *a: "")
     _get_skill = all_handlers.get("get_skill", lambda *a: "")
-    analyst_role = _get_skill("ANALYSIS-REQS")  # used by triage and consolidation only
+    _get_template = all_handlers.get("get_template", lambda *a: "")
+    analyst_role = _get_skill("ANALYSIS-REQS")
 
     import json as _json
+    import re as _re
+    import time as _time
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from ..config import get_concurrency
 
     # --- Stage 1: Triage — categorize files ---
     ui.stage("Stage 1: Triaging files...")
@@ -188,8 +200,7 @@ def _gather_from(
     try:
         triage_data = _json.loads(triage_response.strip())
     except _json.JSONDecodeError:
-        import re
-        m = re.search(r"\{.*\}", triage_response, re.DOTALL)
+        m = _re.search(r"\{.*\}", triage_response, _re.DOTALL)
         if m:
             triage_data = _json.loads(m.group())
         else:
@@ -205,12 +216,11 @@ def _gather_from(
         if isinstance(files, list):
             categories[cat] = files
         elif isinstance(files, dict):
-            # Flatten if model returned sub-groups
             categories[cat] = [f for fs in files.values() for f in fs]
         else:
             categories[cat] = []
 
-    # --- Validation pass — model reviews its own triage output ---
+    # Validation pass — model reviews its own triage output
     all_files = [f for fs in categories.values() for f in fs]
     validation_prompt = _get_prompt("gather", "TRIAGE-VALIDATION")
     validator = AgentLoop(
@@ -229,46 +239,86 @@ def _gather_from(
     except Exception:
         pass  # validation is best-effort
 
-    # Build file-to-category mapping for analysis
     file_category: dict[str, str] = {}
     for cat, files in categories.items():
         for f in files:
             file_category[f] = cat
 
-    all_files = list(file_category.keys())
+    source_files = categories.get("source", [])
     cat_counts = {c: len(fs) for c, fs in categories.items() if fs}
-    ui.info(f"{len(all_files)} files: {', '.join(f'{c}({n})' for c, n in cat_counts.items())}")
+    ui.info(f"{len(file_category)} files: {', '.join(f'{c}({n})' for c, n in cat_counts.items())}")
     with open(log, "a") as f:
         f.write(f"Triage: {_json.dumps(categories)}\n")
 
-    # --- Stage 2: Analysis — one agent per file, category-aware ---
-    ui.stage("Stage 2: Analyzing files...")
-    analysis_tools, analysis_handlers = _pick_tools(
-        {"read_source_file", "store_file_analysis"}
-    )
+    # --- Stage 2: Context Build — one agent per non-source category (REQ-G-17) ---
+    ui.stage("Stage 2: Building context from non-source files...")
+    context_summaries: dict[str, str] = {}
+    ctx_build_prompt_tpl = _get_prompt("gather", "CONTEXT-BUILD")
 
+    for cat in _NON_SOURCE:
+        cat_files = categories.get(cat, [])
+        if not cat_files:
+            continue
+        # Concatenate all files in this category
+        parts = []
+        total_chars = 0
+        for fp in sorted(cat_files):
+            text = read_from_source(fp)
+            entry = f"### {fp}\n\n{text}"
+            if _input_limit and total_chars + len(entry) > _input_limit:
+                parts.append(f"### {fp}\n\n[omitted — context limit reached]")
+                break
+            parts.append(entry)
+            total_chars += len(entry)
+        content_block = "\n\n---\n\n".join(parts)
+
+        lens = _ANALYSIS_LENS.get(cat, "")
+        system = ctx_build_prompt_tpl.format(category=cat, context_lens=lens)
+        ctx_agent = AgentLoop(
+            model=model, stream=False, extra_body=extra,
+            max_tokens=_get_max_tokens(model.model_type, "analysis"),
+            log_path=log,
+            system_prompt=system,
+            tools=[], tool_handlers={},
+        )
+        try:
+            summary = ctx_agent.send(f"Files:\n\n{content_block}")
+            context_summaries[cat] = summary
+            ui.detail(f"  {cat}: {len(cat_files)} file(s) → context summary ({len(summary)} chars)")
+            with open(log, "a") as f:
+                f.write(f"Context [{cat}]:\n{summary}\n")
+        except (RuntimeError, OSError) as e:
+            ui.warn(f"  Context build failed for {cat}: {e}")
+
+    # Build context block to inject into every source analysis agent (REQ-G-17)
+    context_block = ""
+    if context_summaries:
+        ctx_parts = []
+        for cat, summary in context_summaries.items():
+            ctx_parts.append(f"### {cat.capitalize()}\n\n{summary.strip()}")
+        context_block = "## Project Context\n\n" + "\n\n".join(ctx_parts)
+
+    # --- Stage 3: Source Analysis — one agent per source file, direct response ---
+    ui.stage(f"Stage 3: Analyzing {len(source_files)} source files...")
+
+    source_tools, source_handlers = _pick_tools({"read_source_file"})
     analysis_prompt_tpl = _get_prompt("gather", "ANALYSIS")
-
-    import time as _time
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-    from ..config import get_concurrency
+    source_requirements: dict[str, str] = {}
 
     concurrency = get_concurrency(model.model_type)
-    max_workers = len(all_files) if concurrency == 0 else concurrency
+    max_workers = len(source_files) if concurrency == 0 else concurrency
     _counter = {"done": 0}
     _lock = __import__("threading").Lock()
 
-    from ..config import get_max_tokens as _get_max_tokens
-
-    def _analyze_file(filepath: str) -> tuple[str, float | None, str | None]:
-        cat = file_category.get(filepath, "source")
-        lens = _ANALYSIS_LENS.get(cat, _ANALYSIS_LENS["source"])
-        # Lens-only system prompt — no ANALYSIS-REQS skill (REQ-G-8)
-        system = analysis_prompt_tpl.format(category=cat, analysis_lens=lens)
+    def _analyze_source(filepath: str) -> tuple[str, float | None, str | None, str]:
+        lens = _ANALYSIS_LENS["source"]
+        system = analysis_prompt_tpl.format(analysis_lens=lens)
+        if context_block:
+            system = system + "\n\n" + context_block
         max_tok = _get_max_tokens(model.model_type, "analysis")
         start = _time.time()
 
-        # REQ-G-13: chunk large files instead of truncating
+        # REQ-G-13: chunk large source files instead of truncating
         if _input_limit:
             full_path = (from_path / filepath).resolve()
             if full_path.exists():
@@ -310,213 +360,173 @@ def _gather_from(
                                 f"Partial analyses of {filepath}:\n\n{parts_text}\n\n"
                                 "Write one unified, non-redundant analysis of the whole file."
                             )
-                        store_fn = analysis_handlers.get("store_file_analysis")
-                        if store_fn:
-                            store_fn(filepath, combined)
-                    return filepath, _time.time() - start, None
+                        return filepath, _time.time() - start, None, combined
 
-        # Normal flow: agent reads file and stores analysis via tool calls
+        # Normal flow: agent calls read_source_file(), returns analysis as direct text
         agent = AgentLoop(
             model=model, stream=False, extra_body=extra, max_tokens=max_tok,
             log_path=log,
             system_prompt=system,
-            tools=analysis_tools, tool_handlers=analysis_handlers,
+            tools=source_tools, tool_handlers=source_handlers,
         )
         try:
-            agent.send(f"Analyze: {filepath}")
-            return filepath, _time.time() - start, None
+            response = agent.send(f"Analyze: {filepath}")
+            return filepath, _time.time() - start, None, response
         except (RuntimeError, OSError) as e:
-            err_str = str(e)
-            # REQ-G-15: retry on truncated tool call JSON
-            if _is_truncated_json_error(err_str):
-                with open(log, "a") as _f:
-                    _f.write(f"[TRUNCATED_JSON] {filepath} — retrying with halved tokens\n")
-                retry_agent = AgentLoop(
-                    model=model, stream=False, extra_body=extra,
-                    max_tokens=max(max_tok // 2, 256),
-                    log_path=log,
-                    system_prompt=system,
-                    tools=analysis_tools, tool_handlers=analysis_handlers,
-                )
-                try:
-                    retry_agent.send(f"Analyze: {filepath}\nBe very brief — 5 bullet points maximum.")
-                    return filepath, _time.time() - start, None
-                except (RuntimeError, OSError) as e2:
-                    return filepath, None, str(e2)
-            return filepath, None, err_str
+            return filepath, None, str(e), ""
 
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        futures = {pool.submit(_analyze_file, fp): fp for fp in all_files}
-        from rich.live import Live
-        from rich.spinner import Spinner
-        from rich.text import Text
-        from rich.console import Group
-        from rich.markup import escape as _esc
+    if source_files:
+        with ThreadPoolExecutor(max_workers=max(1, max_workers)) as pool:
+            futures = {pool.submit(_analyze_source, fp): fp for fp in source_files}
+            from rich.live import Live
+            from rich.spinner import Spinner
+            from rich.text import Text
+            from rich.console import Group
+            from rich.markup import escape as _esc
 
-        completed_lines: list[Text] = []
+            completed_lines: list[Text] = []
 
-        with Live(Spinner("dots", text=f"  {len(all_files)} files analyzing...", style="dim"),
-                   console=ui._con, refresh_per_second=10) as live:
-            for future in as_completed(futures):
-                filepath, elapsed, err = future.result()
-                with _lock:
-                    _counter["done"] += 1
-                    n = _counter["done"]
-                if err:
-                    completed_lines.append(Text.from_markup(
-                        f"[dim]  {n}/{len(all_files)} {_esc(filepath)}...[/dim]"
-                        f" [yellow]⚠ {_esc(err)}[/yellow]"
-                    ))
-                else:
-                    completed_lines.append(Text.from_markup(
-                        f"[dim]  {n}/{len(all_files)} {_esc(filepath)}...[/dim]"
-                        f" [green]✓[/green] [dim]{elapsed:.1f}s[/dim]"
-                    ))
-                remaining = len(all_files) - n
-                if remaining:
-                    live.update(Group(
-                        *completed_lines,
-                        Spinner("dots", text=f"  {remaining} file{'s' if remaining != 1 else ''} analyzing...", style="dim"),
-                    ))
-                else:
-                    live.update(Group(*completed_lines))
-                with open(log, "a") as f:
-                    f.write(f"Analyzed: {filepath}\n")
+            with Live(
+                Spinner("dots", text=f"  {len(source_files)} source files analyzing...", style="dim"),
+                console=ui._con, refresh_per_second=10,
+            ) as live:
+                for future in as_completed(futures):
+                    filepath, elapsed, err, response = future.result()
+                    with _lock:
+                        _counter["done"] += 1
+                        n = _counter["done"]
+                    if err:
+                        completed_lines.append(Text.from_markup(
+                            f"[dim]  {n}/{len(source_files)} {_esc(filepath)}...[/dim]"
+                            f" [yellow]⚠ {_esc(err)}[/yellow]"
+                        ))
+                    else:
+                        source_requirements[filepath] = response
+                        completed_lines.append(Text.from_markup(
+                            f"[dim]  {n}/{len(source_files)} {_esc(filepath)}...[/dim]"
+                            f" [green]✓[/green] [dim]{elapsed:.1f}s[/dim]"
+                        ))
+                    remaining = len(source_files) - n
+                    if remaining:
+                        live.update(Group(
+                            *completed_lines,
+                            Spinner("dots",
+                                    text=f"  {remaining} file{'s' if remaining != 1 else ''} analyzing...",
+                                    style="dim"),
+                        ))
+                    else:
+                        live.update(Group(*completed_lines))
+                    with open(log, "a") as f:
+                        f.write(f"Analyzed: {filepath}\n")
 
-    # Retrieve all analyses from SessionStore
-    all_analyses = mcp_mod.session_store.get_all(run_id, "analysis") if mcp_mod else {}
-
-    # Write operator-readable analysis output — index + per-file detail files
+    # Write operator-readable analysis output — ANALYSIS.md index + per-file detail files
     voidrift_dir = target.parent
     analysis_dir = voidrift_dir / "analysis"
     analysis_dir.mkdir(exist_ok=True)
 
-    # Per-file analysis files mirroring the source tree
-    for cat in CATEGORIES:
-        for fp in sorted(categories.get(cat, [])):
-            analysis_text = all_analyses.get(fp, "")
-            if not analysis_text:
-                continue
-            dest = analysis_dir / (fp + ".md")
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_text(
-                f"# {fp}\n\n**Category:** {cat}\n\n{analysis_text.strip()}\n",
-                encoding="utf-8",
-            )
+    for fp in sorted(source_requirements):
+        analysis_text = source_requirements[fp]
+        if not analysis_text:
+            continue
+        dest = analysis_dir / (fp + ".md")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(
+            f"# {fp}\n\n**Category:** source\n\n{analysis_text.strip()}\n",
+            encoding="utf-8",
+        )
 
-    # Index file — categories, file counts, and links to individual analyses
     analysis_log = voidrift_dir / "ANALYSIS.md"
     with open(analysis_log, "w", encoding="utf-8") as _af:
         _af.write(f"# Gather Analysis\n\nSource: `{from_path}`\n\n")
-        total_analyzed = sum(1 for fp in all_analyses if all_analyses[fp])
-        _af.write(f"{total_analyzed} files analyzed.\n\n")
-        for cat in CATEGORIES:
-            cat_files = sorted(fp for fp in categories.get(cat, []) if all_analyses.get(fp))
-            if not cat_files:
-                continue
-            _af.write(f"## {cat.capitalize()} ({len(cat_files)})\n\n")
-            for fp in cat_files:
-                _af.write(f"- [{fp}](analysis/{fp}.md)\n")
-            _af.write("\n")
+        _af.write(f"{len(source_requirements)} source files analyzed.\n\n")
+        _af.write("## Source\n\n")
+        for fp in sorted(source_requirements):
+            _af.write(f"- [{fp}](analysis/{fp}.md)\n")
+        _af.write("\n")
+        if context_summaries:
+            _af.write("## Context Summaries\n\n")
+            for cat, summary in context_summaries.items():
+                _af.write(f"### {cat.capitalize()}\n\n{summary.strip()}\n\n")
 
-    # --- Stage 3: Synthesize requirements from all analyzed files (category order per REQ-G-8) ---
-    all_analyzed = [
-        (fp, cat, all_analyses.get(fp, ""))
-        for cat in CATEGORIES
-        for fp in sorted(categories.get(cat, []))
-        if all_analyses.get(fp, "")
-    ]
+    # --- Stage 4: Final Pass — CLI owns all persistence, model returns markdown directly ---
+    ui.stage("Stage 4: Final pass — consolidating requirements...")
+    ui.model_label(model.alias)
 
-    ui.stage(f"Stage 3: Synthesizing requirements from {len(all_analyzed)} files...")
+    # Pre-fetch template (CLI calls directly, no model tool call)
+    requirements_template = _get_template("REQUIREMENTS-TEMPLATE")
 
-    extract_tools, extract_handlers = _pick_tools({"store_requirements"})
+    # Build source requirements text
+    source_reqs_text = "\n\n---\n\n".join(
+        f"### {fp}\n\n{req.strip()}"
+        for fp, req in sorted(source_requirements.items())
+        if req.strip()
+    )
+
+    # Build context text for final pass
+    if context_summaries:
+        ctx_text = "\n\n".join(
+            f"**{cat.capitalize()}:**\n{summary.strip()}"
+            for cat, summary in context_summaries.items()
+        )
+        final_msg = (
+            f"Source Requirements:\n\n{source_reqs_text}"
+            f"\n\n---\n\nProject Context:\n\n{ctx_text}"
+        )
+    else:
+        final_msg = f"Source Requirements:\n\n{source_reqs_text}"
+
+    # System prompt: consolidation instructions + template
+    final_prompt = _get_prompt("gather", "CONSOLIDATION")
+    if requirements_template:
+        final_system = final_prompt + f"\n\n## Output Template\n\n{requirements_template}"
+    else:
+        final_system = final_prompt
 
     try:
-        for i, (fp, cat, analysis) in enumerate(all_analyzed, 1):
-            ui.stage(f"Stage 3: {i}/{len(all_analyzed)} — {fp}")
-            lens = _ANALYSIS_LENS.get(cat, _ANALYSIS_LENS["source"])
-            # Lens-only system prompt for synthesis agents (REQ-G-8)
-            synth_prompt = _get_prompt("gather", "SYNTHESIS").format(category_lens=lens)
-            agent = AgentLoop(
-                model=model, stream=False, extra_body=extra,
-                max_tokens=_get_max_tokens(model.model_type, "synthesis"),
-                log_path=log,
-                system_prompt=synth_prompt,
-                tools=extract_tools, tool_handlers=extract_handlers,
-            )
-            response = agent.send(f"[{cat}] {fp}:\n\n{analysis}")
-            with open(log, "a") as f:
-                f.write(f"Synthesize ({i}/{len(all_analyzed)} {fp}):\n{response}\n")
-
-        # --- Stage 4: Consolidation — structured requirements from all categories ---
-        ui.stage("Stage 4: Consolidating requirements...")
-        ui.model_label(model.alias)
-
-        stored_reqs = []
-        for cat in CATEGORIES:
-            for fp in sorted(categories.get(cat, [])):
-                req = mcp_mod.artifacts.get("requirements", fp) if mcp_mod else None
-                if req:
-                    stored_reqs.append(f"### {fp} [{cat}]\n\n{req}")
-        all_requirements_text = "\n\n---\n\n".join(stored_reqs)
-
-        consol_tools, consol_handlers = _pick_tools({"get_template", "write_framework_file"})
-        consol_prompt = _get_prompt("gather", "CONSOLIDATION")
-        consol_max_tok = _get_max_tokens(model.model_type, "consolidation")
-        consol_system = f"{analyst_role}\n\n{consol_prompt}"
-        consol_msg = f"Extracted requirements:\n\n{all_requirements_text}"
-
-        def _make_consol_agent(max_tok: int) -> AgentLoop:
-            return AgentLoop(
-                model=model, stream=False, extra_body=extra, max_tokens=max_tok,
-                log_path=log,
-                system_prompt=consol_system,
-                tools=consol_tools, tool_handlers=consol_handlers,
-            )
-
-        try:
-            response = _make_consol_agent(consol_max_tok).send(consol_msg)
-        except (RuntimeError, OSError) as e:
-            if _is_truncated_json_error(str(e)):
-                with open(log, "a") as _f:
-                    _f.write(f"[TRUNCATED_JSON] consolidation — retrying with halved tokens\n")
-                response = _make_consol_agent(max(consol_max_tok // 2, 256)).send(
-                    consol_msg + "\n\nBe concise — fewer requirements, essential only."
-                )
-            else:
-                raise
+        final_agent = AgentLoop(
+            model=model, stream=False, extra_body=extra,
+            max_tokens=_get_max_tokens(model.model_type, "consolidation"),
+            log_path=log,
+            system_prompt=final_system,
+            tools=[], tool_handlers={},
+        )
+        final_response = final_agent.send(final_msg)
         with open(log, "a") as f:
-            f.write(f"Consolidation:\n{response}\n")
-
+            f.write(f"Final pass response ({len(final_response)} chars)\n")
+    except (RuntimeError, OSError) as e:
+        ui.error(f"Final pass failed: {e}")
+        return 1
     except KeyboardInterrupt:
         ui.info("Interrupted.")
         return 1
 
-    if target.exists():
-        # Write state entry (REQ-PS-3)
-        from ..utils import append_state
-        analyzed = [(fp, cat) for cat in CATEGORIES for fp in sorted(categories.get(cat, []))]
-        files_created = [str(target.relative_to(Path.cwd()))]
-        if analysis_log.exists():
-            files_created.append(str(analysis_log.relative_to(Path.cwd())))
-        for af in sorted(analysis_dir.rglob("*.md")):
-            files_created.append(str(af.relative_to(Path.cwd())))
-        total = len([f for fs in categories.values() for f in fs])
-        src_count = len(categories.get("source", []))
-        append_state(
-            phase="gather",
-            model_alias=model.alias,
-            summary=f"Analyzed {total} files ({src_count} source). Wrote REQUIREMENTS.md.",
-            files_created=files_created,
-            analyzed_files=analyzed,
-        )
-        ui.done(f"Requirements written to {str(target.relative_to(Path.cwd()))}")
-        if analysis_log.exists():
-            ui.detail(f"Analysis log: {str(analysis_log.relative_to(Path.cwd()))}")
-        return 0
-    else:
-        ui.warn("Requirements file was not created.")
-        return 1
+    # Strip any preamble — find first `#` header
+    match = _re.search(r"^#\s+", final_response, _re.MULTILINE)
+    final_content = final_response[match.start():] if match else final_response
+
+    target.write_text(final_content, encoding="utf-8")
+
+    # Write state entry (REQ-PS-3)
+    from ..utils import append_state
+    analyzed = [(fp, "source") for fp in sorted(source_requirements)]
+    files_created = [str(target.relative_to(Path.cwd()))]
+    if analysis_log.exists():
+        files_created.append(str(analysis_log.relative_to(Path.cwd())))
+    for af in sorted(analysis_dir.rglob("*.md")):
+        files_created.append(str(af.relative_to(Path.cwd())))
+    total = len(file_category)
+    src_count = len(source_files)
+    append_state(
+        phase="gather",
+        model_alias=model.alias,
+        summary=f"Analyzed {total} files ({src_count} source). Wrote REQUIREMENTS.md.",
+        files_created=files_created,
+        analyzed_files=analyzed,
+    )
+    ui.done(f"Requirements written to {str(target.relative_to(Path.cwd()))}")
+    if analysis_log.exists():
+        ui.detail(f"Analysis log: {str(analysis_log.relative_to(Path.cwd()))}")
+    return 0
 
 
 def _build_file_tree(directory: Path, max_files: int = 500) -> str:

@@ -1,6 +1,6 @@
 # Gather Pipeline Prompts
 
-Phase prompt file for the gather pipeline. Each section is loaded via `get_prompt("gather", "<section>")`. The ANALYSIS-REQS skill is preloaded and prepended to every stage prompt as the shared methodology.
+Phase prompt file for the gather pipeline. Each section is loaded via `get_prompt("gather", "<section>")`. The ANALYSIS-REQS skill is preloaded and prepended to triage prompts.
 
 ## TRIAGE
 
@@ -30,38 +30,38 @@ Given a list of files, return ONLY the files that are human-written content wort
 
 Return ONLY a JSON list of files to keep. No markdown fences.
 
+## CONTEXT-BUILD
+
+**Role:** Context Analyst — summarize {category} files as supporting context for source code analysis.
+
+You are given the content of all {category} files in the project. Extract the most relevant facts that will help a source code analyst understand what the source files should do.
+
+{context_lens}
+
+Output format: bullet points only, maximum 10 items. Start each item with `-`. Focus on facts that directly inform how the source code behaves or is constrained. No preamble, no markdown fences, no headers — return bullet points only.
+
 ## ANALYSIS
 
-**Role:** Source Analyst — analyze a single {category} file for requirements extraction.
+**Role:** Source Analyst — extract requirements from a source file.
 
-Steps (use only these tools, in this order):
-1. Call `read_source_file()` to read the file.
-2. Call `store_file_analysis()` once with your analysis.
-3. Call `done()`.
+Steps:
+1. Call `read_source_file()` with the filepath from the user message.
+2. Return your analysis directly in your response. Do NOT call any other tool.
 
 {analysis_lens}
 
-Output format: bullet points only, maximum 15 items. Focus on requirements-relevant observations. Omit implementation detail, style commentary, and anything not traceable to a system behavior.
-
-## SYNTHESIS
-
-**Role:** Requirements Extractor — distill requirements from a single file analysis.
-
-Given a file analysis, extract a concise list of requirements. Use EARS notation (WHEN [trigger], THE SYSTEM SHALL [result]). Each requirement gets one line of rationale.
-
-Derive requirements exclusively from what the analysis describes.
-
-Store your extracted requirements using `store_requirements()` with the file path as the key. Then call `done()`.
-
-{category_lens}
+Output format: bullet points only, maximum 15 items. Use EARS notation where applicable: WHEN [trigger], THE SYSTEM SHALL [result]. Start each item with `-`. No preamble, no markdown fences, no headers — return bullet points only.
 
 ## CONSOLIDATION
 
-**Role:** Requirements Author — consolidate extracted requirements into a final requirements document.
+**Role:** Requirements Author — produce a complete, consolidated requirements document from source analysis.
 
-Steps (follow this order):
-1. Review all the extracted requirements provided in the user message.
-2. Call `get_template('REQUIREMENTS-TEMPLATE')` for the output format.
-3. Consolidate into a single coherent requirements document: merge duplicates, resolve contradictions, organize by functional area, ensure every requirement has acceptance criteria.
-4. Call `write_framework_file("REQUIREMENTS.md")` with the complete consolidated requirements.
-5. Call `done()`.
+You have been given requirements extracted from every source file and project context summaries. Source code analyses are the ground truth — they take precedence over documentation when there is a conflict.
+
+Your task:
+1. Read all provided source requirements and context.
+2. Consolidate into a single coherent requirements document following the provided template.
+3. Merge duplicates, resolve contradictions (source takes precedence over docs), organize by functional area.
+4. Every requirement must have clear acceptance criteria.
+
+Return ONLY the requirements document as markdown. Start directly with the `#` title — no preamble, no commentary, no markdown fences.

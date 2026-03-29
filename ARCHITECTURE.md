@@ -94,7 +94,7 @@ The MCP server runs as a stdio subprocess, not a network service. **Why:** The o
 
 ### 3.2 One agent per unit of work
 
-Each agent (gather file analysis, plan, develop task) starts with a clean message history. Shared state flows through MCP tools (`store_file_analysis`, `get_all_analyses`). **Why:** A single agent accumulating 50 file analyses would hit the context window before the last file. Per-unit agents keep each context small and focused (REQ-ARCH-7).
+Each agent (gather source analysis, plan, develop task) starts with a clean message history. Shared state flows through in-memory dicts (`source_requirements`, `context_summaries`) that the CLI owns; only the final pass output is written to disk. **Why:** A single agent accumulating 50 file analyses would hit the context window before the last file. Per-unit agents keep each context small and focused; CLI-owned persistence eliminates tool call JSON overhead (REQ-ARCH-7, REQ-G-8).
 
 ### 3.3 Non-streaming for automated phases
 
@@ -132,13 +132,27 @@ Each phase sees only the tools relevant to its role (REQ-ARCH-9). Gather cannot 
 
 ```
 CLI: build file tree → triage agent (categorize) → validation pass (prune bad entries)
-     for each file (concurrent):
-       if file > input_limit → split into overlapping chunks → analyze each chunk separately
-                             → consolidate chunk analyses (if >1 chunk)
-       else → agent reads via read_source_file() → store_file_analysis()
+
+Stage 2 — Context Build (non-source categories: tests, config, infrastructure, docs, assets):
+  for each non-source category with files:
+    CLI: concatenate all files in category → context agent → direct response text (≤10 bullets)
+    CLI: store in context_summaries[cat]
+  CLI: build "Project Context" block from context_summaries
+
+Stage 3 — Source Analysis (concurrent):
+  for each source file:
+    if file > input_limit → split into overlapping chunks → analyze each chunk separately (direct response)
+                         → consolidate chunk analyses (if >1 chunk)
+    else → agent reads via read_source_file() → returns requirements as direct response text
+  CLI: store in source_requirements[filepath]
+
 CLI: write .voidrift/ANALYSIS.md (index) + .voidrift/analysis/<file>.md (per-file) ← operator review
-CLI: for each analysis → synthesis agent → store_requirements()
-     consolidation agent → get_template(REQUIREMENTS-TEMPLATE) → write_framework_file(REQUIREMENTS.md)
+
+Stage 4 — Final Pass:
+  CLI: pre-fetch REQUIREMENTS-TEMPLATE (Python call, no model tool)
+  CLI: send source_requirements + context_summaries in user message to final agent (no tools)
+  model: returns complete REQUIREMENTS.md content as direct response text
+  CLI: strip preamble, write .voidrift/REQUIREMENTS.md
 ```
 
 ### 4.2 Plan phase

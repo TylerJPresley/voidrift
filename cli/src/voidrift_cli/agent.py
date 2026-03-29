@@ -636,6 +636,7 @@ def build_mcp_tools(mcp_server_module: Any, phase: str = "") -> tuple[list[dict]
             "list_documents", "list_project_artifacts",
             "read_source_file", "write_source_file",
             "read_framework_file", "write_framework_file",
+            "web_fetch",
         },
     }
     allowed = _PHASE_TOOLS.get(phase) if phase else None

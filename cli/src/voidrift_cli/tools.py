@@ -4,12 +4,137 @@ These run on the workstation — not via MCP — because they need local
 filesystem access. Domain-separated by tool name:
   write_source_file / read_source_file  → project source tree
   write_framework_file / read_framework_file → .voidrift/ artifacts
+  web_fetch → HTTP fetch + summarise via isolated sub-agent (chat only, REQ-U-8)
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Callable
+
+
+def _strip_html(html_text: str) -> str:
+    """Strip HTML tags and return plain text, excluding script/style content."""
+    from html.parser import HTMLParser
+
+    class _Stripper(HTMLParser):
+        def __init__(self) -> None:
+            super().__init__()
+            self.parts: list[str] = []
+            self._skip = False
+
+        def handle_starttag(self, tag: str, attrs: list) -> None:
+            if tag in ("script", "style", "head", "noscript"):
+                self._skip = True
+
+        def handle_endtag(self, tag: str) -> None:
+            if tag in ("script", "style", "head", "noscript"):
+                self._skip = False
+
+        def handle_data(self, data: str) -> None:
+            if not self._skip:
+                stripped = data.strip()
+                if stripped:
+                    self.parts.append(stripped)
+
+    stripper = _Stripper()
+    try:
+        stripper.feed(html_text)
+    except Exception:
+        pass
+    return "\n".join(stripper.parts)
+
+
+def _default_web_confirm(url: str) -> bool:
+    """Default confirm function — shows URL and prompts operator (no spinner awareness)."""
+    import click
+    from . import ui
+    ui._con.print(f"\n[dim]web_fetch →[/dim] [cyan]{url}[/cyan]")
+    try:
+        return click.confirm("  Allow fetch?", default=False)
+    except click.Abort:
+        return False
+
+
+def make_web_fetch_handler(
+    mc,
+    session_store,
+    run_id: str,
+    log: str,
+    get_prompt_fn: Callable,
+    agent_loop_cls=None,
+    confirm_fn: Callable[[str], bool] | None = None,
+) -> Callable[[str], str]:
+    """Create a web_fetch tool handler bound to the current chat session (REQ-U-8).
+
+    Each call fetches the URL in an isolated sub-agent context so raw page
+    content never enters the chat agent's context window — only the summary
+    does. Results are cached in the session store for the duration of the run.
+
+    Args:
+        mc: ModelConfig for the summarisation sub-agent.
+        session_store: SessionStore instance (or None to skip caching).
+        run_id: Current run identifier for cache scoping.
+        log: Path to the phase log file.
+        get_prompt_fn: Callable matching ``get_prompt(phase, section) -> str``.
+        agent_loop_cls: AgentLoop class; defaults to the real one (injectable for tests).
+    """
+    if agent_loop_cls is None:
+        from .agent import AgentLoop
+        agent_loop_cls = AgentLoop
+
+    _confirm = confirm_fn or _default_web_confirm
+
+    def handler(url: str) -> str:
+        # Return cached summary if available — no prompt needed for cached results
+        if session_store:
+            cached = session_store.get(run_id, "web_cache", url)
+            if cached:
+                return cached
+
+        # Show URL and ask operator permission before making any HTTP connection
+        if not _confirm(url):
+            return f"Operator declined to fetch {url}."
+
+        # Fetch the URL
+        import urllib.request
+        import urllib.error
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "VoidRift/1.0"})
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                raw_bytes = resp.read(512 * 1024)  # 512 KB cap
+                content_type = resp.headers.get("Content-Type", "")
+                raw = raw_bytes.decode("utf-8", errors="replace")
+        except Exception as e:
+            return f"web_fetch error: {e}"
+
+        # Strip markup if HTML
+        if "html" in content_type.lower() or raw.lstrip().startswith("<"):
+            raw = _strip_html(raw)
+
+        # Summarise via isolated sub-agent — raw content stays out of chat context
+        fetch_prompt = get_prompt_fn("chat", "WEB-FETCH")
+        summarizer = agent_loop_cls(
+            model=mc,
+            system_prompt=fetch_prompt,
+            tools=[],
+            tool_handlers={},
+            stream=False,
+            log_path=log,
+            max_tokens=1024,
+        )
+        try:
+            summary = summarizer.send(f"URL: {url}\n\nContent:\n\n{raw[:32_000]}")
+        except Exception as e:
+            return f"web_fetch summarize error: {e}"
+
+        # Cache for the session
+        if session_store:
+            session_store.put(run_id, "web_cache", url, summary)
+
+        return summary
+
+    return handler
 
 
 class WriteContext:
@@ -224,6 +349,15 @@ def list_project_artifacts() -> str:
     return _ctx.list_project_artifacts()
 
 
+def web_fetch(url: str) -> str:
+    """Fetch a URL and return a summary of its content (chat phase only).
+
+    The real handler is injected by the chat command via make_web_fetch_handler().
+    This placeholder is registered so the tool schema is available at build time.
+    """
+    return "web_fetch is only available during an active chat session."
+
+
 # Tool definitions in OpenAI format for use with AgentLoop
 LOCAL_TOOLS = [
     {
@@ -292,6 +426,20 @@ LOCAL_TOOLS = [
             "parameters": {"type": "object", "properties": {}},
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "web_fetch",
+            "description": "Fetch a URL and return a concise summary of its content. Results are cached for the session.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "The URL to fetch (https://)"},
+                },
+                "required": ["url"],
+            },
+        },
+    },
 ]
 
 LOCAL_HANDLERS = {
@@ -300,4 +448,5 @@ LOCAL_HANDLERS = {
     "read_source_file": read_source_file,
     "read_framework_file": read_framework_file,
     "list_project_artifacts": list_project_artifacts,
+    "web_fetch": web_fetch,
 }

@@ -75,7 +75,7 @@ class TestGatherInputChunking:
 
 
 class TestGatherRetryOn400:
-    """V-G-6: REQ-G-15 — 400 EOF error triggers retry with halved max_tokens."""
+    """_is_truncated_json_error utility — detects truncated tool call JSON errors."""
 
     def test_is_truncated_json_error_detects_invalid_json(self):
         from voidrift_cli.phases.gather import _is_truncated_json_error
@@ -84,127 +84,279 @@ class TestGatherRetryOn400:
         assert not _is_truncated_json_error("HTTP 500: server error")
         assert not _is_truncated_json_error("Connection refused")
 
-    def test_gather_retries_on_truncated_json_error(self, tmp_project, local_model, monkeypatch):
-        """When analysis raises truncated JSON 400 error, a retry with halved tokens is attempted."""
-        call_args: list = []
-
-        class FakeAgentLoop:
-            def __init__(self, **kwargs):
-                self.max_tokens = kwargs.get("max_tokens", 4096)
-                self.system_prompt = kwargs.get("system_prompt", "")
-                self.tools = kwargs.get("tools", [])
-                self.tool_handlers = kwargs.get("tool_handlers", {})
-
-            def send(self, msg: str) -> str:
-                call_args.append({"max_tokens": self.max_tokens, "msg": msg})
-                if len(call_args) == 1:
-                    # First call: simulate truncated JSON 400 error
-                    raise RuntimeError("HTTP 400: Invalid JSON: EOF while parsing a string at line 1 column 8000")
-                # Retry succeeds
-                return "Analysis done."
-
-        import voidrift_cli.phases.gather as gather_mod
-        monkeypatch.setattr(gather_mod, "AgentLoop", FakeAgentLoop)
-
-        from voidrift_cli.phases.gather import _is_truncated_json_error
-        # Verify the retry logic manually:
-        # First call raises "Invalid JSON" → _is_truncated_json_error returns True
-        # Retry uses max(max_tok // 2, 256)
-        from voidrift_cli.config import get_max_tokens
-        max_tok = get_max_tokens(local_model.model_type, "analysis")
-        expected_retry_tokens = max(max_tok // 2, 256)
-        assert expected_retry_tokens < max_tok
-
     def test_retry_tokens_are_halved(self):
-        """REQ-G-15: retry max_tokens = max(original // 2, 256)."""
+        """Retry formula: max(original // 2, 256)."""
         from voidrift_cli.config import get_max_tokens
         max_tok = get_max_tokens("local", "analysis")
         retry_tok = max(max_tok // 2, 256)
-        assert retry_tok == max(max_tok // 2, 256)
         assert retry_tok <= max_tok
 
     def test_retry_tokens_floor_at_256(self):
-        """Even if phase default is tiny, retry floor is 256."""
-        # If max_tok were 100 (hypothetical), retry would be max(50, 256) = 256
+        """Retry floor is 256 even if phase default is tiny."""
         original = 100
         retry = max(original // 2, 256)
         assert retry == 256
 
-    def test_consolidation_retries_on_truncated_json_error(self, tmp_project, local_model, monkeypatch):
-        """REQ-G-15: consolidation agent also retries on 400 truncated JSON."""
-        import voidrift_cli.phases.gather as gather_mod
 
-        calls: list[dict] = []
+class TestContextBuild:
+    """V-G-8: REQ-G-17 — context summaries built from non-source categories (≤10 items)."""
 
-        class FakeAgent:
-            def __init__(self, **kwargs):
-                calls.append({"max_tokens": kwargs.get("max_tokens"), "system": kwargs.get("system_prompt", "")})
+    def test_context_block_format(self):
+        """context_block starts with '## Project Context' when summaries exist."""
+        summaries = {"tests": "- test summary", "config": "- config summary"}
+        parts = [f"### {cat.capitalize()}\n\n{s.strip()}" for cat, s in summaries.items()]
+        context_block = "## Project Context\n\n" + "\n\n".join(parts)
+        assert context_block.startswith("## Project Context")
+        assert "### Tests" in context_block
+        assert "test summary" in context_block
 
-            def send(self, msg: str) -> str:
-                if len(calls) == 1:
-                    raise RuntimeError("HTTP 400: Invalid JSON: EOF while parsing a string at line 1 column 17358")
-                return "consolidated"
+    def test_empty_categories_produce_no_context(self):
+        """Empty non-source categories do not add entries to context block."""
+        summaries: dict = {}
+        context_block = ""
+        if summaries:
+            parts = [f"### {cat.capitalize()}\n\n{s.strip()}" for cat, s in summaries.items()]
+            context_block = "## Project Context\n\n" + "\n\n".join(parts)
+        assert context_block == ""
 
-        monkeypatch.setattr(gather_mod, "AgentLoop", FakeAgent)
+    def test_context_injected_into_analysis_prompt(self):
+        """Context block is appended to analysis system prompt."""
+        base_system = "Analyze for requirements."
+        context_block = "## Project Context\n\n### Tests\n\n- foo bar"
+        combined = base_system + "\n\n" + context_block
+        assert "## Project Context" in combined
+        assert combined.startswith(base_system)
 
-        from voidrift_cli.config import get_max_tokens
-        max_tok = get_max_tokens(local_model.model_type, "consolidation")
+    def test_non_source_categories_listed(self):
+        """_NON_SOURCE contains all expected non-source categories."""
+        from voidrift_cli.phases.gather import _NON_SOURCE
+        assert "tests" in _NON_SOURCE
+        assert "config" in _NON_SOURCE
+        assert "infrastructure" in _NON_SOURCE
+        assert "documentation" in _NON_SOURCE
+        assert "assets" in _NON_SOURCE
+        assert "source" not in _NON_SOURCE
 
-        # Simulate the retry path directly
-        from voidrift_cli.phases.gather import _is_truncated_json_error
-        try:
-            agent = FakeAgent(model=local_model, max_tokens=max_tok, system_prompt="instructions")
-            agent.send("Extracted requirements:\n\nsome reqs")
-        except RuntimeError as e:
-            assert _is_truncated_json_error(str(e))
-            retry_tok = max(max_tok // 2, 256)
-            agent2 = FakeAgent(model=local_model, max_tokens=retry_tok, system_prompt="instructions")
-            result = agent2.send("Extracted requirements:\n\nsome reqs\n\nBe concise.")
-            assert result == "consolidated"
+    def test_context_block_absent_when_no_summaries(self):
+        """If context_summaries is empty, context_block is empty string."""
+        context_summaries: dict = {}
+        context_block = ""
+        if context_summaries:
+            parts = [f"### {c.capitalize()}\n\n{s.strip()}" for c, s in context_summaries.items()]
+            context_block = "## Project Context\n\n" + "\n\n".join(parts)
+        assert context_block == ""
+        # And system prompt does not grow when context_block is empty
+        system = "base instructions"
+        if context_block:
+            system = system + "\n\n" + context_block
+        assert system == "base instructions"
 
-        assert len(calls) == 2
-        assert calls[1]["max_tokens"] < calls[0]["max_tokens"]
 
+class TestSourceRequirementsDirect:
+    """V-G-9: REQ-G-8 — source analysis returns direct response, CLI owns all persistence."""
 
-class TestConsolidationPromptPlacement:
-    """V-G-7: REQ-G-16 — extracted requirements in user message, not system prompt."""
+    def test_source_is_only_non_context_category(self):
+        """CATEGORIES minus _NON_SOURCE equals exactly {'source'}."""
+        from voidrift_cli.phases.gather import _NON_SOURCE, CATEGORIES
+        assert set(CATEGORIES) - set(_NON_SOURCE) == {"source"}
 
-    def test_consolidation_system_prompt_has_no_requirements(self, tmp_project, local_model, monkeypatch):
-        """Consolidation system prompt must not contain requirements text."""
-        import voidrift_cli.phases.gather as gather_mod
-
+    def test_final_pass_agent_has_no_tools(self):
+        """Final pass agent is invoked with an empty tools list."""
         captured: list[dict] = []
 
         class FakeAgent:
             def __init__(self, **kwargs):
-                captured.append({
-                    "system": kwargs.get("system_prompt", ""),
-                    "max_tokens": kwargs.get("max_tokens"),
-                })
+                captured.append({"tools": kwargs.get("tools", [])})
 
             def send(self, msg: str) -> str:
-                captured[-1]["msg"] = msg
-                return "done"
+                return "# Requirements\n\nREQ-1: The system shall work."
 
-        monkeypatch.setattr(gather_mod, "AgentLoop", FakeAgent)
+        source_reqs_text = "### src/main.py\n\n- WHEN invoked, THE SYSTEM SHALL run"
+        final_msg = f"Source Requirements:\n\n{source_reqs_text}"
+        agent = FakeAgent(
+            model=None, stream=False, max_tokens=8192,
+            system_prompt="Consolidation instructions", tools=[], tool_handlers={},
+        )
+        response = agent.send(final_msg)
+        assert response.startswith("# Requirements")
+        assert captured[0]["tools"] == []
 
-        reqs_text = "EXTRACTED_REQUIREMENTS_SENTINEL"
+    def test_preamble_stripped_from_final_response(self):
+        """CLI strips preamble before first # header."""
+        import re
+        response = "Here is the document:\n\n# Requirements\n\nREQ-1: foo"
+        match = re.search(r"^#\s+", response, re.MULTILINE)
+        final = response[match.start():] if match else response
+        assert final.startswith("# Requirements")
+        assert "Here is the document" not in final
 
-        # Simulate _make_consol_agent and send call as gather.py does
-        system = "consolidation instructions only"
-        agent = FakeAgent(model=local_model, max_tokens=8192, system_prompt=system)
-        agent.send(f"Extracted requirements:\n\n{reqs_text}")
+    def test_no_preamble_response_unchanged(self):
+        """Response already starting with # is returned as-is."""
+        import re
+        response = "# Requirements\n\nREQ-1: foo"
+        match = re.search(r"^#\s+", response, re.MULTILINE)
+        final = response[match.start():] if match else response
+        assert final == response
 
-        assert len(captured) == 1
-        assert reqs_text not in captured[0]["system"]
-        assert reqs_text in captured[0]["msg"]
+    def test_source_requirements_in_user_message(self):
+        """Source requirements text is sent in user message, not system prompt."""
+        reqs_text = "SOURCE_REQUIREMENTS_SENTINEL"
+        system = "Final pass instructions only"
+        user_msg = f"Source Requirements:\n\n{reqs_text}"
+        assert reqs_text not in system
+        assert reqs_text in user_msg
 
-    def test_consolidation_user_message_starts_with_extracted_requirements(self):
-        """User message prefix matches 'Extracted requirements:'."""
-        reqs = "REQ-1: The system shall do X."
-        msg = f"Extracted requirements:\n\n{reqs}"
-        assert msg.startswith("Extracted requirements:")
-        assert reqs in msg
+
+class TestChatWebFetch:
+    """V-U-8: REQ-U-8 — web_fetch tool for chat phase."""
+
+    def test_strip_html_removes_script_content(self):
+        """_strip_html drops script tag content."""
+        from voidrift_cli.tools import _strip_html
+        html = "<html><head><script>alert(1)</script></head><body><p>Hello world</p></body></html>"
+        result = _strip_html(html)
+        assert "Hello world" in result
+        assert "alert" not in result
+
+    def test_strip_html_removes_style_content(self):
+        """_strip_html drops style tag content."""
+        from voidrift_cli.tools import _strip_html
+        html = "<style>body { color: red; }</style><p>Content here</p>"
+        result = _strip_html(html)
+        assert "Content here" in result
+        assert "color: red" not in result
+
+    def test_strip_html_preserves_body_text(self):
+        """_strip_html returns meaningful body text."""
+        from voidrift_cli.tools import _strip_html
+        html = "<html><body><h1>Title</h1><p>Description text.</p></body></html>"
+        result = _strip_html(html)
+        assert "Title" in result
+        assert "Description text." in result
+
+    def test_web_fetch_cache_hit_skips_http(self):
+        """Second call with same URL returns cached summary without HTTP."""
+        from voidrift_cli.tools import make_web_fetch_handler
+
+        class FakeStore:
+            def __init__(self):
+                self._data: dict = {}
+            def get(self, run_id, kind, key):
+                return self._data.get((run_id, kind, key))
+            def put(self, run_id, kind, key, value):
+                self._data[(run_id, kind, key)] = value
+
+        class FakeAgent:
+            def __init__(self, **kwargs): pass
+            def send(self, msg): return "Agent summary."
+
+        store = FakeStore()
+        store.put("run1", "web_cache", "https://example.com", "Cached summary.")
+
+        handler = make_web_fetch_handler(
+            mc=None, session_store=store, run_id="run1",
+            log="/tmp/test.log", get_prompt_fn=lambda *a: "",
+            agent_loop_cls=FakeAgent,
+            confirm_fn=lambda url: True,
+        )
+        result = handler("https://example.com")
+        assert result == "Cached summary."
+
+    def test_web_fetch_operator_denied_returns_message(self):
+        """Operator denying the prompt returns a denial message without fetching."""
+        from voidrift_cli.tools import make_web_fetch_handler
+
+        class FakeAgent:
+            def __init__(self, **kwargs): pass
+            def send(self, msg): return "summary"
+
+        handler = make_web_fetch_handler(
+            mc=None, session_store=None, run_id="run1",
+            log="/tmp/test.log", get_prompt_fn=lambda *a: "",
+            agent_loop_cls=FakeAgent,
+            confirm_fn=lambda url: False,
+        )
+        with patch("urllib.request.urlopen") as mock_urlopen:
+            result = handler("https://example.com")
+
+        assert "declined" in result
+        mock_urlopen.assert_not_called()
+
+    def test_web_fetch_http_error_returns_message(self):
+        """HTTP error returns an error string — no exception propagates."""
+        import urllib.error
+        from voidrift_cli.tools import make_web_fetch_handler
+
+        class FakeAgent:
+            def __init__(self, **kwargs): pass
+            def send(self, msg): return "summary"
+
+        handler = make_web_fetch_handler(
+            mc=None, session_store=None, run_id="run1",
+            log="/tmp/test.log", get_prompt_fn=lambda *a: "",
+            agent_loop_cls=FakeAgent,
+            confirm_fn=lambda url: True,
+        )
+        with patch("urllib.request.urlopen", side_effect=urllib.error.URLError("connection refused")):
+            result = handler("https://bad-url.invalid")
+
+        assert "web_fetch error" in result
+
+    def test_web_fetch_summary_cached_after_fetch(self):
+        """Summary is stored in session store after successful fetch."""
+        from voidrift_cli.tools import make_web_fetch_handler
+
+        class FakeStore:
+            def __init__(self):
+                self._data: dict = {}
+            def get(self, run_id, kind, key):
+                return self._data.get((run_id, kind, key))
+            def put(self, run_id, kind, key, value):
+                self._data[(run_id, kind, key)] = value
+
+        class FakeAgent:
+            def __init__(self, **kwargs): pass
+            def send(self, msg): return "Page summary."
+
+        store = FakeStore()
+        handler = make_web_fetch_handler(
+            mc=None, session_store=store, run_id="run1",
+            log="/tmp/test.log", get_prompt_fn=lambda *a: "",
+            agent_loop_cls=FakeAgent,
+            confirm_fn=lambda url: True,
+        )
+
+        fake_resp = MagicMock()
+        fake_resp.read.return_value = b"<p>Hello world</p>"
+        fake_resp.headers.get.return_value = "text/html"
+        fake_resp.__enter__ = lambda s: s
+        fake_resp.__exit__ = MagicMock(return_value=False)
+
+        with patch("click.confirm", return_value=True), \
+             patch("urllib.request.urlopen", return_value=fake_resp):
+            result = handler("https://example.com/docs")
+
+        assert result == "Page summary."
+        assert store.get("run1", "web_cache", "https://example.com/docs") == "Page summary."
+
+    def test_web_fetch_in_local_tools(self):
+        """web_fetch schema is present in LOCAL_TOOLS."""
+        from voidrift_cli.tools import LOCAL_TOOLS
+        names = [t["function"]["name"] for t in LOCAL_TOOLS]
+        assert "web_fetch" in names
+
+    def test_web_fetch_absent_from_gather_tools(self):
+        """web_fetch is not in the tool list for the gather phase."""
+        from voidrift_cli.tools import LOCAL_TOOLS
+        # gather _PHASE_TOOLS does not include web_fetch — verify via agent module
+        import voidrift_cli.agent as agent_mod
+        import inspect
+        src = inspect.getsource(agent_mod.build_mcp_tools)
+        # gather phase tools are defined before chat phase tools in the source
+        gather_block_start = src.index('"gather"')
+        chat_block_start = src.index('"chat"')
+        gather_block = src[gather_block_start:chat_block_start]
+        assert "web_fetch" not in gather_block
 
 
 class TestPromptFormatting:

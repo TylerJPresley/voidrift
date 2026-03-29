@@ -8,6 +8,16 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- `web_fetch(url)` tool for `voidrift chat` (REQ-U-8) — fetches a URL, strips HTML markup, summarises content via an isolated sub-agent (raw page content never enters the chat context window), caches the summary in the MCP session store for the session. HTTP/DNS/timeout errors return a message rather than raising. Available in the chat phase only.
+- `WEB-RESEARCH` north-star skill (`resources/skills/WEB-RESEARCH.md`) — guidelines for effective web research using `web_fetch`: DuckDuckGo HTML search URL construction, direct documentation URL patterns (PyPI, Python docs, MDN, GitHub), two-step search-then-fetch navigation, source priority, and caching behaviour.
+- Chat SYSTEM prompt now lists `web_fetch(url)` in available tools and instructs the model to load `WEB-RESEARCH` skill before searching.
+
+### Changed
+- **Gather pipeline redesigned** (REQ-G-8): source code is now the primary requirements source; non-source files (tests, config, infrastructure, docs, assets) are treated as context. Four-stage pipeline: (1) Triage — unchanged; (2) Context Build — one agent per non-source category, direct response ≤10 bullet items, stored in `context_summaries` dict; (3) Source Analysis — one agent per source file, `read_source_file()` only tool, "Project Context" block injected from Stage 2, direct response stored in `source_requirements` dict; (4) Final Pass — CLI pre-fetches REQUIREMENTS template, sends all source requirements + context in user message to a tool-less agent, model returns markdown directly, CLI strips preamble and writes `REQUIREMENTS.md`. Eliminates synthesis loop and all tool-call-embedded output — JSON truncation failure mode is no longer possible.
+- Gather `ANALYSIS.md` now indexes only source file analyses (not all categories); context summaries appended as a dedicated section.
+- Gather prompts: added `## CONTEXT-BUILD` section; rewrote `## ANALYSIS` (direct response, source only); removed `## SYNTHESIS`; updated `## CONSOLIDATION` (direct response, no tools, source takes precedence).
+
+### Added
 - `voidrift skills` command group with six subcommands: `list`, `search`, `review`, `install`, `remove`, `approve` (REQ-SKL-1 through REQ-SKL-5) — manages skills across north-star, domain, and project layers from the CLI; `install` runs synthesis pipeline when `skills.repos` and `skills.synthesis_model` are configured, otherwise copies from local layer; `search` queries repo manifests in addition to local layers (REQ-SKL-6); `review` lists pending skills when no name given
 - `resources/skills/BACKEND-ENG.md` — north-star skill for VoidRift framework development (Python/Click/FastMCP/pytest/AgentLoop conventions); use `[backend-eng]` tag on framework development tasks
 - Per-phase `max_tokens` budget via `get_max_tokens(model_type, phase)` (REQ-CFG-6, REQ-CFG-7) — analysis=2000, synthesis=2000, consolidation=8192, task=4000, triage=4096, plan=32768; configurable per model type in `limits:` section of config.yml
