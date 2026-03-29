@@ -7,7 +7,7 @@ See the [framework README](../README.md) for full documentation.
 ## Install
 
 ```bash
-pip install -e .
+uv pip install -e .
 ```
 
 ## Usage

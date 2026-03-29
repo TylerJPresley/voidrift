@@ -503,7 +503,7 @@ Two log roots, two intents:
 - **Performance:** Local models SHALL be served via vLLM with FlashInfer backend. The MCP server SHALL use in-memory indexing for sub-millisecond section retrieval. Agents SHALL receive one task at a time to minimize context window usage.
 - **Security:** The CLI SHALL NOT hardcode secrets. A PATH shim SHALL prevent the worker model from executing package managers on the host. File operations SHALL be sandboxed to the project directory (path traversal denied). The Worker CLI SHALL validate Kiro Gateway credentials before reporting the endpoint as ready.
 - **Portability:** The framework SHALL run on Linux, macOS, and WSL2. Local model support requires an NVIDIA GPU worker node accessible via SSH and the Worker CLI. Cloud-only mode requires no special hardware or Worker CLI.
-- **Maintainability:** All packages SHALL use `pyproject.toml` with hatchling, a shared `VERSION` file, and editable installs. Google-style docstrings and type hints SHALL be used throughout. Tests SHALL use pytest.
+- **Maintainability:** All packages SHALL use `pyproject.toml` with hatchling, a shared `VERSION` file, and editable installs. Google-style docstrings and type hints SHALL be used throughout. Tests SHALL use pytest. `uv` SHALL be the package manager for all development operations (install, test, build); developers SHALL NOT need pip or python3 directly for project setup.
 
 ## 6. Verification Plan
 

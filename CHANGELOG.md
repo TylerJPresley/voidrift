@@ -7,6 +7,11 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- Makefile `test` and `install` targets now use `uv` instead of `python3`/`pip`; `cli/README.md` and `mcp-context-server/README.md` install instructions updated to `uv pip install -e .`
+- `make setup` target added — runs `install` then `sync` as a single onboarding command
+- Default config assets (`config.yml`, `models.yml`, `worker-models.yml`) moved from repo root to `defaults/`; `make sync` updated accordingly
+
 ### Added
 - `web_fetch(url)` tool for `voidrift chat` (REQ-U-8) — fetches a URL, strips HTML markup, summarises content via an isolated sub-agent (raw page content never enters the chat context window), caches the summary in the MCP session store for the session. HTTP/DNS/timeout errors return a message rather than raising. Available in the chat phase only.
 - `WEB-RESEARCH` north-star skill (`resources/skills/WEB-RESEARCH.md`) — guidelines for effective web research using `web_fetch`: DuckDuckGo HTML search URL construction, direct documentation URL patterns (PyPI, Python docs, MDN, GitHub), two-step search-then-fetch navigation, source priority, and caching behaviour.
