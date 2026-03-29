@@ -60,10 +60,8 @@ Store your extracted requirements using `store_requirements()` with the file pat
 **Role:** Requirements Author — consolidate extracted requirements into a final requirements document.
 
 Steps (follow this order):
-1. Review all the extracted requirements provided below.
+1. Review all the extracted requirements provided in the user message.
 2. Call `get_template('REQUIREMENTS-TEMPLATE')` for the output format.
 3. Consolidate into a single coherent requirements document: merge duplicates, resolve contradictions, organize by functional area, ensure every requirement has acceptance criteria.
 4. Call `write_framework_file("REQUIREMENTS.md")` with the complete consolidated requirements.
 5. Call `done()`.
-
-{all_requirements}

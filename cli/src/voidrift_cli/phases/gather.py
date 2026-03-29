@@ -461,16 +461,30 @@ def _gather_from(
         all_requirements_text = "\n\n---\n\n".join(stored_reqs)
 
         consol_tools, consol_handlers = _pick_tools({"get_template", "write_framework_file"})
-        consol_prompt = _get_prompt("gather", "CONSOLIDATION").format(
-            all_requirements=all_requirements_text,
-        )
-        agent = AgentLoop(
-            model=model, stream=False, extra_body=extra, max_tokens=_get_max_tokens(model.model_type, "consolidation"),
-            log_path=log,
-            system_prompt=f"{analyst_role}\n\n{consol_prompt}",
-            tools=consol_tools, tool_handlers=consol_handlers,
-        )
-        response = agent.send("Consolidate the extracted requirements into REQUIREMENTS.md.")
+        consol_prompt = _get_prompt("gather", "CONSOLIDATION")
+        consol_max_tok = _get_max_tokens(model.model_type, "consolidation")
+        consol_system = f"{analyst_role}\n\n{consol_prompt}"
+        consol_msg = f"Extracted requirements:\n\n{all_requirements_text}"
+
+        def _make_consol_agent(max_tok: int) -> AgentLoop:
+            return AgentLoop(
+                model=model, stream=False, extra_body=extra, max_tokens=max_tok,
+                log_path=log,
+                system_prompt=consol_system,
+                tools=consol_tools, tool_handlers=consol_handlers,
+            )
+
+        try:
+            response = _make_consol_agent(consol_max_tok).send(consol_msg)
+        except (RuntimeError, OSError) as e:
+            if _is_truncated_json_error(str(e)):
+                with open(log, "a") as _f:
+                    _f.write(f"[TRUNCATED_JSON] consolidation — retrying with halved tokens\n")
+                response = _make_consol_agent(max(consol_max_tok // 2, 256)).send(
+                    consol_msg + "\n\nBe concise — fewer requirements, essential only."
+                )
+            else:
+                raise
         with open(log, "a") as f:
             f.write(f"Consolidation:\n{response}\n")
 
