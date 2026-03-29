@@ -387,7 +387,8 @@ def _gather_from(
     all_analyses = mcp_mod.session_store.get_all(run_id, "analysis") if mcp_mod else {}
 
     # Write operator-readable analysis output — index + per-file detail files
-    analysis_dir = d / "analysis"
+    voidrift_dir = target.parent
+    analysis_dir = voidrift_dir / "analysis"
     analysis_dir.mkdir(exist_ok=True)
 
     # Per-file analysis files mirroring the source tree
@@ -404,7 +405,7 @@ def _gather_from(
             )
 
     # Index file — categories, file counts, and links to individual analyses
-    analysis_log = d / "ANALYSIS.md"
+    analysis_log = voidrift_dir / "ANALYSIS.md"
     with open(analysis_log, "w", encoding="utf-8") as _af:
         _af.write(f"# Gather Analysis\n\nSource: `{from_path}`\n\n")
         total_analyzed = sum(1 for fp in all_analyses if all_analyses[fp])
