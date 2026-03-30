@@ -309,6 +309,7 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
             color = "\033[37m"  # white
         return ANSI(f"\n{color}[{pct}%]\033[0m > ")
 
+    from rich.console import Group as _RGroup
     from rich.live import Live
     from rich.spinner import Spinner as _RSpinner
     from rich.text import Text as _RText
@@ -319,13 +320,22 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
     _stream_buf: list[str] = []   # accumulated token buffer
 
     def _thinking():
-        return _RSpinner("dots", text="  Thinking...", style="dim")
+        return _RGroup(_RText(""), _RSpinner("dots", text="  Thinking...", style="dim"))
 
     def on_token(token):
         _stream_buf.append(token)
         live = _live_holder[0]
         if live is not None:
-            live.update(ui.render_text("".join(_stream_buf)))
+            # Show a tail window during streaming — keeps display compact and
+            # avoids rendering broken partial markdown. Final Rich render
+            # (with tables, headers, etc.) happens once the stream ends.
+            text = "".join(_stream_buf)
+            lines = text.splitlines()
+            tail = "\n".join(lines[-5:]) if len(lines) > 5 else text
+            live.update(_RGroup(
+                _RText(""),
+                _RText("  " + tail, style="dim"),
+            ))
 
     _stats_parts = []
 
@@ -342,12 +352,11 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
     def on_tool_call(name):
         live = _live_holder[0]
         if live is not None:
-            live.update(_RText(f"  ⚙ {name}()", style="dim"))
+            live.update(_thinking())
 
     def on_tool_result(name, result):
         live = _live_holder[0]
         if live is not None:
-            ui._con.print(f"[dim green]  ✓ {name}[/dim green]")
             live.update(_thinking())
 
     # Rebuild web_fetch handler with a confirm_fn that pauses for the permission
@@ -384,14 +393,15 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
     kb = KeyBindings()
 
     @kb.add("enter")
-    def _submit_or_newline(event):
+    def _submit(event):
         buf = event.current_buffer
-        text = buf.text.strip()
-        # Commands and single-line input: submit immediately
-        if not text or text.startswith("/") or buf.document.current_line.strip() == "":
-            buf.validate_and_handle()
-        else:
+        # If the current line ends with \, strip it and insert a real newline
+        # (matches Claude CLI's universal multiline convention).
+        if buf.document.current_line.endswith("\\"):
+            buf.delete_before_cursor()  # remove the backslash
             buf.insert_text("\n")
+        else:
+            buf.validate_and_handle()
 
     session = PromptSession(key_bindings=kb, multiline=True)
 
@@ -480,6 +490,7 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
                 _live_holder[0] = _live
                 try:
                     response = agent.send(user_input)
+                    _live.update(ui.render_text(response))
                 except RuntimeError as e:
                     _error = str(e)
                 finally:
