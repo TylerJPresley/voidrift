@@ -11,7 +11,7 @@ install:
 setup: install sync
 
 sync:
-	@mkdir -p ~/.voidrift/resources
+	@mkdir -p ~/.voidrift/resources ~/.voidrift/domain-skills
 	cp -r resources/* ~/.voidrift/resources/
 	cp defaults/config.yml ~/.voidrift/config.yml
 	cp defaults/models.yml ~/.voidrift/models.yml

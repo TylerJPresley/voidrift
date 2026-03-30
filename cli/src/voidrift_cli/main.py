@@ -175,12 +175,23 @@ def _interactive_mode():
 # ---------------------------------------------------------------------------
 
 
+def _check_setup() -> None:
+    """Exit with a setup error if VOIDRIFT_HOME is not initialized (REQ-CFG-8)."""
+    from .config import voidrift_home
+    home = voidrift_home()
+    if not (home / "models.yml").exists():
+        raise click.ClickException(
+            f"{home} is not initialized. Run 'make setup' to initialize."
+        )
+
+
 @cli.command()
 @click.argument("model", shell_complete=_complete_model)
 @click.argument("path", type=click.Path(exists=True))
 @click.option("--overwrite", is_flag=True, help="Remove previous gather artifacts and start fresh")
 def gather(model, path, overwrite) -> None:
     """Phase 1: Reverse-engineer requirements from a codebase."""
+    _check_setup()
     from .phases.gather import run_gather
     mc = resolve_model(model)
     sys.exit(run_gather(mc, from_path=path, overwrite=overwrite))
@@ -193,6 +204,7 @@ def gather(model, path, overwrite) -> None:
 @click.option("--update", is_flag=True, help="Revise existing plan to match current requirements")
 def plan(model, feature, overwrite, update) -> None:
     """Phase 2: Generate architecture and task breakdown."""
+    _check_setup()
     from .phases.plan import run_plan
     mc = resolve_model(model)
     sys.exit(run_plan(mc, feature=feature, overwrite=overwrite, update=update))
@@ -203,6 +215,7 @@ def plan(model, feature, overwrite, update) -> None:
 @click.argument("architect", required=False, shell_complete=_complete_model)
 def develop(model, architect) -> None:
     """Phase 3: Execute implementation tasks."""
+    _check_setup()
     from .phases.develop import run_develop
     mc = resolve_model(model)
     am = resolve_model(architect) if architect else mc
@@ -214,6 +227,7 @@ def develop(model, architect) -> None:
 @click.argument("architect", required=False, shell_complete=_complete_model)
 def automate(model, architect) -> None:
     """Phase 4: Generate infrastructure-as-code."""
+    _check_setup()
     from .phases.automate import run_automate
     mc = resolve_model(model)
     am = resolve_model(architect) if architect else mc
@@ -225,6 +239,7 @@ def automate(model, architect) -> None:
 @click.argument("architect", required=False, shell_complete=_complete_model)
 def verify(model, architect) -> None:
     """Phase 5: Run quality checks and validation."""
+    _check_setup()
     from .phases.verify import run_verify
     mc = resolve_model(model)
     am = resolve_model(architect) if architect else mc
@@ -239,8 +254,8 @@ def verify(model, architect) -> None:
 def _query_max_context(mc) -> int | None:
     """Query max_model_len from the model's /v1/models endpoint (REQ-MC-3).
 
-    Falls back to mc.max_context (from models.yml) for cloud models that
-    don't expose max_model_len on their endpoint.
+    Falls back to mc.max_context (from models.yml) for models that don't
+    expose max_model_len on their endpoint.
     """
     try:
         from openai import OpenAI
@@ -294,8 +309,32 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
             color = "\033[37m"  # white
         return ANSI(f"\n{color}[{pct}%]\033[0m > ")
 
+    from rich.console import Group as _RGroup
+    from rich.live import Live
+    from rich.padding import Padding as _RPadding
+    from rich.spinner import Spinner as _RSpinner
+    from rich.text import Text as _RText
+
+    # Shared state for Live-based streaming display.
+    # Uses a list so closures can mutate without nonlocal declarations.
+    _live_holder: list = [None]   # current Live instance
+    _stream_buf: list[str] = []   # accumulated token buffer
+    _term_holder: list = [None]   # (termios_module, fd, saved_attr) while raw mode active
+
+    def _thinking():
+        return _RPadding(_RSpinner("dots", text="  Thinking...", style="dim"), pad=(1, 0, 0, 0))
+
     def on_token(token):
-        pass
+        _stream_buf.append(token)
+        live = _live_holder[0]
+        if live is not None:
+            # Show a tail window during streaming — keeps display compact and
+            # avoids rendering broken partial markdown. Final Rich render
+            # (with tables, headers, etc.) happens once the stream ends.
+            text = "".join(_stream_buf)
+            lines = text.splitlines()
+            tail = "\n".join(lines[-5:]) if len(lines) > 5 else text
+            live.update(_RPadding(_RText("  " + tail, style="dim"), pad=(1, 0, 0, 0)))
 
     _stats_parts = []
 
@@ -309,63 +348,60 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
         if stats.get("elapsed"):
             _stats_parts.append(f"{stats['elapsed']}s")
 
-    _tool_spinner = None
-    _tool_stop = None
-
-    def _start_spinner():
-        nonlocal _tool_spinner, _tool_stop
-        _tool_stop = threading.Event()
-        def _spin():
-            for ch in itertools.cycle("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"):
-                if _tool_stop.wait(0.1):
-                    break
-                sys.stderr.write(f"\r\033[2m  {ch} working...\033[0m")
-                sys.stderr.flush()
-            sys.stderr.write("\r\033[K")
-            sys.stderr.flush()
-        _tool_spinner = threading.Thread(target=_spin, daemon=True)
-        _tool_spinner.start()
-
     def on_tool_call(name):
-        nonlocal _tool_spinner, _tool_stop
-        if _tool_stop:
-            _tool_stop.set()
-            _tool_spinner.join()
-        _start_spinner()
+        live = _live_holder[0]
+        if live is not None:
+            live.update(_thinking())
 
-    def _stop_tool_spinner():
-        nonlocal _tool_spinner, _tool_stop
-        if _tool_stop:
-            _tool_stop.set()
-            _tool_spinner.join()
-            _tool_stop = None
-            _tool_spinner = None
+    def on_tool_result(name, result):
+        live = _live_holder[0]
+        if live is not None:
+            live.update(_thinking())
 
-    # Rebuild web_fetch handler with a confirm_fn that stops the spinner before
-    # prompting, so the permission prompt renders cleanly (REQ-U-8).
+    # Rebuild web_fetch handler with a confirm_fn that pauses for the permission
+    # prompt, so it renders cleanly within the Live context (REQ-U-8).
     if web_fetch_kwargs:
         import click as _click
         from .tools import make_web_fetch_handler as _make_wf
 
-        def _spinner_confirm(url: str) -> bool:
-            _stop_tool_spinner()
+        def _live_confirm(url: str) -> bool:
+            # Stop Live entirely so Click can own the terminal (REQ-UI-9).
+            # transient=True on stop clears the Thinking... from the screen;
+            # reset to False before restart so the final response persists.
+            live = _live_holder[0]
+            if live is not None:
+                live.transient = True
+                live.stop()
+                live.transient = False
+            # Restore terminal input mode so the prompt is visible and typeable.
+            _ts = _term_holder[0]
+            if _ts is not None:
+                _tm, _fd, _saved = _ts
+                try:
+                    _tm.tcsetattr(_fd, _tm.TCSANOW, _saved)
+                except Exception:
+                    pass
             ui._con.print(f"\n[dim]web_fetch →[/dim] [cyan]{url}[/cyan]")
             try:
                 allowed = _click.confirm("  Allow fetch?", default=False)
             except _click.Abort:
                 allowed = False
-            if allowed:
-                _start_spinner()  # resume while fetch + summarise runs
+            # Re-disable echo and restart Live.
+            if _ts is not None:
+                try:
+                    _raw = _tm.tcgetattr(_fd)
+                    _raw[3] &= ~(_tm.ECHO | _tm.ICANON)
+                    _tm.tcsetattr(_fd, _tm.TCSANOW, _raw)
+                except Exception:
+                    pass
+            if live is not None:
+                live.start()
+                live.update(_thinking())
             return allowed
 
         agent.tool_handlers["web_fetch"] = _make_wf(
-            **web_fetch_kwargs, confirm_fn=_spinner_confirm
+            **web_fetch_kwargs, confirm_fn=_live_confirm
         )
-
-    def on_tool_result(name, result):
-        _stop_tool_spinner()
-        ui.tool_done(name)
-        _start_spinner()
 
     agent.on_token = on_token
     agent.on_complete = on_complete
@@ -378,25 +414,37 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
     kb = KeyBindings()
 
     @kb.add("enter")
-    def _submit_or_newline(event):
+    def _submit(event):
         buf = event.current_buffer
-        text = buf.text.strip()
-        # Commands and single-line input: submit immediately
-        if not text or text.startswith("/") or buf.document.current_line.strip() == "":
-            buf.validate_and_handle()
-        else:
+        # If the current line ends with \, strip it and insert a real newline
+        # (matches Claude CLI's universal multiline convention).
+        if buf.document.current_line.endswith("\\"):
+            buf.delete_before_cursor()  # remove the backslash
             buf.insert_text("\n")
+        else:
+            buf.validate_and_handle()
 
     session = PromptSession(key_bindings=kb, multiline=True)
 
+    _consecutive_interrupt = 0
     try:
         while True:
             try:
                 user_input = session.prompt(_context_prompt()).strip()
+                _consecutive_interrupt = 0
+            except KeyboardInterrupt:
+                _consecutive_interrupt += 1
+                if _consecutive_interrupt >= 2:
+                    raise
+                ui.info("Press Ctrl+C again to exit.")
+                continue
             except EOFError:
                 break
-            if not user_input or user_input.lower() in ("quit", "exit", "/quit"):
+            if user_input.lower() in ("quit", "exit", "/quit"):
                 break
+            if not user_input:
+                continue  # ignore accidental Enter pressed during model processing
+            _consecutive_interrupt = 0
 
             # /compact — summarize history to free context (REQ-U-7)
             if user_input.lower().strip() == "/compact":
@@ -452,17 +500,59 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
             with open(log, "a") as f:
                 f.write(f"\n> {user_input}\n")
 
-            ui.model_label(mc.alias)
-            _start_spinner()
+            _stream_buf.clear()
+            _msg_snapshot = len(agent.messages)
+
+            # Disable terminal echo while the model is processing so keystrokes
+            # don't appear alongside the Live display output (REQ-UI-9).
+            _saved_term = None
             try:
-                response = agent.send(user_input)
-            except RuntimeError as e:
-                _stop_tool_spinner()
-                ui.error(str(e))
+                import termios as _termios
+                _fd = sys.stdin.fileno()
+                _saved_term = _termios.tcgetattr(_fd)
+                _raw = _termios.tcgetattr(_fd)
+                _raw[3] &= ~(_termios.ECHO | _termios.ICANON)
+                _termios.tcsetattr(_fd, _termios.TCSANOW, _raw)
+                _term_holder[0] = (_termios, _fd, _saved_term)
+            except Exception:
+                pass
+
+            _error = None
+            _interrupted = False
+            with Live(_thinking(), console=ui._con, refresh_per_second=12) as _live:
+                _live_holder[0] = _live
+                try:
+                    response = agent.send(user_input)
+                    _live.update(ui.render_text(response))
+                except KeyboardInterrupt:
+                    _interrupted = True
+                    _live.transient = True  # erase thinking/streaming from screen
+                except RuntimeError as e:
+                    _error = str(e)
+                finally:
+                    _live_holder[0] = None
+                    _term_holder[0] = None
+                    if _saved_term is not None:
+                        try:
+                            _termios.tcsetattr(_fd, _termios.TCSANOW, _saved_term)
+                            _termios.tcflush(_fd, _termios.TCIFLUSH)
+                        except Exception:
+                            pass
+
+            if _interrupted:
+                # Restore history to pre-send state — interrupt may leave orphaned
+                # tool calls, tool results, or partial assistant messages behind.
+                agent.messages = agent.messages[:_msg_snapshot]
+                ui._con.print()
+                ui.info("Interrupted.")
+                ui._con.print()
+                ui.operator_rule()
                 continue
 
-            _stop_tool_spinner()
-            ui.model_text(response)
+            if _error:
+                ui.error(_error)
+                continue
+
             if _stats_parts:
                 ui.stats(_stats_parts)
 
@@ -483,40 +573,33 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
 @click.argument("model", shell_complete=_complete_model)
 @click.option("--doc", help="Scope conversation to a specific .voidrift/ artifact")
 def chat(model, doc) -> None:
-    """Interactive session with full MCP tools for requirements, planning, and refinement."""
+    """Interactive session with CLI-native tools for requirements, planning, and refinement."""
+    _check_setup()
     mc = resolve_model(model)
-    from .agent import AgentLoop, build_mcp_tools
+    from .agent import AgentLoop, build_local_tools
     from .utils import boot_run
+    from . import prompts as _prompts
+    from .skills import find_skill
 
     log, run_id = boot_run("chat")
 
-    try:
-        import voidrift_mcp.server as mcp_mod
-        mcp_mod.run_id = run_id
-        mcp_mod._boot()
-        tools, handlers = build_mcp_tools(mcp_mod, phase="chat")
-    except ImportError:
-        tools, handlers = [], {}
-
-    _get_prompt = handlers.get("get_prompt", lambda *a: "")
-    _get_skill = handlers.get("get_skill", lambda *a: "")
+    tools, handlers = build_local_tools(phase="chat")
 
     # Override web_fetch placeholder with real implementation (REQ-U-8).
     # confirm_fn is injected by _interactive_loop after spinner functions are defined
     # so that the spinner stops cleanly before the permission prompt appears.
     from .tools import make_web_fetch_handler
+    _web_cache: dict = {}
     _web_fetch_kwargs = dict(
         mc=mc,
-        session_store=mcp_mod.session_store if mcp_mod else None,
-        run_id=run_id,
         log=log,
-        get_prompt_fn=_get_prompt,
+        web_cache=_web_cache,
     )
     handlers["web_fetch"] = make_web_fetch_handler(**_web_fetch_kwargs)
 
-    skill = _get_skill("ANALYSIS-REQS")
-    system_context = _get_prompt("system", "CONTEXT")
-    system_prompt = _get_prompt("chat", "SYSTEM")
+    skill = find_skill("ANALYSIS-REQS") or ""
+    system_context = _prompts.load_prompt("system", "CONTEXT")
+    system_prompt = _prompts.load_prompt("chat", "SYSTEM")
 
     # Load project state for lifecycle awareness (REQ-PS-3)
     from .utils import voidrift_dir
@@ -531,13 +614,13 @@ def chat(model, doc) -> None:
         from .utils import voidrift_dir
         doc_path = voidrift_dir() / doc
         if doc_path.exists():
-            doc_section = _get_prompt("chat", "DOC").format(
+            doc_section = _prompts.load_prompt("chat", "DOC").format(
                 doc_name=doc, doc_content=doc_path.read_text()
             )
             system += f"\n\n{doc_section}"
         else:
             ui.warn(f"{doc} not found — starting fresh")
-            system += f"\n\n{_get_prompt('chat', 'DOC-NEW').format(doc_name=doc)}"
+            system += f"\n\n{_prompts.load_prompt('chat', 'DOC-NEW').format(doc_name=doc)}"
 
     agent = AgentLoop(
         model=mc,

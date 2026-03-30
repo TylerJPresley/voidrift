@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-os.environ["VOIDRIFT_HOME"] = str(REPO_ROOT)
+os.environ.setdefault("VOIDRIFT_HOME", str(Path.home() / ".voidrift"))
 
 
 @pytest.fixture(autouse=True)
@@ -20,6 +20,18 @@ def _clear_config_cache():
     clear_config_cache()
 
 
+@pytest.fixture(autouse=True)
+def _clear_resource_caches():
+    """Clear skills and prompts in-process caches before each test."""
+    from voidrift_cli.skills import clear_cache as clear_skills
+    from voidrift_cli.prompts import clear_cache as clear_prompts
+    clear_skills()
+    clear_prompts()
+    yield
+    clear_skills()
+    clear_prompts()
+
+
 @pytest.fixture
 def tmp_project(tmp_path, monkeypatch):
     """Create a temporary project directory with .voidrift/ and chdir into it."""
@@ -27,7 +39,7 @@ def tmp_project(tmp_path, monkeypatch):
     project.mkdir()
     (project / ".voidrift").mkdir()
     monkeypatch.chdir(project)
-    monkeypatch.setenv("VOIDRIFT_HOME", str(REPO_ROOT))
+    monkeypatch.setenv("VOIDRIFT_HOME", os.environ.get("VOIDRIFT_HOME", str(Path.home() / ".voidrift")))
     return project
 
 

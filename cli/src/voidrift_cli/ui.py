@@ -90,21 +90,27 @@ def model_label(alias: str) -> None:
     _con.print(f"\n[dim italic]  ◆ {alias}[/dim italic]\n")
 
 
-def model_text(text: str) -> None:
-    """Print a complete model response (non-streaming)."""
+def render_text(text: str):
+    """Return a Rich renderable for a model response without printing it."""
     if _has_markdown(text):
         from rich.markdown import Markdown
         from rich.padding import Padding
-        _con.print(Padding(Markdown(text), (0, 0, 0, 2)))
-    else:
-        for line in text.splitlines():
-            _con.print(f"  {_esc(line)}")
+        return Padding(Markdown(text), (1, 0, 0, 2))
+    from rich.text import Text
+    from rich.padding import Padding
+    return Padding(Text("\n".join(f"  {line}" for line in text.splitlines())), (1, 0, 0, 0))
+
+
+def model_text(text: str) -> None:
+    """Print a complete model response (non-streaming)."""
+    _con.print(render_text(text))
 
 
 def _has_markdown(text: str) -> bool:
     """Quick check for common markdown formatting."""
     import re
-    for p in (r'^#{1,6}\s', r'\*\*\w', r'```'):
+    for p in (r'^#{1,6}\s', r'\*\*\w', r'```', r'^\|', r'^[-*+]\s', r'`\w',
+              r'^\d+\.\s', r'^>\s', r'\[.+\]\('):
         if re.search(p, text, re.MULTILINE):
             return True
     return False

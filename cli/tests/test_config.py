@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from unittest.mock import patch
 
-from voidrift_cli.config import get_max_tokens, get_max_input_chars, clear_config_cache
+from voidrift_cli.config import get_max_tokens, get_max_input_chars, get_max_read_lines, clear_config_cache
 
 
 @pytest.fixture(autouse=True)
@@ -82,3 +82,45 @@ class TestGetMaxInputChars:
         cfg = {"limits": {"max_input_chars": 0}}
         with patch("voidrift_cli.config.load_config", return_value=cfg):
             assert get_max_input_chars("local") == 0
+
+
+class TestMaxReadLines:
+    """V-CFG-6a: get_max_read_lines returns configured value; defaults to 2000 (REQ-CFG-6)."""
+
+    def test_local_default_is_2000(self):
+        with patch("voidrift_cli.config.load_config", return_value={}):
+            assert get_max_read_lines("local") == 2000
+
+    def test_cloud_default_is_2000(self):
+        with patch("voidrift_cli.config.load_config", return_value={}):
+            assert get_max_read_lines("cloud") == 2000
+
+    def test_gateway_default_is_2000(self):
+        with patch("voidrift_cli.config.load_config", return_value={}):
+            assert get_max_read_lines("gateway") == 2000
+
+    def test_local_config_override(self):
+        cfg = {"limits": {"local_max_read_lines": 1000}}
+        with patch("voidrift_cli.config.load_config", return_value=cfg):
+            assert get_max_read_lines("local") == 1000
+
+    def test_cloud_config_override(self):
+        cfg = {"limits": {"cloud_max_read_lines": 4000}}
+        with patch("voidrift_cli.config.load_config", return_value=cfg):
+            assert get_max_read_lines("cloud") == 4000
+
+    def test_gateway_config_override(self):
+        cfg = {"limits": {"gateway_max_read_lines": 3000}}
+        with patch("voidrift_cli.config.load_config", return_value=cfg):
+            assert get_max_read_lines("gateway") == 3000
+
+    def test_missing_limits_section_returns_default(self):
+        with patch("voidrift_cli.config.load_config", return_value={}):
+            assert get_max_read_lines("unknown_type") == 2000
+
+    def test_per_type_overrides_are_independent(self):
+        cfg = {"limits": {"local_max_read_lines": 500, "cloud_max_read_lines": 5000}}
+        with patch("voidrift_cli.config.load_config", return_value=cfg):
+            assert get_max_read_lines("local") == 500
+            assert get_max_read_lines("cloud") == 5000
+            assert get_max_read_lines("gateway") == 2000

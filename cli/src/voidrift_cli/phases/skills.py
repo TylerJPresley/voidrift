@@ -336,18 +336,9 @@ def _install_via_synthesis(name: str, repos: list[str], model_alias: str) -> Non
         ui.error(f"Cannot resolve synthesis model '{model_alias}': {e}")
         return
 
-    try:
-        import voidrift_mcp.server as mcp_mod
-        from ..utils import boot_run
-        from ..agent import AgentLoop, build_mcp_tools
-        log, run_id = boot_run("skills")
-        mcp_mod.run_id = run_id
-        mcp_mod._boot()
-        _, handlers = build_mcp_tools(mcp_mod, phase="")
-        _get_template = handlers.get("get_template", lambda *a: "")
-        template = _get_template("DOMAIN-SKILL-TEMPLATE")
-    except Exception as e:
-        ui.warn(f"Could not load DOMAIN-SKILL-TEMPLATE: {e}")
+    from .. import prompts as _prompts
+    template = _prompts.load_template("DOMAIN-SKILL-TEMPLATE")
+    if not template:
         template = "Write a VoidRift domain skill with: name, description, core philosophy, implementation rules."
 
     combined_sources = "\n\n".join(source_contents)

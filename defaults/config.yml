@@ -24,3 +24,11 @@ concurrency:
 retention:
   project: 5
   global: 30
+
+limits:
+  local_max_tokens: 4096
+  cloud_max_tokens: 32768
+  max_input_chars: 8000
+  local_max_read_lines: 2000
+  cloud_max_read_lines: 2000
+  gateway_max_read_lines: 2000

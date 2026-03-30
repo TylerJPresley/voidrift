@@ -9,7 +9,7 @@ Phase prompt file for the develop pipeline. Each section is loaded via `get_prom
 Steps (follow this order):
 1. Call `read_framework_file("arch/<module>.md")` — review your module's architecture. Identify the components, interfaces, and patterns relevant to this task.
 2. Call `read_framework_file("spec/<module>.md")` — review your module's requirements. Identify the acceptance criteria and constraints for this task.
-3. If the task references a skill (e.g. `[backend-eng]`), call `get_skill("backend-eng")` to load it before implementing.
+3. If task skills are provided below, apply the guidance from each skill before implementing.
 4. Implement the task using `write_source_file()`. Use `read_source_file()` to examine existing project code as needed.
 5. Call `done()`.
 
@@ -22,6 +22,7 @@ TASK:
 {task_text}
 
 {arch_context}
+{skill_content}
 
 ## ESCALATION
 
