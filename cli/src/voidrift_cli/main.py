@@ -311,6 +311,7 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
 
     from rich.console import Group as _RGroup
     from rich.live import Live
+    from rich.padding import Padding as _RPadding
     from rich.spinner import Spinner as _RSpinner
     from rich.text import Text as _RText
 
@@ -321,7 +322,7 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
     _term_holder: list = [None]   # (termios_module, fd, saved_attr) while raw mode active
 
     def _thinking():
-        return _RGroup(_RText(""), _RSpinner("dots", text="  Thinking...", style="dim"))
+        return _RPadding(_RSpinner("dots", text="  Thinking...", style="dim"), pad=(1, 0, 0, 0))
 
     def on_token(token):
         _stream_buf.append(token)
@@ -333,10 +334,7 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
             text = "".join(_stream_buf)
             lines = text.splitlines()
             tail = "\n".join(lines[-5:]) if len(lines) > 5 else text
-            live.update(_RGroup(
-                _RText(""),
-                _RText("  " + tail, style="dim"),
-            ))
+            live.update(_RPadding(_RText("  " + tail, style="dim"), pad=(1, 0, 0, 0)))
 
     _stats_parts = []
 
@@ -367,11 +365,15 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
         from .tools import make_web_fetch_handler as _make_wf
 
         def _live_confirm(url: str) -> bool:
+            # Stop Live entirely so Click can own the terminal (REQ-UI-9).
+            # transient=True on stop clears the Thinking... from the screen;
+            # reset to False before restart so the final response persists.
             live = _live_holder[0]
             if live is not None:
-                live.update(_RText(""))
-            # Restore terminal so the confirm prompt is visible and typeable
-            # (REQ-UI-9: temporarily restore normal mode during interactive prompts).
+                live.transient = True
+                live.stop()
+                live.transient = False
+            # Restore terminal input mode so the prompt is visible and typeable.
             _ts = _term_holder[0]
             if _ts is not None:
                 _tm, _fd, _saved = _ts
@@ -379,12 +381,12 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
                     _tm.tcsetattr(_fd, _tm.TCSANOW, _saved)
                 except Exception:
                     pass
-            ui._con.print(f"[dim]web_fetch →[/dim] [cyan]{url}[/cyan]")
+            ui._con.print(f"\n[dim]web_fetch →[/dim] [cyan]{url}[/cyan]")
             try:
                 allowed = _click.confirm("  Allow fetch?", default=False)
             except _click.Abort:
                 allowed = False
-            # Re-disable echo now that the prompt is done
+            # Re-disable echo and restart Live.
             if _ts is not None:
                 try:
                     _raw = _tm.tcgetattr(_fd)
@@ -393,6 +395,7 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
                 except Exception:
                     pass
             if live is not None:
+                live.start()
                 live.update(_thinking())
             return allowed
 
@@ -423,16 +426,25 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
 
     session = PromptSession(key_bindings=kb, multiline=True)
 
+    _consecutive_interrupt = 0
     try:
         while True:
             try:
                 user_input = session.prompt(_context_prompt()).strip()
+                _consecutive_interrupt = 0
+            except KeyboardInterrupt:
+                _consecutive_interrupt += 1
+                if _consecutive_interrupt >= 2:
+                    raise
+                ui.info("Press Ctrl+C again to exit.")
+                continue
             except EOFError:
                 break
             if user_input.lower() in ("quit", "exit", "/quit"):
                 break
             if not user_input:
                 continue  # ignore accidental Enter pressed during model processing
+            _consecutive_interrupt = 0
 
             # /compact — summarize history to free context (REQ-U-7)
             if user_input.lower().strip() == "/compact":
@@ -489,6 +501,7 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
                 f.write(f"\n> {user_input}\n")
 
             _stream_buf.clear()
+            _msg_snapshot = len(agent.messages)
 
             # Disable terminal echo while the model is processing so keystrokes
             # don't appear alongside the Live display output (REQ-UI-9).
@@ -505,11 +518,15 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
                 pass
 
             _error = None
+            _interrupted = False
             with Live(_thinking(), console=ui._con, refresh_per_second=12) as _live:
                 _live_holder[0] = _live
                 try:
                     response = agent.send(user_input)
                     _live.update(ui.render_text(response))
+                except KeyboardInterrupt:
+                    _interrupted = True
+                    _live.transient = True  # erase thinking/streaming from screen
                 except RuntimeError as e:
                     _error = str(e)
                 finally:
@@ -521,6 +538,16 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
                             _termios.tcflush(_fd, _termios.TCIFLUSH)
                         except Exception:
                             pass
+
+            if _interrupted:
+                # Restore history to pre-send state — interrupt may leave orphaned
+                # tool calls, tool results, or partial assistant messages behind.
+                agent.messages = agent.messages[:_msg_snapshot]
+                ui._con.print()
+                ui.info("Interrupted.")
+                ui._con.print()
+                ui.operator_rule()
+                continue
 
             if _error:
                 ui.error(_error)
