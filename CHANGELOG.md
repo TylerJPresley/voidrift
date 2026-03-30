@@ -7,6 +7,16 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **REQ-UI-7:** Chat streaming uses a single Rich `Live` block with three progressive states: `Thinking...` spinner → dim 5-line streaming tail window → full Rich Markdown final render. Blank line precedes the block. Tool call names are suppressed.
+- **REQ-UI-8:** Chat responses are auto-detected for markdown content (headings, bold, fences, tables, bullets, numbered lists, inline code, blockquotes, links) and rendered via Rich Markdown. Plain text falls through to indented plain text.
+- **REQ-UI-9:** Terminal ECHO + ICANON disabled during `agent.send()` to prevent keystrokes appearing in the Live display. Restored on exit (success or error). Temporarily restored for `web_fetch` confirmation prompt (REQ-U-8) so the operator can see and type their response.
+
+### Changed
+- **REQ-UI-3:** Chat multiline input changed from "blank line to submit" to `\` + Enter for line continuation; Enter always submits.
+- **REQ-ARCH-4:** `Thinking...` spinner in chat phase now uses Rich `Live` on stdout; automated phases continue to use stderr spinner.
+- **REQ-U-8:** `web_fetch` confirmation prompt temporarily restores terminal to normal input mode before displaying, then re-disables after operator responds.
+
 ### Changed
 - Makefile `test` and `install` targets now use `uv` instead of `python3`/`pip`; `cli/README.md` and `mcp-context-server/README.md` install instructions updated to `uv pip install -e .`
 - `make setup` target added — runs `install` then `sync` as a single onboarding command

@@ -318,6 +318,7 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
     # Uses a list so closures can mutate without nonlocal declarations.
     _live_holder: list = [None]   # current Live instance
     _stream_buf: list[str] = []   # accumulated token buffer
+    _term_holder: list = [None]   # (termios_module, fd, saved_attr) while raw mode active
 
     def _thinking():
         return _RGroup(_RText(""), _RSpinner("dots", text="  Thinking...", style="dim"))
@@ -369,12 +370,29 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
             live = _live_holder[0]
             if live is not None:
                 live.update(_RText(""))
+            # Restore terminal so the confirm prompt is visible and typeable
+            # (REQ-UI-9: temporarily restore normal mode during interactive prompts).
+            _ts = _term_holder[0]
+            if _ts is not None:
+                _tm, _fd, _saved = _ts
+                try:
+                    _tm.tcsetattr(_fd, _tm.TCSANOW, _saved)
+                except Exception:
+                    pass
             ui._con.print(f"[dim]web_fetch →[/dim] [cyan]{url}[/cyan]")
             try:
                 allowed = _click.confirm("  Allow fetch?", default=False)
             except _click.Abort:
                 allowed = False
-            if allowed and live is not None:
+            # Re-disable echo now that the prompt is done
+            if _ts is not None:
+                try:
+                    _raw = _tm.tcgetattr(_fd)
+                    _raw[3] &= ~(_tm.ECHO | _tm.ICANON)
+                    _tm.tcsetattr(_fd, _tm.TCSANOW, _raw)
+                except Exception:
+                    pass
+            if live is not None:
                 live.update(_thinking())
             return allowed
 
@@ -473,7 +491,7 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
             _stream_buf.clear()
 
             # Disable terminal echo while the model is processing so keystrokes
-            # don't appear alongside the Live display output.
+            # don't appear alongside the Live display output (REQ-UI-9).
             _saved_term = None
             try:
                 import termios as _termios
@@ -482,6 +500,7 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
                 _raw = _termios.tcgetattr(_fd)
                 _raw[3] &= ~(_termios.ECHO | _termios.ICANON)
                 _termios.tcsetattr(_fd, _termios.TCSANOW, _raw)
+                _term_holder[0] = (_termios, _fd, _saved_term)
             except Exception:
                 pass
 
@@ -495,6 +514,7 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
                     _error = str(e)
                 finally:
                     _live_holder[0] = None
+                    _term_holder[0] = None
                     if _saved_term is not None:
                         try:
                             _termios.tcsetattr(_fd, _termios.TCSANOW, _saved_term)
