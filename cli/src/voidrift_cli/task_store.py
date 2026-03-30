@@ -1,8 +1,8 @@
-"""Task store for parsing and managing TASKS.md (AC-MCP4c).
+"""CLI-native task store for parsing and managing TASKS.md (REQ-CTX-3).
 
 Parses a single TASKS.md into per-module task queues.
-Supports `## Module: <name>` headers for multi-module projects.
-Write-through: all state changes persist back to disk.
+Supports ``## Module: <name>`` headers for multi-module projects.
+Write-through: all state changes persist back to disk immediately.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ class Task(BaseModel):
 
 
 class TaskStore(BaseModel):
-    """Manages tasks from a single TASKS.md, split by module headers."""
+    """Manages tasks from a single TASKS.md, split by module headers (REQ-CTX-3)."""
 
     path: Path | None = None
     _modules: dict[str, list[Task]] = PrivateAttr(default_factory=dict)
@@ -130,7 +130,7 @@ class TaskStore(BaseModel):
         """Return done/blocked/remaining counts.
 
         Args:
-            module: Module name. Empty returns counts for all modules.
+            module: Module name. Empty returns aggregated counts across all modules.
         """
         if module:
             return self._module_status(module)

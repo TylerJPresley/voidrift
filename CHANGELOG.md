@@ -11,6 +11,11 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Makefile `test` and `install` targets now use `uv` instead of `python3`/`pip`; `cli/README.md` and `mcp-context-server/README.md` install instructions updated to `uv pip install -e .`
 - `make setup` target added — runs `install` then `sync` as a single onboarding command
 - Default config assets (`config.yml`, `models.yml`, `worker-models.yml`) moved from repo root to `defaults/`; `make sync` updated accordingly
+- `make sync` now also creates `~/.voidrift/domain-skills/` (REQ-CFG-3) — previously omitted, causing skills system to reference a non-existent directory
+- Test suite `VOIDRIFT_HOME` fixture updated to use `~/.voidrift` (the actual runtime location per REQ-CFG-4) instead of the repo root; CI environments must set `VOIDRIFT_HOME` explicitly
+
+### Added
+- Phase commands (`gather`, `plan`, `develop`, `automate`, `verify`, `chat`) now check for `~/.voidrift/models.yml` at startup and exit with a clear "Run 'make setup'" error if missing (REQ-CFG-8); utility commands (`status`, `log`, `prune`, `unlock`, `completions`, `skills`) are unaffected
 
 ### Added
 - `web_fetch(url)` tool for `voidrift chat` (REQ-U-8) — fetches a URL, strips HTML markup, summarises content via an isolated sub-agent (raw page content never enters the chat context window), caches the summary in the MCP session store for the session. HTTP/DNS/timeout errors return a message rather than raising. Available in the chat phase only.

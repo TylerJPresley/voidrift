@@ -7,7 +7,9 @@ from pathlib import Path
 
 from rich.status import Status
 
-from ..agent import AgentLoop, build_mcp_tools
+from ..agent import AgentLoop, build_local_tools
+from .. import prompts
+from ..skills import find_skill
 from ..models import ModelConfig
 from ..utils import ensure_voidrift_dir, voidrift_dir, boot_run, check_disk_space
 from .. import ui
@@ -66,14 +68,7 @@ def run_plan(
     with open(log, "a") as f:
         f.write(f"\n=== Plan run: {datetime.now().isoformat()} ===\n")
 
-    # Set up tools
-    try:
-        import voidrift_mcp.server as mcp_mod
-        mcp_mod.run_id = run_id
-        mcp_mod._boot()
-        tools, handlers = build_mcp_tools(mcp_mod, phase="plan")
-    except ImportError:
-        tools, handlers = [], {}
+    tools, handlers = build_local_tools(phase="plan")
 
     requirements = (d / "REQUIREMENTS.md").read_text()
     specs = []
@@ -82,17 +77,18 @@ def run_plan(
         for f in sorted(spec_dir.glob("*.md")):
             specs.append(f"### {f.stem}\n\n{f.read_text()}")
 
-    _get_prompt = handlers.get("get_prompt", lambda *a: "")
-    _get_skill = handlers.get("get_skill", lambda *a: "")
-
-    skill = _get_skill("ARCH-DESIGN")
+    skill = find_skill("ARCH-DESIGN") or ""
 
     specs_section = "FEATURE SPECS:\n" + "\n\n".join(specs) if specs else ""
     valid_skills = ", ".join(sorted(_available_skills())) if _available_skills() else ""
     task_format = _TASK_FORMAT.format(valid_skills=valid_skills)
 
+    # Pre-load architecture template (replaces get_template tool call in prompt)
+    arch_template = prompts.load_template("ARCHITECTURE-TEMPLATE")
+    arch_template_section = f"\n\n## Architecture Template\n\n{arch_template}" if arch_template else ""
+
     # Load shared framework context (REQ-RES-7)
-    system_context = _get_prompt("system", "CONTEXT")
+    system_context = prompts.load_prompt("system", "CONTEXT")
 
     if update:
         arch_path = d / "ARCHITECTURE.md"
@@ -100,7 +96,7 @@ def run_plan(
         if not arch_path.exists() or not tasks_path.exists():
             ui.error("--update requires existing ARCHITECTURE.md and TASKS.md. Run plan without --update first.")
             return 1
-        stage_prompt = _get_prompt("plan", "PLAN-UPDATE").format(
+        stage_prompt = prompts.load_prompt("plan", "PLAN-UPDATE").format(
             requirements=requirements,
             specs_section=specs_section,
             architecture=arch_path.read_text(),
@@ -109,7 +105,7 @@ def run_plan(
         )
     else:
         feature_section = f"Focus on feature: {feature}" if feature else ""
-        stage_prompt = _get_prompt("plan", "PLAN").format(
+        stage_prompt = prompts.load_prompt("plan", "PLAN").format(
             requirements=requirements,
             specs_section=specs_section,
             feature_section=feature_section,
@@ -117,6 +113,7 @@ def run_plan(
         )
 
     system = "\n\n".join(p for p in [system_context, skill, stage_prompt] if p)
+    system += arch_template_section
 
     agent = AgentLoop(
         model=model,

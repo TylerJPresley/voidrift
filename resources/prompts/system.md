@@ -20,3 +20,16 @@ You are an agent in **VoidRift**, a local-first AI development lifecycle framewo
 | `VERIFY.md` | Verify | Chat | Verification results — test results, lint, requirements coverage, verdict |
 | `STATE.md` | Gather, Plan, Develop | Develop, Chat | Phase lifecycle log — timestamp, model, outcome, file manifest per run |
 | `logs/<phase>-<ts>.log` | Each phase | (read-only, never load) | Full agent dialog for that run — not a tool-readable artifact |
+
+## FILE SIZE LIMITS
+
+Every file read and write is subject to a per-model line limit (typically 2000 lines).
+
+**Reading large files:**
+When `read_source_file` or `read_framework_file` returns a `WARNING: ... has N lines` header, the file was truncated. You have received only the first chunk. You MUST call the tool again with the next `offset` value shown in the warning before drawing any conclusions about the file. Continue paginating until you have read all required sections.
+
+**Writing large files:**
+When a write tool returns an error containing `exceeds the max_read_lines limit`, the file you attempted to write is too large. This is a design signal — the file must be decomposed. Do NOT retry the same write with the same content. Instead:
+1. Identify a logical split (by module, responsibility, or section).
+2. Write each part as a separate, smaller file.
+3. Never truncate content to fit the limit — decomposition always produces a better design.

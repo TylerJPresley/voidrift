@@ -11,8 +11,8 @@ Phase prompt file for the interactive chat session. Each section is loaded via `
 Chat helps the operator review and edit artifacts that already exist: reviewing requirements before running plan, refining architecture after plan, editing tasks, etc. Chat cannot create `REQUIREMENTS.md` from a codebase, generate `ARCHITECTURE.md` from requirements, or produce any artifact that a phase command would produce.
 
 **Tools available:**
-- Discovery: `list_skills()`, `list_templates()`, `list_documents()`, `list_project_artifacts()`
-- Read: `get_skill()`, `get_template()`, `get_requirements()`, `read_source_file()`, `read_framework_file()`, `get_task_status()`
+- Discovery: `list_skills()`, `list_project_artifacts()`
+- Read: `get_skill()`, `read_source_file()`, `read_framework_file()`
 - Write: `write_source_file()` — writes project source files; `write_framework_file()` — writes `.voidrift/` artifacts
 - Web: `web_fetch(url)` — fetches a URL and returns a summary; results are cached for the session
 

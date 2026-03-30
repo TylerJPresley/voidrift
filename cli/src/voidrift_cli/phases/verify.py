@@ -8,7 +8,7 @@ from pathlib import Path
 
 from rich.status import Status
 
-from ..agent import AgentLoop, build_mcp_tools
+from ..agent import AgentLoop, build_local_tools
 from ..models import ModelConfig
 from ..utils import ensure_voidrift_dir, voidrift_dir, boot_run, check_disk_space
 from .. import ui
@@ -104,13 +104,7 @@ def run_verify(worker: ModelConfig, architect: ModelConfig | None = None) -> int
     log, run_id = boot_run("verify")
     ui.detail(f"Log: {log}")
 
-    try:
-        import voidrift_mcp.server as mcp_mod
-        mcp_mod.run_id = run_id
-        mcp_mod._boot()
-        tools, handlers = build_mcp_tools(mcp_mod)
-    except ImportError:
-        tools, handlers = [], {}
+    tools, handlers = build_local_tools()
 
     # Analysis
     context_parts = [f"Raw check output:\n{raw_output}"]

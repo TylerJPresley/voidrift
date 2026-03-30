@@ -73,6 +73,49 @@ class TestSystemLog:
         assert mcp_log.name == "mcp.log"
 
 
+class TestSetupCheck:
+    """V-CFG-3: Phase commands exit with setup error when models.yml missing (REQ-CFG-8)."""
+
+    def test_phase_command_exits_when_models_yml_missing(self, tmp_path, monkeypatch):
+        """gather exits with setup error when VOIDRIFT_HOME has no models.yml."""
+        monkeypatch.setenv("VOIDRIFT_HOME", str(tmp_path))
+        from voidrift_cli.config import clear_config_cache
+        clear_config_cache()
+
+        from click.testing import CliRunner
+        from voidrift_cli.main import cli
+        runner = CliRunner()
+        result = runner.invoke(cli, ["gather", "claude", "."])
+        assert result.exit_code != 0
+        assert "make setup" in result.output
+
+    def test_phase_command_proceeds_when_models_yml_exists(self, tmp_path, monkeypatch):
+        """No setup error raised when models.yml exists at VOIDRIFT_HOME."""
+        (tmp_path / "models.yml").write_text("models: {}\n")
+        monkeypatch.setenv("VOIDRIFT_HOME", str(tmp_path))
+        from voidrift_cli.config import clear_config_cache
+        clear_config_cache()
+
+        from click.testing import CliRunner
+        from voidrift_cli.main import cli
+        runner = CliRunner()
+        # Will fail past the setup check (model not found), but not with setup error
+        result = runner.invoke(cli, ["gather", "claude", "."])
+        assert "make setup" not in result.output
+
+    def test_utility_command_unaffected_by_missing_models_yml(self, tmp_path, monkeypatch):
+        """status command runs without setup error even when models.yml is missing."""
+        monkeypatch.setenv("VOIDRIFT_HOME", str(tmp_path))
+        from voidrift_cli.config import clear_config_cache
+        clear_config_cache()
+
+        from click.testing import CliRunner
+        from voidrift_cli.main import cli
+        runner = CliRunner()
+        result = runner.invoke(cli, ["status"])
+        assert "make setup" not in result.output
+
+
 class TestActiveModelAlias:
     """V-ARCH-6: Interactive mode defaults to the active container's model alias."""
 

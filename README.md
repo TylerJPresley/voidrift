@@ -120,14 +120,21 @@ Run benchmarks: `worker bench 100 1`
 ### Kiro Gateway Models (Free)
 
 Requires [Kiro Gateway setup](#kiro-gateway). See that section for credentials.
+Context window sizes sourced from [kiro.dev/docs/models/](https://kiro.dev/docs/models/).
 
-| Alias | Model |
-|---|---|
-| `kiro-sonnet` | Claude Sonnet 4.5 |
-| `kiro-haiku` | Claude Haiku 4.5 |
-| `kiro-deepseek` | DeepSeek V3.2 |
-| `kiro-minimax` | MiniMax M2.1 (230B MoE) |
-| `kiro-qwen` | Qwen3-Coder-Next (80B MoE) |
+| Alias | Model | Context |
+|---|---|---|
+| `kiro-opus` | Claude Opus 4.6 | 1M |
+| `kiro-sonnet` | Claude Sonnet 4.6 | 1M |
+| `kiro-opus-4.5` | Claude Opus 4.5 | 200K |
+| `kiro-sonnet-4.5` | Claude Sonnet 4.5 | 200K |
+| `kiro-sonnet-4` | Claude Sonnet 4.0 | 200K |
+| `kiro-haiku` | Claude Haiku 4.5 | 200K |
+| `kiro-deepseek` | DeepSeek V3.2 | 128K |
+| `kiro-minimax` | MiniMax M2.5 | 200K |
+| `kiro-minimax-2.1` | MiniMax M2.1 | 200K |
+| `kiro-qwen` | Qwen3-Coder-Next | 256K |
+| `kiro` | Auto (routing) | — |
 
 ---
 

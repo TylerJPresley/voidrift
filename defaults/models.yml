@@ -9,8 +9,8 @@
 #
 # Optional fields:
 #   max_context — context window size (integer). Used when the model's API does
-#                 not expose max_model_len. Required for cloud models; not needed
-#                 for local (vLLM exposes it) or gateway (endpoint exposes it).
+#                 not expose max_model_len. Required for cloud and gateway models;
+#                 not needed for local (vLLM exposes max_model_len via its API).
 #
 # Variable expansion:
 #   ${section.key}  — Reference from config.yml (e.g., ${worker.ip})
@@ -44,32 +44,78 @@ models:
     max_context: 1048576
 
   # Kiro Gateway models (start with: worker kiro start)
+  kiro:
+    model_id: "openai/auto"
+    base_url: "http://localhost:${kiro.port}/v1"
+    api_key: "${kiro.api_key}"
+    type: gateway
+
+  kiro-opus:
+    model_id: "openai/claude-opus-4.6"
+    base_url: "http://localhost:${kiro.port}/v1"
+    api_key: "${kiro.api_key}"
+    type: gateway
+    max_context: 1048576
+
   kiro-sonnet:
+    model_id: "openai/claude-sonnet-4.6"
+    base_url: "http://localhost:${kiro.port}/v1"
+    api_key: "${kiro.api_key}"
+    type: gateway
+    max_context: 1048576
+
+  kiro-opus-4.5:
+    model_id: "openai/claude-opus-4.5"
+    base_url: "http://localhost:${kiro.port}/v1"
+    api_key: "${kiro.api_key}"
+    type: gateway
+    max_context: 200000
+
+  kiro-sonnet-4.5:
     model_id: "openai/claude-sonnet-4.5"
     base_url: "http://localhost:${kiro.port}/v1"
     api_key: "${kiro.api_key}"
     type: gateway
+    max_context: 200000
+
+  kiro-sonnet-4:
+    model_id: "openai/claude-sonnet-4"
+    base_url: "http://localhost:${kiro.port}/v1"
+    api_key: "${kiro.api_key}"
+    type: gateway
+    max_context: 200000
 
   kiro-haiku:
     model_id: "openai/claude-haiku-4.5"
     base_url: "http://localhost:${kiro.port}/v1"
     api_key: "${kiro.api_key}"
     type: gateway
+    max_context: 200000
 
   kiro-deepseek:
-    model_id: "openai/deepseek-v3-2"
+    model_id: "openai/deepseek-3.2"
     base_url: "http://localhost:${kiro.port}/v1"
     api_key: "${kiro.api_key}"
     type: gateway
+    max_context: 131072
 
   kiro-minimax:
-    model_id: "openai/minimax-m2-1"
+    model_id: "openai/minimax-m2.5"
     base_url: "http://localhost:${kiro.port}/v1"
     api_key: "${kiro.api_key}"
     type: gateway
+    max_context: 200000
+
+  kiro-minimax-2.1:
+    model_id: "openai/minimax-m2.1"
+    base_url: "http://localhost:${kiro.port}/v1"
+    api_key: "${kiro.api_key}"
+    type: gateway
+    max_context: 200000
 
   kiro-qwen:
     model_id: "openai/qwen3-coder-next"
     base_url: "http://localhost:${kiro.port}/v1"
     api_key: "${kiro.api_key}"
     type: gateway
+    max_context: 262144

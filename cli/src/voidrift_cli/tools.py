@@ -58,10 +58,8 @@ def _default_web_confirm(url: str) -> bool:
 
 def make_web_fetch_handler(
     mc,
-    session_store,
-    run_id: str,
     log: str,
-    get_prompt_fn: Callable,
+    web_cache: dict | None = None,
     agent_loop_cls=None,
     confirm_fn: Callable[[str], bool] | None = None,
 ) -> Callable[[str], str]:
@@ -69,15 +67,14 @@ def make_web_fetch_handler(
 
     Each call fetches the URL in an isolated sub-agent context so raw page
     content never enters the chat agent's context window — only the summary
-    does. Results are cached in the session store for the duration of the run.
+    does. Results are cached in ``web_cache`` for the duration of the run.
 
     Args:
         mc: ModelConfig for the summarisation sub-agent.
-        session_store: SessionStore instance (or None to skip caching).
-        run_id: Current run identifier for cache scoping.
         log: Path to the phase log file.
-        get_prompt_fn: Callable matching ``get_prompt(phase, section) -> str``.
+        web_cache: In-memory dict mapping url -> summary (mutated in place). Pass {} to enable caching.
         agent_loop_cls: AgentLoop class; defaults to the real one (injectable for tests).
+        confirm_fn: Optional callable to confirm fetches; defaults to interactive prompt.
     """
     if agent_loop_cls is None:
         from .agent import AgentLoop
@@ -87,10 +84,8 @@ def make_web_fetch_handler(
 
     def handler(url: str) -> str:
         # Return cached summary if available — no prompt needed for cached results
-        if session_store:
-            cached = session_store.get(run_id, "web_cache", url)
-            if cached:
-                return cached
+        if web_cache is not None and url in web_cache:
+            return web_cache[url]
 
         # Show URL and ask operator permission before making any HTTP connection
         if not _confirm(url):
@@ -113,7 +108,8 @@ def make_web_fetch_handler(
             raw = _strip_html(raw)
 
         # Summarise via isolated sub-agent — raw content stays out of chat context
-        fetch_prompt = get_prompt_fn("chat", "WEB-FETCH")
+        from . import prompts as _prompts
+        fetch_prompt = _prompts.load_prompt("chat", "WEB-FETCH")
         summarizer = agent_loop_cls(
             model=mc,
             system_prompt=fetch_prompt,
@@ -129,8 +125,8 @@ def make_web_fetch_handler(
             return f"web_fetch summarize error: {e}"
 
         # Cache for the session
-        if session_store:
-            session_store.put(run_id, "web_cache", url, summary)
+        if web_cache is not None:
+            web_cache[url] = summary
 
         return summary
 
@@ -148,9 +144,10 @@ class WriteContext:
         ctx.write_source_file("src/main.py", "...")
     """
 
-    def __init__(self, project_dir: Path | None = None) -> None:
+    def __init__(self, project_dir: Path | None = None, model_type: str = "local") -> None:
         self._project_dir = (project_dir or Path.cwd()).resolve()
         self._framework_dir = self._project_dir / ".voidrift"
+        self._model_type = model_type
         self._source_write_count: int = 0
         self._written_this_run: set[str] = set()
         self._rewrite_allowed: set[str] = set()
@@ -188,6 +185,18 @@ class WriteContext:
             return f"Error: content is a placeholder ('{content.strip()}'). Write the FULL file content."
         return None
 
+    def _check_write_size(self, path: str, content: str) -> str | None:
+        from .config import get_max_read_lines
+        limit = get_max_read_lines(self._model_type)
+        line_count = content.count("\n") + (1 if content and not content.endswith("\n") else 0)
+        if line_count > limit:
+            return (
+                f"Error: {path} is {line_count} lines, which exceeds the {limit}-line limit "
+                f"(model_type={self._model_type}). This file exceeds the max_read_lines limit. "
+                f"Decompose into smaller files and write each separately."
+            )
+        return None
+
     def _check_duplicate(self, path: str, full: Path, content: str) -> str | None:
         if path in self._written_this_run and full.exists() and path not in self._rewrite_allowed:
             return f"Already written: {path} — file is complete. Proceed to the next step."
@@ -198,6 +207,8 @@ class WriteContext:
     def write_source_file(self, path: str, content: str) -> str:
         """Write a source file to the project directory."""
         if err := self._validate_content(content):
+            return err
+        if err := self._check_write_size(path, content):
             return err
         if path.startswith(".voidrift/") or path.startswith(".voidrift\\"):
             return "Access denied: use write_framework_file for .voidrift/ paths."
@@ -219,6 +230,8 @@ class WriteContext:
         """Write a framework artifact to the .voidrift/ directory."""
         if err := self._validate_content(content):
             return err
+        if err := self._check_write_size(path, content):
+            return err
         if path.startswith(".voidrift/"):
             path = path[len(".voidrift/"):]
         full = self._framework_dir / path
@@ -234,7 +247,30 @@ class WriteContext:
         self._written_this_run.add(canon)
         return f"Wrote {len(content)} bytes to .voidrift/{path}"
 
-    def read_source_file(self, path: str) -> str:
+    def _read_with_guard(self, full: Path, display_path: str, offset: int, limit: int | None) -> str:
+        """Read lines from a file with optional pagination and size guard (REQ-FSZ-1)."""
+        from .config import get_max_read_lines
+        effective_limit = limit if limit is not None else get_max_read_lines(self._model_type)
+        explicit_limit = limit is not None or offset > 0
+
+        lines = full.read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
+        total = len(lines)
+
+        chunk = lines[offset: offset + effective_limit]
+        content = "".join(chunk)
+
+        if not explicit_limit and total > effective_limit:
+            next_offset = offset + effective_limit
+            header = (
+                f"WARNING: {display_path} has {total} lines. "
+                f"Returning lines {offset + 1}–{offset + len(chunk)}. "
+                f"Use offset={next_offset} to read the next chunk.\n\n"
+            )
+            return header + content
+
+        return content
+
+    def read_source_file(self, path: str, offset: int = 0, limit: int | None = None) -> str:
         """Read a source file from the project directory."""
         full = self._project_dir / path
         if not full.exists():
@@ -247,9 +283,9 @@ class WriteContext:
             return f"Access denied: {path} is outside the project directory"
         if ".voidrift/logs" in path or ".voidrift\\logs" in path:
             return "Access denied: log files are not readable by the model. Use 'voidrift log' instead."
-        return full.read_text(encoding="utf-8", errors="replace")
+        return self._read_with_guard(full, path, offset, limit)
 
-    def read_framework_file(self, path: str) -> str:
+    def read_framework_file(self, path: str, offset: int = 0, limit: int | None = None) -> str:
         """Read a framework artifact from the .voidrift/ directory."""
         if path.startswith(".voidrift/"):
             path = path[len(".voidrift/"):]
@@ -264,7 +300,7 @@ class WriteContext:
             return f"Access denied: {path} resolves outside .voidrift/"
         if path.startswith("logs/") or path.startswith("logs\\"):
             return "Access denied: log files are not readable by the model."
-        return full.read_text(encoding="utf-8", errors="replace")
+        return self._read_with_guard(full, f".voidrift/{path}", offset, limit)
 
     def list_project_artifacts(self) -> str:
         """List all files in the project's .voidrift/ directory (excludes logs)."""
@@ -334,14 +370,14 @@ def write_framework_file(path: str, content: str) -> str:
     return _ctx.write_framework_file(path, content)
 
 
-def read_source_file(path: str) -> str:
+def read_source_file(path: str, offset: int = 0, limit: int | None = None) -> str:
     """Read a source file from the project directory."""
-    return _ctx.read_source_file(path)
+    return _ctx.read_source_file(path, offset=offset, limit=limit)
 
 
-def read_framework_file(path: str) -> str:
+def read_framework_file(path: str, offset: int = 0, limit: int | None = None) -> str:
     """Read a framework artifact from the .voidrift/ directory."""
-    return _ctx.read_framework_file(path)
+    return _ctx.read_framework_file(path, offset=offset, limit=limit)
 
 
 def list_project_artifacts() -> str:
@@ -394,11 +430,17 @@ LOCAL_TOOLS = [
         "type": "function",
         "function": {
             "name": "read_source_file",
-            "description": "Read a source file from the project directory.",
+            "description": (
+                "Read a source file from the project directory. "
+                "If the file exceeds the line limit, a warning header is returned with pagination instructions. "
+                "Use offset and limit to read large files in chunks."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "path": {"type": "string", "description": "Relative path from project root"},
+                    "offset": {"type": "integer", "description": "Line offset to start reading from (0-based, default 0)"},
+                    "limit": {"type": "integer", "description": "Maximum number of lines to return. Omit to use the model's configured max_read_lines."},
                 },
                 "required": ["path"],
             },
@@ -408,11 +450,17 @@ LOCAL_TOOLS = [
         "type": "function",
         "function": {
             "name": "read_framework_file",
-            "description": "Read a framework artifact from the .voidrift/ directory.",
+            "description": (
+                "Read a framework artifact from the .voidrift/ directory. "
+                "If the file exceeds the line limit, a warning header is returned with pagination instructions. "
+                "Use offset and limit to read large files in chunks."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "path": {"type": "string", "description": "Path relative to .voidrift/ (e.g. arch/backend.md, spec/frontend.md)"},
+                    "offset": {"type": "integer", "description": "Line offset to start reading from (0-based, default 0)"},
+                    "limit": {"type": "integer", "description": "Maximum number of lines to return. Omit to use the model's configured max_read_lines."},
                 },
                 "required": ["path"],
             },

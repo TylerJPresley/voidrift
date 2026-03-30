@@ -11,7 +11,10 @@ from pathlib import Path
 
 from rich.status import Status
 
-from ..agent import AgentLoop, build_mcp_tools
+from ..agent import AgentLoop, build_local_tools
+from .. import prompts
+from ..skills import find_skill
+from ..task_store import TaskStore
 from ..models import ModelConfig
 from ..utils import (
     ensure_voidrift_dir, voidrift_dir, boot_run, check_disk_space,
@@ -85,20 +88,14 @@ def run_develop(
     with open(log, "a") as f:
         f.write(f"\n=== Develop session: {datetime.now().isoformat()} ===\n")
 
-    try:
-        import voidrift_mcp.server as mcp_mod
-        mcp_mod.run_id = run_id
-        mcp_mod._boot()
-        mcp_mod.load_tasks(str(task_file))
-        tools, handlers = build_mcp_tools(mcp_mod, phase="develop")
-    except ImportError:
-        tools, handlers = [], {}
+    tools, handlers = build_local_tools(phase="develop")
 
-    modules = mcp_mod.tasks.modules() if hasattr(mcp_mod, 'tasks') else ["_default"]
+    task_store = TaskStore()
+    task_store.load(task_file)
+    modules = task_store.modules()
 
-    _get_prompt = handlers.get("get_prompt", lambda *a: "")
-    dev_prompt_tpl = _get_prompt("develop", "TASK")
-    esc_prompt_tpl = _get_prompt("develop", "ESCALATION")
+    dev_prompt_tpl = prompts.load_prompt("develop", "TASK")
+    esc_prompt_tpl = prompts.load_prompt("develop", "ESCALATION")
 
     git_lock = threading.Lock()  # REQ-D-11: serialize git operations across workers
 
@@ -119,7 +116,7 @@ def run_develop(
                         ui.warn("Interrupted — stopping after current task.")
                         break
                     label = f"[{module}] "
-                    result = _develop_module(worker, architect, module, label, tools, handlers, log, dev_prompt_tpl, esc_prompt_tpl, git_lock, lambda: _interrupted)
+                    result = _develop_module(worker, architect, module, label, tools, handlers, log, dev_prompt_tpl, esc_prompt_tpl, git_lock, task_store, lambda: _interrupted)
                     if result != 0:
                         break
             else:
@@ -135,7 +132,7 @@ def run_develop(
                         fut = pool.submit(
                             _develop_module, worker, architect, module, label,
                             tools, handlers, log, dev_prompt_tpl, esc_prompt_tpl,
-                            git_lock, lambda: _interrupted,
+                            git_lock, task_store, lambda: _interrupted,
                         )
                         futures[fut] = module
 
@@ -154,7 +151,7 @@ def run_develop(
                     ui.warn("Interrupted — stopping after current task.")
                     break
                 label = ""
-                result = _develop_module(worker, architect, module, label, tools, handlers, log, dev_prompt_tpl, esc_prompt_tpl, git_lock, lambda: _interrupted)
+                result = _develop_module(worker, architect, module, label, tools, handlers, log, dev_prompt_tpl, esc_prompt_tpl, git_lock, task_store, lambda: _interrupted)
     except KeyboardInterrupt:
         _interrupted = True
         ui.warn("Interrupted — stopping after current task.")
@@ -182,11 +179,10 @@ def _develop_module(
     dev_prompt_tpl: str,
     esc_prompt_tpl: str,
     git_lock: threading.Lock,
+    task_store: TaskStore,
     is_interrupted: callable = lambda: False,
 ) -> int:
-    """Execute tasks for a single module via MCP task tools (REQ-D-4)."""
-    import voidrift_mcp.server as mcp_mod
-
+    """Execute tasks for a single module (REQ-D-4)."""
     escalation_count = 0
     blocked_tasks = 0
     d = voidrift_dir()
@@ -198,11 +194,11 @@ def _develop_module(
             ui.warn(f"{prefix}Interrupted — exiting module.")
             return 1
 
-        task = mcp_mod.tasks.get_next(mod_arg)
+        task = task_store.get_next(mod_arg)
         if not task:
             break
 
-        status = mcp_mod.tasks.status(mod_arg)
+        status = task_store.status(mod_arg)
         task_num = status["done"] + status["blocked"] + 1
         total = status["done"] + status["blocked"] + status["remaining"]
         label = truncate_task_label(f"- [ ] {task.text}")
@@ -213,9 +209,18 @@ def _develop_module(
         if task_num in arch_guidance:
             arch_context = f"Architect guidance:\n{arch_guidance[task_num]}"
 
+        # Pre-load task skills and inject into system prompt
+        skill_parts = []
+        for skill_name in task.skills:
+            content = find_skill(skill_name)
+            if content:
+                skill_parts.append(f"### Skill: {skill_name}\n\n{content}")
+        skill_content = "\n\n".join(skill_parts) if skill_parts else ""
+
         system = dev_prompt_tpl.format(
             task_text=task.text,
             arch_context=arch_context,
+            skill_content=skill_content,
         )
 
         from ..tools import reset_write_count, get_write_count
@@ -302,7 +307,7 @@ def _develop_module(
 
             escalation_count += 1
             if escalation_count > MAX_ESCALATIONS:
-                mcp_mod.tasks.block(mod_arg)
+                task_store.block(mod_arg)
                 blocked_tasks += 1
                 ui.warn("Task blocked (max escalations reached)")
                 continue
@@ -316,7 +321,7 @@ def _develop_module(
             else:
                 return 1
 
-        mcp_mod.tasks.complete(mod_arg)
+        task_store.complete(mod_arg)
         ui.success(f"{label} ({elapsed:.1f}s)")
 
     # Clean up any leftover escalation dirs

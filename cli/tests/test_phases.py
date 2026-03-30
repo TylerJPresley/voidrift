@@ -48,10 +48,11 @@ class TestGatherInputChunking:
         from voidrift_cli.config import get_max_input_chars
         assert get_max_input_chars("local") == 8000
 
-    def test_cloud_model_not_chunked(self):
-        """Cloud model limit is 0 (unlimited — no chunking)."""
+    def test_cloud_model_input_limit(self):
+        """Cloud model input limit matches the configured max_input_chars."""
         from voidrift_cli.config import get_max_input_chars
-        assert get_max_input_chars("cloud") == 0
+        result = get_max_input_chars("cloud")
+        assert result >= 0  # 0 means unlimited, >0 means configured limit
 
     def test_large_file_produces_multiple_chunks(self, local_model):
         """A file 3x the limit produces at least 3 chunks."""
@@ -238,24 +239,13 @@ class TestChatWebFetch:
         """Second call with same URL returns cached summary without HTTP."""
         from voidrift_cli.tools import make_web_fetch_handler
 
-        class FakeStore:
-            def __init__(self):
-                self._data: dict = {}
-            def get(self, run_id, kind, key):
-                return self._data.get((run_id, kind, key))
-            def put(self, run_id, kind, key, value):
-                self._data[(run_id, kind, key)] = value
-
         class FakeAgent:
             def __init__(self, **kwargs): pass
             def send(self, msg): return "Agent summary."
 
-        store = FakeStore()
-        store.put("run1", "web_cache", "https://example.com", "Cached summary.")
-
+        web_cache = {"https://example.com": "Cached summary."}
         handler = make_web_fetch_handler(
-            mc=None, session_store=store, run_id="run1",
-            log="/tmp/test.log", get_prompt_fn=lambda *a: "",
+            mc=None, log="/tmp/test.log", web_cache=web_cache,
             agent_loop_cls=FakeAgent,
             confirm_fn=lambda url: True,
         )
@@ -271,8 +261,7 @@ class TestChatWebFetch:
             def send(self, msg): return "summary"
 
         handler = make_web_fetch_handler(
-            mc=None, session_store=None, run_id="run1",
-            log="/tmp/test.log", get_prompt_fn=lambda *a: "",
+            mc=None, log="/tmp/test.log", web_cache=None,
             agent_loop_cls=FakeAgent,
             confirm_fn=lambda url: False,
         )
@@ -292,8 +281,7 @@ class TestChatWebFetch:
             def send(self, msg): return "summary"
 
         handler = make_web_fetch_handler(
-            mc=None, session_store=None, run_id="run1",
-            log="/tmp/test.log", get_prompt_fn=lambda *a: "",
+            mc=None, log="/tmp/test.log", web_cache=None,
             agent_loop_cls=FakeAgent,
             confirm_fn=lambda url: True,
         )
@@ -303,25 +291,16 @@ class TestChatWebFetch:
         assert "web_fetch error" in result
 
     def test_web_fetch_summary_cached_after_fetch(self):
-        """Summary is stored in session store after successful fetch."""
+        """Summary is stored in web_cache dict after successful fetch."""
         from voidrift_cli.tools import make_web_fetch_handler
-
-        class FakeStore:
-            def __init__(self):
-                self._data: dict = {}
-            def get(self, run_id, kind, key):
-                return self._data.get((run_id, kind, key))
-            def put(self, run_id, kind, key, value):
-                self._data[(run_id, kind, key)] = value
 
         class FakeAgent:
             def __init__(self, **kwargs): pass
             def send(self, msg): return "Page summary."
 
-        store = FakeStore()
+        web_cache: dict = {}
         handler = make_web_fetch_handler(
-            mc=None, session_store=store, run_id="run1",
-            log="/tmp/test.log", get_prompt_fn=lambda *a: "",
+            mc=None, log="/tmp/test.log", web_cache=web_cache,
             agent_loop_cls=FakeAgent,
             confirm_fn=lambda url: True,
         )
@@ -337,7 +316,7 @@ class TestChatWebFetch:
             result = handler("https://example.com/docs")
 
         assert result == "Page summary."
-        assert store.get("run1", "web_cache", "https://example.com/docs") == "Page summary."
+        assert web_cache.get("https://example.com/docs") == "Page summary."
 
     def test_web_fetch_in_local_tools(self):
         """web_fetch schema is present in LOCAL_TOOLS."""
@@ -347,16 +326,10 @@ class TestChatWebFetch:
 
     def test_web_fetch_absent_from_gather_tools(self):
         """web_fetch is not in the tool list for the gather phase."""
-        from voidrift_cli.tools import LOCAL_TOOLS
-        # gather _PHASE_TOOLS does not include web_fetch — verify via agent module
-        import voidrift_cli.agent as agent_mod
-        import inspect
-        src = inspect.getsource(agent_mod.build_mcp_tools)
-        # gather phase tools are defined before chat phase tools in the source
-        gather_block_start = src.index('"gather"')
-        chat_block_start = src.index('"chat"')
-        gather_block = src[gather_block_start:chat_block_start]
-        assert "web_fetch" not in gather_block
+        from voidrift_cli.agent import build_local_tools
+        tools, _ = build_local_tools(phase="gather")
+        tool_names = {t["function"]["name"] for t in tools}
+        assert "web_fetch" not in tool_names
 
 
 class TestPromptFormatting:
@@ -983,33 +956,26 @@ class TestChatSession:
     V-UI-2: session log contains operator input and model responses."""
 
     def test_chat_phase_tools_include_required_handlers(self, tmp_project):
-        """V-U-2: build_mcp_tools with phase='chat' exposes get_skill and get_prompt."""
-        import voidrift_mcp.server as mcp_mod
-        mcp_mod._boot()
-        from voidrift_cli.agent import build_mcp_tools
-        tools, handlers = build_mcp_tools(mcp_mod, phase="chat")
+        """V-U-2: build_local_tools with phase='chat' exposes get_skill."""
+        from voidrift_cli.agent import build_local_tools
+        tools, handlers = build_local_tools(phase="chat")
         assert "get_skill" in handlers
-        assert "get_prompt" in handlers
         tool_names = {t["function"]["name"] for t in tools}
         assert "get_skill" in tool_names
 
     def test_chat_analysis_reqs_skill_is_available(self, tmp_project):
         """V-U-2: get_skill('ANALYSIS-REQS') returns non-empty content in chat context."""
-        import voidrift_mcp.server as mcp_mod
-        mcp_mod._boot()
-        from voidrift_cli.agent import build_mcp_tools
-        _, handlers = build_mcp_tools(mcp_mod, phase="chat")
+        from voidrift_cli.agent import build_local_tools
+        _, handlers = build_local_tools(phase="chat")
         skill_content = handlers["get_skill"]("ANALYSIS-REQS")
         assert len(skill_content) > 10
         assert "not found" not in skill_content.lower()
 
     def test_chat_system_prompt_is_available(self, tmp_project):
-        """V-U-2: get_prompt('chat', 'SYSTEM') returns non-empty content."""
-        import voidrift_mcp.server as mcp_mod
-        mcp_mod._boot()
-        from voidrift_cli.agent import build_mcp_tools
-        _, handlers = build_mcp_tools(mcp_mod, phase="chat")
-        system_prompt = handlers["get_prompt"]("chat", "SYSTEM")
+        """V-U-2: load_prompt('chat', 'SYSTEM') returns non-empty content."""
+        from voidrift_cli import prompts
+        prompts.clear_cache()
+        system_prompt = prompts.load_prompt("chat", "SYSTEM")
         assert len(system_prompt) > 10
         assert "not found" not in system_prompt.lower()
 

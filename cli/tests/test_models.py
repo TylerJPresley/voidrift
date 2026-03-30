@@ -51,7 +51,7 @@ class TestResolveModel:
     def test_kiro_model(self):
         m = resolve_model("kiro-sonnet")
         assert m.model_type == "gateway"
-        assert m.model_id == "openai/claude-sonnet-4.5"
+        assert m.model_id == "openai/claude-sonnet-4.6"
 
     def test_unknown_model_raises(self):
         with pytest.raises(ValueError, match="Unknown model"):
@@ -63,10 +63,10 @@ class TestResolveModel:
         msg = str(exc_info.value)
         assert "claude" in msg
 
-    def test_cloud_model_no_max_context_if_unset(self):
+    def test_gateway_model_max_context(self):
         m = resolve_model("kiro-sonnet")
-        # gateway models have no max_context in models.yml — should be None
-        assert m.max_context is None
+        # kiro-sonnet is Claude Sonnet 4.6 — 1M context per kiro.dev/docs/models/
+        assert m.max_context == 1048576
 
 
 class TestWorkerModelDiscovery:
@@ -158,7 +158,7 @@ class TestMaxContext:
 
     def test_req_mc3_max_context_none_when_unset(self):
         """REQ-MC-3: max_context is None when not present in models.yml."""
-        m = resolve_model("kiro-sonnet")
+        m = resolve_model("kiro")  # auto-routing model — no fixed context window
         assert m.max_context is None
 
     @patch("voidrift_cli.models._merged_models", return_value={

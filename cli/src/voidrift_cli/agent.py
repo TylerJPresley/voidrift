@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
+import httpx
 import openai
 
 from openai import OpenAI
@@ -77,7 +78,10 @@ class AgentLoop(BaseModel):
             kwargs["base_url"] = "https://generativelanguage.googleapis.com/v1beta/openai/"
         else:
             kwargs["api_key"] = get_worker_config().get("api_key", "no-key")
-        return OpenAI(timeout=120.0, **kwargs)
+        return OpenAI(
+            timeout=httpx.Timeout(connect=30.0, read=600.0, write=60.0, pool=30.0),
+            **kwargs,
+        )
 
     def _model_name(self) -> str:
         """Get the model name to pass to the API, stripping provider prefixes.
@@ -391,23 +395,26 @@ class AgentLoop(BaseModel):
         usage_data: dict = {}
         stream_start = time.time()
 
-        # Spinner until first token arrives
+        # Spinner until first token arrives — only when caller has no on_token
+        # callback. When on_token is set, the caller owns the display (e.g. a
+        # Rich Live context) and manages its own "Thinking..." indicator.
+        stop_spinner = threading.Event()
+        spinner: threading.Thread | None = None
         if not self.on_token:
             sys.stderr.write("\n")
             sys.stderr.flush()
-        stop_spinner = threading.Event()
-        def _spin():
-            for ch in itertools.cycle("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"):
-                if stop_spinner.wait(0.1):
-                    break
-                sys.stderr.write(f"\r\033[2m  {ch} Thinking...\033[0m")
+            def _spin():
+                for ch in itertools.cycle("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"):
+                    if stop_spinner.wait(0.1):
+                        break
+                    sys.stderr.write(f"\r\033[2m  {ch} Thinking...\033[0m")
+                    sys.stderr.flush()
+                sys.stderr.write("\r\033[K")
                 sys.stderr.flush()
-            sys.stderr.write("\r\033[K")
-            sys.stderr.flush()
-        spinner = threading.Thread(target=_spin, daemon=True)
-        spinner.start()
+            spinner = threading.Thread(target=_spin, daemon=True)
+            spinner.start()
 
-        in_think = True
+        in_think = False
         think_buf = ""
         pending = ""
 
@@ -432,13 +439,12 @@ class AgentLoop(BaseModel):
         try:
             stream = _stream_obj
             # Stateful filter for <think> tags in streaming.
-            # Start assuming we're in a think block — models often emit
-            # thinking content without an opening <think> tag.  If we
-            # accumulate more than a threshold without seeing </think>,
-            # flush the buffer as real content (it wasn't thinking).
-            in_think = True
+            # Only enter think mode when an explicit <think> tag is seen.
+            # Starting in think mode caused short responses from non-thinking
+            # models (e.g. Claude via Kiro) to be silently discarded when they
+            # fell under the flush threshold.
+            in_think = False
             think_buf = ""
-            _THINK_FLUSH = 200  # chars before we decide it's not thinking
 
             for chunk in stream:
                 if not chunk.choices:
@@ -455,7 +461,8 @@ class AgentLoop(BaseModel):
                 if delta.content:
                     if not stop_spinner.is_set():
                         stop_spinner.set()
-                        spinner.join()
+                        if spinner:
+                            spinner.join()
                     collected_text += delta.content
                     token_count += 1
 
@@ -470,40 +477,24 @@ class AgentLoop(BaseModel):
                                     self._log(f"[THINKING] {think_buf.strip()}")
                                 think_buf = ""
                                 in_think = False
-                                pending = pending[end_idx + 8:]
-                                # Skip whitespace after closing tag
-                                pending = pending.lstrip()
-                            elif len(think_buf) + len(pending) > _THINK_FLUSH:
-                                # Too much content without </think> — not thinking
-                                in_think = False
-                                self._emit_token(think_buf + pending)
-                                think_buf = ""
-                                pending = ""
+                                pending = pending[end_idx + 8:].lstrip()
                             else:
                                 think_buf += pending
                                 pending = ""
                         else:
-                            # Check for orphaned </think> (no opening tag)
-                            end_idx = pending.find("</think>")
                             start_idx = pending.find("<think>")
-                            if end_idx != -1 and (start_idx == -1 or end_idx < start_idx):
-                                # Orphaned closing tag — everything before it is thinking
-                                before = pending[:end_idx]
-                                if before.strip():
-                                    self._log(f"[THINKING] {before.strip()}")
-                                pending = pending[end_idx + 8:].lstrip()
-                            elif start_idx != -1:
-                                # Emit text before the tag
+                            if start_idx != -1:
+                                # Emit text before the tag, then enter think mode
                                 before = pending[:start_idx]
                                 if before:
                                     self._emit_token(before)
                                 in_think = True
                                 pending = pending[start_idx + 7:]
                             elif "<" in pending and not pending.endswith(">"):
-                                # Might be a partial tag — hold it
+                                # Might be a partial <think> tag — hold it
                                 last_lt = pending.rfind("<")
                                 partial = pending[last_lt:]
-                                if "<think>"[:len(partial)] == partial or "</think>"[:len(partial)] == partial:
+                                if "<think>"[:len(partial)] == partial:
                                     before = pending[:last_lt]
                                     if before:
                                         self._emit_token(before)
@@ -520,7 +511,8 @@ class AgentLoop(BaseModel):
                 if delta.tool_calls:
                     if not stop_spinner.is_set():
                         stop_spinner.set()
-                        spinner.join()
+                        if spinner:
+                            spinner.join()
                     for tc_delta in delta.tool_calls:
                         idx = tc_delta.index
                         if idx not in collected_tool_calls:
@@ -547,7 +539,8 @@ class AgentLoop(BaseModel):
                 self._log(f"[THINKING] {think_buf.strip()}")
             if not stop_spinner.is_set():
                 stop_spinner.set()
-            spinner.join()
+            if spinner:
+                spinner.join()
 
         tool_calls_list = [collected_tool_calls[i] for i in sorted(collected_tool_calls)]
 
@@ -604,191 +597,82 @@ class AgentLoop(BaseModel):
         return self._execute_tool(tc["function"]["name"], tc["function"]["arguments"])
 
 
-def build_mcp_tools(mcp_server_module: Any, phase: str = "") -> tuple[list[dict], dict[str, Callable]]:
-    """Build OpenAI-format tool definitions from the MCP server's registered tools.
+def build_local_tools(phase: str = "") -> tuple[list[dict], dict[str, Callable]]:
+    """Build OpenAI-format tool definitions from CLI-native tools (no MCP).
 
     Args:
-        mcp_server_module: The imported ``voidrift_mcp.server`` module.
         phase: Phase name to filter tools. Empty string returns all tools.
 
     Returns:
         Tuple of (tool_definitions, tool_handlers) for use with AgentLoop.
     """
-    # Per-phase tool filtering — which MCP tools each phase can see
     _PHASE_TOOLS: dict[str, set[str]] = {
-        "gather": {
-            "store_file_analysis", "get_file_analysis", "get_all_analyses",
-            "store_requirements", "get_requirements", "export_to_file",
-            "get_skill", "get_template", "list_skills", "list_templates",
-            "read_source_file", "read_framework_file", "write_framework_file",
-        },
-        "plan": {
-            "get_skill", "get_template", "list_skills", "list_templates",
-            "read_framework_file", "write_framework_file",
-        },
-        "develop": {
-            "get_skill", "list_skills",
-            "read_source_file", "write_source_file", "read_framework_file",
-        },
+        "gather": {"read_source_file", "write_framework_file", "read_framework_file"},
+        "plan": {"read_framework_file", "write_framework_file"},
+        "develop": {"read_source_file", "write_source_file", "read_framework_file"},
         "chat": {
-            "get_requirements", "get_task_status",
-            "get_skill", "get_template", "list_skills", "list_templates",
-            "list_documents", "list_project_artifacts",
             "read_source_file", "write_source_file",
             "read_framework_file", "write_framework_file",
-            "web_fetch",
+            "list_project_artifacts", "web_fetch",
+            "get_skill", "list_skills",
         },
     }
     allowed = _PHASE_TOOLS.get(phase) if phase else None
-    tools = []
-    handlers = {}
 
-    # Import the MCP server to access its tool registry
-    from voidrift_mcp.server import (
-        store_file_analysis,
-        get_file_analysis,
-        get_all_analyses,
-        store_requirements,
-        get_requirements,
-        load_tasks,
-        get_next_task,
-        complete_task,
-        get_task_status,
-        get_skill,
-        get_template,
-        get_prompt,
-        list_skills,
-        list_templates,
-        list_documents,
-        list_prompts,
-        export_to_file,
-    )
+    from .tools import LOCAL_TOOLS, LOCAL_HANDLERS
+    from .skills import find_skill as _find_skill, list_skills as _list_skills
 
-    tool_map = {
-        "store_file_analysis": (store_file_analysis, {
-            "type": "object",
-            "properties": {
-                "file_path": {"type": "string", "description": "Relative path of the analyzed file"},
-                "analysis": {"type": "string", "description": "Analysis text"},
-            },
-            "required": ["file_path", "analysis"],
-        }),
-        "get_file_analysis": (get_file_analysis, {
-            "type": "object",
-            "properties": {
-                "file_path": {"type": "string", "description": "Relative path of the file"},
-            },
-            "required": ["file_path"],
-        }),
-        "get_all_analyses": (get_all_analyses, {
-            "type": "object", "properties": {},
-        }),
-        "store_requirements": (store_requirements, {
-            "type": "object",
-            "properties": {
-                "content": {"type": "string", "description": "Requirements markdown text"},
-                "key": {"type": "string", "description": "'project' or feature name", "default": "project"},
-            },
-            "required": ["content"],
-        }),
-        "get_requirements": (get_requirements, {
-            "type": "object",
-            "properties": {
-                "key": {"type": "string", "description": "'project' or feature name", "default": "project"},
-            },
-        }),
-        "load_tasks": (load_tasks, {
-            "type": "object",
-            "properties": {
-                "path": {"type": "string", "description": "Path to TASKS.md", "default": ".voidrift/TASKS.md"},
-            },
-        }),
-        "get_next_task": (get_next_task, {
-            "type": "object",
-            "properties": {
-                "module": {"type": "string", "description": "Module name (empty for single-module)", "default": ""},
-            },
-        }),
-        "complete_task": (complete_task, {
-            "type": "object",
-            "properties": {
-                "module": {"type": "string", "description": "Module name (empty for single-module)", "default": ""},
-            },
-        }),
-        "get_task_status": (get_task_status, {
-            "type": "object",
-            "properties": {
-                "module": {"type": "string", "description": "Module name (empty for all modules)", "default": ""},
-            },
-        }),
-        "get_skill": (get_skill, {
-            "type": "object",
-            "properties": {
-                "name": {"type": "string", "description": "Skill name as returned by list_skills()"},
-                "topic": {"type": "string", "description": "Optional H2 heading within the skill to retrieve a specific section", "default": ""},
-            },
-            "required": ["name"],
-        }),
-        "get_template": (get_template, {
-            "type": "object",
-            "properties": {
-                "name": {"type": "string", "description": "Template name as returned by list_templates()"},
-            },
-            "required": ["name"],
-        }),
-        "export_to_file": (export_to_file, {
-            "type": "object",
-            "properties": {
-                "artifact_type": {"type": "string", "description": "Type of artifact"},
-                "path": {"type": "string", "description": "Relative path to write to"},
-            },
-            "required": ["artifact_type", "path"],
-        }),
-        "get_prompt": (get_prompt, {
-            "type": "object",
-            "properties": {
-                "phase": {"type": "string", "description": "Phase name as returned by list_prompts()"},
-                "section": {"type": "string", "description": "Section name (H2 heading) as returned by list_prompts(phase)"},
-            },
-            "required": ["phase", "section"],
-        }),
-        "list_skills": (list_skills, {
-            "type": "object", "properties": {},
-        }),
-        "list_templates": (list_templates, {
-            "type": "object", "properties": {},
-        }),
-        "list_documents": (list_documents, {
-            "type": "object", "properties": {},
-        }),
-        "list_prompts": (list_prompts, {
-            "type": "object",
-            "properties": {
-                "phase": {"type": "string", "description": "Phase name to filter by", "default": ""},
-            },
-        }),
-    }
+    import re as _re
 
-    for name, (func, params) in tool_map.items():
-        if allowed is not None and name not in allowed:
-            # Still register handler so phases can call it programmatically
-            handlers[name] = func
-            continue
-        # Strip 'default' from properties — Anthropic rejects it
-        for prop in params.get("properties", {}).values():
-            prop.pop("default", None)
-        tools.append({
+    def _get_skill_handler(name: str, topic: str = "") -> str:
+        content = _find_skill(name)
+        if content is None:
+            return f"Skill '{name}' not found."
+        if not topic:
+            return content
+        parts = _re.split(r"^## (.+)$", content, flags=_re.MULTILINE)
+        for i in range(1, len(parts), 2):
+            if parts[i].strip().lower() == topic.strip().lower():
+                return parts[i + 1].strip() if i + 1 < len(parts) else ""
+        return f"Section '{topic}' not found in skill '{name}'."
+
+    def _list_skills_handler() -> str:
+        return _list_skills()
+
+    skill_tools = [
+        {
             "type": "function",
             "function": {
-                "name": name,
-                "description": func.__doc__ or "",
-                "parameters": params,
+                "name": "get_skill",
+                "description": "Retrieve a skill document by name, optionally scoped to an H2 section.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string", "description": "Skill name as returned by list_skills()"},
+                        "topic": {"type": "string", "description": "Optional H2 heading within the skill to retrieve a specific section"},
+                    },
+                    "required": ["name"],
+                },
             },
-        })
-        handlers[name] = func
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "list_skills",
+                "description": "List all available skill documents grouped by layer (project, domain, north star).",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        },
+    ]
+    skill_handlers: dict[str, Callable] = {
+        "get_skill": _get_skill_handler,
+        "list_skills": _list_skills_handler,
+    }
 
-    # Include CLI-native filesystem tools (REQ-MCP-4a)
-    from .tools import LOCAL_TOOLS, LOCAL_HANDLERS
+    tools: list[dict] = []
+    handlers: dict[str, Callable] = {}
+
+    # Include CLI-native filesystem tools, filtered by phase
     for tool_def in LOCAL_TOOLS:
         name = tool_def["function"]["name"]
         if allowed is not None and name not in allowed:
@@ -796,5 +680,14 @@ def build_mcp_tools(mcp_server_module: Any, phase: str = "") -> tuple[list[dict]
             continue
         tools.append(tool_def)
         handlers[name] = LOCAL_HANDLERS[name]
+
+    # Include skill tools (chat phase only)
+    for tool_def in skill_tools:
+        name = tool_def["function"]["name"]
+        if allowed is not None and name not in allowed:
+            handlers[name] = skill_handlers[name]
+            continue
+        tools.append(tool_def)
+        handlers[name] = skill_handlers[name]
 
     return tools, handlers

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ..agent import AgentLoop, build_mcp_tools
+from ..agent import AgentLoop, build_local_tools
+from .. import prompts
+from ..skills import find_skill
 from ..models import ModelConfig
 from ..utils import (
     ensure_voidrift_dir, boot_run, check_disk_space,
@@ -122,16 +124,7 @@ def _gather_from(
 
     log, run_id = boot_run("gather")
 
-    try:
-        import voidrift_mcp.server as mcp_mod
-        mcp_mod.run_id = run_id
-        mcp_mod._boot()
-        all_tools, all_handlers = build_mcp_tools(mcp_mod, phase="gather")
-    except ImportError:
-        from ..tools import LOCAL_TOOLS, LOCAL_HANDLERS
-        all_tools = list(LOCAL_TOOLS)
-        all_handlers = dict(LOCAL_HANDLERS)
-        mcp_mod = None
+    all_tools, all_handlers = build_local_tools(phase="gather")
 
     from ..config import get_max_input_chars, get_max_tokens as _get_max_tokens
     _input_limit = get_max_input_chars(model.model_type)
@@ -171,10 +164,7 @@ def _gather_from(
     with open(log, "a") as f:
         f.write(f"=== Reverse engineering from {from_path} ===\n")
 
-    _get_prompt = all_handlers.get("get_prompt", lambda *a: "")
-    _get_skill = all_handlers.get("get_skill", lambda *a: "")
-    _get_template = all_handlers.get("get_template", lambda *a: "")
-    analyst_role = _get_skill("ANALYSIS-REQS")
+    analyst_role = find_skill("ANALYSIS-REQS") or ""
 
     import json as _json
     import re as _re
@@ -184,7 +174,7 @@ def _gather_from(
 
     # --- Stage 1: Triage — categorize files ---
     ui.stage("Stage 1: Triaging files...")
-    triage_prompt = _get_prompt("gather", "TRIAGE")
+    triage_prompt = prompts.load_prompt("gather", "TRIAGE")
     triage = AgentLoop(
         model=model, stream=False, extra_body=extra, max_tokens=4096,
         log_path=log,
@@ -222,7 +212,7 @@ def _gather_from(
 
     # Validation pass — model reviews its own triage output
     all_files = [f for fs in categories.values() for f in fs]
-    validation_prompt = _get_prompt("gather", "TRIAGE-VALIDATION")
+    validation_prompt = prompts.load_prompt("gather","TRIAGE-VALIDATION")
     validator = AgentLoop(
         model=model, stream=False, extra_body=extra, max_tokens=4096,
         log_path=log,
@@ -253,7 +243,7 @@ def _gather_from(
     # --- Stage 2: Context Build — one agent per non-source category (REQ-G-17) ---
     ui.stage("Stage 2: Building context from non-source files...")
     context_summaries: dict[str, str] = {}
-    ctx_build_prompt_tpl = _get_prompt("gather", "CONTEXT-BUILD")
+    ctx_build_prompt_tpl = prompts.load_prompt("gather","CONTEXT-BUILD")
 
     for cat in _NON_SOURCE:
         cat_files = categories.get(cat, [])
@@ -302,7 +292,7 @@ def _gather_from(
     ui.stage(f"Stage 3: Analyzing {len(source_files)} source files...")
 
     source_tools, source_handlers = _pick_tools({"read_source_file"})
-    analysis_prompt_tpl = _get_prompt("gather", "ANALYSIS")
+    analysis_prompt_tpl = prompts.load_prompt("gather","ANALYSIS")
     source_requirements: dict[str, str] = {}
 
     concurrency = get_concurrency(model.model_type)
@@ -453,7 +443,7 @@ def _gather_from(
     ui.model_label(model.alias)
 
     # Pre-fetch template (CLI calls directly, no model tool call)
-    requirements_template = _get_template("REQUIREMENTS-TEMPLATE")
+    requirements_template = prompts.load_template("REQUIREMENTS-TEMPLATE")
 
     # Build source requirements text
     source_reqs_text = "\n\n---\n\n".join(
@@ -476,7 +466,7 @@ def _gather_from(
         final_msg = f"Source Requirements:\n\n{source_reqs_text}"
 
     # System prompt: consolidation instructions + template
-    final_prompt = _get_prompt("gather", "CONSOLIDATION")
+    final_prompt = prompts.load_prompt("gather", "CONSOLIDATION")
     if requirements_template:
         final_system = final_prompt + f"\n\n## Output Template\n\n{requirements_template}"
     else:

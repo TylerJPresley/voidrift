@@ -6,7 +6,7 @@ from unittest.mock import patch, MagicMock, call
 import openai
 import pytest
 
-from voidrift_cli.agent import AgentLoop, build_mcp_tools
+from voidrift_cli.agent import AgentLoop, build_local_tools
 from voidrift_cli.models import ModelConfig
 
 from helpers import make_openai_response, make_tool_call
@@ -347,11 +347,9 @@ class TestContextLengthError:
         assert cloud_model.alias in msg
 
 
-class TestBuildMcpTools:
+class TestBuildLocalTools:
     def test_returns_tools_and_handlers(self):
-        import voidrift_mcp.server as mcp_mod
-        mcp_mod._boot()
-        tools, handlers = build_mcp_tools(mcp_mod)
+        tools, handlers = build_local_tools()
         assert len(tools) > 0
         assert len(handlers) > 0
         for t in tools:
@@ -359,66 +357,50 @@ class TestBuildMcpTools:
             assert name in handlers, f"Tool {name} has no handler"
 
     def test_tool_format(self):
-        import voidrift_mcp.server as mcp_mod
-        mcp_mod._boot()
-        tools, _ = build_mcp_tools(mcp_mod)
+        tools, _ = build_local_tools()
         for t in tools:
             assert t["type"] == "function"
             assert "name" in t["function"]
             assert "parameters" in t["function"]
 
-    def test_expected_tools_present(self):
-        import voidrift_mcp.server as mcp_mod
-        mcp_mod._boot()
-        tools, handlers = build_mcp_tools(mcp_mod)
+    def test_expected_tools_present_no_phase(self):
+        tools, handlers = build_local_tools()
         expected = [
-            "store_file_analysis", "get_file_analysis", "get_all_analyses",
-            "store_requirements", "get_requirements",
-            "load_tasks", "get_next_task", "complete_task", "get_task_status",
-            "get_skill", "get_template", "get_prompt",
-            "list_skills", "list_templates", "list_documents", "list_prompts",
-            "read_source_file", "write_source_file", "read_framework_file", "write_framework_file",
-            "export_to_file", "list_project_artifacts",
+            "read_source_file", "write_source_file",
+            "read_framework_file", "write_framework_file",
+            "list_project_artifacts", "web_fetch",
+            "get_skill", "list_skills",
         ]
         tool_names = {t["function"]["name"] for t in tools}
         for name in expected:
             assert name in tool_names, f"Missing tool: {name}"
 
-    def test_develop_phase_excludes_task_tools(self):
-        """V-ARCH-5: develop phase must not expose task management tools (REQ-ARCH-9)."""
-        import voidrift_mcp.server as mcp_mod
-        mcp_mod._boot()
-        tools, handlers = build_mcp_tools(mcp_mod, phase="develop")
+    def test_develop_phase_excludes_skill_tools(self):
+        """V-ARCH-5: develop phase must not expose get_skill/list_skills tools (skills are pre-injected)."""
+        tools, handlers = build_local_tools(phase="develop")
         tool_names = {t["function"]["name"] for t in tools}
-        excluded = {"load_tasks", "get_next_task", "complete_task", "get_task_status"}
-        for name in excluded:
-            assert name not in tool_names, f"Task tool '{name}' must not be in develop phase"
+        assert "get_skill" not in tool_names
+        assert "list_skills" not in tool_names
 
     def test_develop_phase_has_source_tools(self):
         """V-ARCH-5: develop phase includes source file read/write tools."""
-        import voidrift_mcp.server as mcp_mod
-        mcp_mod._boot()
-        tools, handlers = build_mcp_tools(mcp_mod, phase="develop")
+        tools, handlers = build_local_tools(phase="develop")
         tool_names = {t["function"]["name"] for t in tools}
         assert "read_source_file" in tool_names
         assert "write_source_file" in tool_names
 
     def test_plan_phase_excludes_source_write(self):
         """V-ARCH-5: plan phase excludes write_source_file."""
-        import voidrift_mcp.server as mcp_mod
-        mcp_mod._boot()
-        tools, handlers = build_mcp_tools(mcp_mod, phase="plan")
+        tools, handlers = build_local_tools(phase="plan")
         tool_names = {t["function"]["name"] for t in tools}
         assert "write_source_file" not in tool_names
-        # Plan should include write_framework_file
         assert "write_framework_file" in tool_names
 
-    def test_handlers_still_registered_for_filtered_tools(self):
-        """V-ARCH-5: filtered tools still have handlers (for programmatic use)."""
-        import voidrift_mcp.server as mcp_mod
-        mcp_mod._boot()
-        _, handlers = build_mcp_tools(mcp_mod, phase="develop")
-        # load_tasks is filtered from the tool list but handler must exist
-        assert "load_tasks" in handlers
-        assert "get_next_task" in handlers
-        assert "complete_task" in handlers
+    def test_chat_phase_includes_skill_tools(self):
+        """V-ARCH-5: chat phase exposes get_skill and list_skills tools."""
+        tools, handlers = build_local_tools(phase="chat")
+        tool_names = {t["function"]["name"] for t in tools}
+        assert "get_skill" in tool_names
+        assert "list_skills" in tool_names
+        assert "get_skill" in handlers
+        assert "list_skills" in handlers

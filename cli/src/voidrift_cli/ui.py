@@ -90,15 +90,19 @@ def model_label(alias: str) -> None:
     _con.print(f"\n[dim italic]  ◆ {alias}[/dim italic]\n")
 
 
-def model_text(text: str) -> None:
-    """Print a complete model response (non-streaming)."""
+def render_text(text: str):
+    """Return a Rich renderable for a model response without printing it."""
     if _has_markdown(text):
         from rich.markdown import Markdown
         from rich.padding import Padding
-        _con.print(Padding(Markdown(text), (0, 0, 0, 2)))
-    else:
-        for line in text.splitlines():
-            _con.print(f"  {_esc(line)}")
+        return Padding(Markdown(text), (0, 0, 0, 2))
+    from rich.text import Text
+    return Text("\n".join(f"  {line}" for line in text.splitlines()))
+
+
+def model_text(text: str) -> None:
+    """Print a complete model response (non-streaming)."""
+    _con.print(render_text(text))
 
 
 def _has_markdown(text: str) -> bool:

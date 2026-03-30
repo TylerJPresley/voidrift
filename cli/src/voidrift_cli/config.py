@@ -185,6 +185,31 @@ def get_max_input_chars(model_type: str) -> int:
     return _MODEL_INPUT_CHARS.get(model_type, 0)
 
 
+# Default max_read_lines per model type (REQ-CFG-6, REQ-FSZ-1, REQ-FSZ-2)
+_MODEL_MAX_READ_LINES: dict[str, int] = {
+    "local":   2000,
+    "cloud":   2000,
+    "gateway": 2000,
+}
+
+
+def get_max_read_lines(model_type: str) -> int:
+    """Return max lines for read/write size guards for a model type (REQ-FSZ-1, REQ-FSZ-2).
+
+    Configurable via config.yml limits.<model_type>_max_read_lines.
+    Defaults to 2000 for all types if not configured.
+
+    Args:
+        model_type: "local", "cloud", or "gateway".
+    """
+    limits = load_config().get("limits", {})
+    key = f"{model_type}_max_read_lines"
+    val = limits.get(key)
+    if val is not None:
+        return int(val)
+    return _MODEL_MAX_READ_LINES.get(model_type, 2000)
+
+
 def get_skills_config() -> dict:
     """Get skills section from config (REQ-SKL-3)."""
     return load_config().get("skills", {})
