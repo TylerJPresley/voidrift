@@ -130,12 +130,14 @@ def get_retention(scope: str) -> int:
 
 # Per-stage default max_tokens (REQ-CFG-7)
 _STAGE_MAX_TOKENS: dict[str, int] = {
-    "triage":       4096,
-    "analysis":     2000,
-    "synthesis":    2000,
-    "consolidation": 8192,
-    "task":         4000,
-    "plan":         32768,
+    "triage":           4096,
+    "analysis":         2000,
+    "synthesis":        2000,
+    "consolidation":    8192,
+    "task":             4000,
+    "plan":             32768,
+    "verify-plan":      32768,   # plan agent reads all docs + writes VERIFY-PLAN.md
+    "verify-execute":   8192,    # sub-agent executes one test case + optional bug report
 }
 
 # Model-type default caps (REQ-CFG-6)

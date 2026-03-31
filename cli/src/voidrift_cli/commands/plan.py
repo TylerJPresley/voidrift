@@ -10,6 +10,7 @@ from .. import prompts
 from ..skills import find_skill
 from ..models import ModelConfig
 from ..utils import ensure_voidrift_dir, voidrift_dir, boot_run, check_disk_space
+from ..config import get_max_tokens
 from .. import ui
 
 
@@ -33,7 +34,6 @@ def run_plan(
     model: ModelConfig,
     feature: str | None = None,
     overwrite: bool = False,
-    update: bool = False,
 ) -> int:
     """Execute the plan command.
 
@@ -41,7 +41,6 @@ def run_plan(
         model: Model configuration for the architect role.
         feature: Optional feature name to plan.
         overwrite: Remove previous plan artifacts (per STATE.md) before starting.
-        update: Revise existing plan to align with current requirements.
 
     Returns:
         Exit code (0 for success, 1 for failure).
@@ -84,12 +83,11 @@ def run_plan(
     # Load shared framework context (REQ-RES-7)
     system_context = prompts.load_prompt("system", "CONTEXT")
 
+    arch_path = d / "ARCHITECTURE.md"
+    tasks_path = d / "TASKS.md"
+    update = arch_path.exists() and tasks_path.exists()
+
     if update:
-        arch_path = d / "ARCHITECTURE.md"
-        tasks_path = d / "TASKS.md"
-        if not arch_path.exists() or not tasks_path.exists():
-            ui.error("--update requires existing ARCHITECTURE.md and TASKS.md. Run plan without --update first.")
-            return 1
         stage_prompt = prompts.load_prompt("plan", "PLAN-UPDATE").format(
             requirements=requirements,
             specs_section=specs_section,
@@ -114,7 +112,7 @@ def run_plan(
         tools=tools,
         tool_handlers=handlers,
         stream=False,
-        max_tokens=32768,
+        max_tokens=get_max_tokens(model.model_type, "plan"),
         log_path=log,
         show_spinner=False,
     )

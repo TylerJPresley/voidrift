@@ -48,7 +48,7 @@ def _strip_html(html_text: str) -> str:
 def _default_web_confirm(url: str) -> bool:
     """Default confirm function — shows URL and prompts operator (no spinner awareness)."""
     import click
-    from . import ui
+    from .. import ui
     ui._con.print(f"\n[dim]web_fetch →[/dim] [cyan]{url}[/cyan]")
     try:
         return click.confirm("  Allow fetch?", default=False)
@@ -77,7 +77,7 @@ def make_web_fetch_handler(
         confirm_fn: Optional callable to confirm fetches; defaults to interactive prompt.
     """
     if agent_loop_cls is None:
-        from .agent import AgentLoop
+        from ..agent import AgentLoop
         agent_loop_cls = AgentLoop
 
     _confirm = confirm_fn or _default_web_confirm
@@ -108,7 +108,7 @@ def make_web_fetch_handler(
             raw = _strip_html(raw)
 
         # Summarise via isolated sub-agent — raw content stays out of chat context
-        from . import prompts as _prompts
+        from .. import prompts as _prompts
         fetch_prompt = _prompts.load_prompt("chat", "WEB-FETCH")
         summarizer = agent_loop_cls(
             model=mc,
@@ -186,7 +186,7 @@ class WriteContext:
         return None
 
     def _check_write_size(self, path: str, content: str) -> str | None:
-        from .config import get_max_read_lines
+        from ..config import get_max_read_lines
         limit = get_max_read_lines(self._model_type)
         line_count = content.count("\n") + (1 if content and not content.endswith("\n") else 0)
         if line_count > limit:
@@ -251,7 +251,7 @@ class WriteContext:
 
     def _read_with_guard(self, full: Path, display_path: str, offset: int, limit: int | None) -> str:
         """Read lines from a file with optional pagination and size guard (REQ-FSZ-1)."""
-        from .config import get_max_read_lines
+        from ..config import get_max_read_lines
         effective_limit = limit if limit is not None else get_max_read_lines(self._model_type)
         explicit_limit = limit is not None or offset > 0
 

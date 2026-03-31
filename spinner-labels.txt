@@ -17,6 +17,7 @@ Interpolating
 Extrapolating
 Triangulating
 Bootstrapping
+Swirling
 
 # nerdy / technical
 Reticulating
@@ -30,7 +31,6 @@ Casting
 Overclocking
 Recursing
 Refactoring
-Memoizing
 Garbage-collecting
 Stack-overflowing
 Segfaulting
@@ -44,11 +44,12 @@ Overfitting
 Paginating
 Hashing
 Diffing
+TODOing
+Synthesizing
+Beaming
 
 # sci-fi / fantasy
-Scrying
 Necromancing
-Astral-projecting
 Terraforming
 Transmuting
 Enchanting
@@ -64,10 +65,9 @@ Grinding
 Crafting
 Speed-running
 Glitch-hunting
-Sequence-breaking
 Loot-farming
-Rolling-dice
-Leveling-up
+Dice-rolling
+Leveling
 Skill-checking
 
 # chaotic / funny
@@ -91,11 +91,13 @@ Caffeinating
 Panicking
 Improvising
 Winging-it
-Touching-grass
+Grass-Touching
 Existentially-spiraling
 Coping
 Snacking
-Vibes-checking
+Frolicking
+Whirling
+Discombobulating
 
 # dev culture
 Yak-shaving
@@ -108,6 +110,4 @@ Premature-optimizing
 Git-blaming
 Cherry-picking
 Hotfixing
-Ticket-grooming
 Copy-pasting
-On-calling

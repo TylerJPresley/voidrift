@@ -1,6 +1,6 @@
 # Looking Forward
 
-Strategic direction for future framework command development. This document contains the full architecture, requirements, and task breakdown for the redesigned Verify system. Nothing here is implemented — this is the plan.
+Strategic direction for future framework command development. This document contains the full architecture, requirements, and task breakdown for the redesigned Verify system. The core Verify implementation (REQ-VF-1 through REQ-VF-16) is complete on `feat/verify-command`. Mockup verification and plan integration tests remain open.
 
 ---
 
@@ -382,48 +382,48 @@ The product process is started once by the orchestrator before Stage 2, shared a
 
 ### Module: Plan Integration
 
-- [ ] Add `startup_command:` and `test_bootstrap:` to `resources/templates/ARCHITECTURE-TEMPLATE.md`
-- [ ] Update `resources/prompts/plan.md` to populate `startup_command:` from project type and entry point
-- [ ] Update `resources/prompts/plan.md` to generate test harness task when auth is present
+- [x] Add `startup_command:` and `test_bootstrap:` to `resources/templates/ARCHITECTURE-TEMPLATE.md`
+- [x] Update `resources/prompts/plan.md` to populate `startup_command:` from project type and entry point
+- [x] Update `resources/prompts/plan.md` to generate test harness task when auth is present
 - [ ] Write tests: `startup_command:` present for web/API/CLI types [QUALITY-QA]
 - [ ] Write tests: test harness task generated when auth detected [QUALITY-QA]
 
 ### Module: Process Lifecycle Tools
 
-- [ ] Design `ProcessManager`: `start()`, `stop()`, `wait_for_ready()`, `read_output()`, `stop_all()` [SYSTEMS-ENG]
-- [ ] Implement `cli/src/voidrift_cli/tools/process_manager.py`
-- [ ] Implement `start_process` tool: subprocess with ring-buffered output
-- [ ] Implement `stop_process` tool: SIGTERM → SIGKILL after 5s
-- [ ] Implement `wait_for_ready` tool: `http`, `port`, `log_pattern` strategies
-- [ ] Implement `read_process_output` tool: 500-line buffer, newest on truncation
-- [ ] Implement `run_command` tool: synchronous, stdout/stderr/exit_code
-- [ ] Write tests: lifecycle, capture, SIGKILL fallback, readiness strategies, timeout [QUALITY-QA]
+- [x] Design `ProcessManager`: `start()`, `stop()`, `wait_for_ready()`, `read_output()`, `stop_all()` [SYSTEMS-ENG]
+- [x] Implement `cli/src/voidrift_cli/tools/process_manager.py`
+- [x] Implement `start_process` tool: subprocess with ring-buffered output
+- [x] Implement `stop_process` tool: SIGTERM → SIGKILL after 5s
+- [x] Implement `wait_for_ready` tool: `http`, `port`, `log_pattern` strategies
+- [x] Implement `read_process_output` tool: 500-line buffer, newest on truncation
+- [x] Implement `run_command` tool: synchronous, stdout/stderr/exit_code
+- [x] Write tests: lifecycle, capture, SIGKILL fallback, readiness strategies, timeout [QUALITY-QA]
 
 ### Module: HTTP Tool
 
-- [ ] Design `SessionManager`: session_id keyed, cookie + auth header persistence, run-scoped
-- [ ] Implement `cli/src/voidrift_cli/tools/http_client.py`
-- [ ] Implement `http_request` tool with session support
-- [ ] Implement cookie persistence per session
-- [ ] Implement multi-session isolation and cleanup
-- [ ] Write tests: persistence, isolation, inheritance, cleanup [QUALITY-QA]
+- [x] Design `SessionManager`: session_id keyed, cookie + auth header persistence, run-scoped
+- [x] Implement `cli/src/voidrift_cli/tools/http_client.py`
+- [x] Implement `http_request` tool with session support
+- [x] Implement cookie persistence per session
+- [x] Implement multi-session isolation and cleanup
+- [x] Write tests: persistence, isolation, inheritance, cleanup [QUALITY-QA]
 
 ### Module: Browser Tools
 
-- [ ] Evaluate Playwright vs. browser automation libraries; select approach
-- [ ] Implement `browser_navigate`, `browser_screenshot`, `browser_click`, `browser_get_text`
-- [ ] Implement session scoping and cleanup
-- [ ] Write tests: navigation, capture, interaction, cleanup [QUALITY-QA]
+- [x] Evaluate Playwright vs. browser automation libraries; select approach (Playwright, soft dependency)
+- [x] Implement `browser_navigate`, `browser_screenshot`, `browser_click`, `browser_get_text`
+- [x] Implement session scoping and cleanup
+- [x] Write tests: navigation, capture, interaction, cleanup [QUALITY-QA]
 
 ### Module: Tool Registration
 
-- [ ] Add `cmd="verify-plan"` to `build_local_tools()`: `read_framework_file`, `read_source_file`, `write_framework_file`
-- [ ] Add `cmd="verify-execute"` to `build_local_tools()`: `read_framework_file`, `write_framework_file`, `read_process_output`, `http_request`, `run_command`, browser tools — no source file tools, no process lifecycle tools
-- [ ] Write tests: tool set composition for both verify commands [QUALITY-QA]
+- [x] Add `cmd="verify-plan"` to `build_local_tools()`: `read_framework_file`, `read_source_file`, `write_framework_file`
+- [x] Add `cmd="verify-execute"` to `build_local_tools()`: `read_framework_file`, `write_framework_file`, `read_process_output`, `http_request`, `run_command`, browser tools — no source file tools, no process lifecycle tools
+- [x] Write tests: tool set composition for both verify commands [QUALITY-QA]
 
 ### Module: Verify Command Prompt
 
-- [ ] Write `resources/prompts/verify.md` [QUALITY-QA] [ANALYSIS-REQS]
+- [x] Write `resources/prompts/verify.md` [QUALITY-QA] [ANALYSIS-REQS]
   - Stage 1 instructions: read all docs, cross-reference, write self-contained test cases to VERIFY-PLAN.md
   - Stage 2 instructions: execute scenario, assert expected result, collect evidence on failure
   - Evidence collection instructions: full request/response, process output, stack traces, screenshots, timestamps, decoded tokens, agent notes
@@ -432,7 +432,7 @@ The product process is started once by the orchestrator before Stage 2, shared a
 
 ### Module: Verify Command Orchestrator
 
-- [ ] Rewrite `cli/src/voidrift_cli/commands/verify.py` [ARCH-DESIGN] [RELIABILITY-ENG]
+- [x] Rewrite `cli/src/voidrift_cli/commands/verify.py` [ARCH-DESIGN] [RELIABILITY-ENG]
   - Stage 1: create plan agent, inject all docs, run, confirm VERIFY-PLAN.md written
   - Execute test_bootstrap if configured
   - Start product, wait for readiness
@@ -440,11 +440,11 @@ The product process is started once by the orchestrator before Stage 2, shared a
   - Each sub-agent: inject test case text as full context, collect result
   - Stage 3: aggregate results, write VERIFY.md, write STATE.md entry
   - Stop product in finally block
-- [ ] Write integration tests: full flow, mock process, mock agents [QUALITY-QA]
-- [ ] Write tests: cleanup on sub-agent exception [QUALITY-QA]
-- [ ] Write tests: concurrent sub-agent execution respects concurrency limit [QUALITY-QA]
-- [ ] Write tests: sub-agent cannot call write_source_file (tool set enforcement) [QUALITY-QA]
-- [ ] Write tests: VERIFY-PLAN.md, VERIFY.md, bug report format correctness [QUALITY-QA]
+- [x] Write integration tests: full flow, mock process, mock agents [QUALITY-QA]
+- [x] Write tests: cleanup on sub-agent exception [QUALITY-QA]
+- [x] Write tests: concurrent sub-agent execution respects concurrency limit [QUALITY-QA]
+- [x] Write tests: sub-agent cannot call write_source_file (tool set enforcement) [QUALITY-QA]
+- [x] Write tests: VERIFY-PLAN.md, VERIFY.md, bug report format correctness [QUALITY-QA]
 
 ### Module: Mockup Verification
 
@@ -456,10 +456,10 @@ The product process is started once by the orchestrator before Stage 2, shared a
 
 ### Module: Documentation
 
-- [ ] Update REQUIREMENTS.md: replace REQ-V-1–4 with formal REQ-VF entries
-- [ ] Update ARCHITECTURE.md: Verify component, data flow, startup_command field, bug report artifacts
-- [ ] Update README.md: Verify as two-stage QA with bug reports
-- [ ] Update CHANGELOG.md
+- [x] Update REQUIREMENTS.md: replace REQ-V-1–4 with formal REQ-VF entries
+- [x] Update ARCHITECTURE.md: Verify component, data flow, startup_command field, bug report artifacts
+- [x] Update README.md: Verify as two-stage QA with bug reports
+- [x] Update CHANGELOG.md
 
 ---
 

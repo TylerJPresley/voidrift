@@ -144,39 +144,39 @@ Each command writes artifacts to `<project>/.voidrift/`. Run commands from your 
 
 ### Gather
 
-Reverse-engineers requirements from an existing codebase in three stages:
+Reverse-engineers requirements from an existing codebase in four stages:
 
 ```mermaid
 flowchart LR
-    T[Triage\ncategorize files] --> A[Analyze\none agent per file] --> S[Synthesize\nbuild REQUIREMENTS.md]
+    T[Triage\ncategorize files] --> C[Context Build\nnon-source categories] --> A[Source Analysis\none agent per file] --> F[Final Pass\nbuild REQUIREMENTS.md]
     style T fill:#1e3a5f,color:#fff
+    style C fill:#1e3a5f,color:#fff
     style A fill:#1e3a5f,color:#fff
-    style S fill:#1e3a5f,color:#fff
+    style F fill:#1e3a5f,color:#fff
 ```
 
 ```bash
-voidrift gather <model> <path>             # error if .voidrift/REQUIREMENTS.md exists
-voidrift gather <model> <path> --overwrite # remove previous gather artifacts first
+voidrift gather <model> <path>             # update REQUIREMENTS.md if it exists; create if not
+voidrift gather <model> <path> --overwrite # remove previous gather artifacts and start fresh
 ```
 
 Produces: `REQUIREMENTS.md`, `ANALYSIS.md` (index), `analysis/<file>.md` (per-file), `spec/<module>.md`
 
-Gather never auto-commits. Respects `.gitignore`. Use `voidrift chat <model>` to iterate on requirements interactively.
+Re-running gather updates requirements in place: the existing `REQUIREMENTS.md` is passed as context to the final consolidation pass, which merges new analysis with preserved rationale and user stories. Gather never auto-commits. Respects `.gitignore`. Use `voidrift chat <model>` to iterate on requirements interactively.
 
 ### Plan
 
 Generates architecture and task breakdown from requirements:
 
 ```bash
-voidrift plan <model>             # error if ARCHITECTURE.md or TASKS.md exist
-voidrift plan <model> --overwrite # remove previous plan artifacts first
-voidrift plan <model> --update    # revise existing plan; preserves completed tasks
+voidrift plan <model>             # auto-detects: update if artifacts exist, fresh plan if not
+voidrift plan <model> --overwrite # remove previous plan artifacts and start fresh
 voidrift plan <model> <feature>   # scope to a specific spec file
 ```
 
 Produces: `ARCHITECTURE.md`, `TASKS.md`, `arch/<module>.md`
 
-`ARCHITECTURE.md` is a lean system map (module inventory, cross-module contracts). `arch/<module>.md` carries the design depth for each module (components, data models, interfaces). Tasks are single atomic file operations with enough context for an agent to implement without cross-referencing requirements.
+Re-running plan automatically detects existing artifacts and switches to update mode: plan reads current source files to determine what is already implemented, then writes a fresh task list covering only what remains. Tasks that no longer apply are removed; new tasks are added for unaddressed requirements. `ARCHITECTURE.md` is a lean system map (module inventory, cross-module contracts). `arch/<module>.md` carries the design depth for each module (components, data models, interfaces). Tasks are single atomic file operations with enough context for an agent to implement without cross-referencing requirements.
 
 ### Develop
 
@@ -219,13 +219,19 @@ Produces IaC files in the project. Reconciles gaps if IaC already exists. No har
 
 ### Verify
 
-Runs quality checks and produces a PASS/FAIL verdict:
+Two-stage requirements-driven acceptance testing:
 
 ```bash
 voidrift verify <model>
 ```
 
-Produces: `VERIFY.md` with sections: Test Results, Lint & Static Analysis, Infrastructure, Requirements Coverage, Issues, Verdict. Verify reports issues only — it does not modify source files or produce task files.
+**Stage 1 — Plan agent:** Reads all project documentation (REQUIREMENTS.md, ARCHITECTURE.md, TASKS.md, spec files) and writes `.voidrift/VERIFY-PLAN.md` — one self-contained test case per testable requirement. Each test case embeds the requirement, scenario steps, credentials, and evidence collection instructions.
+
+**Stage 2 — Concurrent sub-agents:** One sub-agent per test case. Each executes its scenario using HTTP, process, and browser tools. On failure it writes a full bug report to `.voidrift/bugs/<ITEM-ID>.md` with request/response detail, process output, stack traces, and screenshots.
+
+**Stage 3 — Report:** Orchestrator writes `.voidrift/VERIFY.md` (summary table, per-item results with bug report links, verdict) and a STATE.md entry.
+
+Verify never modifies source files. Failures become tasks for Develop.
 
 ---
 
@@ -273,8 +279,8 @@ Command logs are at `<project>/.voidrift/logs/<command>-<timestamp>.log`. The fr
 ```bash
 voidrift prune                # remove old project logs (keeps 5 most recent)
 voidrift prune --all          # remove entire .voidrift/ directory
-voidrift prune --global       # prune old sessions from ~/.voidrift/sessions.db
-voidrift prune --global --all # remove all session data
+voidrift prune --global       # prune old global framework logs from ~/.voidrift/logs/
+voidrift prune --global --all # remove all global framework logs
 ```
 
 ### Unlock
@@ -473,7 +479,8 @@ your-project/
 │   ├── spec/<module>.md     # Per-module requirements           ← Gather
 │   ├── ARCHITECTURE.md      # System map, cross-module contracts ← Plan
 │   ├── arch/<module>.md     # Module design, components, interfaces ← Plan
-│   ├── TASKS.md             # Ordered task list                 ← Plan
+│   ├── TASKS.md             # Pending and blocked tasks         ← Plan
+│   ├── TASKS-DONE.md        # Completed task log (append-only)  ← Develop
 │   ├── VERIFY.md            # Test results, verdict             ← Verify
 │   ├── STATE.md             # Command run history (append-only)
 │   └── logs/
@@ -484,7 +491,6 @@ your-project/
 ├── config.yml
 ├── models.yml               # Cloud and gateway aliases
 ├── worker-models.yml        # Local model configs
-├── sessions.db              # Ephemeral run data
 └── logs/
     └── voidrift.log         # CLI invocations, command outcomes (rotating)
 ```
@@ -542,7 +548,7 @@ voidrift/
 │       ├── main.py               # Click commands, entry point
 │       ├── agent.py              # Agent loop: API calls, tool dispatch, retry, streaming
 │       ├── models.py             # Model alias resolution (models.yml + worker-models.yml)
-│       ├── tools.py              # Local filesystem tools (WriteContext)
+│       ├── tools/                # Local agent tools: filesystem, process, HTTP, browser
 │       ├── utils.py              # Utilities: STATE.md, system log, task helpers
 │       ├── config.py             # Config loading, variable expansion
 │       └── commands/             # command implementations: gather, plan, develop, automate, verify
@@ -554,10 +560,10 @@ voidrift/
 │   ├── prompts/                  # system.md + per-command prompts (5 files)
 │   ├── skills/                   # Domain methodology (16 files)
 │   └── templates/                # Document scaffolding (4 files)
-├── defaults/                     # Default configs synced to ~/.voidrift/ by make sync
-│   ├── config.yml
-│   ├── models.yml                # Cloud and gateway model aliases
-│   └── worker-models.yml         # Local model configs
+├── config.yml                    # Default config synced to ~/.voidrift/ by make sync
+├── models.yml                    # Cloud and gateway model aliases
+├── worker-models.yml             # Local model configs
+├── spinner-labels.txt            # Spinner labels (user-editable, not overwritten on sync)
 ├── REQUIREMENTS.md               # IEEE 29148 / EARS requirements
 ├── ARCHITECTURE.md               # Component design, data flows, design decisions
 ├── CHANGELOG.md

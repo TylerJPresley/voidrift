@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 import threading
+from datetime import datetime
 from pathlib import Path
 
 from pydantic import BaseModel, PrivateAttr
@@ -91,7 +92,7 @@ class TaskStore(BaseModel):
         return None
 
     def complete(self, module: str = "") -> Task | None:
-        """Mark the first unchecked task as done and write through to disk.
+        """Remove the first unchecked task from TASKS.md and append to TASKS-DONE.md.
 
         Args:
             module: Module name. Empty string uses _default.
@@ -104,10 +105,15 @@ class TaskStore(BaseModel):
             if not task:
                 return None
             task.status = "x"
-            self._raw_lines[task.line_num] = re.sub(
-                r"^- \[ \]", "- [x]", self._raw_lines[task.line_num]
-            )
+            removed_line = task.line_num
+            del self._raw_lines[removed_line]
+            # Shift line numbers for all tasks after the removed line
+            for mod_tasks in self._modules.values():
+                for t in mod_tasks:
+                    if t.line_num > removed_line:
+                        t.line_num -= 1
             self._flush()
+            self._append_done(task)
         return task
 
     def block(self, module: str = "") -> Task | None:
@@ -152,6 +158,14 @@ class TaskStore(BaseModel):
             "blocked": sum(1 for t in tasks if t.status == "!"),
             "remaining": sum(1 for t in tasks if t.status == " "),
         }
+
+    def _append_done(self, task: Task) -> None:
+        if not self.path:
+            return
+        done_path = self.path.parent / "TASKS-DONE.md"
+        ts = datetime.now().isoformat(timespec="seconds")
+        with open(done_path, "a", encoding="utf-8") as f:
+            f.write(f"- [x] {task.text}  <!-- {ts} -->\n")
 
     def _flush(self) -> None:
         if self.path:

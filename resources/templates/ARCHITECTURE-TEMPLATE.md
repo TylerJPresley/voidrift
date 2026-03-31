@@ -2,6 +2,10 @@
 
 <!-- Template follows the arc42 documentation standard (https://arc42.org) with C4 model diagrams (https://c4model.com). Populate every section with project-specific content. -->
 
+<!-- Verify fields — required for `voidrift verify` to start and test the system -->
+startup_command: <!-- Shell command to start the system (e.g. "uvicorn main:app --port 8000"). Omit or leave blank for non-runnable projects (libraries, CLIs with no server). -->
+test_bootstrap: <!-- Shell command to seed test data before verify runs (e.g. "python scripts/seed_test_data.py"). Omit if no seeding is needed. -->
+
 ## 1. Introduction and Goals
 
 State the project's purpose, primary use cases, and the key stakeholders. Keep this to one paragraph — the requirements document has the detail.

@@ -27,14 +27,14 @@ Getting started:
   voidrift chat <model>                   Interactive requirements & planning
   voidrift plan <model>                   Generate architecture and tasks
   voidrift develop <model> [<architect>]  Execute implementation tasks
-  voidrift verify <model> [<architect>]   Run quality checks
+  voidrift verify <model>                  Requirements-driven acceptance testing
 
 Framework commands:
   gather <model> <path> [--overwrite]
-  plan <model> [<feature>] [--overwrite] [--update]
+  plan <model> [<feature>] [--overwrite]
   develop <model> [<architect>]              Execute implementation tasks
   automate <model> [<architect>]
-  verify <model> [<architect>]
+  verify <model>
 
 Utility:
   status                      Show project command status
@@ -204,13 +204,12 @@ def gather(model, path, overwrite) -> None:
 @click.argument("model", shell_complete=_complete_model)
 @click.argument("feature", required=False)
 @click.option("--overwrite", is_flag=True, help="Remove previous plan artifacts and start fresh")
-@click.option("--update", is_flag=True, help="Revise existing plan to match current requirements")
-def plan(model, feature, overwrite, update) -> None:
+def plan(model, feature, overwrite) -> None:
     """Plan: Generate architecture and task breakdown."""
     _check_setup()
     from .commands.plan import run_plan
     mc = resolve_model(model)
-    sys.exit(run_plan(mc, feature=feature, overwrite=overwrite, update=update))
+    sys.exit(run_plan(mc, feature=feature, overwrite=overwrite))
 
 
 @cli.command()
@@ -239,14 +238,12 @@ def automate(model, architect) -> None:
 
 @cli.command()
 @click.argument("model", shell_complete=_complete_model)
-@click.argument("architect", required=False, shell_complete=_complete_model)
-def verify(model, architect) -> None:
-    """Verify: Run quality checks and validation."""
+def verify(model) -> None:
+    """Verify: Requirements-driven acceptance testing."""
     _check_setup()
     from .commands.verify import run_verify
     mc = resolve_model(model)
-    am = resolve_model(architect) if architect else mc
-    sys.exit(run_verify(mc, architect=am))
+    sys.exit(run_verify(mc))
 
 
 # ---------------------------------------------------------------------------
@@ -862,28 +859,22 @@ def prune(global_: bool, all_: bool) -> None:
     from .config import get_retention, voidrift_home
 
     if global_:
-        db_path = voidrift_home() / "sessions.db"
-        if not db_path.exists():
-            ui.info("No session database found — nothing to prune")
+        log_dir = voidrift_home() / "logs"
+        if not log_dir.exists():
+            ui.info("No global logs found — nothing to prune")
             return
-        import sqlite3
-        conn = sqlite3.connect(str(db_path))
         if all_:
-            conn.execute("DELETE FROM ephemeral")
-            conn.execute("DELETE FROM context_log")
-            conn.execute("DELETE FROM sessions")
-            conn.commit()
-            ui.success("Deleted all session data")
+            import shutil
+            shutil.rmtree(log_dir)
+            ui.success("Removed all global framework logs")
         else:
             days = get_retention("global")
-            cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-            cur = conn.execute("DELETE FROM sessions WHERE started_at < ?", (cutoff,))
-            conn.execute("DELETE FROM context_log WHERE session_id NOT IN (SELECT id FROM sessions)")
-            conn.execute("DELETE FROM ephemeral WHERE run_id NOT IN (SELECT run_id FROM sessions)")
-            conn.commit()
-            ui.success(f"Pruned {cur.rowcount} session(s) older than {days} days")
-        conn.execute("VACUUM")
-        conn.close()
+            cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+            logs = sorted(log_dir.glob("*.log*"))
+            removed = [f for f in logs if datetime.fromtimestamp(f.stat().st_mtime, tz=timezone.utc) < cutoff]
+            for f in removed:
+                f.unlink()
+            ui.success(f"Pruned {len(removed)} global log(s) older than {days} days")
         return
 
     d = voidrift_dir()

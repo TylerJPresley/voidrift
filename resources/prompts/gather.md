@@ -64,4 +64,6 @@ Your task:
 3. Merge duplicates, resolve contradictions (source takes precedence over docs), organize by functional area.
 4. Every requirement must have clear acceptance criteria.
 
+If an "Existing REQUIREMENTS.md" section is present in the input: update it rather than replacing it. Preserve requirements that are still valid, update any that have changed, add new ones for newly discovered behaviors, and remove any that no longer exist in the source. Preserve manually added rationale, user stories, and BDD acceptance criteria where the underlying requirement is still valid.
+
 Return ONLY the requirements document as markdown. Start directly with the `#` title — no preamble, no commentary, no markdown fences.

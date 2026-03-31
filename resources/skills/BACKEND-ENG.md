@@ -28,7 +28,7 @@ description: Python backend engineering conventions for the VoidRift framework â
 - Import command modules lazily inside command handlers (`from .commands.foo import run_foo`).
 
 ## Agent Tool Patterns
-- Agent tools are CLI-native functions in `tools.py`, exposed as OpenAI-format tool definitions via `build_local_tools()`.
+- Agent tools are CLI-native functions in the `tools/` package (`tools/filesystem.py`, `tools/process_manager.py`, `tools/http_client.py`, `tools/browser.py`), exposed as OpenAI-format tool definitions via `build_local_tools()`. `tools/__init__.py` contains re-exports only; logic lives in named modules.
 - Tool handlers receive plain Python arguments; return plain strings.
 - Command agent tool subsets are defined in `_COMMAND_TOOLS` in `agent.py` as `set[str]`.
 - Never expose task-management tools (`load_tasks`, `get_next_task`, `complete_task`) to per-task developer agents.

@@ -143,9 +143,7 @@ def _gather_from(
       3. Source Analysis — one agent per source file, context injected, direct response
       4. Final Pass — CLI pre-fetches template, model returns markdown, CLI writes file
     """
-    if target.exists() and not overwrite:
-        ui.error(f"{target} already exists. Use --overwrite to replace.")
-        return 1
+    existing_requirements = target.read_text() if (target.exists() and not overwrite) else None
     if not from_path.is_dir():
         ui.error(f"{from_path} is not a directory")
         return 1
@@ -522,6 +520,9 @@ def _gather_from(
         )
     else:
         final_msg = f"Source Requirements:\n\n{source_reqs_text}"
+
+    if existing_requirements:
+        final_msg += f"\n\n---\n\nExisting REQUIREMENTS.md (update, don't replace):\n\n{existing_requirements}"
 
     # System prompt: consolidation instructions + template
     final_prompt = prompts.load_prompt("gather", "CONSOLIDATION")

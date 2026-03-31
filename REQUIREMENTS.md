@@ -118,11 +118,12 @@
 
 ### 4.4 Command: Gather
 
-- **REQ-G-1:** WHEN `voidrift gather <model> <path>` is run, THE SYSTEM SHALL validate that `<path>` exists and is a directory before performing any model calls. IF `<path>` does not exist or is not a directory, THE SYSTEM SHALL exit with a clear error. `voidrift gather` reverse-engineers requirements from the codebase at `<path>` using the four-stage pipeline (REQ-G-8). `--overwrite` removes files from the previous gather run (per STATE.md manifest) before starting.
+- **REQ-G-1:** WHEN `voidrift gather <model> <path>` is run, THE SYSTEM SHALL validate that `<path>` exists and is a directory before performing any model calls. IF `<path>` does not exist or is not a directory, THE SYSTEM SHALL exit with a clear error. `voidrift gather` reverse-engineers requirements from the codebase at `<path>` using the four-stage pipeline (REQ-G-8). WHEN `.voidrift/REQUIREMENTS.md` already exists AND `--overwrite` is not specified, THE SYSTEM SHALL run in update mode: the four-stage pipeline runs against the current codebase, and the final pass agent receives the existing REQUIREMENTS.md as context to produce a merged, updated version. `--overwrite` removes files from the previous gather run (per STATE.md manifest) before starting a fresh analysis.
+  - *Rationale:* Codebases evolve. Re-running gather after adding source files should refine existing requirements, not replace them wholesale. Starting from scratch discards rationale, user stories, and domain knowledge added manually to REQUIREMENTS.md.
   - Given `<path>` does not exist, When `voidrift gather model ./nonexistent` is run, Then the command exits with an error identifying the invalid path — no model call is made.
   - Given no `.voidrift/REQUIREMENTS.md` exists, When `voidrift gather model ./src` completes, Then `.voidrift/REQUIREMENTS.md` exists with content.
-  - Given `.voidrift/REQUIREMENTS.md` exists, When `voidrift gather model ./src` is run without `--overwrite`, Then the command exits with an error and the file is unchanged.
-  - Given `.voidrift/REQUIREMENTS.md` exists, When `voidrift gather model ./src --overwrite` completes, Then the previous gather files are removed and new content is written.
+  - Given `.voidrift/REQUIREMENTS.md` exists and `--overwrite` is not specified, When `voidrift gather model ./src` runs, Then the final pass prompt includes the existing REQUIREMENTS.md as context and the output merges old and new analysis.
+  - Given `.voidrift/REQUIREMENTS.md` exists, When `voidrift gather model ./src --overwrite` completes, Then the previous gather files are removed and new content is generated from scratch.
 - **REQ-G-8:** THE SYSTEM SHALL reverse-engineer requirements in four stages, each using separate agent instances (per REQ-ARCH-7). Source code is the primary requirements source — non-source files (tests, config, infrastructure, documentation, assets) are treated as context that informs source analysis. All agent outputs are returned as direct response text; the CLI captures responses and handles all persistence in memory and on filesystem. No stage uses tool calls for output. All stage instructions SHALL live in `resources/prompts/gather.md`.
   - *Rationale:* Source code is the ground truth of what the system does. Tests reveal behavioral contracts, docs reveal intent, config reveals constraints — but only source defines what the system actually implements. Treating non-source as context ensures requirements are grounded in implementation, not documentation aspirations. Direct response output eliminates tool call JSON overhead: for the same `max_tokens` budget, direct text provides ~15-20% more usable content with no risk of mid-JSON truncation. The CLI owning persistence keeps each agent context minimal — agents process one message and return one response, never accumulating state.
   1. **Triage:** Agent receives the complete file tree and returns a JSON object with files sorted into predefined categories — `source` (application code), `tests` (test files), `config` (build/project configuration), `infrastructure` (deployment, CI/CD, IaC), `documentation` (READMEs, ADRs, guides), `assets` (static resources, migrations, seeds). All categories are flat file lists. The file tree SHALL respect `.gitignore`: IF a `.gitignore` file exists in the target directory, the CLI SHALL exclude all paths matched by its patterns. Dot-prefixed files and directories (e.g. `.git/`, `.env`, `.voidrift/`) SHALL always be excluded regardless of `.gitignore`. The agent infers category membership from its knowledge of the project's language and toolchain; the CLI SHALL NOT hardcode language-specific rules. A second validation pass SHALL review the triage output and remove any files that were incorrectly included (e.g. build output, lock files, binary assets).
@@ -171,7 +172,7 @@
 - **REQ-P-3:** WHEN `--overwrite` is specified, THE SYSTEM SHALL remove files from the previous plan run (per STATE.md manifest) before planning. Gather-produced artifacts (REQUIREMENTS.md, spec/*.md) SHALL be preserved.
   - Given a previous plan created ARCHITECTURE.md, TASKS.md, and arch/*.md, When `voidrift plan <model> --overwrite` is run, Then those files are deleted (per STATE.md manifest) before the planning agent starts.
 - **REQ-P-4:** `auto-commits: false` SHALL be set for the plan command.
-- **REQ-P-5:** For single-module projects, tasks SHALL be written under a `## Tasks` header. For multi-module projects, tasks SHALL be grouped under `## Module: <name>` headers in a single TASKS.md.
+- **REQ-P-5:** For single-module projects, tasks SHALL be written under a `## Tasks` header. For multi-module projects, tasks SHALL be grouped under `## Module: <name>` headers in a single TASKS.md. TASKS.md SHALL contain only pending (`- [ ]`) and blocked (`- [!]`) task lines — completed tasks live exclusively in TASKS-DONE.md (REQ-D-14).
 - **REQ-P-6:** In multi-module projects, each file path SHALL appear in exactly one module's task group. No file SHALL be created or modified by tasks in more than one module.
 - **REQ-P-7:** Each task line SHALL be a single atomic file operation: `- [ ] <Action verb> <file path>: <exact behavior>. <rationale or user story context> [skill1, skill2]`. The behavior description SHALL include enough context for a developer agent to implement without cross-referencing requirements — acceptance criteria, expected inputs/outputs, error cases, and the *why* behind the task. Tasks that say only "implement X" without specifying behavior are insufficient.
   - *Rationale:* The developer agent processes one task at a time with limited context. Front-loading implementation detail and rationale into the task description reduces the developer's dependence on loading full requirements, decreasing context window usage and improving output quality.
@@ -186,18 +187,27 @@
   - Given the plan prompt is constructed, When the system prompt is formatted, Then it contains the complete list of valid skill names.
 - **REQ-P-10:** `.voidrift/ARCHITECTURE.md` SHALL follow the structure defined in `ARCHITECTURE-TEMPLATE` (loaded via `get_template("ARCHITECTURE-TEMPLATE")`). The template follows the arc42 documentation standard with C4 model diagrams (Mermaid). The model SHALL populate each section with project-specific content.
   - *Rationale:* arc42 is an industry-standard architecture documentation framework providing a proven section structure. C4 (Context, Container, Component, Code) provides consistent diagram levels. Together they ensure architecture documents are complete, navigable, and familiar to engineers.
-- **REQ-P-11:** `voidrift plan <model> --update` SHALL read the current REQUIREMENTS.md, spec files, and existing ARCHITECTURE.md and TASKS.md, then plan from the current requirements. The existing artifacts are context to preserve completed work — requirements are the source of truth. The model SHALL preserve completed tasks (`- [x]`), update or remove tasks that no longer apply, and add new tasks for any unaddressed requirements. The existing architecture SHALL be treated as a starting point, not regenerated from scratch.
-  - Given ARCHITECTURE.md and TASKS.md exist, When `voidrift plan <model> --update` completes, Then requirements are the source of truth and completed tasks are preserved.
-  - Given no ARCHITECTURE.md exists, When `voidrift plan <model> --update` is run, Then the command exits with an error.
+- **REQ-P-11:** WHEN `voidrift plan <model>` is run AND `.voidrift/ARCHITECTURE.md` and `.voidrift/TASKS.md` already exist AND `--overwrite` is not specified, THE SYSTEM SHALL automatically run in update mode: read REQUIREMENTS.md, ARCHITECTURE.md, spec files, and the current source code to determine what is already implemented, then produce a revised TASKS.md containing only the delta — requirements not yet satisfied by the current implementation. Plan SHALL NOT read TASKS-DONE.md. The existing architecture SHALL be treated as a starting point, not regenerated from scratch.
+  - *Rationale:* Source code is ground truth for what's built. Reading a task log to infer implementation state is indirect and can drift. Reading the actual source files is definitive and works regardless of how the code was produced. An updated requirement produces a new task — TASKS-DONE.md is a historical record, not a planning input.
+  - Given ARCHITECTURE.md and TASKS.md exist and `--overwrite` is not specified, When `voidrift plan <model>` is run, Then update mode runs automatically — the agent reads source files to determine what's implemented and writes tasks only for the unimplemented delta.
+  - Given ARCHITECTURE.md and TASKS.md do not exist, When `voidrift plan <model>` is run, Then fresh-plan mode runs.
 - **REQ-P-12:** Tasks SHALL NOT target `.voidrift/` paths. The `.voidrift/` directory contains framework artifacts (requirements, architecture, specs, logs) produced by gather and plan — not the develop command. Dot-prefixed project files (`.github/`, `.dockerignore`, `.eslintrc`, etc.) are valid develop targets.
   - *Rationale:* `.voidrift/` contains framework artifacts produced by gather and plan. Develop tasks that target `.voidrift/` paths overwrite planning artifacts or create redundant specs. However, many projects legitimately require dot-prefixed config files (CI workflows, linter configs, Docker ignore files) that the develop command must create.
   - Given TASKS.md contains a task targeting `.voidrift/spec/backend.md`, When the plan is reviewed, Then the task is invalid — spec files are plan artifacts.
   - Given TASKS.md contains a task targeting `.github/workflows/ci.yml`, When the plan is reviewed, Then the task is valid — CI config is a project source file.
   - Given TASKS.md contains a task targeting `src/main.py`, When the plan is reviewed, Then the task is valid.
-- **REQ-P-13:** WHEN `voidrift plan <model>` is run, THE SYSTEM SHALL validate that `.voidrift/REQUIREMENTS.md` exists before performing any model calls. IF `.voidrift/REQUIREMENTS.md` does not exist, THE SYSTEM SHALL exit with an error prompting `voidrift gather`. WHEN `--overwrite` is not specified AND `.voidrift/ARCHITECTURE.md` or `.voidrift/TASKS.md` already exists, THE SYSTEM SHALL exit with an error prompting `--overwrite` or `--update` — no model call is made.
+- **REQ-P-13:** WHEN `voidrift plan <model>` is run, THE SYSTEM SHALL validate that `.voidrift/REQUIREMENTS.md` exists before performing any model calls. IF `.voidrift/REQUIREMENTS.md` does not exist, THE SYSTEM SHALL exit with an error prompting `voidrift gather`.
   - Given no `.voidrift/REQUIREMENTS.md` exists, When `voidrift plan <model>` is run, Then the command exits with an error containing "Run 'voidrift gather'" — no model call is made.
-  - Given `.voidrift/REQUIREMENTS.md` exists and `.voidrift/ARCHITECTURE.md` exists, When `voidrift plan <model>` is run without `--overwrite` or `--update`, Then the command exits with an error prompting `--overwrite` or `--update`.
-  - Given `.voidrift/REQUIREMENTS.md` exists and no plan artifacts exist, When `voidrift plan <model>` runs, Then planning proceeds normally.
+  - Given `.voidrift/REQUIREMENTS.md` exists and no plan artifacts exist, When `voidrift plan <model>` runs, Then fresh-plan mode runs.
+  - Given `.voidrift/REQUIREMENTS.md` exists and `.voidrift/ARCHITECTURE.md` and `.voidrift/TASKS.md` exist, When `voidrift plan <model>` runs without `--overwrite`, Then update mode runs automatically.
+- **REQ-VF-1:** WHEN the Plan command generates ARCHITECTURE.md for a project with a runnable entry point, THE SYSTEM SHALL include a `startup_command:` field.
+  - *Rationale:* Verify needs to start the system under test. The startup command must be captured during planning when the project type and entry point are known — not inferred at verify time.
+  - Given a web API project, When Plan generates ARCHITECTURE.md, Then `startup_command:` is present with the command to start the server.
+  - Given a CLI-only project with no runnable server, When Plan generates ARCHITECTURE.md, Then `startup_command:` is omitted or empty.
+- **REQ-VF-2:** WHEN the Plan command detects authentication requirements in REQUIREMENTS.md, THE SYSTEM SHALL include `test_bootstrap:` in ARCHITECTURE.md AND add a test harness implementation task in TASKS.md.
+  - *Rationale:* Verify sub-agents need seeded credentials to test auth flows. The bootstrap script must be produced by Develop so it is available before Verify runs.
+  - Given an auth system is present in REQUIREMENTS.md, When Plan generates TASKS.md, Then a test harness task targeting a bootstrap script exists.
+  - Given no authentication requirements, When Plan generates ARCHITECTURE.md, Then `test_bootstrap:` is omitted.
 
 ### 4.6 Command: Develop
 
@@ -227,9 +237,9 @@
   - Given 5 escalations have occurred, When the developer escalates again, Then the task is marked `[!]` and the next task begins.
 - **REQ-D-8:** WHEN architect is consulted, THE SYSTEM SHALL provide: problem description, REQUIREMENTS.md, ARCHITECTURE.md, and task text. Source code files SHALL NOT be loaded.
   - Given a developer escalates, When the architect prompt is constructed, Then it contains the question, task text, full REQUIREMENTS.md, and full ARCHITECTURE.md — no source files.
-- **REQ-D-9:** Task completion SHALL be managed by the develop command framework code, which calls `task_store.complete()` with the correct module name after verifying writes occurred. The model SHALL NOT call task completion directly — the develop prompt SHALL explicitly instruct the model not to. `task_store.complete()` marks `- [ ]` as `- [x]` and writes through to disk.
+- **REQ-D-9:** Task completion SHALL be managed by the develop command framework code, which calls `task_store.complete()` with the correct module name after verifying writes occurred. The model SHALL NOT call task completion directly — the develop prompt SHALL explicitly instruct the model not to. `task_store.complete()` removes the task from TASKS.md and appends it to TASKS-DONE.md (REQ-D-14).
   - *Rationale:* The model does not know the correct module name for multi-module projects. When the model calls `complete_task()` with an empty or wrong module, the task store cannot find the task. The framework has the correct module context from `_develop_module` and calls completion after verifying `write_source_file()` was invoked.
-  - Given a task is pending `[ ]`, When the framework calls `complete_task(module)` after successful writes, Then the task is marked `[x]` in TASKS.md on disk.
+  - Given a task is pending `[ ]`, When the framework calls `task_store.complete(module)` after successful writes, Then the task line is removed from TASKS.md and appended to TASKS-DONE.md.
   - Given the develop prompt, When the model reads its instructions, Then the prompt contains "Do NOT call complete_task()".
 - **REQ-D-10:** WHEN `.voidrift/TASKS.md` contains `## Module:` headers, THE SYSTEM SHALL run modules concurrently using `ThreadPoolExecutor` with the concurrency limit from `get_concurrency()` for the model type (local: 1, cloud: 8, gateway: 8, configurable via `config.yml`). WHEN concurrency is 1, modules SHALL be processed sequentially. WHEN concurrency is 0, one worker SHALL be spawned per module.
   - *Rationale:* Concurrency is a model capacity concern, not a per-command flag. The same `concurrency` config used by gather applies to develop — one place to configure, consistent behavior across commands.
@@ -242,6 +252,11 @@
   - Given TASKS.md has no `## Module:` headers, When develop runs with cloud concurrency config of 8, Then tasks are processed sequentially.
 - **REQ-D-13:** WHEN Ctrl+C or SIGTERM is received, THE SYSTEM SHALL set an interrupted flag and stop after the current task completes. The lock file SHALL be cleaned up in all cases. WHEN multiple workers are active (REQ-D-10), THE SYSTEM SHALL send SIGTERM to active workers, allow a 2-second grace period, then SIGKILL.
   - Given a develop session is running a task, When Ctrl+C is pressed, Then the current task finishes and the session exits with the lock file removed.
+
+- **REQ-D-14:** WHEN the CLI marks a task complete, THE SYSTEM SHALL remove the task line from TASKS.md and append it to `.voidrift/TASKS-DONE.md` in the format `- [x] <task text>  <!-- <ISO timestamp> -->`. TASKS-DONE.md is written exclusively by the CLI via `task_store.complete()` — no agent tool provides write access to it.
+  - *Rationale:* TASKS.md is a work queue. Moving completed tasks out keeps it lean and makes remaining work immediately visible. The log file preserves history without polluting the queue. CLI-only writes prevent accidental or adversarial modification of the completion record.
+  - Given a task completes, When `task_store.complete()` is called, Then the line is absent from TASKS.md and present in TASKS-DONE.md with a timestamp.
+  - Given TASKS.md has no pending (`- [ ]`) tasks, When develop's preflight runs, Then the "all tasks complete" check triggers.
 
 ### 4.7 Command: Automate
 
@@ -256,14 +271,65 @@
 
 ### 4.8 Command: Verify
 
-- **REQ-V-1:** The system SHALL run quality checks based on the technology stack in ARCHITECTURE.md and detected project files.
-- **REQ-V-2:** The worker SHALL produce `.voidrift/VERIFY.md` with sections: Test Results, Lint & Static Analysis, Infrastructure, Requirements Coverage, Issues, Verdict.
-- **REQ-V-3:** The verdict SHALL be PASS only if the verdict line starts with `PASS` AND `failed_checks` is 0.
-- **REQ-V-4:** Verify SHALL report issues only — it SHALL NOT modify source files, produce task files, or attempt remediation. VERIFY.md is the sole output artifact of the verify command.
-  - Given verification identifies failures, When VERIFY.md is produced, Then it contains a description of each failure — no source files are modified and no TASKS-fixes.md is created.
-- **REQ-V-5:** WHEN `voidrift verify <model>` is run, THE SYSTEM SHALL validate that `.voidrift/REQUIREMENTS.md` exists before performing any model calls. IF `.voidrift/REQUIREMENTS.md` does not exist, THE SYSTEM SHALL exit with an error prompting `voidrift gather`.
+Verify is a two-stage requirements-driven acceptance testing command. Stage 1 produces a test plan; Stage 2 executes each test case in a dedicated sub-agent. Verify never modifies source code.
+
+- **REQ-VF-P:** WHEN `voidrift verify <model>` is run, THE SYSTEM SHALL validate that `.voidrift/REQUIREMENTS.md` exists before performing any model calls. IF `.voidrift/REQUIREMENTS.md` does not exist, THE SYSTEM SHALL exit with an error prompting `voidrift gather`.
   - Given no `.voidrift/REQUIREMENTS.md` exists, When `voidrift verify <model>` is run, Then the command exits with an error containing "Run 'voidrift gather'" — no model call is made.
   - Given `.voidrift/REQUIREMENTS.md` exists, When `voidrift verify <model>` runs, Then verification proceeds normally.
+
+- **REQ-VF-3:** WHEN Stage 1 completes, THE SYSTEM SHALL have written `.voidrift/VERIFY-PLAN.md` containing one self-contained test case per testable scenario. Each test case SHALL be a complete prompt including: requirement text, user story context, system context, test credentials (if applicable), numbered scenario steps, expected result, and evidence collection instructions. Non-testable criteria SHALL appear as SKIP items with reason.
+  - *Rationale:* Self-contained test cases eliminate context assembly in the orchestrator. The plan agent does that work once; sub-agents receive ready-to-execute prompts with no further assembly.
+  - Given 10 criteria (8 testable, 2 qualitative), When VERIFY-PLAN.md is written, Then 8 test cases and 2 SKIP items are present.
+
+- **REQ-VF-4:** WHEN a sub-agent encounters a failing scenario, THE SYSTEM SHALL write `.voidrift/bugs/<ITEM-ID>.md` containing: timestamp, run ID, requirement reference, scenario steps executed with full request/response detail, expected vs. actual result, process output at time of failure, any stack traces, screenshots (if UI scenario), and agent notes on likely cause.
+  - *Rationale:* Bug reports are the primary artifact for Develop and Chat. Full-fidelity evidence in a structured file means no re-running is needed to understand the failure.
+  - Given a scenario fails, When the bug report is written, Then it contains all evidence fields.
+
+- **REQ-VF-5:** WHEN Stage 3 completes, THE SYSTEM SHALL have written `.voidrift/VERIFY.md` containing: summary table (total/passed/failed/skipped), per-item result with evidence for passes and bug report link for failures, and a Verdict line.
+  - Given 1 failure exists, When VERIFY.md is written, Then the failure entry links to the bug report file.
+
+- **REQ-VF-6:** WHEN Verify completes, THE SYSTEM SHALL write a STATE.md entry: command, run ID, timestamp, verdict, items total/passed/failed/skipped.
+
+- **REQ-VF-7:** Sub-agents SHALL NOT modify source files. The `write_source_file` tool SHALL NOT be included in the `cmd="verify-execute"` tool set.
+  - *Rationale:* Verify's responsibility is observation and reporting. Code changes are Develop's responsibility. Structural enforcement via tool set ensures this boundary is never crossed.
+  - Given cmd="verify-execute", When build_local_tools() returns the tool list, Then write_source_file and read_source_file are absent.
+
+- **REQ-VF-8:** THE SYSTEM SHALL provide `start_process(cmd, env, cwd)` returning an opaque handle ID with buffered stdout/stderr capture.
+  - *Rationale:* Sub-agents need a stable reference to a running process that persists across tool calls. An opaque handle avoids exposing OS PIDs and allows the framework to manage lifecycle centrally.
+  - Given a valid shell command, When start_process(cmd) is called, Then a handle_id string is returned and the process is running with stdout/stderr captured.
+  - Given a started process, When read_process_output(handle_id) is called, Then buffered output lines are returned without stopping the process.
+
+- **REQ-VF-9:** THE SYSTEM SHALL provide `wait_for_ready(handle_id, strategy, target, timeout)` with strategies `http`, `port`, and `log_pattern`. Timeout SHALL stop the process and raise.
+  - *Rationale:* Different server types signal readiness differently. A unified function with pluggable strategies avoids duplicating polling logic in every test case.
+  - Given strategy="http" and target="http://localhost:8000/health", When the process starts, Then wait_for_ready polls until 200 is returned or timeout.
+  - Given strategy="port" and target="8080", When the process starts, Then wait_for_ready polls until the port accepts connections.
+  - Given strategy="log_pattern" and target="Server started", When the process starts, Then wait_for_ready scans buffered output until the pattern appears.
+
+- **REQ-VF-10:** THE SYSTEM SHALL guarantee process cleanup in a `try/finally` block in the orchestrator regardless of sub-agent outcome.
+  - *Rationale:* Leaked processes accumulate port bindings and consume resources. Structural enforcement via try/finally ensures cleanup even when sub-agents raise exceptions or are interrupted.
+  - Given a started process and a sub-agent that raises an exception, When the orchestrator's try/finally block executes, Then stop_all() is called and the process is terminated.
+  - Given a successful verify run, When run_verify() returns 0, Then stop_all() has been called in the finally block.
+
+- **REQ-VF-11:** THE SYSTEM SHALL provide `read_process_output(handle_id)` returning up to 500 buffered lines (newest kept on overflow) and `run_command(cmd, cwd)` returning stdout, stderr, and exit_code synchronously.
+  - *Rationale:* Sub-agents need both streaming (ongoing process output) and one-shot (diagnostic commands) access. Separating these into two tools keeps each interface focused.
+  - Given a process with more than 500 lines of output, When read_process_output(handle_id) is called, Then the 500 newest lines are returned and no lines beyond 500 are held in memory.
+  - Given a shell command, When run_command(cmd) is called, Then stdout, stderr, and exit_code are returned after the command completes.
+
+- **REQ-VF-12:** THE SYSTEM SHALL provide `http_request(method, url, headers, body, session_id)` with per-session cookie and auth header persistence. Multiple named sessions per sub-agent SHALL be supported. Sessions SHALL be discarded when the orchestrator clears them after Stage 2.
+  - *Rationale:* Many acceptance criteria involve authenticated flows across multiple requests. Session persistence eliminates the need for sub-agents to manually track cookies and auth tokens between steps.
+  - Given a login request that returns a Set-Cookie header with session_id="alice", When a subsequent request uses session_id="alice", Then the cookie is sent automatically.
+  - Given multiple sub-agents running concurrently each using session_id="default", When clear_sessions() is called after Stage 2, Then all sessions for all sub-agents are discarded.
+
+- **REQ-VF-13:** THE SYSTEM SHALL construct Stage 1 and Stage 2 system prompts using four-layer construction: `system.md` + QUALITY-QA skill + `resources/prompts/verify.md` + injected context.
+
+- **REQ-VF-14:** The Stage 1 plan agent SHALL cross-reference REQUIREMENTS.md, user stories, ARCHITECTURE.md, TASKS.md, and spec files when deriving test cases. Each test case SHALL embed all context a sub-agent needs to execute without reading any additional documents.
+  - *Rationale:* Sub-agents have minimal scope by design. All context assembly happens in Stage 1 so sub-agents stay focused on execution.
+
+- **REQ-VF-15:** Sub-agents SHALL run concurrently up to the configured concurrency limit (shared with Develop command config). Each sub-agent starts with a clean message history.
+
+- **REQ-VF-16:** THE SYSTEM SHALL pass `cmd="verify-plan"` and `cmd="verify-execute"` to `build_local_tools()`. The `cmd="verify-execute"` tool set SHALL include: `read_framework_file`, `write_framework_file`, `read_process_output`, `http_request`, `run_command`, and browser tools. It SHALL NOT include `read_source_file`, `write_source_file`, `start_process`, or `stop_process`.
+  - Given cmd="verify-plan", When build_local_tools() is called, Then read_framework_file, read_source_file, and write_framework_file are present.
+  - Given cmd="verify-execute", When build_local_tools() is called, Then read_source_file and write_source_file are absent; http_request, run_command, read_process_output, and browser tools are present.
 
 ### 4.9 Utility Commands
 
@@ -456,7 +522,7 @@ Two log roots, two intents:
 - **REQ-CFG-2:** `config.yml` SHALL contain sections for: `worker` (user, ip, api_key, hf_token), `kiro` (port, api_key), and `api_keys` (anthropic, gemini). Connection settings are literal values; secrets use env var references.
 - **REQ-CFG-3:** Framework resources (skills, templates, prompts), `models.yml`, and `worker-models.yml` SHALL be read from `~/.voidrift/`. The repo is the source of truth; `make sync` copies to `~/.voidrift/`. `make sync` SHALL also create `~/.voidrift/domain-skills/` if it does not exist.
 - **REQ-CFG-4:** `VOIDRIFT_HOME` env var MAY override `~/.voidrift/` for testing and CI. IF not set, `~/.voidrift/` is used.
-- **REQ-CFG-5:** `config.yml` SHALL contain a `retention:` section with `project` (integer, default 5 — number of recent runs to keep) and `global` (integer, default 30 — days of session data to keep). `voidrift prune` uses these limits.
+- **REQ-CFG-5:** `config.yml` SHALL contain a `retention:` section with `project` (integer, default 5 — number of recent project logs to keep) and `global` (integer, default 30 — days of global framework logs to keep). `voidrift prune` uses these limits.
 - **REQ-CFG-6:** `config.yml` SHALL support a `limits:` section with: `local_max_tokens` (integer, default 4096), `cloud_max_tokens` (integer, default 32768), `max_input_chars` (integer, default 8000 for local / 0 = unlimited for cloud), `local_max_read_lines` (integer, default 2000), `cloud_max_read_lines` (integer, default 2000), and `gateway_max_read_lines` (integer, default 2000). These caps are applied by `get_max_tokens(model_type, stage)`, `get_max_input_chars(model_type)`, and `get_max_read_lines(model_type)` in `config.py`. IF the section or a key is absent, the defaults apply.
   - *Rationale:* Local models hallucinate and produce truncated JSON when asked to generate more tokens than their effective working window supports. Hard-coding 16384 everywhere gives local models too large an output budget. Making the cap configurable lets operators tune for their specific hardware without code changes. The `max_read_lines` cap enforces the same discipline on file I/O — models cannot reliably reason about files longer than their effective context; making it configurable allows cloud models to be tuned higher while keeping local models conservative.
   - Given `limits.local_max_tokens: 3000` is set, When a local model agent is constructed with stage "analysis", Then its max_tokens is 2000 (the per-stage default is lower than the cap, so the stage default wins).
@@ -569,7 +635,8 @@ Two log roots, two intents:
 | V-SKL-4 | REQ-SKL-8 | Test | `voidrift skills list` groups output by layer |
 | V-P-3 | REQ-P-6 | Analysis | Code review of generated TASKS.md for file ownership |
 | V-P-4 | REQ-P-9 | Test | `test_commands.py` — invalid skill tags stripped, valid tags preserved |
-| V-P-5 | REQ-P-11 | Test | `test_commands.py` — update mode requires existing artifacts |
+| V-P-5 | REQ-P-11 | Test | `test_commands.py` — auto-detects update mode when artifacts exist; fresh-plan when absent |
+| V-G-10 | REQ-G-1 | Test | `test_commands.py` — gather update mode: existing REQUIREMENTS.md provided as context in final pass |
 | V-D-1 | REQ-D-1 | Test | `test_commands.py::TestDevelopPreflightChecks::test_missing_tasks` |
 | V-D-2 | REQ-D-2 | Test | `test_commands.py::TestDevelopPreflightChecks::test_all_tasks_complete` |
 | V-D-3 | REQ-D-3 | Test | `test_commands.py::TestDevelopPreflightChecks::test_lock_file_stale` |
@@ -580,7 +647,8 @@ Two log roots, two intents:
 | V-D-7 | REQ-D-4 | Inspection | `develop.py::_develop_module` — task loop calls `task_store.get_next()`, skills pre-injected into system prompt at task-init time |
 | V-D-8 | REQ-D-6 | Inspection | `develop.py::_consult_architect` — escalation prompt loaded directly from disk |
 | V-D-9 | REQ-D-8 | Inspection | `develop.py::_consult_architect` — provides reqs + arch + task, no source files |
-| V-D-10 | REQ-D-9 | Test | `test_task_store.py` — `complete()` marks `[x]` and writes through to disk |
+| V-D-10 | REQ-D-9 | Test | `test_task_store.py` — `complete()` removes from TASKS.md and appends to TASKS-DONE.md |
+| V-D-13 | REQ-D-14 | Test | `test_task_store.py` — completed task absent from TASKS.md, present in TASKS-DONE.md with timestamp |
 | V-D-11 | REQ-D-11 | Inspection | `develop.py::run_develop` — `threading.Lock` passed to all `_develop_module` calls, acquired around git ops |
 | V-D-12 | REQ-D-13 | Inspection | `develop.py::run_develop` — SIGTERM/SIGINT set interrupted flag, lock cleaned in finally block |
 | V-U-1 | REQ-U-1 | Test | `test_commands.py::TestCLICommands::test_status_command` |

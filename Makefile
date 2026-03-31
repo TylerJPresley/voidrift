@@ -5,7 +5,6 @@ test:
 
 install:
 	uv pip install --system -e cli/
-	uv pip install --system -e mcp-context-server/
 	uv pip install --system -e worker-cli/
 
 setup: install sync
@@ -16,12 +15,11 @@ sync:
 	cp config.yml ~/.voidrift/config.yml
 	cp models.yml ~/.voidrift/models.yml
 	cp worker-models.yml ~/.voidrift/worker-models.yml 2>/dev/null || true
-	cp -n defaults/spinner-labels.txt ~/.voidrift/spinner-labels.txt 2>/dev/null || true
+	cp -n spinner-labels.txt ~/.voidrift/spinner-labels.txt 2>/dev/null || true
 	@echo "✅ Synced to ~/.voidrift/"
 
 build:
 	cd cli && uv build
-	cd mcp-context-server && uv build
 	cd worker-cli && uv build
 
 release:

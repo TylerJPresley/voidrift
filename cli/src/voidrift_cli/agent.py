@@ -749,6 +749,12 @@ def build_local_tools(cmd: str = "") -> tuple[list[dict], dict[str, Callable]]:
             "list_project_artifacts", "web_fetch",
             "get_skill", "list_skills",
         },
+        "verify-plan": {"read_source_file", "read_framework_file", "write_framework_file"},
+        "verify-execute": {
+            "read_framework_file", "write_framework_file",
+            "read_process_output", "http_request", "run_command",
+            "browser_navigate", "browser_screenshot", "browser_click", "browser_get_text",
+        },
     }
     allowed = _COMMAND_TOOLS.get(cmd) if cmd else None
 
@@ -803,6 +809,131 @@ def build_local_tools(cmd: str = "") -> tuple[list[dict], dict[str, Callable]]:
         "list_skills": _list_skills_handler,
     }
 
+    # Verify execution tools (process lifecycle, HTTP, browser)
+    from .tools import process_manager as _pm, http_client as _http, browser as _browser
+
+    verify_tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "read_process_output",
+                "description": "Read buffered stdout/stderr from a running process (up to 500 lines).",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "handle_id": {"type": "string", "description": "Handle ID returned by start_process"},
+                    },
+                    "required": ["handle_id"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "http_request",
+                "description": (
+                    "Make an HTTP request with session-scoped cookie and auth header persistence. "
+                    "Cookies and Authorization headers are preserved across calls in the same session."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "method": {"type": "string", "description": "HTTP method (GET, POST, PUT, PATCH, DELETE)"},
+                        "url": {"type": "string", "description": "Full URL including scheme"},
+                        "headers": {"type": "string", "description": "JSON object of request headers (default {})"},
+                        "body": {"type": "string", "description": "Request body (default empty)"},
+                        "session_id": {"type": "string", "description": "Named session for persistence (default 'default')"},
+                    },
+                    "required": ["method", "url"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "run_command",
+                "description": "Run a shell command synchronously and return its stdout, stderr, and exit code.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "cmd": {"type": "string", "description": "Shell command to run"},
+                        "cwd": {"type": "string", "description": "Working directory (default current)"},
+                    },
+                    "required": ["cmd"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "browser_navigate",
+                "description": "Navigate the browser to a URL.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "url": {"type": "string", "description": "URL to navigate to"},
+                        "session_id": {"type": "string", "description": "Browser session ID (default 'default')"},
+                    },
+                    "required": ["url"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "browser_screenshot",
+                "description": "Take a full-page screenshot. Returns base64 PNG or saves to .voidrift/ path.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "session_id": {"type": "string", "description": "Browser session ID"},
+                        "save_path": {"type": "string", "description": "Optional path relative to .voidrift/ to save PNG"},
+                    },
+                    "required": [],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "browser_click",
+                "description": "Click an element on the current page using a CSS or text selector.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "selector": {"type": "string", "description": "CSS or text selector (e.g. 'button.submit' or 'text=Login')"},
+                        "session_id": {"type": "string", "description": "Browser session ID"},
+                    },
+                    "required": ["selector"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "browser_get_text",
+                "description": "Get visible text content of an element (default: full page body).",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "selector": {"type": "string", "description": "CSS selector (default 'body')"},
+                        "session_id": {"type": "string", "description": "Browser session ID"},
+                    },
+                    "required": [],
+                },
+            },
+        },
+    ]
+    verify_handlers: dict[str, Callable] = {
+        "read_process_output": _pm.read_process_output,
+        "http_request": _http.http_request,
+        "run_command": _pm.run_command,
+        "browser_navigate": _browser.browser_navigate,
+        "browser_screenshot": _browser.browser_screenshot,
+        "browser_click": _browser.browser_click,
+        "browser_get_text": _browser.browser_get_text,
+    }
+
     tools: list[dict] = []
     handlers: dict[str, Callable] = {}
 
@@ -823,5 +954,14 @@ def build_local_tools(cmd: str = "") -> tuple[list[dict], dict[str, Callable]]:
             continue
         tools.append(tool_def)
         handlers[name] = skill_handlers[name]
+
+    # Include verify execution tools (verify-execute only; never registered for other commands)
+    for tool_def in verify_tools:
+        name = tool_def["function"]["name"]
+        if allowed is not None and name not in allowed:
+            handlers[name] = verify_handlers[name]
+            continue
+        tools.append(tool_def)
+        handlers[name] = verify_handlers[name]
 
     return tools, handlers

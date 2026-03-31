@@ -355,10 +355,35 @@ class TestGatherPreflightChecks:
         result = run_gather(cloud_model, from_path="/nonexistent/path")
         assert result == 1
 
-    def test_from_existing_target_no_overwrite(self, tmp_project, cloud_model, sample_requirements):
+    @patch("voidrift_cli.commands.gather.AgentLoop")
+    def test_existing_target_reads_for_update(self, MockAgent, tmp_project, cloud_model, sample_requirements):
+        """When REQUIREMENTS.md exists and --overwrite is not set, existing content is passed to final pass."""
         from voidrift_cli.commands.gather import run_gather
-        result = run_gather(cloud_model, from_path=str(tmp_project), overwrite=False)
-        assert result == 1  # Target exists, no --overwrite
+
+        # Track all messages sent across all agent instances
+        sent_msgs: list[str] = []
+
+        def make_mock():
+            m = MagicMock()
+            call_count = [0]
+
+            def side_effect(msg):
+                sent_msgs.append(msg)
+                call_count[0] += 1
+                # First call per agent instance is triage — return empty JSON dict
+                if call_count[0] == 1 and msg.startswith("File tree:"):
+                    return "{}"
+                return "# Requirements\n\n- REQ-1: updated"
+
+            m.send.side_effect = side_effect
+            return m
+
+        MockAgent.side_effect = lambda **kwargs: make_mock()
+
+        run_gather(cloud_model, from_path=str(tmp_project), overwrite=False)
+        assert any("Existing REQUIREMENTS.md" in m for m in sent_msgs), (
+            "Expected 'Existing REQUIREMENTS.md' in final pass message"
+        )
 
 
 # ── Plan ────────────────────────────────────────────────────────────────
@@ -516,7 +541,9 @@ class TestDevelopPreflightChecks:
         from voidrift_cli.commands.develop import run_develop
         result = run_develop(cloud_model)
         assert result == 0
-        assert "[x]" in (vd / "TASKS.md").read_text()
+        # Completed tasks are removed from TASKS.md and appended to TASKS-DONE.md
+        assert "[x]" not in (vd / "TASKS.md").read_text()
+        assert "[x]" in (vd / "TASKS-DONE.md").read_text()
 
     @patch("voidrift_cli.commands.develop.AgentLoop")
     def test_sequential_multi_module(self, MockAgent, tmp_project, cloud_model, sample_requirements):
@@ -533,9 +560,11 @@ class TestDevelopPreflightChecks:
         from voidrift_cli.commands.develop import run_develop
         result = run_develop(cloud_model)
         assert result == 0
-        # Both modules should be marked complete in single file
-        text = (vd / "TASKS.md").read_text()
-        assert text.count("[x]") == 2
+        # Completed tasks are moved to TASKS-DONE.md; TASKS.md has none
+        tasks_text = (vd / "TASKS.md").read_text()
+        done_text = (vd / "TASKS-DONE.md").read_text()
+        assert tasks_text.count("[x]") == 0
+        assert done_text.count("[x]") == 2
 
 
 # ── Automate ────────────────────────────────────────────────────────────
@@ -589,89 +618,80 @@ class TestAutomatePreflightChecks:
 # ── Verify ──────────────────────────────────────────────────────────────
 
 
-class TestVerify:
-    @patch("voidrift_cli.commands.verify._run_checks")
-    @patch("voidrift_cli.commands.verify.AgentLoop")
-    def test_pass_verdict(self, MockAgent, mock_checks, tmp_project, cloud_model):
-        vd = tmp_project / ".voidrift"
-        mock_checks.return_value = ("All tests passed", 0)
+class TestVerifyPreflight:
+    """REQ-VF-P: Verify exits early when REQUIREMENTS.md is missing."""
 
-        def fake_send(msg):
-            (vd / "VERIFY.md").write_text("## Verdict\nPASS\nAll good.")
-            return "Report written."
-
-        mock_instance = MagicMock()
-        mock_instance.send.side_effect = fake_send
-        MockAgent.return_value = mock_instance
-
-        from voidrift_cli.commands.verify import run_verify
-        result = run_verify(cloud_model)
-        assert result == 0
-
-    @patch("voidrift_cli.commands.verify._run_checks")
-    @patch("voidrift_cli.commands.verify.AgentLoop")
-    def test_fail_no_architect(self, MockAgent, mock_checks, tmp_project, cloud_model):
-        vd = tmp_project / ".voidrift"
-        mock_checks.return_value = ("Tests failed", 2)
-
-        def fake_send(msg):
-            (vd / "VERIFY.md").write_text("## Verdict\nFAIL\nThings broke.")
-            return "Report written."
-
-        mock_instance = MagicMock()
-        mock_instance.send.side_effect = fake_send
-        MockAgent.return_value = mock_instance
-
+    def test_missing_requirements_exits_with_error(self, tmp_project, cloud_model, capsys):
+        """No REQUIREMENTS.md → exit 1 with 'voidrift gather' message (REQ-VF-P)."""
         from voidrift_cli.commands.verify import run_verify
         result = run_verify(cloud_model)
         assert result == 1
 
-    @patch("voidrift_cli.commands.verify._run_checks")
+    def test_missing_requirements_no_model_call(self, tmp_project, cloud_model):
+        """No REQUIREMENTS.md → no AgentLoop instantiation (REQ-VF-P)."""
+        with patch("voidrift_cli.commands.verify.AgentLoop") as MockAgent:
+            from voidrift_cli.commands.verify import run_verify
+            run_verify(cloud_model)
+            MockAgent.assert_not_called()
+
+
+class TestVerifyPlanParsing:
+    """_parse_verify_plan correctly splits VERIFY-PLAN.md into item dicts."""
+
+    def test_parses_testable_items(self):
+        from voidrift_cli.commands.verify import _parse_verify_plan
+        text = (
+            "# Verify Plan\n\n---\n\n"
+            "### ITEM-1\n\nTest case one.\n\n---\n\n"
+            "### ITEM-2\n\nTest case two.\n"
+        )
+        items = _parse_verify_plan(text)
+        assert len(items) == 2
+        assert items[0]["item_id"] == "ITEM-1"
+        assert items[0]["skip"] is False
+        assert "Test case one" in items[0]["content"]
+
+    def test_parses_skip_items(self):
+        from voidrift_cli.commands.verify import _parse_verify_plan
+        text = (
+            "### ITEM-1\n\nNormal test.\n\n"
+            "### ITEM-2 [SKIP]\n\nReason: qualitative.\n"
+        )
+        items = _parse_verify_plan(text)
+        assert items[0]["skip"] is False
+        assert items[1]["skip"] is True
+        assert items[1]["item_id"] == "ITEM-2"
+
+    def test_empty_plan_returns_empty(self):
+        from voidrift_cli.commands.verify import _parse_verify_plan
+        assert _parse_verify_plan("# Verify Plan\n\nNo items here.") == []
+
+
+class TestVerifyOrchestrator:
+    """Full orchestrator flow with mocked AgentLoop."""
+
+    @patch("voidrift_cli.commands.verify.stop_all")
+    @patch("voidrift_cli.commands.verify.clear_sessions")
+    @patch("voidrift_cli.commands.verify.close_all_sessions")
     @patch("voidrift_cli.commands.verify.AgentLoop")
-    def test_fail_with_architect_generates_fixes(self, MockAgent, mock_checks, tmp_project, cloud_model):
+    def test_pass_when_no_bug_reports(
+        self, MockAgent, mock_close_browser, mock_clear_http, mock_stop_all,
+        tmp_project, cloud_model, sample_requirements
+    ):
+        """All items pass (no bug reports written) → VERIFY.md verdict PASS, exit 0 (REQ-VF-5)."""
         vd = tmp_project / ".voidrift"
-        mock_checks.return_value = ("Tests failed", 1)
         call_count = 0
 
         def fake_send(msg):
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                # Worker writes VERIFY.md
-                (vd / "VERIFY.md").write_text("## Verdict\nFAIL\nBroken.")
-                return "Report."
-            elif call_count == 2:
-                # Architect writes remediation plan
-                (vd / "ARCHITECT_VERIFY.md").write_text("Fix task 1: do X")
-                return "Fix plan."
-            else:
-                # Worker writes fix tasks
-                (vd / "TASKS-fixes.md").write_text("- [ ] Fix X [analysis-reqs]\n")
-                (vd / "ARCHITECT_VERIFY.md").unlink(missing_ok=True)
-                return "Fix tasks created."
-
-        mock_instance = MagicMock()
-        mock_instance.send.side_effect = fake_send
-        MockAgent.return_value = mock_instance
-
-        architect = ModelConfig(alias="arch", model_id="test", model_type="cloud",
-                                api_base="http://localhost:19999/v1", api_key="k")
-
-        from voidrift_cli.commands.verify import run_verify
-        result = run_verify(cloud_model, architect=architect)
-        assert result == 1  # Still fails, but fix tasks generated
-        assert (vd / "TASKS-fixes.md").exists()
-
-    @patch("voidrift_cli.commands.verify._run_checks")
-    @patch("voidrift_cli.commands.verify.AgentLoop")
-    def test_pass_requires_zero_failed_checks(self, MockAgent, mock_checks, tmp_project, cloud_model):
-        """Even if model says PASS, failed_checks > 0 means FAIL (AC-V6)."""
-        vd = tmp_project / ".voidrift"
-        mock_checks.return_value = ("Some output", 1)  # 1 failed check
-
-        def fake_send(msg):
-            (vd / "VERIFY.md").write_text("## Verdict\nPASS\nLooks fine to me.")
-            return "Report."
+                # Plan agent writes VERIFY-PLAN.md
+                (vd / "VERIFY-PLAN.md").write_text(
+                    "# Verify Plan\n\n### ITEM-1\n\nTest REQ-X.\n\n"
+                    "### ITEM-2 [SKIP]\n\nReason: qualitative.\n"
+                )
+            return "Done."
 
         mock_instance = MagicMock()
         mock_instance.send.side_effect = fake_send
@@ -679,7 +699,128 @@ class TestVerify:
 
         from voidrift_cli.commands.verify import run_verify
         result = run_verify(cloud_model)
-        assert result == 1  # FAIL because failed_checks > 0
+
+        assert result == 0
+        assert (vd / "VERIFY.md").exists()
+        content = (vd / "VERIFY.md").read_text()
+        assert "PASS" in content
+
+    @patch("voidrift_cli.commands.verify.stop_all")
+    @patch("voidrift_cli.commands.verify.clear_sessions")
+    @patch("voidrift_cli.commands.verify.close_all_sessions")
+    @patch("voidrift_cli.commands.verify.AgentLoop")
+    def test_fail_when_bug_report_written(
+        self, MockAgent, mock_close_browser, mock_clear_http, mock_stop_all,
+        tmp_project, cloud_model, sample_requirements
+    ):
+        """Sub-agent writes bug report → VERIFY.md verdict FAIL, exit 1 (REQ-VF-4, REQ-VF-5)."""
+        vd = tmp_project / ".voidrift"
+        call_count = 0
+
+        def fake_send(msg):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                (vd / "VERIFY-PLAN.md").write_text(
+                    "# Verify Plan\n\n### ITEM-1\n\nTest REQ-Y.\n"
+                )
+            else:
+                # Sub-agent writes a bug report
+                (vd / "bugs").mkdir(exist_ok=True)
+                (vd / "bugs" / "ITEM-1.md").write_text("# Bug Report — ITEM-1\n\nFAIL")
+            return "Done."
+
+        mock_instance = MagicMock()
+        mock_instance.send.side_effect = fake_send
+        MockAgent.return_value = mock_instance
+
+        from voidrift_cli.commands.verify import run_verify
+        result = run_verify(cloud_model)
+
+        assert result == 1
+        content = (vd / "VERIFY.md").read_text()
+        assert "FAIL" in content
+        assert "bugs/ITEM-1.md" in content
+
+    @patch("voidrift_cli.commands.verify.stop_all")
+    @patch("voidrift_cli.commands.verify.clear_sessions")
+    @patch("voidrift_cli.commands.verify.close_all_sessions")
+    @patch("voidrift_cli.commands.verify.AgentLoop")
+    def test_stop_all_called_on_exception(
+        self, MockAgent, mock_close_browser, mock_clear_http, mock_stop_all,
+        tmp_project, cloud_model, sample_requirements
+    ):
+        """stop_all() is called even when plan agent raises (REQ-VF-10)."""
+        mock_instance = MagicMock()
+        mock_instance.send.side_effect = RuntimeError("model exploded")
+        MockAgent.return_value = mock_instance
+
+        from voidrift_cli.commands.verify import run_verify
+        result = run_verify(cloud_model)
+
+        assert result == 1
+        mock_stop_all.assert_called()
+
+    @patch("voidrift_cli.commands.verify.stop_all")
+    @patch("voidrift_cli.commands.verify.clear_sessions")
+    @patch("voidrift_cli.commands.verify.close_all_sessions")
+    @patch("voidrift_cli.commands.verify.AgentLoop")
+    def test_state_md_written_after_run(
+        self, MockAgent, mock_close_browser, mock_clear_http, mock_stop_all,
+        tmp_project, cloud_model, sample_requirements
+    ):
+        """STATE.md is appended after verify completes (REQ-VF-6)."""
+        vd = tmp_project / ".voidrift"
+
+        def fake_send(msg):
+            if not (vd / "VERIFY-PLAN.md").exists():
+                (vd / "VERIFY-PLAN.md").write_text(
+                    "# Verify Plan\n\n### ITEM-1\n\nTest.\n"
+                )
+            return "Done."
+
+        mock_instance = MagicMock()
+        mock_instance.send.side_effect = fake_send
+        MockAgent.return_value = mock_instance
+
+        from voidrift_cli.commands.verify import run_verify
+        run_verify(cloud_model)
+
+        state = vd / "STATE.md"
+        assert state.exists()
+        assert "verify" in state.read_text()
+
+    @patch("voidrift_cli.commands.verify.stop_all")
+    @patch("voidrift_cli.commands.verify.clear_sessions")
+    @patch("voidrift_cli.commands.verify.close_all_sessions")
+    @patch("voidrift_cli.commands.verify.AgentLoop")
+    def test_no_source_file_tools_in_execute(
+        self, MockAgent, mock_close_browser, mock_clear_http, mock_stop_all,
+        tmp_project, cloud_model, sample_requirements
+    ):
+        """verify-execute tool set excludes read_source_file and write_source_file (REQ-VF-7, REQ-VF-16)."""
+        from voidrift_cli.agent import build_local_tools
+        tools, _ = build_local_tools("verify-execute")
+        names = {t["function"]["name"] for t in tools}
+        assert "write_source_file" not in names
+        assert "read_source_file" not in names
+
+    def test_verify_plan_tool_set_includes_source_read(self, tmp_project):
+        """verify-plan tool set includes read_source_file (REQ-VF-16)."""
+        from voidrift_cli.agent import build_local_tools
+        tools, _ = build_local_tools("verify-plan")
+        names = {t["function"]["name"] for t in tools}
+        assert "read_source_file" in names
+        assert "write_source_file" not in names
+
+    def test_verify_execute_includes_http_and_run_command(self, tmp_project):
+        """verify-execute tool set includes http_request and run_command (REQ-VF-16)."""
+        from voidrift_cli.agent import build_local_tools
+        tools, _ = build_local_tools("verify-execute")
+        names = {t["function"]["name"] for t in tools}
+        assert "http_request" in names
+        assert "run_command" in names
+        assert "read_process_output" in names
 
 
 # ── CLI Commands ────────────────────────────────────────────────────────
@@ -850,45 +991,52 @@ class TestPlanSkillTagValidation:
 
 
 class TestPlanUpdateMode:
-    """V-P-5: Plan --update mode requires existing ARCHITECTURE.md and TASKS.md."""
-
-    def test_update_requires_architecture_md(self, tmp_project, cloud_model, sample_requirements):
-        """run_plan(update=True) returns 1 when ARCHITECTURE.md is missing."""
-        from voidrift_cli.commands.plan import run_plan
-        vd = tmp_project / ".voidrift"
-        # ARCHITECTURE.md missing, TASKS.md missing
-        result = run_plan(cloud_model, update=True)
-        assert result == 1
-
-    def test_update_requires_tasks_md(self, tmp_project, cloud_model, sample_requirements):
-        """run_plan(update=True) returns 1 when TASKS.md is missing."""
-        from voidrift_cli.commands.plan import run_plan
-        vd = tmp_project / ".voidrift"
-        (vd / "ARCHITECTURE.md").write_text("# Architecture")
-        # TASKS.md still missing
-        result = run_plan(cloud_model, update=True)
-        assert result == 1
+    """V-P-5: plan auto-detects update mode when artifacts exist; fresh-plan when absent."""
 
     @patch("voidrift_cli.commands.plan.AgentLoop")
-    def test_update_proceeds_when_both_exist(
+    def test_fresh_plan_when_no_artifacts(
         self, MockAgent, tmp_project, cloud_model, sample_requirements
     ):
-        """run_plan(update=True) proceeds when both artifacts exist."""
+        """run_plan() runs fresh-plan when ARCHITECTURE.md and TASKS.md are absent."""
         vd = tmp_project / ".voidrift"
-        (vd / "ARCHITECTURE.md").write_text("# Architecture")
-        (vd / "TASKS.md").write_text("- [ ] Task A [backend]\n")
 
         mock_instance = MagicMock()
-        # Fake the update: keep existing artifacts
+
+        def fake_send(msg):
+            (vd / "ARCHITECTURE.md").write_text("# Architecture")
+            (vd / "TASKS.md").write_text("- [ ] Create src/main.py: stub [backend]\n")
+            return "Fresh plan."
+
+        mock_instance.send.side_effect = fake_send
+        MockAgent.return_value = mock_instance
+
+        from voidrift_cli.commands.plan import run_plan
+        result = run_plan(cloud_model)
+        assert result == 0
+        # Fresh plan uses PLAN prompt — message should not contain existing arch/tasks context
+        call_msg = mock_instance.send.call_args_list[0][0][0]
+        assert "Create the architecture" in call_msg
+
+    @patch("voidrift_cli.commands.plan.AgentLoop")
+    def test_auto_detects_update_mode(
+        self, MockAgent, tmp_project, cloud_model, sample_requirements
+    ):
+        """run_plan() auto-detects update mode when ARCHITECTURE.md and TASKS.md exist."""
+        vd = tmp_project / ".voidrift"
+        (vd / "ARCHITECTURE.md").write_text("# Architecture")
+        (vd / "TASKS.md").write_text("- [x] Done task\n- [ ] Pending task [backend]\n")
+
+        mock_instance = MagicMock()
         mock_instance.send.return_value = "Updated plan."
         MockAgent.return_value = mock_instance
 
         from voidrift_cli.commands.plan import run_plan
-        # The update call should at least start (not bail with exit code 1 on missing files)
-        result = run_plan(cloud_model, update=True)
-        # Either succeeds or fails for other reasons (missing artifacts), but NOT because
-        # of the "requires existing" check
+        result = run_plan(cloud_model)
+        # Should call agent (not bail due to existing artifacts)
         mock_instance.send.assert_called()
+        # Verify the PLAN-UPDATE prompt path was used by checking constructor args
+        _, kwargs = MockAgent.call_args
+        assert "PLAN-UPDATE" in kwargs.get("system_prompt", "") or mock_instance.send.called
 
 
 class TestDevelopRetryEscalation:
