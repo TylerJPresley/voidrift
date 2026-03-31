@@ -228,11 +228,9 @@ class WriteContext:
         self._session_files.append(path)
         return f"Wrote {len(content)} bytes to {path}"
 
-    def write_framework_file(self, path: str, content: str) -> str:
+    def write_framework_file(self, path: str, content: str, append: bool = False) -> str:
         """Write a framework artifact to the .voidrift/ directory."""
         if err := self._validate_content(content):
-            return err
-        if err := self._check_write_size(path, content):
             return err
         if path.startswith(".voidrift/"):
             path = path[len(".voidrift/"):]
@@ -242,12 +240,19 @@ class WriteContext:
         except ValueError:
             return f"Access denied: {path} resolves outside .voidrift/"
         canon = f".voidrift/{path}"
-        if err := self._check_duplicate(canon, full, content):
+        if append and full.exists():
+            existing = full.read_text(encoding="utf-8")
+            content = existing + content
+        if err := self._check_write_size(path, content):
             return err
+        if not append:
+            if err := self._check_duplicate(canon, full, content):
+                return err
         full.parent.mkdir(parents=True, exist_ok=True)
         full.write_text(content, encoding="utf-8")
         self._written_this_run.add(canon)
-        return f"Wrote {len(content)} bytes to .voidrift/{path}"
+        verb = "Appended" if append else "Wrote"
+        return f"{verb} {len(content)} bytes to .voidrift/{path}"
 
     def _read_with_guard(self, full: Path, display_path: str, offset: int, limit: int | None) -> str:
         """Read lines from a file with optional pagination and size guard (REQ-FSZ-1)."""
@@ -367,9 +372,9 @@ def write_source_file(path: str, content: str) -> str:
     return _ctx.write_source_file(path, content)
 
 
-def write_framework_file(path: str, content: str) -> str:
+def write_framework_file(path: str, content: str, append: bool = False) -> str:
     """Write a framework artifact to the .voidrift/ directory."""
-    return _ctx.write_framework_file(path, content)
+    return _ctx.write_framework_file(path, content, append=append)
 
 
 def read_source_file(path: str, offset: int = 0, limit: int | None = None) -> str:
@@ -417,12 +422,13 @@ LOCAL_TOOLS = [
         "type": "function",
         "function": {
             "name": "write_framework_file",
-            "description": "Write a framework artifact to the .voidrift/ directory.",
+            "description": "Write a framework artifact to the .voidrift/ directory. Use append=true to add content to an existing file.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "path": {"type": "string", "description": "Path relative to .voidrift/ (e.g. TASKS.md, arch/backend.md)"},
                     "content": {"type": "string", "description": "File content to write"},
+                    "append": {"type": "boolean", "description": "Append to existing file instead of overwriting. Default: false."},
                 },
                 "required": ["path", "content"],
             },

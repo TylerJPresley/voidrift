@@ -35,7 +35,7 @@ Steps:
 5. Tag each task line with skills from this list using `[SKILL-NAME]` at the end of the line: {valid_skills}. Use ONLY names from this list — do not invent skill names.
 6. For tasks that create test files, include the AC identifier(s) the tests must validate in the task description.
 7. When requirements mention authentication or pre-seeded state, add a test harness/bootstrap task.
-8. Write `TASKS.md` via `write_framework_file()`.
+8. Write `TASKS.md` one module at a time. First call: `write_framework_file("TASKS.md", content)` with the header and first module section. Each subsequent module: `write_framework_file("TASKS.md", content, append=true)`.
 9. Call `done()`.
 
 {task_format}
