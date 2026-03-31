@@ -23,6 +23,7 @@ class Task(BaseModel):
 
     text: str
     status: str  # " " = pending, "x" = done, "!" = blocked
+    file: str = ""
     skills: list[str] = []
     reqs: list[str] = []
     line_start: int = 0
@@ -78,15 +79,18 @@ class TaskStore(BaseModel):
 
             skills: list[str] = []
             reqs: list[str] = []
+            file_path: str = ""
             for j in range(line_num + 1, end):
                 stripped = self._raw_lines[j].strip()
                 if stripped.lower().startswith("skills:"):
                     skills = [s.strip() for s in stripped.split(":", 1)[1].split(",") if s.strip()]
                 elif stripped.lower().startswith("reqs:"):
                     reqs = [r.strip() for r in stripped.split(":", 1)[1].split(",") if r.strip()]
+                elif stripped.lower().startswith("file:"):
+                    file_path = stripped.split(":", 1)[1].strip()
 
             self._modules[module].append(
-                Task(text=text, status=status, skills=skills, reqs=reqs,
+                Task(text=text, status=status, file=file_path, skills=skills, reqs=reqs,
                      line_start=line_num, line_end=end)
             )
 
