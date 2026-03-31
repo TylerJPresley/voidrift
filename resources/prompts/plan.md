@@ -31,7 +31,7 @@ Steps:
 1. Read the architecture: `ARCHITECTURE.md` and each `arch/<module>.md` file listed below.
 2. IF `TASKS.md` already exists, read it via `read_framework_file("TASKS.md")` — determine what is already covered. Read source files to determine what is already implemented. Write tasks only for the unimplemented delta.
 3. IF `TASKS.md` does not exist, create the full task breakdown from scratch.
-4. Group tasks under `## Module: <name>` headers for multi-module projects. Module names must match the `arch/` filenames (lowercased, spaces to hyphens). For single-module projects, use a `## Tasks` header.
+4. Group tasks under `## Module: <name>` headers for multi-module projects. Module names must match the `arch/` filenames (lowercased, spaces to hyphens). Tasks that span multiple modules (Dockerfile, CI, config templates) go under their own module (e.g. `## Module: deployment`). For single-module projects, use a `## Tasks` header.
 5. Write each task as a multi-line block following the TASK FORMAT below. Use `skills:` and `reqs:` metadata lines. Valid skill names: {valid_skills}. Use ONLY names from this list.
 6. For tasks that create test files, include the AC identifier(s) the tests must validate in the task description.
 7. When requirements mention authentication or pre-seeded state, add a test harness/bootstrap task.
