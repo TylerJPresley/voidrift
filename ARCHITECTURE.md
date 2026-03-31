@@ -14,12 +14,9 @@ VoidRift orchestrates AI models to produce a deployable project from requirement
 Operator
   │
   ▼
-voidrift CLI  ──stdio──►  MCP Context Server
-  │                           │
-  │                           ▼
-  │                      ~/.voidrift/
-  │                      sessions.db
-  │                      resources/
+voidrift CLI  ──reads──►  ~/.voidrift/
+  │                       models.yml
+  │                       resources/
   │
   ├── HTTP ──►  Local vLLM (GPU worker node)
   ├── HTTP ──►  Kiro Gateway
@@ -37,7 +34,7 @@ worker CLI  ──SSH──►  Worker Node (Docker, GPU)
 **Entry point:** `voidrift_cli.main:cli`
 
 The CLI is the orchestration layer. It owns:
-- Phase execution (Gather → Plan → Develop → Automate → Verify)
+- Framework command execution (Gather → Plan → Develop → Automate → Verify)
 - Agent loop (message routing, tool dispatch, stall detection, think-tag stripping, retry)
 - Model alias resolution (`models.yml` + `worker-models.yml`)
 - Local filesystem tools (`write_source_file`, `read_source_file`, etc.)
@@ -46,20 +43,7 @@ The CLI is the orchestration layer. It owns:
 
 The CLI does **not** manage containers, SSH connections, or gateway processes. Every model is just a `(base_url, api_key, model_id)` tuple.
 
-### 2.2 MCP Context Server (`mcp-context-server/`)
-
-**Entry point:** `voidrift_mcp.server:main` (stdio transport)
-
-The MCP server is a subprocess the CLI starts per phase run. It owns:
-- In-memory index of framework resources (skills, templates, prompts) — keyed by markdown heading
-- SQLite session store (`~/.voidrift/sessions.db`) — ephemeral run data (file analyses, escalation context) keyed by run ID
-- Persistent artifact store (requirements, specs) — write-through to disk
-- Task store — TASKS.md parsing and completion tracking with write-through
-- MCP log (`~/.voidrift/logs/mcp.log`)
-
-The MCP server does **not** perform CLI-side filesystem operations. `write_source_file` and friends live in the CLI (`tools.py`), not the MCP server, because the CLI always runs on the workstation but the MCP server could be remote.
-
-### 2.3 Worker CLI (`worker-cli/`)
+### 2.2 Worker CLI (`worker-cli/`)
 
 **Entry point:** `voidrift_worker.main:cli`
 
@@ -72,39 +56,35 @@ Manages the GPU worker node over SSH. It owns:
 
 The Worker CLI is installed independently from the VoidRift CLI and has no import dependency on it.
 
-### 2.4 Framework Resources (`resources/`)
+### 2.3 Framework Resources (`resources/`)
 
-Static guidance loaded by the MCP server at boot:
+Static guidance loaded at command init:
 - `skills/` — methodology guidance (SYSTEMS-ENG, QUALITY-QA, ARCH-DESIGN, RELIABILITY-ENG, PROD-STRATEGY, CLOUD-OPS, ANALYSIS-REQS)
 - `templates/` — output structure templates (REQUIREMENTS-TEMPLATE, ARCHITECTURE-TEMPLATE, etc.)
-- `prompts/system.md` — shared framework context (phase lifecycle table, artifact ownership); prepended to every agent's system prompt across all phases
-- `prompts/<phase>.md` — phase-specific stage instructions (gather.md, plan.md, develop.md, chat.md, automate.md, verify.md)
+- `prompts/system.md` — shared framework context (command lifecycle table, artifact ownership); prepended to every agent's system prompt across all commands
+- `prompts/<command>.md` — command-specific stage instructions (gather.md, plan.md, develop.md, chat.md, automate.md, verify.md)
 
 Synced to `~/.voidrift/resources/` via `make sync`.
 
-> **Note:** The former `resources/agents/` role files (ANALYST.md, ARCHITECT.md, DEVELOPER.md) have been removed. A single phase can have multiple distinct agent invocations, each shaped by its specific phase prompt — static role files were too coarse-grained and duplicated context already in `system.md`.
+> **Note:** The former `resources/agents/` role files (ANALYST.md, ARCHITECT.md, DEVELOPER.md) have been removed. A single command can have multiple distinct agent invocations, each shaped by its specific command prompt — static role files were too coarse-grained and duplicated context already in `system.md`.
 
 ---
 
 ## 3. Key Design Decisions
 
-### 3.1 stdio MCP, not HTTP MCP
-
-The MCP server runs as a stdio subprocess, not a network service. **Why:** The operator workstation is the only host where both the CLI and the filesystem exist. An HTTP MCP server would require the operator to manage a separately-running process. stdio gives automatic lifecycle management — the MCP server starts with the phase and exits when the CLI process ends.
-
-### 3.2 One agent per unit of work
+### 3.1 One agent per unit of work
 
 Each agent (gather source analysis, plan, develop task) starts with a clean message history. Shared state flows through in-memory dicts (`source_requirements`, `context_summaries`) that the CLI owns; only the final pass output is written to disk. **Why:** A single agent accumulating 50 file analyses would hit the context window before the last file. Per-unit agents keep each context small and focused; CLI-owned persistence eliminates tool call JSON overhead (REQ-ARCH-7, REQ-G-8).
 
-### 3.3 Non-streaming for automated phases
+### 3.2 Non-streaming for automated commands
 
 Gather synthesis, plan, and develop use `stream=False`. Chat uses streaming. **Why:** vLLM's streaming parser does not reliably separate text from tool calls when both appear in the same response. Non-streaming allows vLLM to parse the complete response at once (REQ-G-12).
 
-### 3.4 Local filesystem tools in the CLI, not MCP
+### 3.3 Local filesystem tools in the CLI
 
-`write_source_file`, `read_source_file`, `write_framework_file`, `read_framework_file` live in `cli/src/voidrift_cli/tools.py`. **Why:** The CLI always runs on the workstation where the project lives. An MCP server might run remotely. Tools that touch the project filesystem must run where the filesystem is (REQ-MCP-4a).
+`write_source_file`, `read_source_file`, `write_framework_file`, `read_framework_file` live in `cli/src/voidrift_cli/tools.py`. These are agent tools exposed via the OpenAI tools API — they run in-process in the CLI, not as a separate server. **Why:** The CLI always runs on the workstation where the project lives. Keeping tools in the CLI process eliminates the subprocess overhead and round-trip latency of a separate server.
 
-### 3.5 `worker-models.yml` is the source of truth for local models
+### 3.4 `worker-models.yml` is the source of truth for local models
 
 The CLI auto-discovers local models from `worker-models.yml` without requiring duplicate entries in `models.yml`. Explicit `models.yml` entries take precedence for overrides. **Why:** `worker models add` already maintains `worker-models.yml`. Requiring operators to also edit `models.yml` adds toil and introduces drift (REQ-MC-1).
 
@@ -112,23 +92,23 @@ The CLI auto-discovers local models from `worker-models.yml` without requiring d
 
 Cloud model context window sizes live in `models.yml` as `max_context:` fields. No lookup table in the CLI code. **Why:** Hardcoded tables go stale silently. Config files are visible, auditable, and operator-controlled (REQ-MC-3).
 
-### 3.7 Tool choice modes
+### 3.6 Tool choice modes
 
-Automated phases: `tool_choice: "required"` + auto-injected `done` tool. Chat: `tool_choice: "auto"`, no `done` injection. **Why:** `required` ensures automated phases call tools rather than narrating. `auto` is necessary for chat — forcing tool calls on every conversational turn causes models to loop or emit malformed tool calls as text (REQ-ARCH-4).
+Automated commands: `tool_choice: "required"` + auto-injected `done` tool. Chat: `tool_choice: "auto"`, no `done` injection. **Why:** `required` ensures automated commands call tools rather than narrating. `auto` is necessary for chat — forcing tool calls on every conversational turn causes models to loop or emit malformed tool calls as text (REQ-ARCH-4).
 
-### 3.8 Per-phase tool visibility
+### 3.7 Per-command agent tool visibility
 
-Each phase sees only the tools relevant to its role (REQ-ARCH-9). Gather cannot write source files. Plan cannot read source files. Develop cannot write `.voidrift/` artifacts. The boundary is structural — a tool absent from the list simply cannot be called, no runtime guard needed.
+Each command sees only the agent tools relevant to its role (REQ-ARCH-9). Gather cannot write source files. Plan cannot read source files. Develop cannot write `.voidrift/` artifacts. The boundary is structural — an agent tool absent from the list simply cannot be called, no runtime guard needed.
 
-### 3.9 Separate system and MCP logs
+### 3.8 Separate framework and command logs
 
-`~/.voidrift/logs/voidrift.log` records CLI invocations and phase outcomes. `~/.voidrift/logs/mcp.log` records MCP server boot events, writes, and tool errors. **Why:** The MCP server runs as a subprocess with no terminal output. Separate logs with distinct intents avoid duplication and make each log useful on its own — one answers "what did the CLI do", the other "what did the MCP server do" (REQ-LOG-4, REQ-LOG-5).
+`~/.voidrift/logs/voidrift.log` records CLI invocations and command outcomes — always written to `~/.voidrift/` regardless of `VOIDRIFT_HOME`. `<project>/.voidrift/logs/<command>-<timestamp>.log` records the full per-run agent dialog. **Why:** Framework logs are user-global (one across all projects); command logs are project-scoped (one per run). Keeping them separate avoids mixing operational telemetry with agent conversation history (REQ-LOG-4, REQ-LOG-5).
 
 ---
 
 ## 4. Data Flows
 
-### 4.1 Gather phase
+### 4.1 Gather command
 
 ```
 CLI: build file tree → triage agent (categorize) → validation pass (prune bad entries)
@@ -155,7 +135,7 @@ Stage 4 — Final Pass:
   CLI: strip preamble, write .voidrift/REQUIREMENTS.md
 ```
 
-### 4.2 Plan phase
+### 4.2 Plan command
 
 ```
 CLI: create planner agent → get_skill(ARCH-DESIGN)
@@ -166,7 +146,7 @@ CLI: create planner agent → get_skill(ARCH-DESIGN)
 CLI: validate skill tags in TASKS.md, strip invalid ones
 ```
 
-### 4.3 Develop phase
+### 4.3 Develop command
 
 ```
 CLI: load TASKS.md → for each module (concurrent):
@@ -182,9 +162,9 @@ CLI: load TASKS.md → for each module (concurrent):
 
 ```
 system_prompt =
-  get_prompt("system", "CONTEXT")    # phase lifecycle table, artifact boundaries
-  + get_skill("<phase-skill>")        # methodology — how to think
-  + get_prompt("<phase>", "<stage>")  # stage instructions — what to do
+  get_prompt("system", "CONTEXT")    # command lifecycle table, artifact boundaries
+  + get_skill("<command-skill>")      # methodology — how to think
+  + get_prompt("<command>", "<stage>")  # stage instructions — what to do
   + injected_context                  # task details, analyses, specs — what to work with
 ```
 
@@ -213,11 +193,11 @@ Two log roots, two intents:
 | Store | Location | Contents | Lifetime |
 |---|---|---|---|
 | Project artifacts | `<project>/.voidrift/` | REQUIREMENTS.md, ANALYSIS.md, analysis/, ARCHITECTURE.md, TASKS.md, spec/, arch/ | Project |
-| Phase logs | `<project>/.voidrift/logs/` | `<phase>-<timestamp>.log` — full agent dialog | Until `voidrift prune` |
-| System log | `~/.voidrift/logs/voidrift.log` | CLI invocations, phase outcomes | Rotating (1MB × 5) |
-| MCP log | `~/.voidrift/logs/mcp.log` | Boot events, file writes, tool errors | Rotating (1MB × 5) |
+| Command logs | `<project>/.voidrift/logs/` | `<command>-<timestamp>.log` — full agent dialog | Until `voidrift prune` |
+| System log | `~/.voidrift/logs/voidrift.log` | CLI invocations, command outcomes | Rotating (1MB × 5) |
+
 | Session store | `~/.voidrift/sessions.db` | Ephemeral run data (analyses, escalation) | Until `voidrift prune --global` |
 | Model config | `~/.voidrift/models.yml` | Cloud and gateway model aliases | Operator-managed |
 | Worker models | `~/.voidrift/worker-models.yml` | Local model configs | `worker models add/remove` |
 | Active container | `~/.voidrift/.active-container` | Running model alias (line 2) | `worker start/stop` |
-| State history | `<project>/.voidrift/STATE.md` | Phase run history, file manifests | Append-only |
+| State history | `<project>/.voidrift/STATE.md` | Command run history, file manifests | Append-only |

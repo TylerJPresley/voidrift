@@ -1,11 +1,9 @@
-"""Phase 2 — Plan: Architecture and task breakdown (AC-P1 through AC-P16)."""
+"""Plan command: Architecture and task breakdown (AC-P1 through AC-P16)."""
 
 from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-
-from rich.status import Status
 
 from ..agent import AgentLoop, build_local_tools
 from .. import prompts
@@ -37,7 +35,7 @@ def run_plan(
     overwrite: bool = False,
     update: bool = False,
 ) -> int:
-    """Execute the plan phase.
+    """Execute the plan command.
 
     Args:
         model: Model configuration for the architect role.
@@ -55,11 +53,11 @@ def run_plan(
         ui.error("REQUIREMENTS.md not found. Run 'voidrift gather <model>' first.")
         return 1
 
-    ui.phase("VoidRift Plan")
+    ui.header("VoidRift Plan")
 
     if overwrite:
-        from ..utils import undo_phase
-        deleted = undo_phase("plan")
+        from ..utils import undo_command
+        deleted = undo_command("plan")
         if deleted:
             ui.info(f"Cleared {len(deleted)} files from previous plan.")
 
@@ -68,7 +66,7 @@ def run_plan(
     with open(log, "a") as f:
         f.write(f"\n=== Plan run: {datetime.now().isoformat()} ===\n")
 
-    tools, handlers = build_local_tools(phase="plan")
+    tools, handlers = build_local_tools(cmd="plan")
 
     requirements = (d / "REQUIREMENTS.md").read_text()
     specs = []
@@ -82,10 +80,6 @@ def run_plan(
     specs_section = "FEATURE SPECS:\n" + "\n\n".join(specs) if specs else ""
     valid_skills = ", ".join(sorted(_available_skills())) if _available_skills() else ""
     task_format = _TASK_FORMAT.format(valid_skills=valid_skills)
-
-    # Pre-load architecture template (replaces get_template tool call in prompt)
-    arch_template = prompts.load_template("ARCHITECTURE-TEMPLATE")
-    arch_template_section = f"\n\n## Architecture Template\n\n{arch_template}" if arch_template else ""
 
     # Load shared framework context (REQ-RES-7)
     system_context = prompts.load_prompt("system", "CONTEXT")
@@ -113,7 +107,6 @@ def run_plan(
         )
 
     system = "\n\n".join(p for p in [system_context, skill, stage_prompt] if p)
-    system += arch_template_section
 
     agent = AgentLoop(
         model=model,
@@ -123,10 +116,12 @@ def run_plan(
         stream=False,
         max_tokens=32768,
         log_path=log,
+        show_spinner=False,
     )
 
     ui.stage("Planning architecture and tasks...")
-    with Status("  ⠋ Thinking...", console=ui._con):
+    with ui.spinner(ui.random_label(), "plan") as spin:
+        agent.on_progress = spin.on_progress
         try:
             response = agent.send("Create the architecture and task breakdown.")
             with open(log, "a") as f:
@@ -153,7 +148,8 @@ def run_plan(
             f"You did not produce all required artifacts. Missing: {', '.join(missing)}. "
             "Please create them now using write_framework_file()."
         )
-        with Status("  ⠋ Retrying...", console=ui._con):
+        with ui.spinner("Retrying...", "plan retry") as spin:
+            agent.on_progress = spin.on_progress
             try:
                 response = agent.send(retry_msg)
                 with open(log, "a") as f:
@@ -203,7 +199,7 @@ def run_plan(
         for tf in task_files
     )
     append_state(
-        phase="plan",
+        cmd="plan",
         model_alias=model.alias,
         summary=f"Wrote ARCHITECTURE.md, {len(files_created) - 1} supporting files, {task_count} tasks.",
         files_created=files_created,

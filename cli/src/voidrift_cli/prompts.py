@@ -1,7 +1,7 @@
 """CLI-native prompt and template loading (REQ-RES-6, REQ-CTX-6).
 
-Loads prompts directly from disk at phase init. Parses H2 sections from
-{phase}.md files, mirroring the MCP server's get_prompt(phase, section) behavior.
+Loads prompts directly from disk at command init. Parses H2 sections from
+{cmd}.md files.
 
 Three-layer search for both prompts and templates:
   project (.voidrift/prompts/ | .voidrift/templates/)
@@ -21,7 +21,7 @@ from pathlib import Path
 _VOIDRIFT_HOME = Path(os.environ.get("VOIDRIFT_HOME", Path.home() / ".voidrift"))
 
 # In-process caches
-_prompt_cache: dict[tuple[str, str, str], str] = {}   # (phase, section, project_dir) -> content
+_prompt_cache: dict[tuple[str, str, str], str] = {}   # (cmd, section, project_dir) -> content
 _template_cache: dict[tuple[str, str], str] = {}       # (name_upper, project_dir) -> content
 
 
@@ -53,24 +53,24 @@ def _parse_sections(content: str) -> dict[str, str]:
     return sections
 
 
-def load_prompt(phase: str, section: str, project_dir: Path | str | None = None) -> str:
-    """Load a section from a phase prompt file (REQ-RES-6, REQ-CTX-6).
+def load_prompt(cmd: str, section: str, project_dir: Path | str | None = None) -> str:
+    """Load a section from a command prompt file (REQ-RES-6, REQ-CTX-6).
 
     Three-layer search: project → domain → north star. Returns empty string if
-    the phase file or section is not found.
+    the command file or section is not found.
 
     Args:
-        phase: Phase name (e.g. "gather", "plan", "develop", "chat", "system").
-        section: H2 section name within the phase file (e.g. "TRIAGE", "SYSTEM").
+        cmd: Command name (e.g. "gather", "plan", "develop", "chat", "system").
+        section: H2 section name within the command file (e.g. "TRIAGE", "SYSTEM").
         project_dir: Project root directory. Defaults to cwd.
     """
     project_dir = Path(project_dir) if project_dir else Path.cwd()
-    cache_key = (phase, section, str(project_dir))
+    cache_key = (cmd, section, str(project_dir))
     if cache_key in _prompt_cache:
         return _prompt_cache[cache_key]
 
     for prompt_dir in _prompt_dirs(project_dir):
-        candidate = prompt_dir / f"{phase}.md"
+        candidate = prompt_dir / f"{cmd}.md"
         if candidate.is_file():
             sections = _parse_sections(candidate.read_text(encoding="utf-8"))
             result = sections.get(section, "")

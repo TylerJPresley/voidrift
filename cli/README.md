@@ -14,13 +14,13 @@ uv pip install -e .
 
 ```bash
 voidrift                          # Interactive mode
-voidrift gather <model>           # Phase 1: Gather requirements
-voidrift plan <model>             # Phase 2: Architecture and tasks
-voidrift develop <worker> [arch]  # Phase 3: Execute tasks
-voidrift automate <worker>        # Phase 4: Generate IaC
-voidrift verify <worker> [arch]   # Phase 5: Quality checks
-voidrift chat <model>             # Ad-hoc chat session
-voidrift status                   # Project phase status
+voidrift gather <model>           # Gather: requirements elicitation
+voidrift plan <model>             # Plan: architecture and task breakdown
+voidrift develop <worker> [arch]  # Develop: execute tasks
+voidrift automate <worker>        # Automate: generate IaC
+voidrift verify <worker> [arch]   # Verify: quality checks
+voidrift chat <model>             # Chat: ad-hoc session
+voidrift status                   # Project status
 ```
 
 ## Structure
@@ -31,7 +31,7 @@ src/voidrift_cli/
 ├── agent.py         # Agent loop (OpenAI client, tool call handling)
 ├── models.py        # Model config, resolution, lifecycle management
 ├── utils.py         # Task parsing, skill validation, project helpers
-└── phases/
+└── commands/
     ├── gather.py    # Requirements elicitation (interactive + reverse engineering)
     ├── plan.py      # Architecture and task breakdown
     ├── develop.py   # Task execution with escalation
@@ -47,7 +47,6 @@ src/voidrift_cli/
 - `openai` — Model API client (OpenAI-compatible endpoints)
 - `httpx` — HTTP client for health checks
 - `pyyaml` — Worker model config parsing
-- `mcp[cli]` — MCP server integration
 
 ## Tests
 

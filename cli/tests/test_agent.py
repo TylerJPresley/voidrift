@@ -250,7 +250,7 @@ class TestRetryLogic:
         assert mock_client.chat.completions.create.call_count == 3
 
     def test_req_arch10_retry_logged(self, cloud_model, tmp_path):
-        """REQ-ARCH-10: each retry attempt is logged to the phase log."""
+        """REQ-ARCH-10: each retry attempt is logged to the command log."""
         log_file = tmp_path / "test.log"
         agent = AgentLoop(model=cloud_model, stream=False, log_path=log_file)
         conn_err = openai.APIConnectionError(request=MagicMock())
@@ -363,7 +363,7 @@ class TestBuildLocalTools:
             assert "name" in t["function"]
             assert "parameters" in t["function"]
 
-    def test_expected_tools_present_no_phase(self):
+    def test_expected_tools_present_no_cmd(self):
         tools, handlers = build_local_tools()
         expected = [
             "read_source_file", "write_source_file",
@@ -375,30 +375,30 @@ class TestBuildLocalTools:
         for name in expected:
             assert name in tool_names, f"Missing tool: {name}"
 
-    def test_develop_phase_excludes_skill_tools(self):
-        """V-ARCH-5: develop phase must not expose get_skill/list_skills tools (skills are pre-injected)."""
-        tools, handlers = build_local_tools(phase="develop")
+    def test_develop_command_excludes_skill_tools(self):
+        """V-ARCH-5: develop command must not expose get_skill/list_skills tools (skills are pre-injected)."""
+        tools, handlers = build_local_tools(cmd="develop")
         tool_names = {t["function"]["name"] for t in tools}
         assert "get_skill" not in tool_names
         assert "list_skills" not in tool_names
 
-    def test_develop_phase_has_source_tools(self):
-        """V-ARCH-5: develop phase includes source file read/write tools."""
-        tools, handlers = build_local_tools(phase="develop")
+    def test_develop_command_has_source_tools(self):
+        """V-ARCH-5: develop command includes source file read/write tools."""
+        tools, handlers = build_local_tools(cmd="develop")
         tool_names = {t["function"]["name"] for t in tools}
         assert "read_source_file" in tool_names
         assert "write_source_file" in tool_names
 
-    def test_plan_phase_excludes_source_write(self):
-        """V-ARCH-5: plan phase excludes write_source_file."""
-        tools, handlers = build_local_tools(phase="plan")
+    def test_plan_command_excludes_source_write(self):
+        """V-ARCH-5: plan command excludes write_source_file."""
+        tools, handlers = build_local_tools(cmd="plan")
         tool_names = {t["function"]["name"] for t in tools}
         assert "write_source_file" not in tool_names
         assert "write_framework_file" in tool_names
 
-    def test_chat_phase_includes_skill_tools(self):
-        """V-ARCH-5: chat phase exposes get_skill and list_skills tools."""
-        tools, handlers = build_local_tools(phase="chat")
+    def test_chat_command_includes_skill_tools(self):
+        """V-ARCH-5: chat command exposes get_skill and list_skills tools."""
+        tools, handlers = build_local_tools(cmd="chat")
         tool_names = {t["function"]["name"] for t in tools}
         assert "get_skill" in tool_names
         assert "list_skills" in tool_names

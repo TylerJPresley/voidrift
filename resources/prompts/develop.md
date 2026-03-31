@@ -1,6 +1,6 @@
 # Develop Prompts
 
-Phase prompt file for the develop pipeline. Each section is loaded via `get_prompt("develop", "<section>")`. The developer loads task-specific skills dynamically via `get_skill()` calls per REQ-RES-4.
+Command prompt file for the develop command. Each section is loaded via `get_prompt("develop", "<section>")`. The developer loads task-specific skills dynamically via `get_skill()` calls per REQ-RES-4.
 
 ## TASK
 

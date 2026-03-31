@@ -25,8 +25,7 @@ class TestSystemLog:
 
         setup_system_log()
 
-        voidrift_home = os.environ["VOIDRIFT_HOME"]
-        log_path = Path(voidrift_home) / "logs" / "voidrift.log"
+        log_path = Path.home() / ".voidrift" / "logs" / "voidrift.log"
         assert log_path.exists(), "voidrift.log should exist after setup_system_log()"
 
     def test_system_log_is_writable(self, tmp_project, monkeypatch):
@@ -43,8 +42,7 @@ class TestSystemLog:
         log = get_system_logger()
         log.info("test entry from test_system_log_is_writable")
 
-        voidrift_home = os.environ["VOIDRIFT_HOME"]
-        log_path = Path(voidrift_home) / "logs" / "voidrift.log"
+        log_path = Path.home() / ".voidrift" / "logs" / "voidrift.log"
         content = log_path.read_text()
         assert "test entry" in content
 
@@ -63,20 +61,12 @@ class TestSystemLog:
         handler_count_after_second = len(logger.handlers)
         assert handler_count_after_first == handler_count_after_second
 
-    def test_system_log_separate_from_mcp_log(self, tmp_project):
-        """voidrift.log is different from mcp.log (REQ-LOG-4 vs REQ-LOG-5)."""
-        voidrift_home = os.environ["VOIDRIFT_HOME"]
-        system_log = Path(voidrift_home) / "logs" / "voidrift.log"
-        mcp_log = Path(voidrift_home) / "logs" / "mcp.log"
-        assert system_log != mcp_log
-        assert system_log.name == "voidrift.log"
-        assert mcp_log.name == "mcp.log"
 
 
 class TestSetupCheck:
-    """V-CFG-3: Phase commands exit with setup error when models.yml missing (REQ-CFG-8)."""
+    """V-CFG-3: Framework commands exit with setup error when models.yml missing (REQ-CFG-8)."""
 
-    def test_phase_command_exits_when_models_yml_missing(self, tmp_path, monkeypatch):
+    def test_command_exits_when_models_yml_missing(self, tmp_path, monkeypatch):
         """gather exits with setup error when VOIDRIFT_HOME has no models.yml."""
         monkeypatch.setenv("VOIDRIFT_HOME", str(tmp_path))
         from voidrift_cli.config import clear_config_cache
@@ -89,7 +79,7 @@ class TestSetupCheck:
         assert result.exit_code != 0
         assert "make setup" in result.output
 
-    def test_phase_command_proceeds_when_models_yml_exists(self, tmp_path, monkeypatch):
+    def test_command_proceeds_when_models_yml_exists(self, tmp_path, monkeypatch):
         """No setup error raised when models.yml exists at VOIDRIFT_HOME."""
         (tmp_path / "models.yml").write_text("models: {}\n")
         monkeypatch.setenv("VOIDRIFT_HOME", str(tmp_path))

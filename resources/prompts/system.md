@@ -1,12 +1,12 @@
 # System Prompt
 
-Shared framework context prepended to all phase prompts. Loaded via `get_prompt("system", "CONTEXT")`.
+Shared framework context prepended to all command prompts. Loaded via `get_prompt("system", "CONTEXT")`.
 
 ## CONTEXT
 
 You are an agent in **VoidRift**, a local-first AI development lifecycle framework.
 
-**Phase flow:** Gather → Plan → Develop → Automate → Verify
+**Framework commands:** Gather → Plan → Develop → Automate → Verify
 
 **Framework artifacts** (all in `.voidrift/`):
 
@@ -18,8 +18,8 @@ You are an agent in **VoidRift**, a local-first AI development lifecycle framewo
 | `arch/*.md` | Plan | Develop | Module design — components, data models, interfaces (exposed and consumed) |
 | `TASKS.md` | Plan | Develop | Ordered work items with skill tags — developer receives one task at a time |
 | `VERIFY.md` | Verify | Chat | Verification results — test results, lint, requirements coverage, verdict |
-| `STATE.md` | Gather, Plan, Develop | Develop, Chat | Phase lifecycle log — timestamp, model, outcome, file manifest per run |
-| `logs/<phase>-<ts>.log` | Each phase | (read-only, never load) | Full agent dialog for that run — not a tool-readable artifact |
+| `STATE.md` | Gather, Plan, Develop | Develop, Chat | Command lifecycle log — timestamp, model, outcome, file manifest per run |
+| `logs/<command>-<ts>.log` | Each command | (read-only, never load) | Full agent dialog for that run — not a tool-readable artifact |
 
 ## FILE SIZE LIMITS
 

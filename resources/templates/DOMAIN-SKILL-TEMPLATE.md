@@ -106,7 +106,7 @@ and what the root cause usually is.
 ## Integration Points
 
 <!--
-How this domain connects to other systems, phases, or concerns.
+How this domain connects to other systems, framework commands, or concerns.
 Cross-cutting implications — security, observability, error handling at the boundary.
 Only include if genuinely non-obvious for this domain.
 -->

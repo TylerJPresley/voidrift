@@ -1,7 +1,7 @@
-"""CLI-native filesystem tools (REQ-MCP-4a).
+"""CLI-native filesystem tools.
 
-These run on the workstation — not via MCP — because they need local
-filesystem access. Domain-separated by tool name:
+These run on the workstation because they need local filesystem access.
+Domain-separated by tool name:
   write_source_file / read_source_file  → project source tree
   write_framework_file / read_framework_file → .voidrift/ artifacts
   web_fetch → HTTP fetch + summarise via isolated sub-agent (chat only, REQ-U-8)
@@ -63,7 +63,7 @@ def make_web_fetch_handler(
     agent_loop_cls=None,
     confirm_fn: Callable[[str], bool] | None = None,
 ) -> Callable[[str], str]:
-    """Create a web_fetch tool handler bound to the current chat session (REQ-U-8).
+    """Create a web_fetch agent tool handler bound to the current chat session (REQ-U-8).
 
     Each call fetches the URL in an isolated sub-agent context so raw page
     content never enters the chat agent's context window — only the summary
@@ -71,7 +71,7 @@ def make_web_fetch_handler(
 
     Args:
         mc: ModelConfig for the summarisation sub-agent.
-        log: Path to the phase log file.
+        log: Path to the command log file.
         web_cache: In-memory dict mapping url -> summary (mutated in place). Pass {} to enable caching.
         agent_loop_cls: AgentLoop class; defaults to the real one (injectable for tests).
         confirm_fn: Optional callable to confirm fetches; defaults to interactive prompt.
@@ -134,7 +134,7 @@ def make_web_fetch_handler(
 
 
 class WriteContext:
-    """Per-run state for filesystem write tools (REQ-MCP-11, REQ-D-5, REQ-PS-3).
+    """Per-run state for filesystem write tools (REQ-D-5, REQ-PS-3).
 
     Encapsulates mutable write-tracking state so tests can create isolated
     instances without relying on module-level globals.
@@ -199,7 +199,9 @@ class WriteContext:
 
     def _check_duplicate(self, path: str, full: Path, content: str) -> str | None:
         if path in self._written_this_run and full.exists() and path not in self._rewrite_allowed:
-            return f"Already written: {path} — file is complete. Proceed to the next step."
+            existing = full.read_text(encoding="utf-8", errors="replace")
+            if existing == content:
+                return f"Already written: {path} — file is complete. Proceed to the next step."
         return None
 
     # --- Tool implementations ---
@@ -386,10 +388,10 @@ def list_project_artifacts() -> str:
 
 
 def web_fetch(url: str) -> str:
-    """Fetch a URL and return a summary of its content (chat phase only).
+    """Fetch a URL and return a summary of its content (chat command only).
 
     The real handler is injected by the chat command via make_web_fetch_handler().
-    This placeholder is registered so the tool schema is available at build time.
+    This placeholder is registered so the agent tool schema is available at build time.
     """
     return "web_fetch is only available during an active chat session."
 

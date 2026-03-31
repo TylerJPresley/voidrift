@@ -1,4 +1,4 @@
-"""Phase 3 — Develop: Task execution (REQ-D-1 through REQ-D-13)."""
+"""Develop command: Task execution (REQ-D-1 through REQ-D-13)."""
 
 from __future__ import annotations
 
@@ -8,8 +8,6 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
-
-from rich.status import Status
 
 from ..agent import AgentLoop, build_local_tools
 from .. import prompts
@@ -30,7 +28,7 @@ def run_develop(
     worker: ModelConfig,
     architect: ModelConfig | None = None,
 ) -> int:
-    """Execute the develop phase.
+    """Execute the develop command.
 
     Args:
         worker: Model configuration for the developer role.
@@ -82,13 +80,13 @@ def run_develop(
     prev_sigterm = signal.signal(signal.SIGTERM, _handle_sigterm)
     prev_sigint = signal.signal(signal.SIGINT, _handle_sigterm)
 
-    ui.phase("VoidRift Develop")
+    ui.header("VoidRift Develop")
     log, run_id = boot_run("develop")
     ui.detail(f"Log: {log}")
     with open(log, "a") as f:
         f.write(f"\n=== Develop session: {datetime.now().isoformat()} ===\n")
 
-    tools, handlers = build_local_tools(phase="develop")
+    tools, handlers = build_local_tools(cmd="develop")
 
     task_store = TaskStore()
     task_store.load(task_file)
@@ -160,7 +158,7 @@ def run_develop(
         signal.signal(signal.SIGINT, prev_sigint)
         lock.unlink(missing_ok=True)
 
-    # Record phase entry in STATE.md (REQ-PS-3)
+    # Record command entry in STATE.md (REQ-PS-3)
     files_written = get_session_files()
     summary = "completed" if result == 0 else ("interrupted" if _interrupted else "failed")
     append_state("develop", worker.alias, summary, files_created=files_written or None)
@@ -233,10 +231,12 @@ def _develop_module(
             tool_handlers=handlers,
             stream=False,
             log_path=log,
+            show_spinner=False,
         )
 
-        with Status(f"  ⠋ Working...", console=ui._con):
-            start_time = time.time()
+        start_time = time.time()
+        with ui.spinner(ui.random_label(), f"task {task_num}") as spin:
+            agent.on_progress = spin.on_progress
             try:
                 response = agent.send("Execute this task.")
                 elapsed = time.time() - start_time
@@ -252,13 +252,14 @@ def _develop_module(
         if get_write_count() == 0:
             ui.warn("No files written — retrying task...")
             reset_write_count()
-            with Status(f"  ⠋ Retrying...", console=ui._con):
+            with ui.spinner("Retrying...", f"task {task_num} retry") as spin2:
                 try:
                     agent2 = AgentLoop(
                         model=worker, system_prompt=system,
                         tools=tools, tool_handlers=handlers,
-                        stream=False, log_path=log,
+                        stream=False, log_path=log, show_spinner=False,
                     )
+                    agent2.on_progress = spin2.on_progress
                     response = agent2.send("Execute this task. You must call write_source_file() to produce output.")
                     with open(log, "a") as f:
                         f.write(f"\n--- Task {task_num} RETRY ---\n{response}\n")
@@ -368,10 +369,12 @@ def _consult_architect(
         tool_handlers=handlers,
         stream=False,
         log_path=log,
+        show_spinner=False,
     )
 
     ui.info("Consulting architect...")
-    with Status("  ⠋ Thinking...", console=ui._con):
+    with ui.spinner(ui.random_label(), "architect") as spin:
+        agent.on_progress = spin.on_progress
         try:
             response = agent.send("Provide guidance for this blocked task.")
             with open(log, "a") as f:

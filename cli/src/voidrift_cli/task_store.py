@@ -8,6 +8,7 @@ Write-through: all state changes persist back to disk immediately.
 from __future__ import annotations
 
 import re
+import threading
 from pathlib import Path
 
 from pydantic import BaseModel, PrivateAttr
@@ -31,6 +32,7 @@ class TaskStore(BaseModel):
     path: Path | None = None
     _modules: dict[str, list[Task]] = PrivateAttr(default_factory=dict)
     _raw_lines: list[str] = PrivateAttr(default_factory=list)
+    _lock: threading.Lock = PrivateAttr(default_factory=threading.Lock)
 
     def load(self, path: Path) -> dict[str, int]:
         """Load and parse a TASKS.md file.
@@ -97,14 +99,15 @@ class TaskStore(BaseModel):
         Returns:
             The completed task, or None if no pending tasks.
         """
-        task = self.get_next(module)
-        if not task:
-            return None
-        task.status = "x"
-        self._raw_lines[task.line_num] = re.sub(
-            r"^- \[ \]", "- [x]", self._raw_lines[task.line_num]
-        )
-        self._flush()
+        with self._lock:
+            task = self.get_next(module)
+            if not task:
+                return None
+            task.status = "x"
+            self._raw_lines[task.line_num] = re.sub(
+                r"^- \[ \]", "- [x]", self._raw_lines[task.line_num]
+            )
+            self._flush()
         return task
 
     def block(self, module: str = "") -> Task | None:
@@ -116,14 +119,15 @@ class TaskStore(BaseModel):
         Returns:
             The blocked task, or None if no pending tasks.
         """
-        task = self.get_next(module)
-        if not task:
-            return None
-        task.status = "!"
-        self._raw_lines[task.line_num] = re.sub(
-            r"^- \[ \]", "- [!]", self._raw_lines[task.line_num]
-        )
-        self._flush()
+        with self._lock:
+            task = self.get_next(module)
+            if not task:
+                return None
+            task.status = "!"
+            self._raw_lines[task.line_num] = re.sub(
+                r"^- \[ \]", "- [!]", self._raw_lines[task.line_num]
+            )
+            self._flush()
         return task
 
     def status(self, module: str = "") -> dict[str, int]:

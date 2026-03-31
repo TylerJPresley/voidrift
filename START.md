@@ -69,15 +69,14 @@ ALWAYS:
 
 Python monorepo with three packages:
 - `cli/` — Click-based CLI providing the `voidrift` command (entry point: voidrift_cli.main:cli)
-- `mcp-context-server/` — FastMCP server for project artifacts and framework resources
 - `worker-cli/` — Click-based CLI providing the `worker` command for GPU node management
 - `resources/` — Framework guidance files (skills/, templates/, prompts/)
-- Five phases: Gather → Plan → Develop → Automate → Verify
-- Per-phase prompts replace static role files — a phase can have multiple distinct agent invocations
+- Five framework commands: Gather → Plan → Develop → Automate → Verify
+- Per-command prompts replace static role files — a command can have multiple distinct agent invocations
 - Local worker models (vLLM) + Kiro Gateway + cloud APIs, all as OpenAI-compatible endpoints
 - Pydantic models, Google-style docstrings, src/ layout
 - Build: hatchling, VERSION file (shared), Makefile
-- Tests: pytest across cli/tests/, mcp-context-server/tests/, worker-cli/tests/
+- Tests: pytest across cli/tests/, worker-cli/tests/
 
 ## When User Requests a Feature
 

@@ -1,7 +1,10 @@
-"""Phase 1 — Gather: Reverse-engineer requirements from a codebase (REQ-G-1, REQ-G-8)."""
+"""Gather command: Reverse-engineer requirements from a codebase (REQ-G-1, REQ-G-8)."""
 
 from __future__ import annotations
 
+import hashlib
+import json
+import time as _time_mod
 from pathlib import Path
 
 from ..agent import AgentLoop, build_local_tools
@@ -82,12 +85,42 @@ def _is_truncated_json_error(err: str) -> bool:
     return "Invalid JSON" in err or "EOF while parsing" in err
 
 
+# ── Analysis cache (REQ-CTX-5) ──────────────────────────────────────────────
+
+def _cache_path(voidrift_dir: Path, file_hash: str) -> Path:
+    """Return the cache file path for a given SHA-256 content hash."""
+    return voidrift_dir / "cache" / "analyses" / f"{file_hash}.json"
+
+
+def _load_cache(cache_file: Path) -> str | None:
+    """Return the cached analysis string, or None on miss or corruption."""
+    if not cache_file.exists():
+        return None
+    try:
+        data = json.loads(cache_file.read_text(encoding="utf-8"))
+        return data.get("analysis")
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def _save_cache(cache_file: Path, filepath: str, file_hash: str, analysis: str) -> None:
+    """Write an analysis result to the cache (REQ-CTX-5)."""
+    cache_file.parent.mkdir(parents=True, exist_ok=True)
+    cache_file.write_text(
+        json.dumps(
+            {"file": filepath, "hash": file_hash, "analysis": analysis, "timestamp": _time_mod.time()},
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+
 def run_gather(
     model: ModelConfig,
     from_path: str,
     overwrite: bool = False,
 ) -> int:
-    """Execute the gather phase — reverse-engineer requirements from a codebase."""
+    """Execute the gather command — reverse-engineer requirements from a codebase."""
     check_disk_space()
     d = ensure_voidrift_dir()
     target = d / "REQUIREMENTS.md"
@@ -117,14 +150,14 @@ def _gather_from(
         ui.error(f"{from_path} is not a directory")
         return 1
     if overwrite:
-        from ..utils import undo_phase
-        deleted = undo_phase("gather")
+        from ..utils import undo_command
+        deleted = undo_command("gather")
         if deleted:
             ui.info(f"Removed {len(deleted)} files from previous gather.")
 
     log, run_id = boot_run("gather")
 
-    all_tools, all_handlers = build_local_tools(phase="gather")
+    all_tools, all_handlers = build_local_tools(cmd="gather")
 
     from ..config import get_max_input_chars, get_max_tokens as _get_max_tokens
     _input_limit = get_max_input_chars(model.model_type)
@@ -150,7 +183,7 @@ def _gather_from(
         if model.model_type == "local" else None
     )
 
-    ui.phase("VoidRift Gather (Reverse Engineering)")
+    ui.header("VoidRift Gather (Reverse Engineering)")
     ui.detail(f"Log: {log}")
     ui.detail(f"Source: {from_path}")
     ui.detail(f"Target: {target}")
@@ -176,13 +209,16 @@ def _gather_from(
     ui.stage("Stage 1: Triaging files...")
     triage_prompt = prompts.load_prompt("gather", "TRIAGE")
     triage = AgentLoop(
-        model=model, stream=False, extra_body=extra, max_tokens=4096,
+        model=model, stream=True, extra_body=extra, max_tokens=4096,
         log_path=log,
         system_prompt=f"{analyst_role}\n\n{triage_prompt}",
-        tools=[], tool_handlers={},
+        tools=[], tool_handlers={}, show_spinner=False,
     )
     try:
-        triage_response = triage.send(f"File tree:\n{file_tree}")
+        with ui.spinner(ui.random_label(), "triage") as spin:
+            triage.on_progress = spin.on_progress
+            triage.on_token = lambda t: None
+            triage_response = triage.send(f"File tree:\n{file_tree}")
     except (RuntimeError, OSError) as e:
         ui.error(f"Triage failed: {e}")
         return 1
@@ -214,13 +250,16 @@ def _gather_from(
     all_files = [f for fs in categories.values() for f in fs]
     validation_prompt = prompts.load_prompt("gather","TRIAGE-VALIDATION")
     validator = AgentLoop(
-        model=model, stream=False, extra_body=extra, max_tokens=4096,
+        model=model, stream=True, extra_body=extra, max_tokens=4096,
         log_path=log,
         system_prompt=f"{analyst_role}\n\n{validation_prompt}",
-        tools=[], tool_handlers={},
+        tools=[], tool_handlers={}, show_spinner=False,
     )
     try:
-        val_response = validator.send(f"Files to review:\n{_json.dumps(all_files)}")
+        with ui.spinner(ui.random_label(), "validation") as spin:
+            validator.on_progress = spin.on_progress
+            validator.on_token = lambda t: None
+            val_response = validator.send(f"Files to review:\n{_json.dumps(all_files)}")
         val_data = _json.loads(val_response.strip())
         if isinstance(val_data, dict):
             val_data = next(iter(val_data.values()), [])
@@ -265,14 +304,17 @@ def _gather_from(
         lens = _ANALYSIS_LENS.get(cat, "")
         system = ctx_build_prompt_tpl.format(category=cat, context_lens=lens)
         ctx_agent = AgentLoop(
-            model=model, stream=False, extra_body=extra,
+            model=model, stream=True, extra_body=extra,
             max_tokens=_get_max_tokens(model.model_type, "analysis"),
             log_path=log,
             system_prompt=system,
-            tools=[], tool_handlers={},
+            tools=[], tool_handlers={}, show_spinner=False,
         )
         try:
-            summary = ctx_agent.send(f"Files:\n\n{content_block}")
+            with ui.spinner(ui.random_label(), cat) as spin:
+                ctx_agent.on_progress = spin.on_progress
+                ctx_agent.on_token = lambda t: None
+                summary = ctx_agent.send(f"Files:\n\n{content_block}")
             context_summaries[cat] = summary
             ui.detail(f"  {cat}: {len(cat_files)} file(s) → context summary ({len(summary)} chars)")
             with open(log, "a") as f:
@@ -300,112 +342,129 @@ def _gather_from(
     _counter = {"done": 0}
     _lock = __import__("threading").Lock()
 
-    def _analyze_source(filepath: str) -> tuple[str, float | None, str | None, str]:
+    def _analyze_source(
+        filepath: str,
+        on_progress=None,
+    ) -> tuple[str, float | None, str | None, str, int, int, int | None]:
         lens = _ANALYSIS_LENS["source"]
         system = analysis_prompt_tpl.format(analysis_lens=lens)
         if context_block:
             system = system + "\n\n" + context_block
         max_tok = _get_max_tokens(model.model_type, "analysis")
+        _pt: list[int] = [0]
+        _ct: list[int] = [0]
+        _ctx: list[int | None] = [None]
+
+        def _on_complete(data: dict) -> None:
+            _pt[0] = max(_pt[0], data.get("prompt_tokens", 0))
+            _ct[0] += data.get("completion_tokens", 0)
+            if data.get("ctx_pct") is not None:
+                _ctx[0] = data["ctx_pct"]
+
+        # Read file content once — used for cache hash and chunking (REQ-CTX-5, REQ-G-13)
+        full_path = (from_path / filepath).resolve()
+        raw_content: str | None = None
+        file_hash: str | None = None
+        if full_path.exists():
+            raw_content = full_path.read_text(encoding="utf-8", errors="replace")
+            file_hash = hashlib.sha256(raw_content.encode("utf-8", errors="replace")).hexdigest()
+
+        # Cache lookup — skip model inference if unchanged (REQ-CTX-5)
+        if file_hash is not None:
+            cached = _load_cache(_cache_path(target.parent, file_hash))
+            if cached is not None:
+                with open(log, "a") as _f:
+                    _f.write(f"[CACHE HIT] {filepath} (hash {file_hash[:8]})\n")
+                return filepath, 0.0, None, cached, 0, 0, None
+
         start = _time.time()
 
         # REQ-G-13: chunk large source files instead of truncating
-        if _input_limit:
-            full_path = (from_path / filepath).resolve()
-            if full_path.exists():
-                raw = full_path.read_text(encoding="utf-8", errors="replace")
-                if len(raw) > _input_limit:
-                    chunks = _make_chunks(raw, _input_limit)
-                    with open(log, "a") as _f:
-                        _f.write(f"[CHUNKED] {filepath} ({len(raw)} chars → {len(chunks)} chunks)\n")
-                    partial: list[str] = []
-                    for i, chunk in enumerate(chunks, 1):
-                        chunk_agent = AgentLoop(
-                            model=model, stream=False, extra_body=extra, max_tokens=max_tok,
-                            log_path=log,
-                            system_prompt=system,
-                            tools=[], tool_handlers={},
-                        )
-                        try:
-                            resp = chunk_agent.send(
-                                f"Analyze portion {i}/{len(chunks)} of {filepath}:\n\n{chunk}"
-                            )
-                            partial.append(resp)
-                        except (RuntimeError, OSError):
-                            pass
-                    if partial:
-                        if len(partial) == 1:
-                            combined = partial[0]
-                        else:
-                            consol_agent = AgentLoop(
-                                model=model, stream=False, extra_body=extra, max_tokens=max_tok,
-                                log_path=log,
-                                system_prompt=system,
-                                tools=[], tool_handlers={},
-                            )
-                            parts_text = "\n\n---\n\n".join(
-                                f"[Chunk {j+1}/{len(partial)}]\n{p}"
-                                for j, p in enumerate(partial)
-                            )
-                            combined = consol_agent.send(
-                                f"Partial analyses of {filepath}:\n\n{parts_text}\n\n"
-                                "Write one unified, non-redundant analysis of the whole file."
-                            )
-                        return filepath, _time.time() - start, None, combined
+        if _input_limit and raw_content is not None and len(raw_content) > _input_limit:
+            chunks = _make_chunks(raw_content, _input_limit)
+            with open(log, "a") as _f:
+                _f.write(f"[CHUNKED] {filepath} ({len(raw_content)} chars → {len(chunks)} chunks)\n")
+            partial: list[str] = []
+            for i, chunk in enumerate(chunks, 1):
+                chunk_agent = AgentLoop(
+                    model=model, stream=True, extra_body=extra, max_tokens=max_tok,
+                    log_path=log,
+                    system_prompt=system,
+                    tools=[], tool_handlers={}, show_spinner=False,
+                )
+                chunk_agent.on_progress = on_progress
+                chunk_agent.on_token = lambda t: None
+                chunk_agent.on_complete = _on_complete
+                try:
+                    resp = chunk_agent.send(
+                        f"Analyze portion {i}/{len(chunks)} of {filepath}:\n\n{chunk}"
+                    )
+                    partial.append(resp)
+                except (RuntimeError, OSError):
+                    pass
+            if partial:
+                if len(partial) == 1:
+                    combined = partial[0]
+                else:
+                    consol_agent = AgentLoop(
+                        model=model, stream=True, extra_body=extra, max_tokens=max_tok,
+                        log_path=log,
+                        system_prompt=system,
+                        tools=[], tool_handlers={}, show_spinner=False,
+                    )
+                    consol_agent.on_progress = on_progress
+                    consol_agent.on_token = lambda t: None
+                    consol_agent.on_complete = _on_complete
+                    parts_text = "\n\n---\n\n".join(
+                        f"[Chunk {j+1}/{len(partial)}]\n{p}"
+                        for j, p in enumerate(partial)
+                    )
+                    combined = consol_agent.send(
+                        f"Partial analyses of {filepath}:\n\n{parts_text}\n\n"
+                        "Write one unified, non-redundant analysis of the whole file."
+                    )
+                if file_hash and combined:
+                    _save_cache(_cache_path(target.parent, file_hash), filepath, file_hash, combined)
+                return filepath, _time.time() - start, None, combined, _pt[0], _ct[0], _ctx[0]
 
         # Normal flow: agent calls read_source_file(), returns analysis as direct text
         agent = AgentLoop(
-            model=model, stream=False, extra_body=extra, max_tokens=max_tok,
+            model=model, stream=True, extra_body=extra, max_tokens=max_tok,
             log_path=log,
             system_prompt=system,
-            tools=source_tools, tool_handlers=source_handlers,
+            tools=source_tools, tool_handlers=source_handlers, show_spinner=False,
         )
+        agent.on_progress = on_progress
+        agent.on_token = lambda t: None
+        agent.on_complete = _on_complete
         try:
             response = agent.send(f"Analyze: {filepath}")
-            return filepath, _time.time() - start, None, response
+            if file_hash and response:
+                _save_cache(_cache_path(target.parent, file_hash), filepath, file_hash, response)
+            return filepath, _time.time() - start, None, response, _pt[0], _ct[0], _ctx[0]
         except (RuntimeError, OSError) as e:
-            return filepath, None, str(e), ""
+            return filepath, None, str(e), "", 0, 0, None
 
     if source_files:
-        with ThreadPoolExecutor(max_workers=max(1, max_workers)) as pool:
-            futures = {pool.submit(_analyze_source, fp): fp for fp in source_files}
-            from rich.live import Live
-            from rich.spinner import Spinner
-            from rich.text import Text
-            from rich.console import Group
-            from rich.markup import escape as _esc
+        from rich.markup import escape as _esc
 
-            completed_lines: list[Text] = []
-
-            with Live(
-                Spinner("dots", text=f"  {len(source_files)} source files analyzing...", style="dim"),
-                console=ui._con, refresh_per_second=10,
-            ) as live:
+        with ui.multi_spinner(f"{ui.random_label()} ({len(source_files)} source files)") as ms:
+            with ThreadPoolExecutor(max_workers=max(1, max_workers)) as pool:
+                futures = {
+                    pool.submit(_analyze_source, fp, ms.track(fp)): fp
+                    for fp in source_files
+                }
                 for future in as_completed(futures):
-                    filepath, elapsed, err, response = future.result()
+                    filepath, elapsed, err, response, pt, ct, ctx_pct = future.result()
                     with _lock:
                         _counter["done"] += 1
                         n = _counter["done"]
+                    label = f"{n}/{len(source_files)} {filepath}"
                     if err:
-                        completed_lines.append(Text.from_markup(
-                            f"[dim]  {n}/{len(source_files)} {_esc(filepath)}...[/dim]"
-                            f" [yellow]⚠ {_esc(err)}[/yellow]"
-                        ))
+                        ms.done(filepath, label, elapsed or 0, failed=True)
                     else:
                         source_requirements[filepath] = response
-                        completed_lines.append(Text.from_markup(
-                            f"[dim]  {n}/{len(source_files)} {_esc(filepath)}...[/dim]"
-                            f" [green]✓[/green] [dim]{elapsed:.1f}s[/dim]"
-                        ))
-                    remaining = len(source_files) - n
-                    if remaining:
-                        live.update(Group(
-                            *completed_lines,
-                            Spinner("dots",
-                                    text=f"  {remaining} file{'s' if remaining != 1 else ''} analyzing...",
-                                    style="dim"),
-                        ))
-                    else:
-                        live.update(Group(*completed_lines))
+                        ms.done(filepath, label, elapsed or 0, pt, ct, ctx_pct)
                     with open(log, "a") as f:
                         f.write(f"Analyzed: {filepath}\n")
 
@@ -440,7 +499,6 @@ def _gather_from(
 
     # --- Stage 4: Final Pass — CLI owns all persistence, model returns markdown directly ---
     ui.stage("Stage 4: Final pass — consolidating requirements...")
-    ui.model_label(model.alias)
 
     # Pre-fetch template (CLI calls directly, no model tool call)
     requirements_template = prompts.load_template("REQUIREMENTS-TEMPLATE")
@@ -474,13 +532,16 @@ def _gather_from(
 
     try:
         final_agent = AgentLoop(
-            model=model, stream=False, extra_body=extra,
+            model=model, stream=True, extra_body=extra,
             max_tokens=_get_max_tokens(model.model_type, "consolidation"),
             log_path=log,
             system_prompt=final_system,
-            tools=[], tool_handlers={},
+            tools=[], tool_handlers={}, show_spinner=False,
         )
-        final_response = final_agent.send(final_msg)
+        with ui.spinner(ui.random_label(), "consolidation") as spin:
+            final_agent.on_progress = spin.on_progress
+            final_agent.on_token = lambda t: None
+            final_response = final_agent.send(final_msg)
         with open(log, "a") as f:
             f.write(f"Final pass response ({len(final_response)} chars)\n")
     except (RuntimeError, OSError) as e:
@@ -507,7 +568,7 @@ def _gather_from(
     total = len(file_category)
     src_count = len(source_files)
     append_state(
-        phase="gather",
+        cmd="gather",
         model_alias=model.alias,
         summary=f"Analyzed {total} files ({src_count} source). Wrote REQUIREMENTS.md.",
         files_created=files_created,

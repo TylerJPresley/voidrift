@@ -1,6 +1,6 @@
 # Gather Pipeline Prompts
 
-Phase prompt file for the gather pipeline. Each section is loaded via `get_prompt("gather", "<section>")`. The ANALYSIS-REQS skill is preloaded and prepended to triage prompts.
+Command prompt file for the gather command. Each section is loaded via `get_prompt("gather", "<section>")`. The ANALYSIS-REQS skill is preloaded and prepended to triage prompts.
 
 ## TRIAGE
 

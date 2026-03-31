@@ -1,4 +1,4 @@
-"""Tests for phase commands — integration tests with mocked model API."""
+"""Tests for framework commands — integration tests with mocked model API."""
 
 from pathlib import Path
 from unittest.mock import patch, MagicMock
@@ -17,7 +17,7 @@ class TestGatherInputChunking:
 
     def test_make_chunks_splits_large_content(self):
         """_make_chunks splits text into sized pieces."""
-        from voidrift_cli.phases.gather import _make_chunks
+        from voidrift_cli.commands.gather import _make_chunks
         text = "a" * 1000
         chunks = _make_chunks(text, 400, overlap=50)
         # Every character is covered
@@ -28,7 +28,7 @@ class TestGatherInputChunking:
 
     def test_make_chunks_single_chunk_when_fits(self):
         """_make_chunks returns one chunk when content fits within limit."""
-        from voidrift_cli.phases.gather import _make_chunks
+        from voidrift_cli.commands.gather import _make_chunks
         text = "a" * 100
         chunks = _make_chunks(text, 200)
         assert len(chunks) == 1
@@ -36,7 +36,7 @@ class TestGatherInputChunking:
 
     def test_make_chunks_covers_full_content(self):
         """Every character appears in at least one chunk."""
-        from voidrift_cli.phases.gather import _make_chunks
+        from voidrift_cli.commands.gather import _make_chunks
         text = "abcdefghij" * 100  # 1000 chars
         chunks = _make_chunks(text, 300, overlap=50)
         # Last chunk must reach the end of the text
@@ -56,7 +56,7 @@ class TestGatherInputChunking:
 
     def test_large_file_produces_multiple_chunks(self, local_model):
         """A file 3x the limit produces at least 3 chunks."""
-        from voidrift_cli.phases.gather import _make_chunks
+        from voidrift_cli.commands.gather import _make_chunks
         from voidrift_cli.config import get_max_input_chars
 
         limit = get_max_input_chars(local_model.model_type)
@@ -66,7 +66,7 @@ class TestGatherInputChunking:
 
     def test_single_chunk_skips_consolidation(self):
         """A file that fits in one chunk doesn't need a consolidation agent."""
-        from voidrift_cli.phases.gather import _make_chunks
+        from voidrift_cli.commands.gather import _make_chunks
         from voidrift_cli.config import get_max_input_chars
 
         limit = get_max_input_chars("local")
@@ -79,7 +79,7 @@ class TestGatherRetryOn400:
     """_is_truncated_json_error utility — detects truncated tool call JSON errors."""
 
     def test_is_truncated_json_error_detects_invalid_json(self):
-        from voidrift_cli.phases.gather import _is_truncated_json_error
+        from voidrift_cli.commands.gather import _is_truncated_json_error
         assert _is_truncated_json_error("Invalid JSON: something")
         assert _is_truncated_json_error("HTTP 400: EOF while parsing a string at line 1")
         assert not _is_truncated_json_error("HTTP 500: server error")
@@ -93,7 +93,7 @@ class TestGatherRetryOn400:
         assert retry_tok <= max_tok
 
     def test_retry_tokens_floor_at_256(self):
-        """Retry floor is 256 even if phase default is tiny."""
+        """Retry floor is 256 even if stage default is tiny."""
         original = 100
         retry = max(original // 2, 256)
         assert retry == 256
@@ -130,7 +130,7 @@ class TestContextBuild:
 
     def test_non_source_categories_listed(self):
         """_NON_SOURCE contains all expected non-source categories."""
-        from voidrift_cli.phases.gather import _NON_SOURCE
+        from voidrift_cli.commands.gather import _NON_SOURCE
         assert "tests" in _NON_SOURCE
         assert "config" in _NON_SOURCE
         assert "infrastructure" in _NON_SOURCE
@@ -158,7 +158,7 @@ class TestSourceRequirementsDirect:
 
     def test_source_is_only_non_context_category(self):
         """CATEGORIES minus _NON_SOURCE equals exactly {'source'}."""
-        from voidrift_cli.phases.gather import _NON_SOURCE, CATEGORIES
+        from voidrift_cli.commands.gather import _NON_SOURCE, CATEGORIES
         assert set(CATEGORIES) - set(_NON_SOURCE) == {"source"}
 
     def test_final_pass_agent_has_no_tools(self):
@@ -209,7 +209,7 @@ class TestSourceRequirementsDirect:
 
 
 class TestChatWebFetch:
-    """V-U-8: REQ-U-8 — web_fetch tool for chat phase."""
+    """V-U-8: REQ-U-8 — web_fetch tool for chat command."""
 
     def test_strip_html_removes_script_content(self):
         """_strip_html drops script tag content."""
@@ -325,9 +325,9 @@ class TestChatWebFetch:
         assert "web_fetch" in names
 
     def test_web_fetch_absent_from_gather_tools(self):
-        """web_fetch is not in the tool list for the gather phase."""
+        """web_fetch is not in the agent tool list for the gather command."""
         from voidrift_cli.agent import build_local_tools
-        tools, _ = build_local_tools(phase="gather")
+        tools, _ = build_local_tools(cmd="gather")
         tool_names = {t["function"]["name"] for t in tools}
         assert "web_fetch" not in tool_names
 
@@ -337,26 +337,26 @@ class TestPromptFormatting:
 
     def test_task_format_with_valid_skills(self):
         """_TASK_FORMAT.format(valid_skills=...) substitutes correctly."""
-        from voidrift_cli.phases.plan import _TASK_FORMAT
+        from voidrift_cli.commands.plan import _TASK_FORMAT
         result = _TASK_FORMAT.format(valid_skills="backend, analysis-reqs")
         assert "backend, analysis-reqs" in result
         assert "{valid_skills}" not in result
 
     def test_task_format_missing_var_raises_key_error(self):
         """_TASK_FORMAT.format() with no args raises KeyError for missing valid_skills."""
-        from voidrift_cli.phases.plan import _TASK_FORMAT
+        from voidrift_cli.commands.plan import _TASK_FORMAT
         with pytest.raises(KeyError):
             _TASK_FORMAT.format()
 
 
 class TestGatherPreflightChecks:
     def test_from_nonexistent_dir(self, tmp_project, cloud_model):
-        from voidrift_cli.phases.gather import run_gather
+        from voidrift_cli.commands.gather import run_gather
         result = run_gather(cloud_model, from_path="/nonexistent/path")
         assert result == 1
 
     def test_from_existing_target_no_overwrite(self, tmp_project, cloud_model, sample_requirements):
-        from voidrift_cli.phases.gather import run_gather
+        from voidrift_cli.commands.gather import run_gather
         result = run_gather(cloud_model, from_path=str(tmp_project), overwrite=False)
         assert result == 1  # Target exists, no --overwrite
 
@@ -366,16 +366,16 @@ class TestGatherPreflightChecks:
 
 class TestPlanPreflightChecks:
     def test_missing_requirements(self, tmp_project, cloud_model):
-        from voidrift_cli.phases.plan import run_plan
+        from voidrift_cli.commands.plan import run_plan
         result = run_plan(cloud_model)
         assert result == 1
 
-    @patch("voidrift_cli.phases.plan.AgentLoop")
+    @patch("voidrift_cli.commands.plan.AgentLoop")
     def test_produces_artifacts(self, MockAgent, tmp_project, cloud_model, sample_requirements):
         """Simulate a model that creates the required artifacts via tool calls."""
         vd = tmp_project / ".voidrift"
 
-        # When agent.send() is called, create the artifacts the plan phase expects
+        # When agent.send() is called, create the artifacts the plan command expects
         def fake_send(msg):
             (vd / "ARCHITECTURE.md").write_text("# Architecture\n\n## Overview\nTest arch")
             (vd / "TASKS.md").write_text("- [ ] Create src/main.py: entry point [analysis-reqs]\n")
@@ -385,13 +385,13 @@ class TestPlanPreflightChecks:
         mock_instance.send.side_effect = fake_send
         MockAgent.return_value = mock_instance
 
-        from voidrift_cli.phases.plan import run_plan
+        from voidrift_cli.commands.plan import run_plan
         result = run_plan(cloud_model)
         assert result == 0
         assert (vd / "ARCHITECTURE.md").exists()
         assert (vd / "TASKS.md").exists()
 
-    @patch("voidrift_cli.phases.plan.AgentLoop")
+    @patch("voidrift_cli.commands.plan.AgentLoop")
     def test_retries_on_missing_artifacts(self, MockAgent, tmp_project, cloud_model, sample_requirements):
         vd = tmp_project / ".voidrift"
         call_count = 0
@@ -412,18 +412,18 @@ class TestPlanPreflightChecks:
         mock_instance.send.side_effect = fake_send
         MockAgent.return_value = mock_instance
 
-        from voidrift_cli.phases.plan import run_plan
+        from voidrift_cli.commands.plan import run_plan
         result = run_plan(cloud_model)
         assert result == 0
         assert call_count == 2
 
-    @patch("voidrift_cli.phases.plan.AgentLoop")
+    @patch("voidrift_cli.commands.plan.AgentLoop")
     def test_fails_after_retry(self, MockAgent, tmp_project, cloud_model, sample_requirements):
         mock_instance = MagicMock()
         mock_instance.send.return_value = "I didn't create anything."
         MockAgent.return_value = mock_instance
 
-        from voidrift_cli.phases.plan import run_plan
+        from voidrift_cli.commands.plan import run_plan
         result = run_plan(cloud_model)
         assert result == 1
 
@@ -436,7 +436,7 @@ class TestPlanPreflightChecks:
         (vd / "spec").mkdir(exist_ok=True)
         (vd / "spec" / "auth.md").write_text("gather spec")
 
-        # Create a STATE.md entry so undo_phase knows what to remove
+        # Create a STATE.md entry so undo_command knows what to remove
         (vd / "STATE.md").write_text(
             "## 2026-01-01T00:00:00 — plan (test)\nOld plan.\n### Files\n"
             "- created: .voidrift/ARCHITECTURE.md\n"
@@ -444,12 +444,12 @@ class TestPlanPreflightChecks:
             "- created: .voidrift/arch/backend.md\n\n"
         )
 
-        with patch("voidrift_cli.phases.plan.AgentLoop") as MockAgent:
+        with patch("voidrift_cli.commands.plan.AgentLoop") as MockAgent:
             mock_instance = MagicMock()
             mock_instance.send.return_value = "nothing"
             MockAgent.return_value = mock_instance
 
-            from voidrift_cli.phases.plan import run_plan
+            from voidrift_cli.commands.plan import run_plan
             run_plan(cloud_model, overwrite=True)
 
         assert not (vd / "ARCHITECTURE.md").exists()
@@ -463,26 +463,26 @@ class TestPlanPreflightChecks:
 
 class TestDevelopPreflightChecks:
     def test_missing_requirements(self, tmp_project, cloud_model):
-        from voidrift_cli.phases.develop import run_develop
+        from voidrift_cli.commands.develop import run_develop
         result = run_develop(cloud_model)
         assert result == 1
 
     def test_missing_tasks(self, tmp_project, cloud_model, sample_requirements):
-        from voidrift_cli.phases.develop import run_develop
+        from voidrift_cli.commands.develop import run_develop
         result = run_develop(cloud_model)
         assert result == 1
 
     def test_all_tasks_complete(self, tmp_project, cloud_model, sample_requirements):
         vd = tmp_project / ".voidrift"
         (vd / "TASKS.md").write_text("- [x] Done 1\n- [x] Done 2\n")
-        from voidrift_cli.phases.develop import run_develop
+        from voidrift_cli.commands.develop import run_develop
         result = run_develop(cloud_model)
         assert result == 0
 
     def test_workers_without_modules(self, tmp_project, cloud_model, sample_requirements):
         vd = tmp_project / ".voidrift"
         (vd / "TASKS.md").write_text("- [ ] Task [analysis-reqs]\n")
-        from voidrift_cli.phases.develop import run_develop
+        from voidrift_cli.commands.develop import run_develop
         result = run_develop(cloud_model)
         # Single module, processes sequentially
         assert result in (0, 1)
@@ -492,19 +492,19 @@ class TestDevelopPreflightChecks:
         lock = tmp_project / ".voidrift" / ".develop.lock"
         lock.write_text("99999999\n2020-01-01T00:00:00")  # Dead PID
 
-        with patch("voidrift_cli.phases.develop.AgentLoop") as MockAgent:
+        with patch("voidrift_cli.commands.develop.AgentLoop") as MockAgent:
             mock_instance = MagicMock()
             mock_instance.send.return_value = "done"
             MockAgent.return_value = mock_instance
 
-            from voidrift_cli.phases.develop import run_develop
+            from voidrift_cli.commands.develop import run_develop
             # Will proceed past lock check (stale PID), then try to run tasks
             result = run_develop(cloud_model)
 
         # Lock should be cleaned up
         assert not lock.exists()
 
-    @patch("voidrift_cli.phases.develop.AgentLoop")
+    @patch("voidrift_cli.commands.develop.AgentLoop")
     def test_develop_loop_marks_tasks(self, MockAgent, tmp_project, cloud_model, sample_requirements):
         vd = tmp_project / ".voidrift"
         (vd / "TASKS.md").write_text("- [ ] Create src/main.py: entry [analysis-reqs]\n")
@@ -513,12 +513,12 @@ class TestDevelopPreflightChecks:
         mock_instance.send.return_value = "Created the file."
         MockAgent.return_value = mock_instance
 
-        from voidrift_cli.phases.develop import run_develop
+        from voidrift_cli.commands.develop import run_develop
         result = run_develop(cloud_model)
         assert result == 0
         assert "[x]" in (vd / "TASKS.md").read_text()
 
-    @patch("voidrift_cli.phases.develop.AgentLoop")
+    @patch("voidrift_cli.commands.develop.AgentLoop")
     def test_sequential_multi_module(self, MockAgent, tmp_project, cloud_model, sample_requirements):
         vd = tmp_project / ".voidrift"
         (vd / "TASKS.md").write_text(
@@ -530,7 +530,7 @@ class TestDevelopPreflightChecks:
         mock_instance.send.return_value = "done"
         MockAgent.return_value = mock_instance
 
-        from voidrift_cli.phases.develop import run_develop
+        from voidrift_cli.commands.develop import run_develop
         result = run_develop(cloud_model)
         assert result == 0
         # Both modules should be marked complete in single file
@@ -543,11 +543,11 @@ class TestDevelopPreflightChecks:
 
 class TestAutomatePreflightChecks:
     def test_missing_requirements(self, tmp_project, cloud_model):
-        from voidrift_cli.phases.automate import run_automate
+        from voidrift_cli.commands.automate import run_automate
         result = run_automate(cloud_model)
         assert result == 1
 
-    @patch("voidrift_cli.phases.automate.AgentLoop")
+    @patch("voidrift_cli.commands.automate.AgentLoop")
     def test_generate_mode(self, MockAgent, tmp_project, cloud_model, sample_requirements):
         def fake_send(msg):
             # Simulate creating a compose file
@@ -558,21 +558,21 @@ class TestAutomatePreflightChecks:
         mock_instance.send.side_effect = fake_send
         MockAgent.return_value = mock_instance
 
-        from voidrift_cli.phases.automate import run_automate
+        from voidrift_cli.commands.automate import run_automate
         result = run_automate(cloud_model)
         assert result == 0
 
-    @patch("voidrift_cli.phases.automate.AgentLoop")
+    @patch("voidrift_cli.commands.automate.AgentLoop")
     def test_generate_fails_no_iac(self, MockAgent, tmp_project, cloud_model, sample_requirements):
         mock_instance = MagicMock()
         mock_instance.send.return_value = "I described the infrastructure but didn't create files."
         MockAgent.return_value = mock_instance
 
-        from voidrift_cli.phases.automate import run_automate
+        from voidrift_cli.commands.automate import run_automate
         result = run_automate(cloud_model)
         assert result == 1
 
-    @patch("voidrift_cli.phases.automate.AgentLoop")
+    @patch("voidrift_cli.commands.automate.AgentLoop")
     def test_review_mode(self, MockAgent, tmp_project, cloud_model, sample_requirements):
         # Pre-existing IaC
         (tmp_project / "docker-compose.yml").write_text("version: '3'")
@@ -581,7 +581,7 @@ class TestAutomatePreflightChecks:
         mock_instance.send.return_value = "Reviewed and reconciled."
         MockAgent.return_value = mock_instance
 
-        from voidrift_cli.phases.automate import run_automate
+        from voidrift_cli.commands.automate import run_automate
         result = run_automate(cloud_model)
         assert result == 0
 
@@ -590,8 +590,8 @@ class TestAutomatePreflightChecks:
 
 
 class TestVerify:
-    @patch("voidrift_cli.phases.verify._run_checks")
-    @patch("voidrift_cli.phases.verify.AgentLoop")
+    @patch("voidrift_cli.commands.verify._run_checks")
+    @patch("voidrift_cli.commands.verify.AgentLoop")
     def test_pass_verdict(self, MockAgent, mock_checks, tmp_project, cloud_model):
         vd = tmp_project / ".voidrift"
         mock_checks.return_value = ("All tests passed", 0)
@@ -604,12 +604,12 @@ class TestVerify:
         mock_instance.send.side_effect = fake_send
         MockAgent.return_value = mock_instance
 
-        from voidrift_cli.phases.verify import run_verify
+        from voidrift_cli.commands.verify import run_verify
         result = run_verify(cloud_model)
         assert result == 0
 
-    @patch("voidrift_cli.phases.verify._run_checks")
-    @patch("voidrift_cli.phases.verify.AgentLoop")
+    @patch("voidrift_cli.commands.verify._run_checks")
+    @patch("voidrift_cli.commands.verify.AgentLoop")
     def test_fail_no_architect(self, MockAgent, mock_checks, tmp_project, cloud_model):
         vd = tmp_project / ".voidrift"
         mock_checks.return_value = ("Tests failed", 2)
@@ -622,12 +622,12 @@ class TestVerify:
         mock_instance.send.side_effect = fake_send
         MockAgent.return_value = mock_instance
 
-        from voidrift_cli.phases.verify import run_verify
+        from voidrift_cli.commands.verify import run_verify
         result = run_verify(cloud_model)
         assert result == 1
 
-    @patch("voidrift_cli.phases.verify._run_checks")
-    @patch("voidrift_cli.phases.verify.AgentLoop")
+    @patch("voidrift_cli.commands.verify._run_checks")
+    @patch("voidrift_cli.commands.verify.AgentLoop")
     def test_fail_with_architect_generates_fixes(self, MockAgent, mock_checks, tmp_project, cloud_model):
         vd = tmp_project / ".voidrift"
         mock_checks.return_value = ("Tests failed", 1)
@@ -657,13 +657,13 @@ class TestVerify:
         architect = ModelConfig(alias="arch", model_id="test", model_type="cloud",
                                 api_base="http://localhost:19999/v1", api_key="k")
 
-        from voidrift_cli.phases.verify import run_verify
+        from voidrift_cli.commands.verify import run_verify
         result = run_verify(cloud_model, architect=architect)
         assert result == 1  # Still fails, but fix tasks generated
         assert (vd / "TASKS-fixes.md").exists()
 
-    @patch("voidrift_cli.phases.verify._run_checks")
-    @patch("voidrift_cli.phases.verify.AgentLoop")
+    @patch("voidrift_cli.commands.verify._run_checks")
+    @patch("voidrift_cli.commands.verify.AgentLoop")
     def test_pass_requires_zero_failed_checks(self, MockAgent, mock_checks, tmp_project, cloud_model):
         """Even if model says PASS, failed_checks > 0 means FAIL (AC-V6)."""
         vd = tmp_project / ".voidrift"
@@ -677,7 +677,7 @@ class TestVerify:
         mock_instance.send.side_effect = fake_send
         MockAgent.return_value = mock_instance
 
-        from voidrift_cli.phases.verify import run_verify
+        from voidrift_cli.commands.verify import run_verify
         result = run_verify(cloud_model)
         assert result == 1  # FAIL because failed_checks > 0
 
@@ -692,8 +692,8 @@ class TestCLICommands:
         runner = CliRunner()
         result = runner.invoke(cli, ["status"])
         assert result.exit_code == 0
-        assert "Phase 1" in result.output
-        assert "Phase 5" in result.output
+        assert "Gather" in result.output
+        assert "Verify" in result.output
 
     def test_status_with_requirements(self, tmp_project, sample_requirements):
         from click.testing import CliRunner
@@ -811,7 +811,7 @@ class TestPlanSkillTagValidation:
 
     def test_validate_returns_invalid_tags(self, tmp_project, voidrift_dir):
         """_validate_skill_tags identifies tags not in the valid set."""
-        from voidrift_cli.phases.plan import _validate_skill_tags
+        from voidrift_cli.commands.plan import _validate_skill_tags
         tasks_file = voidrift_dir / "TASKS.md"
         tasks_file.write_text(
             "- [ ] Create src/main.py: entry [backend, invalid-tag, another-bad]\n"
@@ -823,7 +823,7 @@ class TestPlanSkillTagValidation:
 
     def test_validate_returns_empty_when_all_valid(self, tmp_project, voidrift_dir):
         """_validate_skill_tags returns empty set when all tags are valid."""
-        from voidrift_cli.phases.plan import _validate_skill_tags
+        from voidrift_cli.commands.plan import _validate_skill_tags
         tasks_file = voidrift_dir / "TASKS.md"
         tasks_file.write_text("- [ ] Create src/main.py: entry [backend]\n")
         invalid = _validate_skill_tags(tasks_file, {"backend"})
@@ -831,7 +831,7 @@ class TestPlanSkillTagValidation:
 
     def test_strip_removes_invalid_tags(self, tmp_project, voidrift_dir):
         """_strip_invalid_tags removes invalid tags from task lines."""
-        from voidrift_cli.phases.plan import _strip_invalid_tags
+        from voidrift_cli.commands.plan import _strip_invalid_tags
         tasks_file = voidrift_dir / "TASKS.md"
         tasks_file.write_text("- [ ] Create src/a.py: desc [backend, bad-skill]\n")
         _strip_invalid_tags(tasks_file, {"bad-skill"})
@@ -841,7 +841,7 @@ class TestPlanSkillTagValidation:
 
     def test_strip_removes_whole_bracket_when_all_invalid(self, tmp_project, voidrift_dir):
         """If all tags are invalid, the bracket is removed entirely."""
-        from voidrift_cli.phases.plan import _strip_invalid_tags
+        from voidrift_cli.commands.plan import _strip_invalid_tags
         tasks_file = voidrift_dir / "TASKS.md"
         tasks_file.write_text("- [ ] Create src/b.py: desc [totally-invalid]\n")
         _strip_invalid_tags(tasks_file, {"totally-invalid"})
@@ -854,7 +854,7 @@ class TestPlanUpdateMode:
 
     def test_update_requires_architecture_md(self, tmp_project, cloud_model, sample_requirements):
         """run_plan(update=True) returns 1 when ARCHITECTURE.md is missing."""
-        from voidrift_cli.phases.plan import run_plan
+        from voidrift_cli.commands.plan import run_plan
         vd = tmp_project / ".voidrift"
         # ARCHITECTURE.md missing, TASKS.md missing
         result = run_plan(cloud_model, update=True)
@@ -862,14 +862,14 @@ class TestPlanUpdateMode:
 
     def test_update_requires_tasks_md(self, tmp_project, cloud_model, sample_requirements):
         """run_plan(update=True) returns 1 when TASKS.md is missing."""
-        from voidrift_cli.phases.plan import run_plan
+        from voidrift_cli.commands.plan import run_plan
         vd = tmp_project / ".voidrift"
         (vd / "ARCHITECTURE.md").write_text("# Architecture")
         # TASKS.md still missing
         result = run_plan(cloud_model, update=True)
         assert result == 1
 
-    @patch("voidrift_cli.phases.plan.AgentLoop")
+    @patch("voidrift_cli.commands.plan.AgentLoop")
     def test_update_proceeds_when_both_exist(
         self, MockAgent, tmp_project, cloud_model, sample_requirements
     ):
@@ -883,7 +883,7 @@ class TestPlanUpdateMode:
         mock_instance.send.return_value = "Updated plan."
         MockAgent.return_value = mock_instance
 
-        from voidrift_cli.phases.plan import run_plan
+        from voidrift_cli.commands.plan import run_plan
         # The update call should at least start (not bail with exit code 1 on missing files)
         result = run_plan(cloud_model, update=True)
         # Either succeeds or fails for other reasons (missing artifacts), but NOT because
@@ -894,7 +894,7 @@ class TestPlanUpdateMode:
 class TestDevelopRetryEscalation:
     """V-D-4: No writes triggers retry, then escalation."""
 
-    @patch("voidrift_cli.phases.develop.AgentLoop")
+    @patch("voidrift_cli.commands.develop.AgentLoop")
     def test_no_writes_triggers_retry(self, MockAgent, tmp_project, cloud_model, sample_requirements):
         """When the first task attempt writes nothing, a retry is attempted."""
         vd = tmp_project / ".voidrift"
@@ -927,12 +927,12 @@ class TestDevelopRetryEscalation:
 
         MockAgent.side_effect = FakeAgent
 
-        from voidrift_cli.phases.develop import run_develop
+        from voidrift_cli.commands.develop import run_develop
         run_develop(cloud_model)
 
         assert call_count >= 2, "Expected at least 2 agent calls (initial + retry)"
 
-    @patch("voidrift_cli.phases.develop.AgentLoop")
+    @patch("voidrift_cli.commands.develop.AgentLoop")
     def test_no_writes_no_architect_skips_task(
         self, MockAgent, tmp_project, cloud_model, sample_requirements
     ):
@@ -944,7 +944,7 @@ class TestDevelopRetryEscalation:
         mock_instance.send.return_value = "I thought about it."
         MockAgent.return_value = mock_instance
 
-        from voidrift_cli.phases.develop import run_develop
+        from voidrift_cli.commands.develop import run_develop
         # Without an architect, task should be skipped gracefully
         result = run_develop(cloud_model)
         assert result in (0, 1)  # Doesn't crash
@@ -955,10 +955,10 @@ class TestChatSession:
     V-UI-1: chat tools available on every turn.
     V-UI-2: session log contains operator input and model responses."""
 
-    def test_chat_phase_tools_include_required_handlers(self, tmp_project):
-        """V-U-2: build_local_tools with phase='chat' exposes get_skill."""
+    def test_chat_command_tools_include_required_handlers(self, tmp_project):
+        """V-U-2: build_local_tools with cmd='chat' exposes get_skill."""
         from voidrift_cli.agent import build_local_tools
-        tools, handlers = build_local_tools(phase="chat")
+        tools, handlers = build_local_tools(cmd="chat")
         assert "get_skill" in handlers
         tool_names = {t["function"]["name"] for t in tools}
         assert "get_skill" in tool_names
@@ -966,7 +966,7 @@ class TestChatSession:
     def test_chat_analysis_reqs_skill_is_available(self, tmp_project):
         """V-U-2: get_skill('ANALYSIS-REQS') returns non-empty content in chat context."""
         from voidrift_cli.agent import build_local_tools
-        _, handlers = build_local_tools(phase="chat")
+        _, handlers = build_local_tools(cmd="chat")
         skill_content = handlers["get_skill"]("ANALYSIS-REQS")
         assert len(skill_content) > 10
         assert "not found" not in skill_content.lower()
@@ -1091,15 +1091,15 @@ class TestDevelopMaxEscalations:
 
     def test_max_escalations_constant(self):
         """MAX_ESCALATIONS is defined and has a positive value."""
-        from voidrift_cli.phases.develop import MAX_ESCALATIONS
+        from voidrift_cli.commands.develop import MAX_ESCALATIONS
         assert MAX_ESCALATIONS > 0
 
-    @patch("voidrift_cli.phases.develop.AgentLoop")
+    @patch("voidrift_cli.commands.develop.AgentLoop")
     def test_max_escalations_blocks_task(
         self, MockAgent, tmp_project, cloud_model, sample_requirements
     ):
         """After MAX_ESCALATIONS+1 escalation files, the task is blocked."""
-        from voidrift_cli.phases.develop import MAX_ESCALATIONS
+        from voidrift_cli.commands.develop import MAX_ESCALATIONS
         vd = tmp_project / ".voidrift"
         (vd / "TASKS.md").write_text(
             "- [ ] Create src/esc.py: stub [backend]\n"
@@ -1142,7 +1142,7 @@ class TestDevelopMaxEscalations:
         architect = MagicMock()
         architect.alias = "arch-test"
 
-        from voidrift_cli.phases.develop import run_develop
+        from voidrift_cli.commands.develop import run_develop
         # Should not raise — blocked tasks are handled gracefully
         result = run_develop(cloud_model)
         assert result in (0, 1)

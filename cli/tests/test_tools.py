@@ -180,3 +180,43 @@ class TestWriteGuard:
             result = ctx.write_source_file("src/main.py", _make_lines(2001))
         assert "Error" in result
         assert "exceeds the max_read_lines limit" in result
+
+
+class TestDuplicateWriteGuard:
+    """V-FSZ-4: Duplicate write guard uses content comparison, not path tracking (REQ-FSZ-4)."""
+
+    def test_identical_content_blocked(self, ctx):
+        """Writing the exact same content a second time is rejected."""
+        with patch("voidrift_cli.config.load_config", return_value={}):
+            ctx.write_source_file("src/main.py", "content A")
+            result = ctx.write_source_file("src/main.py", "content A")
+        assert "Already written" in result
+
+    def test_different_content_allowed(self, ctx):
+        """Writing different content to an already-written path is allowed (correction)."""
+        with patch("voidrift_cli.config.load_config", return_value={}):
+            ctx.write_source_file("src/main.py", "stub")
+            result = ctx.write_source_file("src/main.py", "full content replacing the stub")
+        assert "Wrote" in result
+        assert "Already written" not in result
+
+    def test_same_length_different_content_allowed(self, ctx):
+        """Same byte length but different text is not a duplicate — allowed."""
+        with patch("voidrift_cli.config.load_config", return_value={}):
+            ctx.write_source_file("src/main.py", "aaa")
+            result = ctx.write_source_file("src/main.py", "bbb")
+        assert "Wrote" in result
+
+    def test_stub_correction_allowed_framework_file(self, ctx):
+        """A stub framework file (e.g. TASKS.md written with filename as content) can be corrected."""
+        with patch("voidrift_cli.config.load_config", return_value={}):
+            ctx.write_framework_file("TASKS.md", "TASKS.md")
+            result = ctx.write_framework_file("TASKS.md", "# Tasks\n\n- [ ] Do something real\n")
+        assert "Wrote" in result
+        assert "Already written" not in result
+
+    def test_first_write_never_blocked(self, ctx):
+        """First write to any path is always allowed."""
+        with patch("voidrift_cli.config.load_config", return_value={}):
+            result = ctx.write_source_file("src/new.py", "content")
+        assert "Wrote" in result

@@ -8,6 +8,7 @@ import sys
 import logging
 import itertools
 import threading
+import time
 from pathlib import Path
 
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -28,7 +29,7 @@ Getting started:
   voidrift develop <model> [<architect>]  Execute implementation tasks
   voidrift verify <model> [<architect>]   Run quality checks
 
-Phases:
+Framework commands:
   gather <model> <path> [--overwrite]
   plan <model> [<feature>] [--overwrite] [--update]
   develop <model> [<architect>]              Execute implementation tasks
@@ -36,9 +37,9 @@ Phases:
   verify <model> [<architect>]
 
 Utility:
-  status                      Show project phase status
-  chat <model> [--doc <path>] Interactive session with MCP tools
-  log <phase> [--prune] [-f]   View or manage phase logs
+  status                      Show project command status
+  chat <model> [--doc <path>] Interactive session with agent tools
+  log <command> [--prune] [-f]   View or manage command logs
   prune [--global] [--all]    Clean ephemeral data
   unlock                      Remove develop lock
 
@@ -66,8 +67,10 @@ class TopGroup(OrderedGroup):
 
 
 @click.group(cls=TopGroup, invoke_without_command=True, help=HELP_TEXT)
+@click.option("--verbose", "-v", is_flag=True, help="Show token counts and context % in stats")
 @click.pass_context
-def cli(ctx) -> None:
+def cli(ctx, verbose) -> None:
+    ui.set_verbose(verbose)
     if ctx.invoked_subcommand is None:
         _interactive_mode()
 
@@ -121,7 +124,7 @@ def _active_model_alias() -> str | None:
 
 def _interactive_mode():
     """Interactive guided flow when no subcommand given (REQ-ARCH-3)."""
-    ui.phase("VoidRift — Local-first Agentic Development Framework")
+    ui.header("VoidRift — Local-first Agentic Development Framework")
 
     actions = ["gather", "plan", "develop", "automate", "verify", "chat", "status"]
     for i, a in enumerate(actions, 1):
@@ -171,7 +174,7 @@ def _interactive_mode():
 
 
 # ---------------------------------------------------------------------------
-# Phase commands
+# Framework commands
 # ---------------------------------------------------------------------------
 
 
@@ -190,9 +193,9 @@ def _check_setup() -> None:
 @click.argument("path", type=click.Path(exists=True))
 @click.option("--overwrite", is_flag=True, help="Remove previous gather artifacts and start fresh")
 def gather(model, path, overwrite) -> None:
-    """Phase 1: Reverse-engineer requirements from a codebase."""
+    """Gather: Reverse-engineer requirements from a codebase."""
     _check_setup()
-    from .phases.gather import run_gather
+    from .commands.gather import run_gather
     mc = resolve_model(model)
     sys.exit(run_gather(mc, from_path=path, overwrite=overwrite))
 
@@ -203,9 +206,9 @@ def gather(model, path, overwrite) -> None:
 @click.option("--overwrite", is_flag=True, help="Remove previous plan artifacts and start fresh")
 @click.option("--update", is_flag=True, help="Revise existing plan to match current requirements")
 def plan(model, feature, overwrite, update) -> None:
-    """Phase 2: Generate architecture and task breakdown."""
+    """Plan: Generate architecture and task breakdown."""
     _check_setup()
-    from .phases.plan import run_plan
+    from .commands.plan import run_plan
     mc = resolve_model(model)
     sys.exit(run_plan(mc, feature=feature, overwrite=overwrite, update=update))
 
@@ -214,9 +217,9 @@ def plan(model, feature, overwrite, update) -> None:
 @click.argument("model", shell_complete=_complete_model)
 @click.argument("architect", required=False, shell_complete=_complete_model)
 def develop(model, architect) -> None:
-    """Phase 3: Execute implementation tasks."""
+    """Develop: Execute implementation tasks."""
     _check_setup()
-    from .phases.develop import run_develop
+    from .commands.develop import run_develop
     mc = resolve_model(model)
     am = resolve_model(architect) if architect else mc
     sys.exit(run_develop(mc, architect=am))
@@ -226,9 +229,9 @@ def develop(model, architect) -> None:
 @click.argument("model", shell_complete=_complete_model)
 @click.argument("architect", required=False, shell_complete=_complete_model)
 def automate(model, architect) -> None:
-    """Phase 4: Generate infrastructure-as-code."""
+    """Automate: Generate infrastructure-as-code."""
     _check_setup()
-    from .phases.automate import run_automate
+    from .commands.automate import run_automate
     mc = resolve_model(model)
     am = resolve_model(architect) if architect else mc
     sys.exit(run_automate(mc, architect=am))
@@ -238,9 +241,9 @@ def automate(model, architect) -> None:
 @click.argument("model", shell_complete=_complete_model)
 @click.argument("architect", required=False, shell_complete=_complete_model)
 def verify(model, architect) -> None:
-    """Phase 5: Run quality checks and validation."""
+    """Verify: Run quality checks and validation."""
     _check_setup()
-    from .phases.verify import run_verify
+    from .commands.verify import run_verify
     mc = resolve_model(model)
     am = resolve_model(architect) if architect else mc
     sys.exit(run_verify(mc, architect=am))
@@ -281,7 +284,7 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
     from .agent import AgentLoop
 
     model_label = f"{mc.alias} ({mc.model_id})"
-    ui.phase(title)
+    ui.header(title)
     if extra_header:
         for line in extra_header:
             ui.detail(line)
@@ -318,13 +321,29 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
     # Shared state for Live-based streaming display.
     # Uses a list so closures can mutate without nonlocal declarations.
     _live_holder: list = [None]   # current Live instance
-    _stream_buf: list[str] = []   # accumulated token buffer
-    _term_holder: list = [None]   # (termios_module, fd, saved_attr) while raw mode active
+    _live_start: list[float] = [0.0]  # turn start time for elapsed display (REQ-UI-10)
+    _turn_label: list[str] = [""]     # label fixed per turn so updates stay consistent
+    _got_token: list[bool] = [False]  # True once streaming tokens arrive
+    _stream_buf: list[str] = []       # accumulated token buffer
+    _term_holder: list = [None]       # (termios_module, fd, saved_attr) while raw mode active
 
-    def _thinking():
-        return _RPadding(_RSpinner("dots", text="  Thinking...", style="dim"), pad=(1, 0, 0, 0))
+    def _thinking_text(elapsed: float = 0.0, tokens_in: int = 0, ctx_pct: int | None = None) -> str:
+        """Build thinking spinner text with optional telemetry (REQ-UI-10)."""
+        parts = [ui.elapsed_str(elapsed)] if elapsed >= 1 else []
+        if ui._verbose and tokens_in:
+            parts.append(f"↓ {ui.token_str(tokens_in)} tokens")
+        if ctx_pct is not None and (ui._verbose or ctx_pct >= 80):
+            parts.append(f"ctx {ctx_pct}%")
+        if parts:
+            parts.append("thinking")
+            return f"  {_turn_label[0]} ({' · '.join(parts)})"
+        return f"  {_turn_label[0]}"
 
-    def on_token(token):
+    def _thinking() -> _RPadding:
+        return _RPadding(_RSpinner("dots", text=_thinking_text(), style="dim"), pad=(1, 0, 0, 0))
+
+    def on_token(token: str) -> None:
+        _got_token[0] = True
         _stream_buf.append(token)
         live = _live_holder[0]
         if live is not None:
@@ -338,22 +357,46 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
 
     _stats_parts = []
 
-    def on_complete(stats):
+    def on_complete(stats: dict) -> None:
         nonlocal _stats_parts
         _stats_parts = []
-        if stats.get("completion_tokens"):
-            _stats_parts.append(f"{stats['completion_tokens']} tokens")
-        if stats.get("tokens_per_sec"):
+        elapsed = stats.get("elapsed", 0)
+        completion_tokens = stats.get("completion_tokens", 0)
+        prompt_tokens = stats.get("prompt_tokens", 0)
+        ctx_pct = stats.get("ctx_pct")
+        if ui._verbose and completion_tokens:
+            _stats_parts.append(f"↑ {ui.token_str(completion_tokens)} tokens")
+        if ui._verbose and prompt_tokens:
+            _stats_parts.append(f"↓ {ui.token_str(prompt_tokens)} tokens")
+        if ui._verbose and stats.get("tokens_per_sec"):
             _stats_parts.append(f"{stats['tokens_per_sec']} tok/s")
-        if stats.get("elapsed"):
-            _stats_parts.append(f"{stats['elapsed']}s")
+        if elapsed:
+            _stats_parts.append(f"{elapsed}s")
+        if ctx_pct is not None and (ui._verbose or ctx_pct >= 80):
+            _stats_parts.append(f"ctx {ctx_pct}%")
 
-    def on_tool_call(name):
+    def on_progress(data: dict) -> None:
+        """Update Live thinking spinner with elapsed time while waiting (REQ-UI-10)."""
+        if _got_token[0]:
+            return  # streaming tail is already showing — don't overwrite
+        live = _live_holder[0]
+        if live is not None and data.get("state") == "thinking":
+            elapsed = time.time() - _live_start[0]
+            tokens_in = data.get("prompt_tokens", 0)
+            ctx_pct = data.get("ctx_pct")
+            live.update(_RPadding(
+                _RSpinner("dots", text=_thinking_text(elapsed, tokens_in, ctx_pct), style="dim"),
+                pad=(1, 0, 0, 0),
+            ))
+
+    def on_tool_call(name: str) -> None:
+        _got_token[0] = False  # back to thinking state while tool executes
         live = _live_holder[0]
         if live is not None:
             live.update(_thinking())
 
-    def on_tool_result(name, result):
+    def on_tool_result(name: str, result: str) -> None:
+        _got_token[0] = False  # thinking again while model processes tool result
         live = _live_holder[0]
         if live is not None:
             live.update(_thinking())
@@ -407,6 +450,7 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
     agent.on_complete = on_complete
     agent.on_tool_call = on_tool_call
     agent.on_tool_result = on_tool_result
+    agent.on_progress = on_progress
 
     from prompt_toolkit import PromptSession
     from prompt_toolkit.key_binding import KeyBindings
@@ -427,6 +471,65 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
     session = PromptSession(key_bindings=kb, multiline=True)
 
     _consecutive_interrupt = 0
+    _compact_nudged = False  # inject compact reminder once when context hits 70%
+
+    def _do_compact() -> None:
+        """Summarize history to free context. Called by /compact and auto-compact."""
+        nonlocal _compact_nudged
+        ui._con.print()  # blank line after operator input
+        if len(agent.messages) <= 1:
+            ui.info("Nothing to compact.")
+            return
+
+        target = max_ctx // 10 if max_ctx else 8000
+        compact_prompt = (
+            "Summarize this conversation concisely. Capture: key decisions made, "
+            "artifacts discussed or modified, any pending work or open questions. "
+            f"Keep the summary under {target} tokens."
+        )
+
+        # Disable terminal echo and show Thinking... spinner while the model works.
+        _saved_term = None
+        try:
+            import termios as _termios
+            _fd = sys.stdin.fileno()
+            _saved_term = _termios.tcgetattr(_fd)
+            _raw = _termios.tcgetattr(_fd)
+            _raw[3] &= ~(_termios.ECHO | _termios.ICANON)
+            _termios.tcsetattr(_fd, _termios.TCSANOW, _raw)
+        except Exception:
+            pass
+
+        summary = ""
+        try:
+            _compact_spinner = _RSpinner("dots", text=f"  {ui.random_label()}", style="dim")
+            with Live(_compact_spinner, console=ui._con, refresh_per_second=12, transient=True):
+                client = agent._get_client()
+                resp = client.chat.completions.create(
+                    model=agent._model_name(),
+                    messages=agent.messages + [{"role": "user", "content": compact_prompt}],
+                    max_tokens=target,
+                )
+                summary = resp.choices[0].message.content or ""
+        except Exception as e:
+            ui.error(f"Compact failed: {e}")
+            return
+        finally:
+            if _saved_term is not None:
+                try:
+                    _termios.tcsetattr(_fd, _termios.TCSANOW, _saved_term)
+                except Exception:
+                    pass
+
+        sys_content = agent.messages[0]["content"] + f"\n\n[Conversation summary]\n{summary}"
+        agent.messages = [{"role": "system", "content": sys_content}]
+        pct = _estimate_tokens(agent.messages) * 100 // max_ctx if max_ctx else 0
+        ui.info(f"Compacted to {pct}% of context window.")
+        ui._con.print(ui.render_text(summary), style="dim")
+        with open(log, "a") as f:
+            f.write(f"\n[COMPACT] {summary}\n")
+        _compact_nudged = False  # allow nudge again if context fills back up
+
     try:
         while True:
             try:
@@ -448,35 +551,7 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
 
             # /compact — summarize history to free context (REQ-U-7)
             if user_input.lower().strip() == "/compact":
-                if len(agent.messages) <= 1:
-                    ui.info("Nothing to compact.")
-                    continue
-                _stop_tool_spinner()
-                ui.info("Compacting conversation...")
-                target = max_ctx // 10 if max_ctx else 8000
-                compact_prompt = (
-                    "Summarize this conversation concisely. Capture: key decisions made, "
-                    "artifacts discussed or modified, any pending work or open questions. "
-                    f"Keep the summary under {target} tokens."
-                )
-                try:
-                    from openai import OpenAI
-                    client = agent._get_client()
-                    resp = client.chat.completions.create(
-                        model=agent._model_name(),
-                        messages=agent.messages + [{"role": "user", "content": compact_prompt}],
-                        max_tokens=target,
-                    )
-                    summary = resp.choices[0].message.content or ""
-                    # Replace history: keep system prompt, add summary
-                    sys_msg = agent.messages[0]
-                    agent.messages = [sys_msg, {"role": "system", "content": f"[Conversation summary]\n{summary}"}]
-                    pct = _estimate_tokens(agent.messages) * 100 // max_ctx if max_ctx else 0
-                    ui.info(f"Compacted to {pct}% of context window.")
-                    with open(log, "a") as f:
-                        f.write(f"\n[COMPACT] {summary}\n")
-                except Exception as e:
-                    ui.error(f"Compact failed: {e}")
+                _do_compact()
                 continue
 
             # /write enables tools for this turn (REQ-UI-3)
@@ -501,7 +576,28 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
                 f.write(f"\n> {user_input}\n")
 
             _stream_buf.clear()
+            _got_token[0] = False
+            _turn_label[0] = ui.random_label()
             _msg_snapshot = len(agent.messages)
+
+            # Auto-compact at 95%; nudge once at 70% (REQ-UI-6).
+            if max_ctx:
+                pct = min(100, _estimate_tokens(agent.messages) * 100 // max_ctx)
+                if pct >= 95:
+                    ui.info("Context window at 95% — auto-compacting...")
+                    _do_compact()
+                    _compact_nudged = True
+                    _msg_snapshot = len(agent.messages)
+                elif pct >= 70 and not _compact_nudged:
+                    agent.messages.append({
+                        "role": "system",
+                        "content": (
+                            "Context window is over 70% full. "
+                            "Remind the operator to run /compact to free space before continuing."
+                        ),
+                    })
+                    _compact_nudged = True
+                    _msg_snapshot = len(agent.messages)
 
             # Disable terminal echo while the model is processing so keystrokes
             # don't appear alongside the Live display output (REQ-UI-9).
@@ -519,6 +615,7 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
 
             _error = None
             _interrupted = False
+            _live_start[0] = time.time()
             with Live(_thinking(), console=ui._con, refresh_per_second=12) as _live:
                 _live_holder[0] = _live
                 try:
@@ -583,7 +680,7 @@ def chat(model, doc) -> None:
 
     log, run_id = boot_run("chat")
 
-    tools, handlers = build_local_tools(phase="chat")
+    tools, handlers = build_local_tools(cmd="chat")
 
     # Override web_fetch placeholder with real implementation (REQ-U-8).
     # confirm_fn is injected by _interactive_loop after spinner functions are defined
@@ -638,7 +735,7 @@ def chat(model, doc) -> None:
 
 @cli.command()
 def status() -> None:
-    """Show project phase status."""
+    """Show project command status."""
     _status()
 
 
@@ -648,49 +745,49 @@ def _status():
 
     d = voidrift_dir()
 
-    ui.phase("VoidRift Status")
+    ui.header("VoidRift Status")
 
     req = d / "REQUIREMENTS.md"
     if req.exists():
-        ui._con.print("  ✅ Phase 1 (Gather): REQUIREMENTS.md exists")
+        ui._con.print("  ✅ Gather: REQUIREMENTS.md exists")
     else:
-        ui._con.print("  ⬜ Phase 1 (Gather): Run 'voidrift gather <model>'")
+        ui._con.print("  ⬜ Gather: Run 'voidrift gather <model>'")
 
     has_tasks = (d / "TASKS.md").exists()
     has_arch = (d / "ARCHITECTURE.md").exists()
     if has_tasks and has_arch:
-        ui._con.print("  ✅ Phase 2 (Plan): Tasks and architecture exist")
+        ui._con.print("  ✅ Plan: Tasks and architecture exist")
     elif has_tasks:
-        ui._con.print("  🔄 Phase 2 (Plan): Tasks exist, no architecture")
+        ui._con.print("  🔄 Plan: Tasks exist, no architecture")
     else:
-        ui._con.print("  ⬜ Phase 2 (Plan): Run 'voidrift plan <model>'")
+        ui._con.print("  ⬜ Plan: Run 'voidrift plan <model>'")
 
     task_file = d / "TASKS.md"
     if task_file.exists():
         done, blocked, total = count_tasks(task_file)
         if done == total and total > 0:
-            ui._con.print(f"  ✅ Phase 3 (Develop): All {total} tasks complete")
+            ui._con.print(f"  ✅ Develop: All {total} tasks complete")
         elif done > 0 or blocked > 0:
-            ui._con.print(f"  🔄 Phase 3 (Develop): {done}/{total} done, {blocked} blocked")
+            ui._con.print(f"  🔄 Develop: {done}/{total} done, {blocked} blocked")
         else:
-            ui._con.print(f"  ⬜ Phase 3 (Develop): {total} tasks pending")
+            ui._con.print(f"  ⬜ Develop: {total} tasks pending")
     else:
-        ui._con.print("  ⬜ Phase 3 (Develop): No tasks")
+        ui._con.print("  ⬜ Develop: No tasks")
 
-    from .phases.automate import _detect_iac
+    from .commands.automate import _detect_iac
     if _detect_iac():
-        ui._con.print("  ✅ Phase 4 (Automate): IaC detected")
+        ui._con.print("  ✅ Automate: IaC detected")
     else:
-        ui._con.print("  ⬜ Phase 4 (Automate): Run 'voidrift automate <model>'")
+        ui._con.print("  ⬜ Automate: Run 'voidrift automate <model>'")
 
     if (d / "VERIFY.md").exists():
         text = (d / "VERIFY.md").read_text()
         if "PASS" in text:
-            ui._con.print("  ✅ Phase 5 (Verify): PASS")
+            ui._con.print("  ✅ Verify: PASS")
         else:
-            ui._con.print("  ❌ Phase 5 (Verify): FAIL")
+            ui._con.print("  ❌ Verify: FAIL")
     else:
-        ui._con.print("  ⬜ Phase 5 (Verify): Run 'voidrift verify <model>'")
+        ui._con.print("  ⬜ Verify: Run 'voidrift verify <model>'")
 
     spec_dir = d / "spec"
     if spec_dir.is_dir():
@@ -702,36 +799,36 @@ def _status():
 
 
 @cli.command()
-@click.argument("phase", required=False)
+@click.argument("command", required=False)
 @click.option("--prune", is_flag=True, help="Delete log files")
 @click.option("--follow", "-f", is_flag=True, help="Tail the log file")
-def log(phase, prune, follow) -> None:
-    """View or manage phase log files."""
+def log(command, prune, follow) -> None:
+    """View or manage command log files."""
     from .utils import voidrift_dir
 
     d = voidrift_dir() / "logs"
-    valid_phases = ["gather", "plan", "develop", "automate", "verify"]
+    valid_commands = ["gather", "plan", "develop", "automate", "verify", "chat"]
 
     if prune:
-        pattern = f"{phase}-*.log" if phase else "*.log"
+        pattern = f"{command}-*.log" if command else "*.log"
         logs = sorted(d.glob(pattern))
         for l in logs:
             l.unlink()
         ui.info(f"Deleted {len(logs)} log file(s)" if logs else "No log files to prune")
         return
 
-    if not phase:
-        ui._con.print("Usage: voidrift log <phase> [--prune] [--follow/-f]")
-        ui._con.print(f"Phases: {', '.join(valid_phases)}")
+    if not command:
+        ui._con.print("Usage: voidrift log <command> [--prune] [--follow/-f]")
+        ui._con.print(f"Commands: {', '.join(valid_commands)}")
         sys.exit(1)
 
-    if phase not in valid_phases:
-        ui.error(f"Invalid phase: {phase}. Must be one of: {', '.join(valid_phases)}")
+    if command not in valid_commands:
+        ui.error(f"Invalid command: {command}. Must be one of: {', '.join(valid_commands)}")
         sys.exit(1)
 
-    logs = sorted(d.glob(f"{phase}-*.log"))
+    logs = sorted(d.glob(f"{command}-*.log"))
     if not logs:
-        ui.error(f"No log files found for phase: {phase}")
+        ui.error(f"No log files found for command: {command}")
         sys.exit(1)
 
     latest = logs[-1]
@@ -856,7 +953,7 @@ def unlock() -> None:
     lock.unlink()
 
 
-from .phases.skills import skills_cmd
+from .commands.skills import skills_cmd
 cli.add_command(skills_cmd)
 
 

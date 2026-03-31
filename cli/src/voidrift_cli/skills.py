@@ -67,7 +67,7 @@ def find_skill(name: str, project_dir: Path | str | None = None) -> str | None:
 
 
 def list_skills(project_dir: Path | str | None = None) -> str:
-    """List all available skill files grouped by layer (REQ-MCP-12 equivalent).
+    """List all available skill files grouped by layer.
 
     Args:
         project_dir: Project root directory. Defaults to cwd.

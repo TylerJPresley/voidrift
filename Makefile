@@ -13,9 +13,10 @@ setup: install sync
 sync:
 	@mkdir -p ~/.voidrift/resources ~/.voidrift/domain-skills
 	cp -r resources/* ~/.voidrift/resources/
-	cp defaults/config.yml ~/.voidrift/config.yml
-	cp defaults/models.yml ~/.voidrift/models.yml
-	cp defaults/worker-models.yml ~/.voidrift/worker-models.yml 2>/dev/null || true
+	cp config.yml ~/.voidrift/config.yml
+	cp models.yml ~/.voidrift/models.yml
+	cp worker-models.yml ~/.voidrift/worker-models.yml 2>/dev/null || true
+	cp -n defaults/spinner-labels.txt ~/.voidrift/spinner-labels.txt 2>/dev/null || true
 	@echo "✅ Synced to ~/.voidrift/"
 
 build:

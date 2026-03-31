@@ -49,6 +49,7 @@ models:
     base_url: "http://localhost:${kiro.port}/v1"
     api_key: "${kiro.api_key}"
     type: gateway
+    max_context: 200000  # conservative lower bound — auto-routes to claude models (min 200K)
 
   kiro-opus:
     model_id: "openai/claude-opus-4.6"

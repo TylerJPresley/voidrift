@@ -128,8 +128,8 @@ def get_retention(scope: str) -> int:
     return defaults[scope]
 
 
-# Per-phase default max_tokens (REQ-CFG-7)
-_PHASE_MAX_TOKENS: dict[str, int] = {
+# Per-stage default max_tokens (REQ-CFG-7)
+_STAGE_MAX_TOKENS: dict[str, int] = {
     "triage":       4096,
     "analysis":     2000,
     "synthesis":    2000,
@@ -153,21 +153,21 @@ _MODEL_INPUT_CHARS: dict[str, int] = {
 }
 
 
-def get_max_tokens(model_type: str, phase: str) -> int:
-    """Return max_tokens for an agent given its model type and phase (REQ-CFG-6, REQ-CFG-7).
+def get_max_tokens(model_type: str, stage: str) -> int:
+    """Return max_tokens for an agent given its model type and stage (REQ-CFG-6, REQ-CFG-7).
 
-    Returns min(phase_default, model_type_cap). Both are configurable via
+    Returns min(stage_default, model_type_cap). Both are configurable via
     config.yml limits: section.
 
     Args:
         model_type: "local", "cloud", or "gateway".
-        phase: Phase key matching _PHASE_MAX_TOKENS (e.g. "analysis", "task").
+        stage: Stage key matching _STAGE_MAX_TOKENS (e.g. "analysis", "task").
     """
     limits = load_config().get("limits", {})
     cap_key = f"{model_type}_max_tokens"
     cap = int(limits.get(cap_key, _MODEL_TYPE_CAPS.get(model_type, 32768)))
-    phase_default = _PHASE_MAX_TOKENS.get(phase, 4096)
-    return min(phase_default, cap)
+    stage_default = _STAGE_MAX_TOKENS.get(stage, 4096)
+    return min(stage_default, cap)
 
 
 def get_max_input_chars(model_type: str) -> int:

@@ -1,20 +1,333 @@
-"""Consistent console output for all phases (REQ-UI-1, REQ-UI-2).
+"""Consistent console output for all commands (REQ-UI-1, REQ-UI-2).
 
 Three output roles:
-  System (▸) — dim white: phase titles, stages, progress, logs
+  System (▸) — dim white: command titles, stages, progress, logs
   Model  (◆) — light blue, 2-space indent: all model-generated text
   Operator (▶) — bold white: reprinted user input
 """
 
 from __future__ import annotations
 
+import random
 import sys
+import threading
+import time
 
 from rich.console import Console
 from rich.markup import escape as _esc
+from rich.status import Status as _Status
+
+_SPINNER_LABELS_DEFAULT = [
+    "Thinking", "Pondering", "Ruminating", "Cogitating", "Deliberating",
+    "Contemplating", "Percolating", "Musing", "Tinkering", "Divining",
+]
+
+
+def _load_spinner_labels() -> list[str]:
+    """Load labels from ~/.voidrift/spinner-labels.txt, falling back to defaults."""
+    import os
+    path = os.path.join(os.path.expanduser("~"), ".voidrift", "spinner-labels.txt")
+    try:
+        with open(path) as f:
+            labels = [
+                line.strip() for line in f
+                if line.strip() and not line.startswith("#")
+            ]
+        return labels if labels else _SPINNER_LABELS_DEFAULT
+    except OSError:
+        return _SPINNER_LABELS_DEFAULT
+
+
+def random_label() -> str:
+    """Return a random spinner label with trailing ellipsis."""
+    return f"{random.choice(_load_spinner_labels())}..."
+
+
+def elapsed_str(seconds: float) -> str:
+    """Format elapsed seconds as '3s' or '1m 3s'."""
+    s = int(seconds)
+    if s < 60:
+        return f"{s}s"
+    return f"{s // 60}m {s % 60}s"
+
+
+def token_str(n: int) -> str:
+    """Format token count with 'k' suffix for thousands."""
+    if n >= 1000:
+        return f"{n / 1000:.1f}k"
+    return str(n)
+
+
+def stats_str(
+    elapsed: float,
+    tokens_in: int,
+    tokens_out: int,
+    ctx_pct: int | None,
+    status: str,
+) -> str:
+    """Format a stats segment: (elapsed [· tkns: ↓ Nk - ↑ Nk] [· ctx N%] · status).
+
+    tkns and ctx fields are shown only when verbose mode is active (set_verbose(True)),
+    except ctx is always shown when ctx_pct >= 80 regardless of verbose.
+    """
+    parts = []
+    if elapsed >= 1:
+        parts.append(elapsed_str(elapsed))
+    if _verbose and (tokens_in or tokens_out):
+        tkns = "tkns:"
+        if tokens_in:
+            tkns += f" ↓ {token_str(tokens_in)}"
+        if tokens_in and tokens_out:
+            tkns += " -"
+        if tokens_out:
+            tkns += f" ↑ {token_str(tokens_out)}"
+        parts.append(tkns)
+    if ctx_pct is not None and (_verbose or ctx_pct >= 80):
+        parts.append(f"ctx {ctx_pct}%")
+    parts.append(status)
+    return f"({' · '.join(parts)})"
+
+
+class _Spinner:
+    """Thread-driven Rich Status with live elapsed time, token telemetry, and ctx% (REQ-UI-10).
+
+    Usage::
+
+        with spinner(random_label(), "operation-name") as spin:
+            agent.on_progress = spin.on_progress
+            response = agent.send(...)
+    """
+
+    def __init__(self, label: str, summary: str) -> None:
+        self._label = label      # random label shown during live spinner
+        self._summary = summary  # meaningful name shown in persisted summary line
+        self._start = 0.0
+        self._tokens_in = 0
+        self._tokens_out = 0
+        self._ctx_pct: int | None = None
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._status: _Status | None = None
+
+    def _format(self, *, status: str = "thinking") -> str:
+        with self._lock:
+            elapsed = time.time() - self._start
+            tokens_in = self._tokens_in
+            tokens_out = self._tokens_out
+            ctx_pct = self._ctx_pct
+        return f"  {self._label} {stats_str(elapsed, tokens_in, tokens_out, ctx_pct, status)}"
+
+    def _summary_line(self, *, status: str = "✓ complete") -> str:
+        with self._lock:
+            elapsed = time.time() - self._start
+            tokens_in = self._tokens_in
+            tokens_out = self._tokens_out
+            ctx_pct = self._ctx_pct
+        return f"  ▸ {self._summary} {stats_str(elapsed, tokens_in, tokens_out, ctx_pct, status)}"
+
+    def on_progress(self, data: dict) -> None:
+        """Receive token/ctx data from agent. Elapsed is managed by internal timer.
+
+        prompt_tokens is updated to the latest value (grows as context accumulates).
+        completion_tokens accumulates across all API calls in the spinner block.
+        """
+        with self._lock:
+            if data.get("prompt_tokens"):
+                self._tokens_in = data["prompt_tokens"]
+            if data.get("completion_tokens"):
+                self._tokens_out += data["completion_tokens"]
+            if data.get("ctx_pct") is not None:
+                self._ctx_pct = data["ctx_pct"]
+        if self._status is not None:
+            try:
+                self._status.update(status=self._format(status="thinking"))
+            except Exception:
+                pass
+
+    def _run(self) -> None:
+        while not self._stop.wait(0.25):
+            if self._status is not None:
+                try:
+                    self._status.update(status=self._format(status="thinking"))
+                except Exception:
+                    pass
+
+    def __enter__(self) -> "_Spinner":
+        self._start = time.time()
+        self._status = _Status(self._format(status="thinking"), console=_con)
+        self._status.__enter__()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        self._stop.set()
+        if self._thread:
+            self._thread.join(timeout=0.5)
+        status = "✓ complete" if exc_type is None else "⚠ failed"
+        final = self._summary_line(status=status)
+        if self._status:
+            try:
+                self._status._live.transient = True  # clear spinner cleanly
+            except Exception:
+                pass
+            self._status.__exit__(exc_type, exc_val, exc_tb)
+        style = "dim" if exc_type is None else "yellow"
+        _con.print(f"[{style}]{final}[/{style}]")
+
+
+def spinner(label: str, summary: str) -> _Spinner:
+    """Return a _Spinner context manager for automated command model calls (REQ-UI-10).
+
+    Args:
+        label: Random/fun label shown in the live spinner during execution.
+        summary: Meaningful operation name shown in the persisted summary line on exit.
+    """
+    return _Spinner(label, summary)
+
+
+class _MultiSpinner:
+    """Live block showing one spinner row per concurrent agent with telemetry (REQ-UI-10).
+
+    Usage::
+
+        with multi_spinner("42 source files") as ms:
+            futures = {pool.submit(task, fp, ms.track(fp)): fp for fp in files}
+            for future in as_completed(futures):
+                fp, elapsed, err = future.result()
+                ms.done(fp, Text.from_markup(...))  # completed renderable
+    """
+
+    def __init__(self, header: str) -> None:
+        self._header = header
+        # descriptor -> {start, pt (prompt tokens), ct (completion tokens), ctx (ctx_pct)}
+        self._active: dict[str, dict] = {}
+        self._completed: list = []  # Rich renderables for finished agents
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._live = None
+
+    def track(self, descriptor: str):
+        """Register a descriptor and return its on_progress callback.
+
+        The timer starts on the first on_progress call (i.e., when the agent
+        actually begins executing) rather than at submission time, so queued
+        agents waiting for a thread slot don't show inflated elapsed times.
+        Agents that haven't started yet show as '(queued)'.
+        """
+        with self._lock:
+            self._active[descriptor] = {"start": None, "pt": 0, "ct": 0, "ctx": None}
+
+        def _cb(data: dict) -> None:
+            with self._lock:
+                if descriptor not in self._active:
+                    return
+                s = self._active[descriptor]
+                if s["start"] is None:
+                    s["start"] = time.time()  # start timer on first execution callback
+                if data.get("prompt_tokens"):
+                    s["pt"] = data["prompt_tokens"]
+                if data.get("completion_tokens"):
+                    s["ct"] += data["completion_tokens"]
+                if data.get("ctx_pct") is not None:
+                    s["ctx"] = data["ctx_pct"]
+
+        return _cb
+
+    def done(
+        self,
+        descriptor: str,
+        label: str,
+        elapsed: float,
+        tokens_in: int = 0,
+        tokens_out: int = 0,
+        ctx_pct: int | None = None,
+        *,
+        failed: bool = False,
+    ) -> None:
+        """Mark a descriptor done and append a completed stats row."""
+        from rich.text import Text as _RText
+        status = "⚠ failed" if failed else "✓ complete"
+        style = "yellow" if failed else "dim"
+        row = _RText(
+            f"  {label} {stats_str(elapsed, tokens_in, tokens_out, ctx_pct, status)}",
+            style=style,
+        )
+        with self._lock:
+            self._active.pop(descriptor, None)
+            self._completed.append(row)
+
+    def _render(self):
+        from rich.console import Group as _RGroup
+        from rich.spinner import Spinner as _RSpinner
+        from rich.text import Text as _RText
+        with self._lock:
+            rows = list(self._completed)
+            active_snap = {d: dict(s) for d, s in self._active.items()}
+        now = time.time()
+        for desc, state in active_snap.items():
+            if state["start"] is None:
+                # Thread hasn't picked this up yet — show as queued (no timer)
+                rows.append(_RText(f"  {desc} (queued)", style="dim"))
+            else:
+                elapsed = now - state["start"]
+                s = stats_str(elapsed, state["pt"], state["ct"], state["ctx"], "thinking")
+                rows.append(_RSpinner("dots", text=f"  {desc} {s}", style="dim"))
+        if rows:
+            return _RGroup(*rows)
+        return _RSpinner("dots", text=f"  {self._header}", style="dim")
+
+    def _run(self) -> None:
+        while not self._stop.wait(0.25):
+            if self._live is not None:
+                try:
+                    self._live.update(self._render())
+                except Exception:
+                    pass
+
+    def __enter__(self) -> "_MultiSpinner":
+        from rich.live import Live as _Live
+        from rich.spinner import Spinner as _RSpinner
+        self._live = _Live(
+            _RSpinner("dots", text=f"  {self._header}", style="dim"),
+            console=_con,
+            refresh_per_second=10,
+        )
+        self._live.__enter__()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        self._stop.set()
+        if self._thread:
+            self._thread.join(timeout=0.5)
+        if self._live:
+            # Final render with only completed rows — ensures the last active
+            # agent's spinner doesn't persist if it finished just before __exit__.
+            try:
+                self._live.update(self._render())
+            except Exception:
+                pass
+            self._live.__exit__(exc_type, exc_val, exc_tb)
+
+
+def multi_spinner(header: str) -> _MultiSpinner:
+    """Return a _MultiSpinner for concurrent agent display (REQ-UI-10)."""
+    return _MultiSpinner(header)
+
 
 _con = Console()
 _err = Console(stderr=True)
+_verbose: bool = False
+
+
+def set_verbose(v: bool) -> None:
+    """Set verbose display mode. When False, tkns/ctx fields are hidden unless ctx ≥ 80%."""
+    global _verbose
+    _verbose = v
 
 # ANSI for streaming (bypasses Rich for token-by-token output)
 _BLUE = "\033[38;5;117m"
@@ -23,8 +336,8 @@ _RESET = "\033[0m"
 
 # --- System role ---
 
-def phase(title: str) -> None:
-    """Phase title line."""
+def header(title: str) -> None:
+    """Command title line."""
     _con.print(f"[bold cyan]{title}[/bold cyan]")
 
 
@@ -54,7 +367,7 @@ def success(msg: str) -> None:
 
 
 def done(msg: str) -> None:
-    """Final phase success."""
+    """Final command success."""
     _con.print(f"\n\n[green]  ✓ {_esc(msg)}[/green]\n")
 
 

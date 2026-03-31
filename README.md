@@ -2,7 +2,7 @@
 
 **Local-first Agentic Development Framework**
 
-A local-first AI development lifecycle tool. Five phases — Gather → Plan → Develop → Automate → Verify — produce a deployable, tested project from requirements alone. Any model can fill any role: local vLLM, cloud API, or gateway.
+A local-first AI development lifecycle tool. Five independent framework commands — Gather, Plan, Develop, Automate, Verify — produce a deployable, tested project from requirements alone. Any model can fill any role: local vLLM, cloud API, or gateway.
 
 ```mermaid
 flowchart LR
@@ -23,7 +23,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for component design, data flows, and key
 1. [Installation](#installation)
 2. [Configuration](#configuration)
 3. [Models](#models)
-4. [Phases](#phases)
+4. [Framework Commands](#framework-commands)
 5. [Utility Commands](#utility-commands)
 6. [Worker Node](#worker-node)
 7. [Kiro Gateway](#kiro-gateway)
@@ -138,9 +138,9 @@ Context window sizes sourced from [kiro.dev/docs/models/](https://kiro.dev/docs/
 
 ---
 
-## Phases
+## Framework Commands
 
-Each phase writes artifacts to `<project>/.voidrift/`. Run phases from your project directory.
+Each command writes artifacts to `<project>/.voidrift/`. Run commands from your project directory.
 
 ### Gather
 
@@ -223,12 +223,9 @@ Runs quality checks and produces a PASS/FAIL verdict:
 
 ```bash
 voidrift verify <model>
-voidrift verify <model> <architect>
 ```
 
-Produces: `VERIFY.md` with sections: Test Results, Lint & Static Analysis, Infrastructure, Requirements Coverage, Issues, Verdict.
-
-If verification fails and an architect is configured, produces `TASKS-fixes.md` with a remediation plan.
+Produces: `VERIFY.md` with sections: Test Results, Lint & Static Analysis, Infrastructure, Requirements Coverage, Issues, Verdict. Verify reports issues only — it does not modify source files or produce task files.
 
 ---
 
@@ -240,7 +237,7 @@ If verification fails and an architect is configured, produces `TASKS-fixes.md` 
 voidrift
 ```
 
-Launched with no arguments — prompts for phase, model, and options. Defaults the model to the active local model (from `~/.voidrift/.active-container`) or the first configured alias.
+Launched with no arguments — prompts for command, model, and options. Defaults the model to the active local model (from `~/.voidrift/.active-container`) or the first configured alias.
 
 ### Chat
 
@@ -250,7 +247,7 @@ voidrift chat <model> --doc REQUIREMENTS.md    # scope to a .voidrift/ artifact
 voidrift chat <model> --doc new-feature.md     # create a new artifact
 ```
 
-Interactive session with full MCP tool access. Use to iterate on any `.voidrift/` artifact before or after a phase. Type `/compact` to summarize conversation history when context fills up.
+Interactive session with full tool access. Use to iterate on any `.voidrift/` artifact before or after a framework command. Type `/compact` to summarize conversation history when context fills up.
 
 ### Status
 
@@ -258,18 +255,18 @@ Interactive session with full MCP tool access. Use to iterate on any `.voidrift/
 voidrift status
 ```
 
-Shows phase completion (✅ done, ⬜ not started, 🔄 in progress) and task counts.
+Shows command completion (✅ done, ⬜ not started, 🔄 in progress) and task counts.
 
 ### Log
 
 ```bash
-voidrift log <phase>          # show last 200 lines of most recent log
-voidrift log <phase> -f       # follow live output
-voidrift log <phase> --prune  # delete all logs for that phase
-voidrift log --prune          # delete all phase logs
+voidrift log <command>          # show last 200 lines of most recent log
+voidrift log <command> -f       # follow live output
+voidrift log <command> --prune  # delete all logs for that command
+voidrift log --prune            # delete all command logs
 ```
 
-Phase logs are at `<project>/.voidrift/logs/<phase>-<timestamp>.log`. Framework logs (`voidrift.log`, `mcp.log`) are at `~/.voidrift/logs/` and rotate automatically.
+Command logs are at `<project>/.voidrift/logs/<command>-<timestamp>.log`. The framework system log (`voidrift.log`) is at `~/.voidrift/logs/` and rotates automatically.
 
 ### Prune
 
@@ -465,7 +462,7 @@ worker kiro stop && worker kiro start
 
 ## Project Layout
 
-After running phases, your project will have:
+After running framework commands, your project will have:
 
 ```
 your-project/
@@ -478,9 +475,9 @@ your-project/
 │   ├── arch/<module>.md     # Module design, components, interfaces ← Plan
 │   ├── TASKS.md             # Ordered task list                 ← Plan
 │   ├── VERIFY.md            # Test results, verdict             ← Verify
-│   ├── STATE.md             # Phase run history (append-only)
+│   ├── STATE.md             # Command run history (append-only)
 │   └── logs/
-│       └── <phase>-<ts>.log # Full agent dialog per run
+│       └── <command>-<ts>.log # Full agent dialog per run
 └── src/                     # Your source code                  ← Develop
 
 ~/.voidrift/                  # Framework data (shared across projects)
@@ -489,8 +486,7 @@ your-project/
 ├── worker-models.yml        # Local model configs
 ├── sessions.db              # Ephemeral run data
 └── logs/
-    ├── voidrift.log         # CLI invocations, phase outcomes (rotating)
-    └── mcp.log              # MCP server writes, boot events (rotating)
+    └── voidrift.log         # CLI invocations, command outcomes (rotating)
 ```
 
 ---
@@ -549,20 +545,13 @@ voidrift/
 │       ├── tools.py              # Local filesystem tools (WriteContext)
 │       ├── utils.py              # Utilities: STATE.md, system log, task helpers
 │       ├── config.py             # Config loading, variable expansion
-│       └── phases/               # gather, plan, develop, automate, verify
-├── mcp-context-server/           # MCP Context Server
-│   └── src/voidrift_mcp/
-│       ├── server.py             # FastMCP tools, boot, MCP log
-│       ├── markdown_parser.py    # Markdown index by H2 heading
-│       ├── artifact_store.py     # Write-through artifact store
-│       ├── task_store.py         # TASKS.md parser, per-module queues
-│       └── session_store.py      # SQLite ephemeral run data
+│       └── commands/             # command implementations: gather, plan, develop, automate, verify
 ├── worker-cli/                   # Worker CLI
 │   └── src/voidrift_worker/
 │       ├── main.py               # Click commands: start, stop, models, images, kiro
 │       └── models.py             # Worker model config types
 ├── resources/                    # Framework guidance → ~/.voidrift/resources/
-│   ├── prompts/                  # system.md + per-phase prompts (5 files)
+│   ├── prompts/                  # system.md + per-command prompts (5 files)
 │   ├── skills/                   # Domain methodology (16 files)
 │   └── templates/                # Document scaffolding (4 files)
 ├── defaults/                     # Default configs synced to ~/.voidrift/ by make sync

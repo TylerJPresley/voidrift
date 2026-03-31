@@ -1,12 +1,10 @@
-"""Phase 5 — Verify: Quality checks and reporting (AC-V1 through AC-V12)."""
+"""Verify command: Quality checks and reporting (AC-V1 through AC-V12)."""
 
 from __future__ import annotations
 
 import subprocess
 from datetime import datetime
 from pathlib import Path
-
-from rich.status import Status
 
 from ..agent import AgentLoop, build_local_tools
 from ..models import ModelConfig
@@ -89,11 +87,11 @@ def _run_checks() -> tuple[str, int]:
 
 
 def run_verify(worker: ModelConfig, architect: ModelConfig | None = None) -> int:
-    """Execute the verify phase."""
+    """Execute the verify command."""
     check_disk_space()
     d = ensure_voidrift_dir()
 
-    ui.phase("VoidRift Verify")
+    ui.header("VoidRift Verify")
 
     ui.stage("Running quality checks...")
     raw_output, failed_checks = _run_checks()
@@ -128,10 +126,12 @@ def run_verify(worker: ModelConfig, architect: ModelConfig | None = None) -> int
         tool_handlers=handlers,
         stream=False,
         log_path=log,
+        show_spinner=False,
     )
 
     ui.stage("Analyzing results...")
-    with Status("  ⠋ Thinking...", console=ui._con):
+    with ui.spinner(ui.random_label(), "verify analysis") as spin:
+        agent.on_progress = spin.on_progress
         try:
             response = agent.send("\n\n".join(context_parts))
             with open(log, "a") as f:
@@ -181,10 +181,12 @@ def run_verify(worker: ModelConfig, architect: ModelConfig | None = None) -> int
         tool_handlers=handlers,
         stream=False,
         log_path=log,
+        show_spinner=False,
     )
 
     ui.stage("Architect planning fixes...")
-    with Status("  ⠋ Thinking...", console=ui._con):
+    with ui.spinner(ui.random_label(), "architect fix plan") as spin:
+        arch_agent.on_progress = spin.on_progress
         try:
             arch_response = arch_agent.send(verify_content)
             with open(log, "a") as f:
@@ -206,9 +208,11 @@ def run_verify(worker: ModelConfig, architect: ModelConfig | None = None) -> int
             tool_handlers=handlers,
             stream=False,
             log_path=log,
+            show_spinner=False,
         )
         ui.stage("Generating fix tasks...")
-        with Status("  ⠋ Thinking...", console=ui._con):
+        with ui.spinner(ui.random_label(), "fix tasks") as spin:
+            fix_agent.on_progress = spin.on_progress
             try:
                 fix_response = fix_agent.send(arch_verify.read_text())
                 with open(log, "a") as f:

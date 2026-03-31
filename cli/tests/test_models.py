@@ -158,8 +158,8 @@ class TestMaxContext:
 
     def test_req_mc3_max_context_none_when_unset(self):
         """REQ-MC-3: max_context is None when not present in models.yml."""
-        m = resolve_model("kiro")  # auto-routing model — no fixed context window
-        assert m.max_context is None
+        m = resolve_model("kiro")  # auto-routing — conservative 200K lower bound
+        assert m.max_context == 200000
 
     @patch("voidrift_cli.models._merged_models", return_value={
         "no-ctx": {"model_id": "openai/x", "type": "cloud"}

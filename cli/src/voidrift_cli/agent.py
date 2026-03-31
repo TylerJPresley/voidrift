@@ -1,4 +1,4 @@
-"""Agent loop — sends messages to model APIs, handles MCP tool calls, streams responses (AC-CLI3)."""
+"""Agent loop — sends messages to model APIs, handles agent tool calls, streams responses (AC-CLI3)."""
 
 from __future__ import annotations
 
@@ -48,7 +48,9 @@ class AgentLoop(BaseModel):
     on_complete: Callable[[dict], None] | None = None
     on_tool_call: Callable[[str], None] | None = None
     on_tool_result: Callable[[str, str], None] | None = None
+    on_progress: Callable[[dict], None] | None = None
     log_path: Path | None = None
+    show_spinner: bool = True  # set False when caller owns the spinner display
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -121,6 +123,8 @@ class AgentLoop(BaseModel):
                 msg = f"Cannot connect to {base} — is the model/gateway running?"
             elif "context length" in msg.lower() or "maximum context" in msg.lower() or ("token" in msg.lower() and "exceed" in msg.lower()):
                 msg = f"Context length exceeded. The input is too large for {self.model.alias}. Use a model with a larger context window."
+            elif "json_invalid" in msg or ("EOF while parsing" in msg and "list" in msg):
+                msg = f"Context overflow — request body truncated by {self.model.alias}. The conversation history is too long. Use /compact or a model with a larger context window."
             raise RuntimeError(msg) from e
 
     # done tool definition — auto-injected when tools are present (REQ-ARCH-4)
@@ -205,10 +209,16 @@ class AgentLoop(BaseModel):
             if self.extra_body:
                 kwargs["extra_body"] = self.extra_body
 
-            if self.stream:
-                text, tool_calls = self._stream_response(client, kwargs)
-            else:
-                text, tool_calls = self._sync_response(client, kwargs)
+            try:
+                if self.stream:
+                    text, tool_calls = self._stream_response(client, kwargs)
+                else:
+                    text, tool_calls = self._sync_response(client, kwargs)
+            except Exception as exc:
+                if self._is_context_truncation(exc) and self._trim_messages():
+                    self._log("[CONTEXT_TRIM] Tools JSON truncated — trimmed messages, retrying")
+                    continue
+                raise
 
             if not tool_calls:
                 text = self._strip_think(text)
@@ -343,26 +353,87 @@ class AgentLoop(BaseModel):
             return True
         return False
 
+    def _is_context_truncation(self, exc: Exception) -> bool:
+        """Return True if the error is a 400 caused by the request body being truncated.
+
+        Local model servers (llama.cpp, vllm, etc.) truncate the request when the
+        context is full, producing malformed JSON for the tools parameter.
+        """
+        msg = str(exc)
+        return (
+            "json_invalid" in msg
+            or ("EOF while parsing" in msg and ("list" in msg or "object" in msg))
+            or ("validation error" in msg and "EOF" in msg)
+        )
+
+    def _trim_messages(self) -> bool:
+        """Drop the oldest tool call / tool result block to reduce context size.
+
+        Keeps the system prompt, the first user message, and the most recent
+        messages intact.  Returns True if anything was removed.
+        """
+        system_msgs = [m for m in self.messages if m.get("role") == "system"]
+        other_msgs = [m for m in self.messages if m.get("role") != "system"]
+
+        # Need at least: first user + assistant-with-tools + tool-result + something after
+        if len(other_msgs) < 4:
+            return False
+
+        # Find and remove the first assistant message that carries tool_calls,
+        # plus all immediately following tool-result messages.
+        for i, msg in enumerate(other_msgs):
+            if msg.get("role") == "assistant" and msg.get("tool_calls"):
+                # Only trim if there's content after this block (keep the last exchange)
+                j = i + 1
+                while j < len(other_msgs) and other_msgs[j].get("role") == "tool":
+                    j += 1
+                if j < len(other_msgs):  # at least one message remains after block
+                    removed = j - i
+                    other_msgs = other_msgs[:i] + other_msgs[j:]
+                    self.messages = system_msgs + other_msgs
+                    self._log(f"[TRIM] Removed {removed} messages (tool call+results) to reduce context")
+                    return True
+
+        return False
+
     def _sync_response(self, client: OpenAI, kwargs: dict) -> tuple[str, list[dict]]:
-        """Non-streaming response with exponential backoff retry (REQ-ARCH-10).
+        """Non-streaming response with exponential backoff retry (REQ-ARCH-10, REQ-UI-10).
 
         Returns:
             Tuple of (text, tool_calls_list).
         """
+        _call_start = time.time()
+
+        # Background timer fires on_progress every 250ms while the API call blocks (REQ-UI-10)
+        _tick_stop = threading.Event()
+        _tick_thread: threading.Thread | None = None
+        if self.on_progress:
+            def _tick() -> None:
+                while not _tick_stop.wait(0.25):
+                    self.on_progress({"elapsed": time.time() - _call_start, "state": "thinking"})  # type: ignore[misc]
+            _tick_thread = threading.Thread(target=_tick, daemon=True)
+            _tick_thread.start()
+
         last_exc: Exception | None = None
         response = None
         delay = self._RETRY_BASE
-        for attempt in range(1, self._RETRY_MAX + 1):
-            try:
-                response = client.chat.completions.create(**kwargs)
-                break
-            except Exception as exc:
-                last_exc = exc
-                if not self._is_retryable(exc) or attempt == self._RETRY_MAX:
-                    raise
-                self._log(f"[RETRY] attempt {attempt}/{self._RETRY_MAX} after {delay:.0f}s: {exc}")
-                time.sleep(delay)
-                delay = min(delay * self._RETRY_MULT, self._RETRY_CAP)
+        try:
+            for attempt in range(1, self._RETRY_MAX + 1):
+                try:
+                    response = client.chat.completions.create(**kwargs)
+                    break
+                except Exception as exc:
+                    last_exc = exc
+                    if not self._is_retryable(exc) or attempt == self._RETRY_MAX:
+                        raise
+                    self._log(f"[RETRY] attempt {attempt}/{self._RETRY_MAX} after {delay:.0f}s: {exc}")
+                    time.sleep(delay)
+                    delay = min(delay * self._RETRY_MULT, self._RETRY_CAP)
+        finally:
+            _tick_stop.set()
+            if _tick_thread:
+                _tick_thread.join(timeout=0.5)
+
         if response is None:
             raise last_exc  # type: ignore[misc]
         msg = response.choices[0].message
@@ -375,6 +446,34 @@ class AgentLoop(BaseModel):
                     "type": "function",
                     "function": {"name": tc.function.name, "arguments": tc.function.arguments},
                 })
+
+        # Emit token telemetry from usage data (REQ-UI-10)
+        if response.usage:
+            prompt_tokens = response.usage.prompt_tokens or 0
+            completion_tokens = response.usage.completion_tokens or 0
+            total_tokens = response.usage.total_tokens or 0
+            ctx_pct: int | None = None
+            if self.model.max_context and prompt_tokens:
+                ctx_pct = min(100, round(prompt_tokens * 100 / self.model.max_context))
+            elapsed = time.time() - _call_start
+            if self.on_progress:
+                self.on_progress({
+                    "elapsed": elapsed,
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "ctx_pct": ctx_pct,
+                    "state": "done",
+                })
+            if self.on_complete and not tool_calls:
+                self.on_complete({
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_tokens": total_tokens,
+                    "elapsed": round(elapsed, 1),
+                    "tokens_per_sec": round(completion_tokens / elapsed if elapsed > 0 else 0, 1),
+                    "ctx_pct": ctx_pct,
+                })
+
         return text, tool_calls
 
     def _stream_response(self, client: OpenAI, kwargs: dict) -> tuple[str, list[dict]]:
@@ -395,19 +494,32 @@ class AgentLoop(BaseModel):
         usage_data: dict = {}
         stream_start = time.time()
 
+        # Background on_progress timer — fires every 250ms while waiting for first token (REQ-UI-10).
+        # Fires even when the caller owns the display (on_token set); stops on first content.
+        _prog_stop = threading.Event()
+        _prog_thread: threading.Thread | None = None
+        if self.on_progress:
+            def _prog() -> None:
+                while not _prog_stop.wait(0.25):
+                    self.on_progress({"elapsed": time.time() - stream_start, "state": "thinking"})  # type: ignore[misc]
+            _prog_thread = threading.Thread(target=_prog, daemon=True)
+            _prog_thread.start()
+
         # Spinner until first token arrives — only when caller has no on_token
         # callback. When on_token is set, the caller owns the display (e.g. a
         # Rich Live context) and manages its own "Thinking..." indicator.
         stop_spinner = threading.Event()
         spinner: threading.Thread | None = None
-        if not self.on_token:
+        if not self.on_token and self.show_spinner:
+            from .ui import random_label
+            _spinner_label = random_label()
             sys.stderr.write("\n")
             sys.stderr.flush()
             def _spin():
                 for ch in itertools.cycle("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"):
                     if stop_spinner.wait(0.1):
                         break
-                    sys.stderr.write(f"\r\033[2m  {ch} Thinking...\033[0m")
+                    sys.stderr.write(f"\r\033[2m  {ch} {_spinner_label}\033[0m")
                     sys.stderr.flush()
                 sys.stderr.write("\r\033[K")
                 sys.stderr.flush()
@@ -463,6 +575,8 @@ class AgentLoop(BaseModel):
                         stop_spinner.set()
                         if spinner:
                             spinner.join()
+                    if not _prog_stop.is_set():
+                        _prog_stop.set()
                     collected_text += delta.content
                     token_count += 1
 
@@ -513,6 +627,8 @@ class AgentLoop(BaseModel):
                         stop_spinner.set()
                         if spinner:
                             spinner.join()
+                    if not _prog_stop.is_set():
+                        _prog_stop.set()
                     for tc_delta in delta.tool_calls:
                         idx = tc_delta.index
                         if idx not in collected_tool_calls:
@@ -541,6 +657,10 @@ class AgentLoop(BaseModel):
                 stop_spinner.set()
             if spinner:
                 spinner.join()
+            if not _prog_stop.is_set():
+                _prog_stop.set()
+            if _prog_thread:
+                _prog_thread.join(timeout=0.5)
 
         tool_calls_list = [collected_tool_calls[i] for i in sorted(collected_tool_calls)]
 
@@ -549,14 +669,27 @@ class AgentLoop(BaseModel):
             if collected_text and not self.on_token:
                 sys.stdout.write("\n")
                 sys.stdout.flush()
+            elapsed = time.time() - stream_start
+            prompt_tokens = usage_data.get("prompt_tokens", 0)
+            completion_tokens = usage_data.get("completion_tokens", token_count)
+            ctx_pct: int | None = None
+            if self.model.max_context and prompt_tokens:
+                ctx_pct = min(100, round(prompt_tokens * 100 / self.model.max_context))
+            if self.on_progress:
+                self.on_progress({
+                    "elapsed": elapsed,
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "ctx_pct": ctx_pct,
+                    "state": "done",
+                })
             if self.on_complete:
-                elapsed = time.time() - stream_start
-                completion_tokens = usage_data.get("completion_tokens", token_count)
                 tps = completion_tokens / elapsed if elapsed > 0 else 0
                 self.on_complete({
                     **usage_data,
                     "elapsed": round(elapsed, 1),
                     "tokens_per_sec": round(tps, 1),
+                    "ctx_pct": ctx_pct,
                 })
 
         return collected_text, tool_calls_list
@@ -597,16 +730,16 @@ class AgentLoop(BaseModel):
         return self._execute_tool(tc["function"]["name"], tc["function"]["arguments"])
 
 
-def build_local_tools(phase: str = "") -> tuple[list[dict], dict[str, Callable]]:
-    """Build OpenAI-format tool definitions from CLI-native tools (no MCP).
+def build_local_tools(cmd: str = "") -> tuple[list[dict], dict[str, Callable]]:
+    """Build OpenAI-format agent tool definitions from CLI-native filesystem tools.
 
     Args:
-        phase: Phase name to filter tools. Empty string returns all tools.
+        cmd: Command name to filter agent tools. Empty string returns all agent tools.
 
     Returns:
-        Tuple of (tool_definitions, tool_handlers) for use with AgentLoop.
+        Tuple of (agent_tool_definitions, agent_tool_handlers) for use with AgentLoop.
     """
-    _PHASE_TOOLS: dict[str, set[str]] = {
+    _COMMAND_TOOLS: dict[str, set[str]] = {
         "gather": {"read_source_file", "write_framework_file", "read_framework_file"},
         "plan": {"read_framework_file", "write_framework_file"},
         "develop": {"read_source_file", "write_source_file", "read_framework_file"},
@@ -617,10 +750,11 @@ def build_local_tools(phase: str = "") -> tuple[list[dict], dict[str, Callable]]
             "get_skill", "list_skills",
         },
     }
-    allowed = _PHASE_TOOLS.get(phase) if phase else None
+    allowed = _COMMAND_TOOLS.get(cmd) if cmd else None
 
     from .tools import LOCAL_TOOLS, LOCAL_HANDLERS
     from .skills import find_skill as _find_skill, list_skills as _list_skills
+    from .config import _voidrift_home as _vh
 
     import re as _re
 
@@ -672,7 +806,7 @@ def build_local_tools(phase: str = "") -> tuple[list[dict], dict[str, Callable]]
     tools: list[dict] = []
     handlers: dict[str, Callable] = {}
 
-    # Include CLI-native filesystem tools, filtered by phase
+    # Include CLI-native filesystem agent tools, filtered by command
     for tool_def in LOCAL_TOOLS:
         name = tool_def["function"]["name"]
         if allowed is not None and name not in allowed:
@@ -681,7 +815,7 @@ def build_local_tools(phase: str = "") -> tuple[list[dict], dict[str, Callable]]
         tools.append(tool_def)
         handlers[name] = LOCAL_HANDLERS[name]
 
-    # Include skill tools (chat phase only)
+    # Include skill agent tools (chat command only)
     for tool_def in skill_tools:
         name = tool_def["function"]["name"]
         if allowed is not None and name not in allowed:

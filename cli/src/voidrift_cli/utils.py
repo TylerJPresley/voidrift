@@ -38,11 +38,11 @@ def ensure_voidrift_dir() -> Path:
     return d
 
 
-def log_path(phase: str) -> Path:
+def log_path(cmd: str) -> Path:
     """Generate a timestamped log file path (AC-LOG1).
 
     Args:
-        phase: Phase name (gather, plan, develop, automate, verify).
+        cmd: Command name (gather, plan, develop, automate, verify).
 
     Returns:
         Path to the new log file.
@@ -50,19 +50,19 @@ def log_path(phase: str) -> Path:
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
     log_dir = ensure_voidrift_dir() / "logs"
     log_dir.mkdir(exist_ok=True)
-    return log_dir / f"{phase}-{ts}.log"
+    return log_dir / f"{cmd}-{ts}.log"
 
 
-def boot_run(phase: str) -> tuple[Path, str]:
-    """Start a phase run: create log, set run ID, prune old runs (REQ-MCP-3a).
+def boot_run(cmd: str) -> tuple[Path, str]:
+    """Start a command run: create log and set run ID.
 
     Args:
-        phase: Phase name.
+        cmd: Command name.
 
     Returns:
         Tuple of (log_path, run_id).
     """
-    log = log_path(phase)
+    log = log_path(cmd)
     run_id = log.stem
     return log, run_id
 
@@ -154,16 +154,16 @@ def truncate_task_label(task_text: str, max_len: int = 72) -> str:
 # ---------------------------------------------------------------------------
 
 def append_state(
-    phase: str,
+    cmd: str,
     model_alias: str,
     summary: str,
     files_created: list[str] | None = None,
     analyzed_files: list[tuple[str, str]] | None = None,
 ) -> None:
-    """Append a phase entry to STATE.md.
+    """Append a command entry to STATE.md.
 
     Args:
-        phase: Phase name (gather, plan, develop, etc.).
+        cmd: Command name (gather, plan, develop, etc.).
         model_alias: Model alias used.
         summary: One-line outcome summary.
         files_created: List of file paths created/modified (relative to project root).
@@ -173,7 +173,7 @@ def append_state(
     d = voidrift_dir()
     state = d / "STATE.md"
     ts = datetime.now().isoformat(timespec="seconds")
-    lines = [f"## {ts} — {phase} ({model_alias})", f"{summary}", ""]
+    lines = [f"## {ts} — {cmd} ({model_alias})", f"{summary}", ""]
     if analyzed_files:
         lines.append("### Analyzed")
         for fp, cat in analyzed_files:
@@ -189,8 +189,8 @@ def append_state(
         f.write(entry)
 
 
-def get_state_manifest(phase: str) -> list[str]:
-    """Get file manifest from the most recent STATE.md entry for a phase.
+def get_state_manifest(cmd: str) -> list[str]:
+    """Get file manifest from the most recent STATE.md entry for a command.
 
     Returns:
         List of file paths from the manifest, or empty list.
@@ -200,8 +200,8 @@ def get_state_manifest(phase: str) -> list[str]:
     if not state.exists():
         return []
     text = state.read_text()
-    # Find all entries for this phase, take the last one
-    pattern = rf"^## .+ — {re.escape(phase)} \(.+\)$"
+    # Find all entries for this command, take the last one
+    pattern = rf"^## .+ — {re.escape(cmd)} \(.+\)$"
     entries = list(re.finditer(pattern, text, re.MULTILINE))
     if not entries:
         return []
@@ -226,10 +226,12 @@ def get_state_manifest(phase: str) -> list[str]:
 def setup_system_log() -> None:
     """Initialize the rotating system log at ~/.voidrift/logs/voidrift.log.
 
+    Always writes to ~/.voidrift/ regardless of VOIDRIFT_HOME — framework
+    logs are user-global, not project-scoped.
+
     Safe to call multiple times — handlers are only added once.
     """
-    from .config import voidrift_home
-    log_dir = voidrift_home() / "logs"
+    log_dir = Path.home() / ".voidrift" / "logs"
     try:
         log_dir.mkdir(parents=True, exist_ok=True)
     except OSError:
@@ -262,13 +264,13 @@ def get_system_logger() -> logging.Logger:
     return logger
 
 
-def undo_phase(phase: str) -> list[str]:
-    """Remove files from the last STATE.md entry for a phase and remove the entry.
+def undo_command(cmd: str) -> list[str]:
+    """Remove files from the last STATE.md entry for a command and remove the entry.
 
     Returns:
         List of files that were deleted.
     """
-    manifest = get_state_manifest(phase)
+    manifest = get_state_manifest(cmd)
     deleted = []
     for fp in manifest:
         p = Path(fp) if Path(fp).is_absolute() else Path.cwd() / fp
@@ -280,7 +282,7 @@ def undo_phase(phase: str) -> list[str]:
     state = d / "STATE.md"
     if state.exists():
         text = state.read_text()
-        pattern = rf"^## .+ — {re.escape(phase)} \(.+\)$"
+        pattern = rf"^## .+ — {re.escape(cmd)} \(.+\)$"
         entries = list(re.finditer(pattern, text, re.MULTILINE))
         if entries:
             last = entries[-1]

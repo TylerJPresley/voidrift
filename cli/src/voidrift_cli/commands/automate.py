@@ -1,11 +1,9 @@
-"""Phase 4 — Automate: Infrastructure-as-code generation (AC-A1 through AC-A10)."""
+"""Automate command: Infrastructure-as-code generation (AC-A1 through AC-A10)."""
 
 from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-
-from rich.status import Status
 
 from ..agent import AgentLoop, build_local_tools
 from ..models import ModelConfig
@@ -28,7 +26,7 @@ def _detect_iac() -> bool:
 
 
 def run_automate(worker: ModelConfig, architect: ModelConfig | None = None) -> int:
-    """Execute the automate phase."""
+    """Execute the automate command."""
     check_disk_space()
     d = ensure_voidrift_dir()
 
@@ -39,7 +37,7 @@ def run_automate(worker: ModelConfig, architect: ModelConfig | None = None) -> i
     iac_exists = _detect_iac()
     mode = "Review" if iac_exists else "Generate"
 
-    ui.phase(f"VoidRift Automate ({mode})")
+    ui.header(f"VoidRift Automate ({mode})")
     log, run_id = boot_run("automate")
     ui.detail(f"Log: {log}")
 
@@ -81,10 +79,12 @@ def run_automate(worker: ModelConfig, architect: ModelConfig | None = None) -> i
         tool_handlers=handlers,
         stream=False,
         log_path=log,
+        show_spinner=False,
     )
 
     ui.stage(f"{mode}ing infrastructure...")
-    with Status("  ⠋ Thinking...", console=ui._con):
+    with ui.spinner(ui.random_label(), mode.lower()) as spin:
+        agent.on_progress = spin.on_progress
         try:
             response = agent.send("\n".join(prompt_parts))
             with open(log, "a") as f:

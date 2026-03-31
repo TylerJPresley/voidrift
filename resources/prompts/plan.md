@@ -1,6 +1,6 @@
 # Plan Prompts
 
-Phase prompt file for the plan pipeline. Each section is loaded via `get_prompt("plan", "<section>")`. The ARCH-DESIGN skill is prepended as the shared methodology.
+Command prompt file for the plan command. Each section is loaded via `get_prompt("plan", "<section>")`. The ARCH-DESIGN skill is prepended as the shared methodology.
 
 ## PLAN
 
