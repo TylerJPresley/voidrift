@@ -113,7 +113,12 @@ def run_plan(
             ui.error("Plan failed: ARCHITECTURE.md still missing after retry.")
             return 1
 
-    ui.success("Architecture complete.")
+    arch_files_list = sorted((d / "arch").glob("*.md")) if (d / "arch").is_dir() else []
+    arch_names = ", ".join(f"arch/{af.name}" for af in arch_files_list)
+    if arch_names:
+        ui.success(f"ARCHITECTURE.md + {arch_names}")
+    else:
+        ui.success("ARCHITECTURE.md")
 
     # ── Stage 2: Tasks ──────────────────────────────────────────────────
     ui.stage("Stage 2/2: Task breakdown...")
