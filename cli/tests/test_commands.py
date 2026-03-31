@@ -333,20 +333,20 @@ class TestChatWebFetch:
 
 
 class TestPromptFormatting:
-    """V-RES-1: Prompt format variable substitution — KeyError on missing var."""
+    """V-RES-1: Prompt format variable substitution — task format loaded from template."""
 
-    def test_task_format_with_valid_skills(self):
-        """_TASK_FORMAT.format(valid_skills=...) substitutes correctly."""
-        from voidrift_cli.commands.plan import _TASK_FORMAT
-        result = _TASK_FORMAT.format(valid_skills="backend, analysis-reqs")
-        assert "backend, analysis-reqs" in result
-        assert "{valid_skills}" not in result
+    def test_task_format_loads_from_template(self):
+        """TASK-FORMAT template loads from resources/templates/."""
+        from voidrift_cli.prompts import load_template
+        result = load_template("TASK-FORMAT")
+        assert "skills:" in result
+        assert "reqs:" in result
 
-    def test_task_format_missing_var_raises_key_error(self):
-        """_TASK_FORMAT.format() with no args raises KeyError for missing valid_skills."""
-        from voidrift_cli.commands.plan import _TASK_FORMAT
-        with pytest.raises(KeyError):
-            _TASK_FORMAT.format()
+    def test_task_format_contains_structure(self):
+        """TASK-FORMAT template describes multi-line block structure."""
+        from voidrift_cli.prompts import load_template
+        result = load_template("TASK-FORMAT")
+        assert "- [ ]" in result
 
 
 class TestGatherPreflightChecks:
@@ -973,7 +973,8 @@ class TestPlanSkillTagValidation:
         from voidrift_cli.commands.plan import _validate_skill_tags
         tasks_file = voidrift_dir / "TASKS.md"
         tasks_file.write_text(
-            "- [ ] Create src/main.py: entry [backend, invalid-tag, another-bad]\n"
+            "- [ ] Create src/main.py: entry\n"
+            "  skills: backend, invalid-tag, another-bad\n"
         )
         invalid = _validate_skill_tags(tasks_file, {"backend"})
         assert "invalid-tag" in invalid
@@ -984,28 +985,29 @@ class TestPlanSkillTagValidation:
         """_validate_skill_tags returns empty set when all tags are valid."""
         from voidrift_cli.commands.plan import _validate_skill_tags
         tasks_file = voidrift_dir / "TASKS.md"
-        tasks_file.write_text("- [ ] Create src/main.py: entry [backend]\n")
+        tasks_file.write_text("- [ ] Create src/main.py: entry\n  skills: backend\n")
         invalid = _validate_skill_tags(tasks_file, {"backend"})
         assert invalid == set()
 
     def test_strip_removes_invalid_tags(self, tmp_project, voidrift_dir):
-        """_strip_invalid_tags removes invalid tags from task lines."""
+        """_strip_invalid_tags removes invalid tags from skills: lines."""
         from voidrift_cli.commands.plan import _strip_invalid_tags
         tasks_file = voidrift_dir / "TASKS.md"
-        tasks_file.write_text("- [ ] Create src/a.py: desc [backend, bad-skill]\n")
+        tasks_file.write_text("- [ ] Create src/a.py: desc\n  skills: backend, bad-skill\n")
         _strip_invalid_tags(tasks_file, {"bad-skill"})
         content = tasks_file.read_text()
         assert "bad-skill" not in content
         assert "backend" in content
 
-    def test_strip_removes_whole_bracket_when_all_invalid(self, tmp_project, voidrift_dir):
-        """If all tags are invalid, the bracket is removed entirely."""
+    def test_strip_removes_whole_line_when_all_invalid(self, tmp_project, voidrift_dir):
+        """If all tags are invalid, the skills line is removed entirely."""
         from voidrift_cli.commands.plan import _strip_invalid_tags
         tasks_file = voidrift_dir / "TASKS.md"
-        tasks_file.write_text("- [ ] Create src/b.py: desc [totally-invalid]\n")
+        tasks_file.write_text("- [ ] Create src/b.py: desc\n  skills: totally-invalid\n")
         _strip_invalid_tags(tasks_file, {"totally-invalid"})
         content = tasks_file.read_text()
         assert "totally-invalid" not in content
+        assert "skills:" not in content
 
 
 class TestPlanUpdateMode:

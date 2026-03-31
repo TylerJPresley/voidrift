@@ -14,19 +14,6 @@ from ..config import get_max_tokens
 from .. import ui
 
 
-_TASK_FORMAT = """\
-**Task format** — each line in TASKS.md must be:
-`- [ ] <Action verb> <file path>: <exact behavior>. <rationale or user story context> [skill1, skill2]`
-
-- Action verbs: Create, Update, Add, Implement, Define.
-- File path: exact relative path from project root to a project source file (e.g. `src/main.py`, `.github/workflows/ci.yml`). All paths target the project tree — `.voidrift/` artifacts are produced by you (the architect) directly via `write_framework_file()`, not as developer tasks.
-- Exact behavior: specific inputs, outputs, return types, error handling. Include acceptance criteria, expected behavior, and error cases.
-- Rationale: WHY this task exists — the user story, requirement, or design decision it satisfies.
-- Skill tags: ONLY from this list: {valid_skills}. Format: `[skill1, skill2]`
-
-The developer agent implements ONE task at a time with limited context. Each task description must be self-contained — include enough detail that a developer can implement without reading the full requirements. Tasks that say only "implement X" or "create Y" without specifying exact behavior are insufficient."""
-
-
 def run_plan(
     model: ModelConfig,
     feature: str | None = None,
@@ -80,7 +67,7 @@ def run_plan(
     skill = find_skill("ARCH-DESIGN") or ""
     system_context = prompts.load_prompt("system", "CONTEXT")
     valid_skills = ", ".join(sorted(_available_skills())) if _available_skills() else ""
-    task_format = _TASK_FORMAT.format(valid_skills=valid_skills)
+    task_format = prompts.load_template("TASK-FORMAT")
 
     # ── Stage 1: Architecture ───────────────────────────────────────────
     ui.stage("Stage 1/2: Architecture...")
@@ -240,29 +227,34 @@ def _available_skills() -> set[str]:
 
 
 def _validate_skill_tags(tasks_path: Path, valid: set[str]) -> set[str]:
-    """Return set of invalid skill tags found in TASKS.md."""
-    import re
-    text = tasks_path.read_text()
-    tags = set(re.findall(r"\[([^\]]+)\]", text))
+    """Return set of invalid skill tags found in skills: lines of TASKS.md."""
     valid_upper = {v.upper() for v in valid}
     invalid = set()
-    for tag_group in tags:
-        for tag in tag_group.split(","):
-            tag = tag.strip()
-            if tag and tag.upper() not in valid_upper and not tag.startswith(("x", " ")):
-                invalid.add(tag)
+    for line in tasks_path.read_text().splitlines():
+        stripped = line.strip()
+        if stripped.lower().startswith("skills:"):
+            tags_part = stripped.split(":", 1)[1]
+            for tag in tags_part.split(","):
+                tag = tag.strip()
+                if tag and tag.upper() not in valid_upper:
+                    invalid.add(tag)
     return invalid
 
 
 def _strip_invalid_tags(tasks_path: Path, invalid: set[str]) -> None:
-    """Remove invalid skill tags from TASKS.md lines."""
-    import re
+    """Remove invalid skill tags from skills: lines in TASKS.md."""
+    invalid_upper = {t.upper() for t in invalid}
     lines = tasks_path.read_text().splitlines()
     out = []
     for line in lines:
-        for tag in invalid:
-            line = re.sub(rf",\s*{re.escape(tag)}", "", line)
-            line = re.sub(rf"{re.escape(tag)}\s*,\s*", "", line)
-            line = re.sub(rf"\[\s*{re.escape(tag)}\s*\]", "", line)
-        out.append(line)
+        stripped = line.strip()
+        if stripped.lower().startswith("skills:"):
+            indent = line[:len(line) - len(line.lstrip())]
+            tags_part = stripped.split(":", 1)[1]
+            kept = [t.strip() for t in tags_part.split(",") if t.strip() and t.strip().upper() not in invalid_upper]
+            if kept:
+                out.append(f"{indent}skills: {', '.join(kept)}")
+            # else: drop the entire skills line
+        else:
+            out.append(line)
     tasks_path.write_text("\n".join(out) + "\n")
