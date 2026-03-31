@@ -87,30 +87,38 @@ def _is_truncated_json_error(err: str) -> bool:
 
 # ── Analysis cache (REQ-CTX-5) ──────────────────────────────────────────────
 
-def _cache_path(voidrift_dir: Path, file_hash: str) -> Path:
-    """Return the cache file path for a given SHA-256 content hash."""
-    return voidrift_dir / "cache" / "analyses" / f"{file_hash}.json"
+def _analysis_path(voidrift_dir: Path, filepath: str) -> Path:
+    """Return the analysis file path for a source file."""
+    return voidrift_dir / "analysis" / (filepath + ".md")
 
 
-def _load_cache(cache_file: Path) -> str | None:
-    """Return the cached analysis string, or None on miss or corruption."""
-    if not cache_file.exists():
+def _load_cached_analysis(analysis_file: Path, file_hash: str) -> str | None:
+    """Return cached analysis if the hash matches frontmatter, else None."""
+    if not analysis_file.exists():
         return None
     try:
-        data = json.loads(cache_file.read_text(encoding="utf-8"))
-        return data.get("analysis")
-    except (json.JSONDecodeError, OSError):
+        text = analysis_file.read_text(encoding="utf-8")
+        if not text.startswith("---"):
+            return None
+        end = text.index("---", 3)
+        frontmatter = text[3:end]
+        for line in frontmatter.splitlines():
+            if line.strip().startswith("hash:"):
+                cached_hash = line.split(":", 1)[1].strip()
+                if cached_hash == file_hash:
+                    return text[end + 3:].strip()
+                return None
+        return None
+    except (OSError, ValueError):
         return None
 
 
-def _save_cache(cache_file: Path, filepath: str, file_hash: str, analysis: str) -> None:
-    """Write an analysis result to the cache (REQ-CTX-5)."""
-    cache_file.parent.mkdir(parents=True, exist_ok=True)
-    cache_file.write_text(
-        json.dumps(
-            {"file": filepath, "hash": file_hash, "analysis": analysis, "timestamp": _time_mod.time()},
-            indent=2,
-        ),
+def _write_analysis(analysis_file: Path, filepath: str, file_hash: str, analysis: str) -> None:
+    """Write analysis with YAML frontmatter containing cache metadata (REQ-CTX-5)."""
+    analysis_file.parent.mkdir(parents=True, exist_ok=True)
+    ts = _time_mod.strftime("%Y-%m-%dT%H:%M:%S")
+    analysis_file.write_text(
+        f"---\nfile: {filepath}\nhash: {file_hash}\ntimestamp: {ts}\n---\n\n{analysis.strip()}\n",
         encoding="utf-8",
     )
 
@@ -369,7 +377,7 @@ def _gather_from(
 
         # Cache lookup — skip model inference if unchanged (REQ-CTX-5)
         if file_hash is not None:
-            cached = _load_cache(_cache_path(target.parent, file_hash))
+            cached = _load_cached_analysis(_analysis_path(target.parent, filepath), file_hash)
             if cached is not None:
                 with open(log, "a") as _f:
                     _f.write(f"[CACHE HIT] {filepath} (hash {file_hash[:8]})\n")
@@ -422,7 +430,7 @@ def _gather_from(
                         "Write one unified, non-redundant analysis of the whole file."
                     )
                 if file_hash and combined:
-                    _save_cache(_cache_path(target.parent, file_hash), filepath, file_hash, combined)
+                    _write_analysis(_analysis_path(target.parent, filepath), filepath, file_hash, combined)
                 return filepath, _time.time() - start, None, combined, _pt[0], _ct[0], _ctx[0]
 
         # Normal flow: agent calls read_source_file(), returns analysis as direct text
@@ -438,7 +446,7 @@ def _gather_from(
         try:
             response = agent.send(f"Analyze: {filepath}")
             if file_hash and response:
-                _save_cache(_cache_path(target.parent, file_hash), filepath, file_hash, response)
+                _write_analysis(_analysis_path(target.parent, filepath), filepath, file_hash, response)
             return filepath, _time.time() - start, None, response, _pt[0], _ct[0], _ctx[0]
         except (RuntimeError, OSError) as e:
             return filepath, None, str(e), "", 0, 0, None
@@ -475,12 +483,6 @@ def _gather_from(
         analysis_text = source_requirements[fp]
         if not analysis_text:
             continue
-        dest = analysis_dir / (fp + ".md")
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(
-            f"# {fp}\n\n**Category:** source\n\n{analysis_text.strip()}\n",
-            encoding="utf-8",
-        )
 
     analysis_log = voidrift_dir / "ANALYSIS.md"
     with open(analysis_log, "w", encoding="utf-8") as _af:

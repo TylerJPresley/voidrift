@@ -3,113 +3,94 @@
 from __future__ import annotations
 
 import hashlib
-import json
-import time
 from pathlib import Path
 
 import pytest
 
 
 class TestAnalysisCacheHelpers:
-    """Unit tests for cache helper functions."""
+    """Unit tests for frontmatter-based analysis cache."""
 
-    def test_req_ctx5_cache_path_keyed_by_hash(self, tmp_path):
-        """Cache path is under .voidrift/cache/analyses/ and keyed by hash."""
-        from voidrift_cli.commands.gather import _cache_path
+    def test_analysis_path(self, tmp_path):
+        """Analysis path mirrors source file path under .voidrift/analysis/."""
+        from voidrift_cli.commands.gather import _analysis_path
+        p = _analysis_path(tmp_path, "src/api.py")
+        assert p == tmp_path / "analysis" / "src/api.py.md"
 
-        p = _cache_path(tmp_path, "abc123def456")
-        assert p == tmp_path / "cache" / "analyses" / "abc123def456.json"
-
-    def test_req_ctx5_load_cache_miss_returns_none(self, tmp_path):
-        """_load_cache returns None when no cache entry exists."""
-        from voidrift_cli.commands.gather import _cache_path, _load_cache
-
-        result = _load_cache(_cache_path(tmp_path, "nonexistent"))
+    def test_load_miss_returns_none(self, tmp_path):
+        """Returns None when no analysis file exists."""
+        from voidrift_cli.commands.gather import _analysis_path, _load_cached_analysis
+        result = _load_cached_analysis(_analysis_path(tmp_path, "missing.py"), "abc123")
         assert result is None
 
-    def test_req_ctx5_load_cache_hit_returns_analysis(self, tmp_path):
-        """_load_cache returns the analysis string from a valid cache entry."""
-        from voidrift_cli.commands.gather import _cache_path, _load_cache, _save_cache
-
-        cache_file = _cache_path(tmp_path, "abc123")
-        _save_cache(cache_file, "src/foo.py", "abc123", "- WHEN called, THE SYSTEM SHALL respond")
-
-        result = _load_cache(cache_file)
+    def test_load_hit_returns_analysis(self, tmp_path):
+        """Returns analysis content when hash matches frontmatter."""
+        from voidrift_cli.commands.gather import _analysis_path, _write_analysis, _load_cached_analysis
+        af = _analysis_path(tmp_path, "src/foo.py")
+        _write_analysis(af, "src/foo.py", "abc123", "- WHEN called, THE SYSTEM SHALL respond")
+        result = _load_cached_analysis(af, "abc123")
         assert result == "- WHEN called, THE SYSTEM SHALL respond"
 
-    def test_req_ctx5_save_cache_writes_required_fields(self, tmp_path):
-        """_save_cache writes all required JSON fields: file, hash, analysis, timestamp."""
-        from voidrift_cli.commands.gather import _cache_path, _save_cache
+    def test_load_miss_on_hash_mismatch(self, tmp_path):
+        """Returns None when hash doesn't match frontmatter."""
+        from voidrift_cli.commands.gather import _analysis_path, _write_analysis, _load_cached_analysis
+        af = _analysis_path(tmp_path, "src/foo.py")
+        _write_analysis(af, "src/foo.py", "abc123", "- analysis")
+        result = _load_cached_analysis(af, "different_hash")
+        assert result is None
 
-        before = time.time()
-        cache_file = _cache_path(tmp_path, "deadbeef")
-        _save_cache(cache_file, "src/api.py", "deadbeef", "- analysis text")
-        after = time.time()
+    def test_write_creates_parent_dirs(self, tmp_path):
+        """_write_analysis creates directory tree if absent."""
+        from voidrift_cli.commands.gather import _analysis_path, _write_analysis
+        af = _analysis_path(tmp_path, "deep/nested/file.py")
+        _write_analysis(af, "deep/nested/file.py", "hash123", "analysis text")
+        assert af.exists()
 
-        data = json.loads(cache_file.read_text())
-        assert data["file"] == "src/api.py"
-        assert data["hash"] == "deadbeef"
-        assert data["analysis"] == "- analysis text"
-        assert before <= data["timestamp"] <= after
+    def test_write_includes_frontmatter(self, tmp_path):
+        """Written file has YAML frontmatter with file, hash, timestamp."""
+        from voidrift_cli.commands.gather import _analysis_path, _write_analysis
+        af = _analysis_path(tmp_path, "src/api.py")
+        _write_analysis(af, "src/api.py", "deadbeef", "- analysis text")
+        text = af.read_text()
+        assert text.startswith("---\n")
+        assert "file: src/api.py" in text
+        assert "hash: deadbeef" in text
+        assert "timestamp:" in text
+        assert "- analysis text" in text
 
-    def test_req_ctx5_save_cache_creates_parent_dirs(self, tmp_path):
-        """_save_cache creates the cache directory tree if absent."""
-        from voidrift_cli.commands.gather import _cache_path, _save_cache
-
-        cache_file = _cache_path(tmp_path, "abc")
-        assert not cache_file.parent.exists()
-
-        _save_cache(cache_file, "x.py", "abc", "analysis")
-
-        assert cache_file.exists()
-
-    def test_req_ctx5_load_cache_tolerates_corrupt_entry(self, tmp_path):
-        """_load_cache returns None for a corrupt cache file instead of raising."""
-        from voidrift_cli.commands.gather import _cache_path, _load_cache
-
-        cache_file = _cache_path(tmp_path, "corrupt")
-        cache_file.parent.mkdir(parents=True, exist_ok=True)
-        cache_file.write_text("not valid json")
-
-        result = _load_cache(cache_file)
+    def test_load_tolerates_corrupt_file(self, tmp_path):
+        """Returns None for a file without valid frontmatter."""
+        from voidrift_cli.commands.gather import _analysis_path, _load_cached_analysis
+        af = _analysis_path(tmp_path, "bad.py")
+        af.parent.mkdir(parents=True, exist_ok=True)
+        af.write_text("no frontmatter here")
+        result = _load_cached_analysis(af, "abc123")
         assert result is None
 
 
 class TestAnalysisCacheIntegration:
     """Integration tests for cache hit/miss semantics (V-CTX-2)."""
 
-    def test_req_ctx5_cache_hit_skips_model(self, tmp_path):
-        """Unchanged file: same content hash → cached analysis returned without re-analysis."""
-        from voidrift_cli.commands.gather import _cache_path, _load_cache, _save_cache
-
+    def test_cache_hit_skips_model(self, tmp_path):
+        """Unchanged file: same hash → cached analysis returned."""
+        from voidrift_cli.commands.gather import _analysis_path, _write_analysis, _load_cached_analysis
         content = "def handler(): pass\n"
         file_hash = hashlib.sha256(content.encode()).hexdigest()
-
         vd = tmp_path / ".voidrift"
         vd.mkdir()
-        _save_cache(_cache_path(vd, file_hash), "src/api.py", file_hash, "- Cached analysis")
-
-        # Simulate what _analyze_source does: hash the current file content, look up cache
-        actual_hash = hashlib.sha256(content.encode()).hexdigest()
-        result = _load_cache(_cache_path(vd, actual_hash))
-
+        af = _analysis_path(vd, "src/api.py")
+        _write_analysis(af, "src/api.py", file_hash, "- Cached analysis")
+        result = _load_cached_analysis(af, file_hash)
         assert result == "- Cached analysis"
 
-    def test_req_ctx5_cache_miss_when_content_changes(self, tmp_path):
-        """Modified file: content hash changes → cache miss → re-analysis required."""
-        from voidrift_cli.commands.gather import _cache_path, _load_cache, _save_cache
-
-        original = "def foo(): return 1\n"
-        modified = "def foo(): return 2\n"
-
+    def test_cache_miss_when_content_changes(self, tmp_path):
+        """Modified file: different hash → cache miss."""
+        from voidrift_cli.commands.gather import _analysis_path, _write_analysis, _load_cached_analysis
         vd = tmp_path / ".voidrift"
         vd.mkdir()
-
-        orig_hash = hashlib.sha256(original.encode()).hexdigest()
-        _save_cache(_cache_path(vd, orig_hash), "src/foo.py", orig_hash, "- Original analysis")
-
-        # Modified content → different hash → no cache entry
-        new_hash = hashlib.sha256(modified.encode()).hexdigest()
-        result = _load_cache(_cache_path(vd, new_hash))
-
+        orig_hash = hashlib.sha256(b"def foo(): return 1\n").hexdigest()
+        af = _analysis_path(vd, "src/foo.py")
+        _write_analysis(af, "src/foo.py", orig_hash, "- Original analysis")
+        new_hash = hashlib.sha256(b"def foo(): return 2\n").hexdigest()
+        result = _load_cached_analysis(af, new_hash)
         assert result is None
