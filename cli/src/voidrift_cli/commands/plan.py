@@ -183,8 +183,6 @@ def run_plan(
     for tf in task_files:
         lines = [l for l in tf.read_text().splitlines() if l.strip().startswith("- [ ]")]
         ui.success(f"{tf.name}: {len(lines)} tasks")
-    if (d / "ARCHITECTURE.md").exists():
-        ui.success("ARCHITECTURE.md created")
 
     from ..utils import append_state
     files_created = []
