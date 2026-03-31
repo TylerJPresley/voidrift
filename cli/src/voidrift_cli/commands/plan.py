@@ -233,11 +233,12 @@ def _validate_skill_tags(tasks_path: Path, valid: set[str]) -> set[str]:
     import re
     text = tasks_path.read_text()
     tags = set(re.findall(r"\[([^\]]+)\]", text))
+    valid_upper = {v.upper() for v in valid}
     invalid = set()
     for tag_group in tags:
         for tag in tag_group.split(","):
             tag = tag.strip()
-            if tag and tag not in valid and not tag.startswith(("x", " ")):
+            if tag and tag.upper() not in valid_upper and not tag.startswith(("x", " ")):
                 invalid.add(tag)
     return invalid
 
