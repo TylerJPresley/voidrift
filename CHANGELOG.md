@@ -7,6 +7,9 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- **REQ-UI-10:** Agent stats lines (spinner progress and completion summaries) display elapsed time, token counts (`tkns: ↓ Nk - ↑ Nk`), context utilization (`ctx N%`), and status on every agent call across all commands. Fields omitted when the model response contains no usage data.
+
 ### Added
 - **Verify command — full rewrite (REQ-VF-3 through REQ-VF-16):** Two-stage requirements-driven acceptance testing. Stage 1: plan agent reads all project docs, writes `.voidrift/VERIFY-PLAN.md` with one self-contained test case per testable requirement. Stage 2: concurrent sub-agents (ThreadPoolExecutor, `get_concurrency()` limit) execute scenarios; failures write `.voidrift/bugs/<ITEM-ID>.md` with full evidence. Stage 3: orchestrator writes `VERIFY.md` summary table + verdict + STATE.md entry. `try/finally` guarantees cleanup of all processes, HTTP sessions, and browser sessions regardless of outcome.
 - **`tools/process_manager.py` (REQ-VF-8 through REQ-VF-11):** Subprocess lifecycle management — `start_process(cmd, env, cwd)` returns opaque UUID handle; ring-buffered deque(maxlen=500) for stdout/stderr; `stop_process(handle)` SIGTERM→SIGKILL fallback after 5s; `wait_for_ready(handle, strategy, target, timeout)` with `http`, `port`, and `log_pattern` strategies; `read_process_output(handle)` returns up to 500 buffered lines; `run_command(cmd, cwd)` synchronous with stdout/stderr/exit_code JSON; `stop_all()` clears entire registry.

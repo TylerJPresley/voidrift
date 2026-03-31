@@ -65,15 +65,11 @@ def stats_str(
     ctx_pct: int | None,
     status: str,
 ) -> str:
-    """Format a stats segment: (elapsed [· tkns: ↓ Nk - ↑ Nk] [· ctx N%] · status).
-
-    tkns and ctx fields are shown only when verbose mode is active (set_verbose(True)),
-    except ctx is always shown when ctx_pct >= 80 regardless of verbose.
-    """
+    """Format a stats segment: (elapsed [· tkns: ↓ Nk - ↑ Nk] [· ctx N%] · status)."""
     parts = []
     if elapsed >= 1:
         parts.append(elapsed_str(elapsed))
-    if _verbose and (tokens_in or tokens_out):
+    if tokens_in or tokens_out:
         tkns = "tkns:"
         if tokens_in:
             tkns += f" ↓ {token_str(tokens_in)}"
@@ -82,14 +78,14 @@ def stats_str(
         if tokens_out:
             tkns += f" ↑ {token_str(tokens_out)}"
         parts.append(tkns)
-    if ctx_pct is not None and (_verbose or ctx_pct >= 80):
+    if ctx_pct is not None:
         parts.append(f"ctx {ctx_pct}%")
     parts.append(status)
     return f"({' · '.join(parts)})"
 
 
 class _Spinner:
-    """Thread-driven Rich Status with live elapsed time, token telemetry, and ctx% (REQ-UI-10).
+    """Thread-driven Rich Status with live elapsed time, token telemetry, and ctx%.
 
     Usage::
 
@@ -178,7 +174,7 @@ class _Spinner:
 
 
 def spinner(label: str, summary: str) -> _Spinner:
-    """Return a _Spinner context manager for automated command model calls (REQ-UI-10).
+    """Return a _Spinner context manager for automated command model calls.
 
     Args:
         label: Random/fun label shown in the live spinner during execution.
@@ -188,7 +184,7 @@ def spinner(label: str, summary: str) -> _Spinner:
 
 
 class _MultiSpinner:
-    """Live block showing one spinner row per concurrent agent with telemetry (REQ-UI-10).
+    """Live block showing one spinner row per concurrent agent with telemetry.
 
     Usage::
 
@@ -315,19 +311,12 @@ class _MultiSpinner:
 
 
 def multi_spinner(header: str) -> _MultiSpinner:
-    """Return a _MultiSpinner for concurrent agent display (REQ-UI-10)."""
+    """Return a _MultiSpinner for concurrent agent display."""
     return _MultiSpinner(header)
 
 
 _con = Console()
 _err = Console(stderr=True)
-_verbose: bool = False
-
-
-def set_verbose(v: bool) -> None:
-    """Set verbose display mode. When False, tkns/ctx fields are hidden unless ctx ≥ 80%."""
-    global _verbose
-    _verbose = v
 
 # ANSI for streaming (bypasses Rich for token-by-token output)
 _BLUE = "\033[38;5;117m"

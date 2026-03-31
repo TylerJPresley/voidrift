@@ -397,14 +397,14 @@ class AgentLoop(BaseModel):
         return False
 
     def _sync_response(self, client: OpenAI, kwargs: dict) -> tuple[str, list[dict]]:
-        """Non-streaming response with exponential backoff retry (REQ-ARCH-10, REQ-UI-10).
+        """Non-streaming response with exponential backoff retry (REQ-ARCH-10).
 
         Returns:
             Tuple of (text, tool_calls_list).
         """
         _call_start = time.time()
 
-        # Background timer fires on_progress every 250ms while the API call blocks (REQ-UI-10)
+        # Background timer fires on_progress every 250ms while the API call blocks
         _tick_stop = threading.Event()
         _tick_thread: threading.Thread | None = None
         if self.on_progress:
@@ -447,7 +447,7 @@ class AgentLoop(BaseModel):
                     "function": {"name": tc.function.name, "arguments": tc.function.arguments},
                 })
 
-        # Emit token telemetry from usage data (REQ-UI-10)
+        # Emit token telemetry from usage data
         if response.usage:
             prompt_tokens = response.usage.prompt_tokens or 0
             completion_tokens = response.usage.completion_tokens or 0
@@ -494,7 +494,7 @@ class AgentLoop(BaseModel):
         usage_data: dict = {}
         stream_start = time.time()
 
-        # Background on_progress timer — fires every 250ms while waiting for first token (REQ-UI-10).
+        # Background on_progress timer — fires every 250ms while waiting for first token.
         # Fires even when the caller owns the display (on_token set); stops on first content.
         _prog_stop = threading.Event()
         _prog_thread: threading.Thread | None = None

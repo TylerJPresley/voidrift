@@ -80,10 +80,14 @@ Python monorepo with three packages:
 
 ## When User Requests a Feature
 
-1. "Let me add acceptance criteria to REQUIREMENTS.md first"
-2. "Here's what success looks like. Does this match your intent?"
-3. "Now I'll implement to satisfy these ACs"
-4. "Let's verify: does this satisfy AC-X, AC-Y, AC-Z?"
+1. Trace all related REQs the change touches — address the full scope, not just the narrow delta
+2. Write requirements as positive instructions — describe what the system does, not what it doesn't do or what was removed
+3. "Let me add acceptance criteria to REQUIREMENTS.md first"
+4. "Here's what success looks like. Does this match your intent?"
+5. Wait for operator confirmation before writing any code
+6. "Now I'll implement to satisfy these ACs"
+7. All tests MUST pass. Work is NOT complete until they do
+8. "Let's verify: does this satisfy AC-X, AC-Y, AC-Z?"
 
 ## Eat Your Own Dogfood
 

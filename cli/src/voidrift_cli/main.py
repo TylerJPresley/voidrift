@@ -67,10 +67,8 @@ class TopGroup(OrderedGroup):
 
 
 @click.group(cls=TopGroup, invoke_without_command=True, help=HELP_TEXT)
-@click.option("--verbose", "-v", is_flag=True, help="Show token counts and context % in stats")
 @click.pass_context
-def cli(ctx, verbose) -> None:
-    ui.set_verbose(verbose)
+def cli(ctx) -> None:
     if ctx.invoked_subcommand is None:
         _interactive_mode()
 
@@ -318,18 +316,18 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
     # Shared state for Live-based streaming display.
     # Uses a list so closures can mutate without nonlocal declarations.
     _live_holder: list = [None]   # current Live instance
-    _live_start: list[float] = [0.0]  # turn start time for elapsed display (REQ-UI-10)
+    _live_start: list[float] = [0.0]  # turn start time for elapsed display
     _turn_label: list[str] = [""]     # label fixed per turn so updates stay consistent
     _got_token: list[bool] = [False]  # True once streaming tokens arrive
     _stream_buf: list[str] = []       # accumulated token buffer
     _term_holder: list = [None]       # (termios_module, fd, saved_attr) while raw mode active
 
     def _thinking_text(elapsed: float = 0.0, tokens_in: int = 0, ctx_pct: int | None = None) -> str:
-        """Build thinking spinner text with optional telemetry (REQ-UI-10)."""
+        """Build thinking spinner text with optional telemetry."""
         parts = [ui.elapsed_str(elapsed)] if elapsed >= 1 else []
-        if ui._verbose and tokens_in:
+        if tokens_in:
             parts.append(f"↓ {ui.token_str(tokens_in)} tokens")
-        if ctx_pct is not None and (ui._verbose or ctx_pct >= 80):
+        if ctx_pct is not None:
             parts.append(f"ctx {ctx_pct}%")
         if parts:
             parts.append("thinking")
@@ -361,19 +359,19 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
         completion_tokens = stats.get("completion_tokens", 0)
         prompt_tokens = stats.get("prompt_tokens", 0)
         ctx_pct = stats.get("ctx_pct")
-        if ui._verbose and completion_tokens:
+        if completion_tokens:
             _stats_parts.append(f"↑ {ui.token_str(completion_tokens)} tokens")
-        if ui._verbose and prompt_tokens:
+        if prompt_tokens:
             _stats_parts.append(f"↓ {ui.token_str(prompt_tokens)} tokens")
-        if ui._verbose and stats.get("tokens_per_sec"):
+        if stats.get("tokens_per_sec"):
             _stats_parts.append(f"{stats['tokens_per_sec']} tok/s")
         if elapsed:
             _stats_parts.append(f"{elapsed}s")
-        if ctx_pct is not None and (ui._verbose or ctx_pct >= 80):
+        if ctx_pct is not None:
             _stats_parts.append(f"ctx {ctx_pct}%")
 
     def on_progress(data: dict) -> None:
-        """Update Live thinking spinner with elapsed time while waiting (REQ-UI-10)."""
+        """Update Live thinking spinner with elapsed time while waiting."""
         if _got_token[0]:
             return  # streaming tail is already showing — don't overwrite
         live = _live_holder[0]

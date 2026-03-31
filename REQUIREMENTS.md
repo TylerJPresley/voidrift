@@ -490,7 +490,7 @@ Two log roots, two intents:
   - **Operator** (`▶`): bold white. Reprinted user input in interactive sessions. Preceded by a horizontal rule (`console.rule`, `bright_black` style).
   All framework commands SHALL use these roles identically. A shared output module SHALL enforce the convention — commands SHALL NOT use raw `console.print` with ad-hoc styling.
 - **REQ-UI-2:** ALL framework commands (gather, plan, develop, automate, verify) SHALL display progress through their stages. Each command SHALL show: a command title line, stage transitions (e.g. `▸ Stage 1/3: Triaging files...`), per-item progress with elapsed time (e.g. `▸ 3/28 backend/main.py... ✓ 4.8s`), and a final summary line. Automated commands (plan, develop, automate, verify) SHALL show the same level of progress detail as interactive commands.
-- **REQ-UI-3:** The `voidrift chat` command SHALL use a plain-terminal interface with: a dim header block (command name, log path, model label), a `prompt_toolkit` single-line input where Enter submits and `\` + Enter inserts a newline for multi-line messages (backspace/arrows work across lines), streamed model responses via `on_token` callback, and a dim stats line after each response showing token count, tokens/sec, and elapsed time.
+- **REQ-UI-3:** The `voidrift chat` command SHALL use a plain-terminal interface with: a dim header block (command name, log path, model label), a `prompt_toolkit` single-line input where Enter submits and `\` + Enter inserts a newline for multi-line messages (backspace/arrows work across lines), streamed model responses via `on_token` callback, and a dim stats line after each response (per REQ-UI-10).
 - **REQ-UI-4:** Chat SHALL always have its full tool set available. IF a model request fails mid-session, THE SYSTEM SHALL print the error and return to the prompt.
   - Given a chat session is active, When the operator sends a message, Then all configured chat tools are available to the agent.
 - **REQ-UI-5:** Interactive sessions SHALL handle Ctrl+C gracefully (print dim "Session ended." and exit), handle EOF on input (exit cleanly), and log all operator input and model responses to the session log file.
@@ -515,6 +515,10 @@ Two log roots, two intents:
   - Given the operator types while the model is streaming, When the response completes, Then no stray characters from the operator's typing appear in the terminal output.
   - Given agent.send() raises an exception, When the exception propagates, Then the terminal is restored to normal mode before the error is displayed.
   - Given web_fetch confirmation is required mid-stream, When the prompt appears, Then the operator can see their keystrokes and the input is handled correctly.
+- **REQ-UI-10:** ALL agent stats lines — spinner progress during model calls and completion summaries after — SHALL display: elapsed time, token counts (`tkns: ↓ Nk - ↑ Nk`), context utilization (`ctx N%`), and a status indicator. Format: `(elapsed · tkns: ↓ Nk - ↑ Nk · ctx N% · status)`. Fields with no data from the model response SHALL be omitted. This applies uniformly to automated commands (gather, plan, develop, automate, verify) and interactive commands (chat).
+  - *Rationale:* Token and context telemetry is essential operational feedback. Operators need to see context pressure building before it causes failures. A single consistent format across all commands reduces cognitive load.
+  - Given an agent call returns usage data, When the stats line is rendered, Then elapsed, tkns, ctx%, and status are all present.
+  - Given an agent call returns no usage data, When the stats line is rendered, Then only elapsed and status are present.
 
 ### 4.16 Framework Configuration
 
@@ -671,6 +675,7 @@ Two log roots, two intents:
 | V-U-4 | REQ-U-4 | Test | `test_commands.py::TestCLICommands::test_unlock_no_lock` |
 | V-UI-1 | REQ-UI-4 | Test | `test_commands.py` — chat tools available on every turn |
 | V-UI-2 | REQ-UI-5 | Test | `test_commands.py` — session log contains operator input and model responses |
+| V-UI-3 | REQ-UI-10 | Inspection | `ui.py::stats_str` — all fields present when usage data available; no gating |
 | V-MC-1 | REQ-MC-1 | Test | `test_models.py::TestResolveModel` — alias resolution from config |
 | V-MC-2 | REQ-MC-2 | Test | `test_models.py::TestResolveModel::test_cloud_models` |
 | V-WK-1 | REQ-WK-2 | Test | `test_worker.py` — container start/stop via SSH |
