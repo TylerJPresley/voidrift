@@ -184,45 +184,50 @@ def spinner(label: str, summary: str) -> _Spinner:
 
 
 class _MultiSpinner:
-    """Live block showing one spinner row per concurrent agent with telemetry.
+    """Live block showing concurrent agent progress, optionally grouped.
+
+    Ungrouped (gather): flat list of active/completed rows.
+    Grouped (develop): rows organized under named group headers.
 
     Usage::
 
+        # Ungrouped (gather-style)
         with multi_spinner("42 source files") as ms:
             futures = {pool.submit(task, fp, ms.track(fp)): fp for fp in files}
-            for future in as_completed(futures):
-                fp, elapsed, err = future.result()
-                ms.done(fp, Text.from_markup(...))  # completed renderable
+
+        # Grouped (develop-style)
+        with multi_spinner("3 modules") as ms:
+            ms.track("task-desc", group="backend")
     """
 
     def __init__(self, header: str) -> None:
         self._header = header
-        # descriptor -> {start, pt (prompt tokens), ct (completion tokens), ctx (ctx_pct)}
-        self._active: dict[str, dict] = {}
-        self._completed: list = []  # Rich renderables for finished agents
+        self._groups: dict[str, dict] = {}  # group -> {active: {}, completed: []}
+        self._DEFAULT = ""
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._live = None
 
-    def track(self, descriptor: str):
-        """Register a descriptor and return its on_progress callback.
+    def _ensure_group(self, group: str) -> dict:
+        if group not in self._groups:
+            self._groups[group] = {"active": {}, "completed": []}
+        return self._groups[group]
 
-        The timer starts on the first on_progress call (i.e., when the agent
-        actually begins executing) rather than at submission time, so queued
-        agents waiting for a thread slot don't show inflated elapsed times.
-        Agents that haven't started yet show as '(queued)'.
-        """
+    def track(self, descriptor: str, group: str = ""):
+        """Register a descriptor and return its on_progress callback."""
         with self._lock:
-            self._active[descriptor] = {"start": None, "pt": 0, "ct": 0, "ctx": None}
+            g = self._ensure_group(group or self._DEFAULT)
+            g["active"][descriptor] = {"start": None, "pt": 0, "ct": 0, "ctx": None}
 
         def _cb(data: dict) -> None:
             with self._lock:
-                if descriptor not in self._active:
+                grp = self._groups.get(group or self._DEFAULT, {})
+                s = grp.get("active", {}).get(descriptor)
+                if not s:
                     return
-                s = self._active[descriptor]
                 if s["start"] is None:
-                    s["start"] = time.time()  # start timer on first execution callback
+                    s["start"] = time.time()
                 if data.get("prompt_tokens"):
                     s["pt"] = data["prompt_tokens"]
                 if data.get("completion_tokens"):
@@ -242,6 +247,7 @@ class _MultiSpinner:
         ctx_pct: int | None = None,
         *,
         failed: bool = False,
+        group: str = "",
     ) -> None:
         """Mark a descriptor done and append a completed stats row."""
         from rich.text import Text as _RText
@@ -252,25 +258,45 @@ class _MultiSpinner:
             style=style,
         )
         with self._lock:
-            self._active.pop(descriptor, None)
-            self._completed.append(row)
+            g = self._ensure_group(group or self._DEFAULT)
+            g["active"].pop(descriptor, None)
+            g["completed"].append(row)
 
     def _render(self):
         from rich.console import Group as _RGroup
         from rich.spinner import Spinner as _RSpinner
         from rich.text import Text as _RText
         with self._lock:
-            rows = list(self._completed)
-            active_snap = {d: dict(s) for d, s in self._active.items()}
+            groups_snap = {
+                name: {"active": {d: dict(s) for d, s in g["active"].items()},
+                       "completed": list(g["completed"])}
+                for name, g in self._groups.items()
+            }
         now = time.time()
-        for desc, state in active_snap.items():
-            if state["start"] is None:
-                # Thread hasn't picked this up yet — show as queued (no timer)
-                rows.append(_RText(f"  {desc} (queued)", style="dim"))
-            else:
-                elapsed = now - state["start"]
-                s = stats_str(elapsed, state["pt"], state["ct"], state["ctx"], "thinking")
-                rows.append(_RSpinner("dots", text=f"  {desc} {s}", style="dim"))
+        rows = []
+        for name, g in groups_snap.items():
+            # Group header (skip for unnamed default group)
+            if name:
+                total_done = len(g["completed"])
+                total_active = len(g["active"])
+                total = total_done + total_active
+                if total_active == 0:
+                    rows.append(_RText(f"▸ {name} ✓ complete ({total}/{total})", style="bold"))
+                else:
+                    rows.append(_RText(f"▸ {name} ({total_done}/{total})", style="bold"))
+            # Completed rows
+            rows.extend(g["completed"])
+            # Active rows
+            for desc, state in g["active"].items():
+                if state["start"] is None:
+                    rows.append(_RText(f"  {desc} (queued)", style="dim"))
+                else:
+                    elapsed = now - state["start"]
+                    s = stats_str(elapsed, state["pt"], state["ct"], state["ctx"], "thinking")
+                    rows.append(_RSpinner("dots", text=f"  {desc} {s}", style="dim"))
+            # Blank line between groups (only for named groups)
+            if name and rows:
+                rows.append(_RText(""))
         if rows:
             return _RGroup(*rows)
         return _RSpinner("dots", text=f"  {self._header}", style="dim")
@@ -301,8 +327,6 @@ class _MultiSpinner:
         if self._thread:
             self._thread.join(timeout=0.5)
         if self._live:
-            # Final render with only completed rows — ensures the last active
-            # agent's spinner doesn't persist if it finished just before __exit__.
             try:
                 self._live.update(self._render())
             except Exception:

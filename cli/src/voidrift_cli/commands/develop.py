@@ -128,9 +128,6 @@ def run_develop(
                             if _interrupted:
                                 break
                             label = f"[{module}] "
-                            total = task_store.status(module)["remaining"]
-                            desc = f"{module} (0/{total})"
-                            tracker = ms.track(desc)
                             fut = pool.submit(
                                 _develop_module, worker, architect, module, label,
                                 tools, handlers, log, dev_prompt_tpl, esc_prompt_tpl,
@@ -207,11 +204,10 @@ def _develop_module(
         total = status["done"] + status["blocked"] + status["remaining"]
         label = truncate_task_label(f"- [ ] {task.text}")
 
-        # Update multi-spinner descriptor if in concurrent mode
-        _ms_desc = f"{module} ({task_num}/{total})" if ms else None
-        if ms and _ms_desc:
-            # Re-register with updated descriptor
-            _ms_tracker = ms.track(_ms_desc)
+        # Track in multi-spinner (concurrent) or print stage (sequential)
+        _ms_desc = f"{task_num}/{total} {label}" if ms else None
+        if ms:
+            _ms_tracker = ms.track(_ms_desc, group=module)
         else:
             ui.stage(f"{prefix}Task {task_num}/{total}: {label}")
 
@@ -349,7 +345,7 @@ def _develop_module(
 
         task_store.complete(mod_arg)
         if ms and _ms_desc:
-            ms.done(_ms_desc, f"{prefix}{label}", elapsed)
+            ms.done(_ms_desc, label, elapsed, group=module)
         else:
             ui.success(f"{label} ({elapsed:.1f}s)")
 
