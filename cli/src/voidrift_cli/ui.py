@@ -253,12 +253,20 @@ class _MultiSpinner:
         from rich.text import Text as _RText
         status = "⚠ failed" if failed else "✓ complete"
         style = "yellow" if failed else "dim"
-        row = _RText(
-            f"  {label} {stats_str(elapsed, tokens_in, tokens_out, ctx_pct, status)}",
-            style=style,
-        )
         with self._lock:
             g = self._ensure_group(group or self._DEFAULT)
+            # Fall back to accumulated tracker data when caller passes zeros
+            tracked = g["active"].get(descriptor, {})
+            if not tokens_in and tracked.get("pt"):
+                tokens_in = tracked["pt"]
+            if not tokens_out and tracked.get("ct"):
+                tokens_out = tracked["ct"]
+            if ctx_pct is None and tracked.get("ctx") is not None:
+                ctx_pct = tracked["ctx"]
+            row = _RText(
+                f"  {label} {stats_str(elapsed, tokens_in, tokens_out, ctx_pct, status)}",
+                style=style,
+            )
             g["active"].pop(descriptor, None)
             g["completed"].append(row)
 
