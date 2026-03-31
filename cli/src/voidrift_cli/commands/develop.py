@@ -121,26 +121,31 @@ def run_develop(
                 ui.info(f"Running {len(modules)} modules with {max_w} concurrent worker(s)")
                 results = {}
 
-                with ThreadPoolExecutor(max_workers=max_w) as pool:
-                    futures = {}
-                    for module in modules:
-                        if _interrupted:
-                            break
-                        label = f"[{module}] "
-                        fut = pool.submit(
-                            _develop_module, worker, architect, module, label,
-                            tools, handlers, log, dev_prompt_tpl, esc_prompt_tpl,
-                            git_lock, task_store, lambda: _interrupted,
-                        )
-                        futures[fut] = module
+                with ui.multi_spinner(f"{len(modules)} modules") as ms:
+                    with ThreadPoolExecutor(max_workers=max_w) as pool:
+                        futures = {}
+                        for module in modules:
+                            if _interrupted:
+                                break
+                            label = f"[{module}] "
+                            total = task_store.status(module)["remaining"]
+                            desc = f"{module} (0/{total})"
+                            tracker = ms.track(desc)
+                            fut = pool.submit(
+                                _develop_module, worker, architect, module, label,
+                                tools, handlers, log, dev_prompt_tpl, esc_prompt_tpl,
+                                git_lock, task_store, lambda: _interrupted,
+                                ms=ms,
+                            )
+                            futures[fut] = module
 
-                    for fut in as_completed(futures):
-                        mod = futures[fut]
-                        try:
-                            results[mod] = fut.result()
-                        except Exception as e:
-                            ui.error(f"[{mod}] failed: {e}")
-                            results[mod] = 1
+                        for fut in as_completed(futures):
+                            mod = futures[fut]
+                            try:
+                                results[mod] = fut.result()
+                            except Exception as e:
+                                ui.error(f"[{mod}] failed: {e}")
+                                results[mod] = 1
 
                 result = 1 if any(r != 0 for r in results.values()) else 0
         else:
@@ -179,6 +184,7 @@ def _develop_module(
     git_lock: threading.Lock,
     task_store: TaskStore,
     is_interrupted: callable = lambda: False,
+    ms=None,
 ) -> int:
     """Execute tasks for a single module (REQ-D-4)."""
     escalation_count = 0
@@ -201,7 +207,13 @@ def _develop_module(
         total = status["done"] + status["blocked"] + status["remaining"]
         label = truncate_task_label(f"- [ ] {task.text}")
 
-        ui.stage(f"{prefix}Task {task_num}/{total}: {label}")
+        # Update multi-spinner descriptor if in concurrent mode
+        _ms_desc = f"{module} ({task_num}/{total})" if ms else None
+        if ms and _ms_desc:
+            # Re-register with updated descriptor
+            _ms_tracker = ms.track(_ms_desc)
+        else:
+            ui.stage(f"{prefix}Task {task_num}/{total}: {label}")
 
         arch_context = ""
         if task_num in arch_guidance:
@@ -235,8 +247,8 @@ def _develop_module(
         )
 
         start_time = time.time()
-        with ui.spinner(ui.random_label(), f"task {task_num}") as spin:
-            agent.on_progress = spin.on_progress
+        if ms and _ms_desc:
+            agent.on_progress = _ms_tracker
             try:
                 response = agent.send(prompts.load_prompt("develop", "TASK-USER"))
                 elapsed = time.time() - start_time
@@ -247,6 +259,19 @@ def _develop_module(
                 with open(log, "a") as f:
                     f.write(f"ERROR on task {task_num}: {e}\n")
                 return 1
+        else:
+            with ui.spinner(ui.random_label(), f"task {task_num}") as spin:
+                agent.on_progress = spin.on_progress
+                try:
+                    response = agent.send(prompts.load_prompt("develop", "TASK-USER"))
+                    elapsed = time.time() - start_time
+                    with open(log, "a") as f:
+                        f.write(f"\n--- Task {task_num}: {label} ({elapsed:.1f}s) ---\n{response}\n")
+                except (RuntimeError, OSError, ValueError) as e:
+                    ui.error(f"Task failed: {e}")
+                    with open(log, "a") as f:
+                        f.write(f"ERROR on task {task_num}: {e}\n")
+                    return 1
 
         # Verify writes occurred (REQ-D-5)
         if get_write_count() == 0:
@@ -323,7 +348,10 @@ def _develop_module(
                 return 1
 
         task_store.complete(mod_arg)
-        ui.success(f"{label} ({elapsed:.1f}s)")
+        if ms and _ms_desc:
+            ms.done(_ms_desc, f"{prefix}{label}", elapsed)
+        else:
+            ui.success(f"{label} ({elapsed:.1f}s)")
 
     # Clean up any leftover escalation dirs
     esc_root = d / "escalations"
