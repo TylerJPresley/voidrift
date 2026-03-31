@@ -317,12 +317,22 @@ def _gather_from(
                 tools=[], tool_handlers={}, show_spinner=False,
             )
             tracker = ms.track(f"{cat} ({len(cat_files)} files)")
+            _stats: dict = {"elapsed": 0, "pt": 0, "ct": 0, "ctx": None}
+            def _on_ctx_complete(data: dict, s=_stats) -> None:
+                s["pt"] = max(s["pt"], data.get("prompt_tokens", 0))
+                s["ct"] += data.get("completion_tokens", 0)
+                if data.get("ctx_pct") is not None:
+                    s["ctx"] = data["ctx_pct"]
             try:
                 ctx_agent.on_progress = tracker
                 ctx_agent.on_token = lambda t: None
+                ctx_agent.on_complete = _on_ctx_complete
+                import time as _t2
+                _s2 = _t2.time()
                 summary = ctx_agent.send(f"Files:\n\n{content_block}")
+                _e2 = _t2.time() - _s2
                 context_summaries[cat] = summary
-                ms.done(f"{cat} ({len(cat_files)} files)", f"{cat}: {len(cat_files)} file(s)", 0)
+                ms.done(f"{cat} ({len(cat_files)} files)", f"{cat}: {len(cat_files)} file(s)", _e2, _stats["pt"], _stats["ct"], _stats["ctx"])
                 with open(log, "a") as f:
                     f.write(f"Context [{cat}]:\n{summary}\n")
             except (RuntimeError, OSError) as e:
