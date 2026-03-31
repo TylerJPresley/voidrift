@@ -290,43 +290,43 @@ def _gather_from(
     context_summaries: dict[str, str] = {}
     ctx_build_prompt_tpl = prompts.load_prompt("gather","CONTEXT-BUILD")
 
-    for cat in _NON_SOURCE:
-        cat_files = categories.get(cat, [])
-        if not cat_files:
-            continue
-        # Concatenate all files in this category
-        parts = []
-        total_chars = 0
-        for fp in sorted(cat_files):
-            text = read_from_source(fp)
-            entry = f"### {fp}\n\n{text}"
-            if _input_limit and total_chars + len(entry) > _input_limit:
-                parts.append(f"### {fp}\n\n[omitted — context limit reached]")
-                break
-            parts.append(entry)
-            total_chars += len(entry)
-        content_block = "\n\n---\n\n".join(parts)
+    cats_with_files = [cat for cat in _NON_SOURCE if categories.get(cat)]
+    with ui.multi_spinner(f"{len(cats_with_files)} categories") as ms:
+        for cat in cats_with_files:
+            cat_files = categories[cat]
+            # Concatenate all files in this category
+            parts = []
+            total_chars = 0
+            for fp in sorted(cat_files):
+                text = read_from_source(fp)
+                entry = f"### {fp}\n\n{text}"
+                if _input_limit and total_chars + len(entry) > _input_limit:
+                    parts.append(f"### {fp}\n\n[omitted — context limit reached]")
+                    break
+                parts.append(entry)
+                total_chars += len(entry)
+            content_block = "\n\n---\n\n".join(parts)
 
-        lens = _ANALYSIS_LENS.get(cat, "")
-        system = ctx_build_prompt_tpl.format(category=cat, context_lens=lens)
-        ctx_agent = AgentLoop(
-            model=model, stream=True, extra_body=extra,
-            max_tokens=_get_max_tokens(model.model_type, "analysis"),
-            log_path=log,
-            system_prompt=system,
-            tools=[], tool_handlers={}, show_spinner=False,
-        )
-        try:
-            with ui.spinner(ui.random_label(), cat) as spin:
-                ctx_agent.on_progress = spin.on_progress
+            lens = _ANALYSIS_LENS.get(cat, "")
+            system = ctx_build_prompt_tpl.format(category=cat, context_lens=lens)
+            ctx_agent = AgentLoop(
+                model=model, stream=True, extra_body=extra,
+                max_tokens=_get_max_tokens(model.model_type, "analysis"),
+                log_path=log,
+                system_prompt=system,
+                tools=[], tool_handlers={}, show_spinner=False,
+            )
+            tracker = ms.track(f"{cat} ({len(cat_files)} files)")
+            try:
+                ctx_agent.on_progress = tracker
                 ctx_agent.on_token = lambda t: None
                 summary = ctx_agent.send(f"Files:\n\n{content_block}")
-            context_summaries[cat] = summary
-            ui.detail(f"  {cat}: {len(cat_files)} file(s) → context summary ({len(summary)} chars)")
-            with open(log, "a") as f:
-                f.write(f"Context [{cat}]:\n{summary}\n")
-        except (RuntimeError, OSError) as e:
-            ui.warn(f"  Context build failed for {cat}: {e}")
+                context_summaries[cat] = summary
+                ms.done(f"{cat} ({len(cat_files)} files)", f"{cat}: {len(cat_files)} file(s)", 0)
+                with open(log, "a") as f:
+                    f.write(f"Context [{cat}]:\n{summary}\n")
+            except (RuntimeError, OSError) as e:
+                ms.done(f"{cat} ({len(cat_files)} files)", f"{cat}", 0, failed=True)
 
     # Build context block to inject into every source analysis agent (REQ-G-17)
     context_block = ""
