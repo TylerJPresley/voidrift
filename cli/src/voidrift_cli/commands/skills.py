@@ -342,18 +342,9 @@ def _install_via_synthesis(name: str, repos: list[str], model_alias: str) -> Non
         template = "Write a VoidRift domain skill with: name, description, core philosophy, implementation rules."
 
     combined_sources = "\n\n".join(source_contents)
-    system = (
-        f"You are synthesizing a domain skill for the VoidRift framework.\n\n"
-        f"Output format template:\n{template}\n\n"
-        "Rules:\n"
-        "- Include domain-specific north-star principles, key constraints, common failure modes.\n"
-        "- Exclude implementation recipes, version-specific syntax, and task-context content.\n"
-        "- Output ONLY the skill file content in VoidRift skill format (YAML frontmatter + markdown).\n"
-        "- No preamble, no explanation."
-    )
-    user_message = (
-        f"Synthesize a domain skill named '{upper}' from these source materials:\n\n"
-        f"{combined_sources}"
+    system = _prompts.load_prompt("skills", "SYNTHESIS").format(template=template)
+    user_message = _prompts.load_prompt("skills", "SYNTHESIS-USER").format(
+        name=upper, sources=combined_sources
     )
 
     from ..agent import AgentLoop

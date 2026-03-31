@@ -238,7 +238,7 @@ def _develop_module(
         with ui.spinner(ui.random_label(), f"task {task_num}") as spin:
             agent.on_progress = spin.on_progress
             try:
-                response = agent.send("Execute this task.")
+                response = agent.send(prompts.load_prompt("develop", "TASK-USER"))
                 elapsed = time.time() - start_time
                 with open(log, "a") as f:
                     f.write(f"\n--- Task {task_num}: {label} ({elapsed:.1f}s) ---\n{response}\n")
@@ -260,7 +260,7 @@ def _develop_module(
                         stream=False, log_path=log, show_spinner=False,
                     )
                     agent2.on_progress = spin2.on_progress
-                    response = agent2.send("Execute this task. You must call write_source_file() to produce output.")
+                    response = agent2.send(prompts.load_prompt("develop", "TASK-RETRY"))
                     with open(log, "a") as f:
                         f.write(f"\n--- Task {task_num} RETRY ---\n{response}\n")
                 except (RuntimeError, OSError, ValueError) as e:
@@ -376,7 +376,7 @@ def _consult_architect(
     with ui.spinner(ui.random_label(), "architect") as spin:
         agent.on_progress = spin.on_progress
         try:
-            response = agent.send("Provide guidance for this blocked task.")
+            response = agent.send(prompts.load_prompt("develop", "ESCALATION-USER"))
             with open(log, "a") as f:
                 f.write(f"\n--- Architect consultation ---\n{response}\n")
             return response

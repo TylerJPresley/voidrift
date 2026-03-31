@@ -92,7 +92,7 @@ def run_plan(
     with ui.spinner(ui.random_label(), "plan stage 1") as spin:
         arch_agent.on_progress = spin.on_progress
         try:
-            response = arch_agent.send("Design the system architecture.")
+            response = arch_agent.send(prompts.load_prompt("plan", "ARCH-USER"))
             with open(log, "a") as f:
                 f.write(response + "\n")
         except (RuntimeError, OSError, ValueError) as e:
@@ -104,10 +104,7 @@ def run_plan(
         with ui.spinner("Retrying...", "plan stage 1 retry") as spin:
             arch_agent.on_progress = spin.on_progress
             try:
-                response = arch_agent.send(
-                    "ARCHITECTURE.md was not written. Read existing files if present, "
-                    "then write ARCHITECTURE.md and arch/<module>.md files now."
-                )
+                response = arch_agent.send(prompts.load_prompt("plan", "ARCH-RETRY"))
             except (RuntimeError, OSError, ValueError) as e:
                 ui.error(f"Stage 1 retry failed: {e}")
                 return 1
@@ -153,7 +150,7 @@ def run_plan(
     with ui.spinner(ui.random_label(), "plan stage 2") as spin:
         tasks_agent.on_progress = spin.on_progress
         try:
-            response = tasks_agent.send("Create the task breakdown.")
+            response = tasks_agent.send(prompts.load_prompt("plan", "TASKS-USER"))
             with open(log, "a") as f:
                 f.write(response + "\n")
         except (RuntimeError, OSError, ValueError) as e:
@@ -165,10 +162,7 @@ def run_plan(
         with ui.spinner("Retrying...", "plan stage 2 retry") as spin:
             tasks_agent.on_progress = spin.on_progress
             try:
-                response = tasks_agent.send(
-                    "TASKS.md was not written. Read existing files if present, "
-                    "then write TASKS.md now."
-                )
+                response = tasks_agent.send(prompts.load_prompt("plan", "TASKS-RETRY"))
             except (RuntimeError, OSError, ValueError) as e:
                 ui.error(f"Stage 2 retry failed: {e}")
                 return 1

@@ -238,14 +238,10 @@ class AgentLoop(BaseModel):
                     break  # give up after 2 nudges
                 # Inject a nudge instead of stripping tools — the model
                 # is looping on reads and needs to move to writes.
+                from . import prompts as _prompts
                 self.messages.append({
                     "role": "user",
-                    "content": (
-                        "You are repeating the same tool calls. You already have "
-                        "all the information you need. Compose the COMPLETE content "
-                        "for each file, then call write_source_file() or write_framework_file() with the FULL content. "
-                        "Do NOT use placeholder content like '...' or 'TODO'."
-                    ),
+                    "content": _prompts.load_prompt("system", "STALL-NUDGE"),
                 })
                 last_call_sig = None  # reset so next iteration isn't auto-stall
                 continue

@@ -282,7 +282,7 @@ def run_verify(worker: ModelConfig) -> int:
         with ui.spinner(ui.random_label(), "verify plan") as spin:
             plan_agent.on_progress = spin.on_progress
             try:
-                plan_agent.send("Produce the verify plan for this project.")
+                plan_agent.send(prompts.load_prompt("verify", "PLAN-USER"))
             except (RuntimeError, OSError, ValueError) as exc:
                 ui.error(f"Plan agent failed: {exc}")
                 return 1

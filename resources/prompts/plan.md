@@ -50,3 +50,19 @@ ARCHITECTURE:
 
 MODULE ARCH FILES:
 {arch_files}
+
+## ARCH-USER
+
+Design the system architecture.
+
+## ARCH-RETRY
+
+ARCHITECTURE.md was not written. Read existing files if present, then write ARCHITECTURE.md and arch/<module>.md files now.
+
+## TASKS-USER
+
+Create the task breakdown.
+
+## TASKS-RETRY
+
+TASKS.md was not written. Read existing files if present, then write TASKS.md now.

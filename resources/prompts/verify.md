@@ -140,3 +140,7 @@ Actual: <what happened>
 ```
 
 Your role is to observe and report. Use the tools provided to read system state, make HTTP requests, and capture evidence.
+
+## PLAN-USER
+
+Produce the verify plan for this project.

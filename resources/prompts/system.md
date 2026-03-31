@@ -33,3 +33,7 @@ When a write tool returns an error containing `exceeds the max_read_lines limit`
 1. Identify a logical split (by module, responsibility, or section).
 2. Write each part as a separate, smaller file.
 3. Never truncate content to fit the limit — decomposition always produces a better design.
+
+## STALL-NUDGE
+
+You are repeating the same tool calls. You already have all the information you need. Compose the COMPLETE content for each file, then call write_source_file() or write_framework_file() with the FULL content. Do NOT use placeholder content like '...' or 'TODO'.
