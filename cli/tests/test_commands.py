@@ -399,16 +399,26 @@ class TestPlanPreflightChecks:
     def test_produces_artifacts(self, MockAgent, tmp_project, cloud_model, sample_requirements):
         """Simulate a model that creates the required artifacts via tool calls."""
         vd = tmp_project / ".voidrift"
+        call_count = 0
 
-        # When agent.send() is called, create the artifacts the plan command expects
-        def fake_send(msg):
-            (vd / "ARCHITECTURE.md").write_text("# Architecture\n\n## Overview\nTest arch")
-            (vd / "TASKS.md").write_text("- [ ] Create src/main.py: entry point [analysis-reqs]\n")
-            return "Plan complete."
+        # Stage 1 agent creates arch, Stage 2 agent creates tasks
+        def make_agent(**kwargs):
+            nonlocal call_count
+            mock = MagicMock()
+            call_count += 1
+            if call_count == 1:
+                def stage1_send(msg):
+                    (vd / "ARCHITECTURE.md").write_text("# Architecture\n\n## Overview\nTest arch")
+                    return "Architecture complete."
+                mock.send.side_effect = stage1_send
+            else:
+                def stage2_send(msg):
+                    (vd / "TASKS.md").write_text("- [ ] Create src/main.py: entry point [analysis-reqs]\n")
+                    return "Tasks complete."
+                mock.send.side_effect = stage2_send
+            return mock
 
-        mock_instance = MagicMock()
-        mock_instance.send.side_effect = fake_send
-        MockAgent.return_value = mock_instance
+        MockAgent.side_effect = make_agent
 
         from voidrift_cli.commands.plan import run_plan
         result = run_plan(cloud_model)
@@ -419,28 +429,36 @@ class TestPlanPreflightChecks:
     @patch("voidrift_cli.commands.plan.AgentLoop")
     def test_retries_on_missing_artifacts(self, MockAgent, tmp_project, cloud_model, sample_requirements):
         vd = tmp_project / ".voidrift"
-        call_count = 0
+        agent_count = 0
 
-        def fake_send(msg):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
-                # First call: only create ARCHITECTURE.md (missing TASKS.md)
-                (vd / "ARCHITECTURE.md").write_text("# Arch")
-                return "Partial."
+        def make_agent(**kwargs):
+            nonlocal agent_count
+            agent_count += 1
+            mock = MagicMock()
+            if agent_count == 1:
+                # Stage 1: create ARCHITECTURE.md
+                def send(msg):
+                    (vd / "ARCHITECTURE.md").write_text("# Arch")
+                    return "Done."
+                mock.send.side_effect = send
             else:
-                # Retry: create TASKS.md too
-                (vd / "TASKS.md").write_text("- [ ] Task [analysis-reqs]\n")
-                return "Fixed."
+                # Stage 2: first call misses TASKS.md, retry creates it
+                call_count = 0
+                def send(msg):
+                    nonlocal call_count
+                    call_count += 1
+                    if call_count == 1:
+                        return "Partial."
+                    (vd / "TASKS.md").write_text("- [ ] Task [analysis-reqs]\n")
+                    return "Fixed."
+                mock.send.side_effect = send
+            return mock
 
-        mock_instance = MagicMock()
-        mock_instance.send.side_effect = fake_send
-        MockAgent.return_value = mock_instance
+        MockAgent.side_effect = make_agent
 
         from voidrift_cli.commands.plan import run_plan
         result = run_plan(cloud_model)
         assert result == 0
-        assert call_count == 2
 
     @patch("voidrift_cli.commands.plan.AgentLoop")
     def test_fails_after_retry(self, MockAgent, tmp_project, cloud_model, sample_requirements):
@@ -999,44 +1017,51 @@ class TestPlanUpdateMode:
     ):
         """run_plan() runs fresh-plan when ARCHITECTURE.md and TASKS.md are absent."""
         vd = tmp_project / ".voidrift"
+        agent_count = 0
 
-        mock_instance = MagicMock()
+        def make_agent(**kwargs):
+            nonlocal agent_count
+            agent_count += 1
+            mock = MagicMock()
+            if agent_count == 1:
+                def send(msg):
+                    (vd / "ARCHITECTURE.md").write_text("# Architecture")
+                    return "Arch done."
+                mock.send.side_effect = send
+            else:
+                def send(msg):
+                    (vd / "TASKS.md").write_text("- [ ] Create src/main.py: stub [backend]\n")
+                    return "Tasks done."
+                mock.send.side_effect = send
+            return mock
 
-        def fake_send(msg):
-            (vd / "ARCHITECTURE.md").write_text("# Architecture")
-            (vd / "TASKS.md").write_text("- [ ] Create src/main.py: stub [backend]\n")
-            return "Fresh plan."
-
-        mock_instance.send.side_effect = fake_send
-        MockAgent.return_value = mock_instance
+        MockAgent.side_effect = make_agent
 
         from voidrift_cli.commands.plan import run_plan
         result = run_plan(cloud_model)
         assert result == 0
-        # Fresh plan uses PLAN prompt — message should not contain existing arch/tasks context
-        call_msg = mock_instance.send.call_args_list[0][0][0]
-        assert "Create the architecture" in call_msg
+        # Two agents should have been created (Stage 1 + Stage 2)
+        assert MockAgent.call_count == 2
 
     @patch("voidrift_cli.commands.plan.AgentLoop")
     def test_auto_detects_update_mode(
         self, MockAgent, tmp_project, cloud_model, sample_requirements
     ):
-        """run_plan() auto-detects update mode when ARCHITECTURE.md and TASKS.md exist."""
+        """run_plan() passes existing architecture to Stage 2 when artifacts exist."""
         vd = tmp_project / ".voidrift"
-        (vd / "ARCHITECTURE.md").write_text("# Architecture")
+        (vd / "ARCHITECTURE.md").write_text("# Architecture\nExisting arch content")
         (vd / "TASKS.md").write_text("- [x] Done task\n- [ ] Pending task [backend]\n")
 
         mock_instance = MagicMock()
-        mock_instance.send.return_value = "Updated plan."
+        mock_instance.send.return_value = "Updated."
         MockAgent.return_value = mock_instance
 
         from voidrift_cli.commands.plan import run_plan
         result = run_plan(cloud_model)
-        # Should call agent (not bail due to existing artifacts)
         mock_instance.send.assert_called()
-        # Verify the PLAN-UPDATE prompt path was used by checking constructor args
-        _, kwargs = MockAgent.call_args
-        assert "PLAN-UPDATE" in kwargs.get("system_prompt", "") or mock_instance.send.called
+        # Stage 2 system prompt should contain the existing architecture
+        stage2_call = MockAgent.call_args_list[-1]
+        assert "Existing arch content" in stage2_call[1].get("system_prompt", "")
 
 
 class TestDevelopRetryEscalation:

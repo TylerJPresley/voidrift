@@ -9,6 +9,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 - **REQ-UI-10:** Agent stats lines (spinner progress and completion summaries) display elapsed time, token counts (`tkns: ↓ Nk - ↑ Nk`), context utilization (`ctx N%`), and status on every agent call across all commands. Fields omitted when the model response contains no usage data.
+- **REQ-P-1:** Plan executes in two stages with separate agent instances. Stage 1 produces ARCHITECTURE.md and `arch/<module>.md` files. Stage 2 receives the architecture as input context and produces TASKS.md. Each stage starts with a clean message history. Stage prompts enumerate explicit numbered steps with upsert logic: read existing artifacts if present, update rather than regenerate, create if absent.
 
 ### Added
 - **Verify command — full rewrite (REQ-VF-3 through REQ-VF-16):** Two-stage requirements-driven acceptance testing. Stage 1: plan agent reads all project docs, writes `.voidrift/VERIFY-PLAN.md` with one self-contained test case per testable requirement. Stage 2: concurrent sub-agents (ThreadPoolExecutor, `get_concurrency()` limit) execute scenarios; failures write `.voidrift/bugs/<ITEM-ID>.md` with full evidence. Stage 3: orchestrator writes `VERIFY.md` summary table + verdict + STATE.md entry. `try/finally` guarantees cleanup of all processes, HTTP sessions, and browser sessions regardless of outcome.

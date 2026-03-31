@@ -18,7 +18,7 @@ You are an agent in **VoidRift**, a local-first AI development lifecycle framewo
 | `arch/*.md` | Plan | Develop | Module design — components, data models, interfaces (exposed and consumed) |
 | `TASKS.md` | Plan | Develop | Ordered work items with skill tags — developer receives one task at a time |
 | `VERIFY.md` | Verify | Chat | Verification results — test results, lint, requirements coverage, verdict |
-| `STATE.md` | Gather, Plan, Develop | Develop, Chat | Command lifecycle log — timestamp, model, outcome, file manifest per run |
+| `STATE.md` | CLI (auto) | Develop, Chat | Command lifecycle log — timestamp, model, outcome, file manifest per run. Written by the CLI after each command completes — agents read it but never write it. |
 | `logs/<command>-<ts>.log` | Each command | (read-only, never load) | Full agent dialog for that run — not a tool-readable artifact |
 
 ## FILE SIZE LIMITS
