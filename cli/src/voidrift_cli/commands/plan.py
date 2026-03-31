@@ -49,6 +49,17 @@ def run_plan(
     if overwrite:
         from ..utils import undo_command
         deleted = undo_command("plan")
+        # Fallback: remove known plan artifacts not tracked in STATE.md
+        for target in [d / "ARCHITECTURE.md", d / "TASKS.md"]:
+            if target.exists() and str(target) not in deleted:
+                target.unlink()
+                deleted.append(str(target))
+        arch_dir = d / "arch"
+        if arch_dir.is_dir():
+            for af in arch_dir.glob("*.md"):
+                if str(af) not in deleted:
+                    af.unlink()
+                    deleted.append(str(af))
         if deleted:
             ui.info(f"Cleared {len(deleted)} files from previous plan.")
 
