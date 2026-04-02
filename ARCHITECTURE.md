@@ -177,7 +177,7 @@ The operator acts on them through chat — writing requirements and task tickets
 ```
 Stage 1 — Plan agent:
   Preflight: .voidrift/REQUIREMENTS.md must exist
-  CLI: load REQUIREMENTS.md, ARCHITECTURE.md, TASKS.md, spec/*, arch/* → inject into system prompt
+  CLI: load REQUIREMENTS.md, ARCHITECTURE.md, tasks/manifest.yml, arch/* → inject into system prompt
   Plan agent:
     tools: cmd="verify-plan" {read_framework_file, read_source_file, write_framework_file}
     writes: .voidrift/VERIFY-PLAN.md (self-contained test cases per testable requirement)

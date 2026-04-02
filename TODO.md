@@ -8,15 +8,11 @@ Work items that need doing. Grouped by area, ordered by priority within each gro
 
 The task system was rewritten (ManifestManager + task files) but several requirements and docs still reference the old TASKS.md/TASKS-DONE.md/TaskStore patterns.
 
-- [ ] **REQ-P-5** still describes TASKS.md format with `## Module:` headers and says completed tasks live in TASKS-DONE.md. Needs rewriting to describe task file output in `tasks/active/TASK-{id}.md` with frontmatter. TASKS.md is now an intermediate artifact that plan writes and `_build_task_files()` parses — it's not the canonical task store anymore. Location: REQUIREMENTS.md §4.5, search for REQ-P-5.
-
-- [ ] **REQ-P-11** references TASKS.md and TASKS-DONE.md in update mode description. Should describe plan reading manifest + existing task files to determine delta. The update mode logic itself hasn't been adapted for the new system — plan still checks for TASKS.md existence. Location: REQUIREMENTS.md §4.5, search for REQ-P-11.
-
-- [ ] **REQ-D-14** is marked as replaced by REQ-TM-5/TM-6 but the verification table still has V-D-10 and V-D-13 referencing `test_task_store.py` for TASKS-DONE.md behavior. These verification entries should point to `test_manifest.py` archive tests instead. Location: REQUIREMENTS.md §6 Verification Plan.
-
-- [ ] **ARCHITECTURE.md verify section** (§4.5) still says `CLI: load REQUIREMENTS.md, ARCHITECTURE.md, TASKS.md, spec/*, arch/*`. Should reference manifest.yml and task files. Location: ARCHITECTURE.md line ~180.
-
-- [ ] **Appendix A** in REQUIREMENTS.md still shows the old artifact structure with `TASKS.md` and no `tasks/` directory or `ideas/` directory. Needs updating to match the current layout. Location: REQUIREMENTS.md, Appendix A.
+- [x] **REQ-P-5** — replaced with pointer to REQ-TM-4.
+- [x] **REQ-P-11** — rewritten to reference manifest.yml and task files.
+- [x] **REQ-D-14 verification entries** — V-D-10 and V-D-13 now point to test_manifest.py.
+- [x] **ARCHITECTURE.md verify section** — updated to reference manifest.yml.
+- [x] **Appendix A** — updated with tasks/, ideas/, manifest.yml, history.log.
 
 ---
 

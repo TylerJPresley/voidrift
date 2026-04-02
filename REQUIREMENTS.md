@@ -174,7 +174,7 @@
 - **REQ-P-3:** WHEN `--overwrite` is specified, THE SYSTEM SHALL remove files from the previous plan run (per STATE.md manifest) before planning. Gather-produced artifacts (REQUIREMENTS.md, spec/*.md) SHALL be preserved.
   - Given a previous plan created ARCHITECTURE.md, TASKS.md, and arch/*.md, When `voidrift plan <model> --overwrite` is run, Then those files are deleted (per STATE.md manifest) before the planning agent starts.
 - **REQ-P-4:** `auto-commits: false` SHALL be set for the plan command.
-- **REQ-P-5:** For single-module projects, tasks SHALL be written under a `## Tasks` header. For multi-module projects, tasks SHALL be grouped under `## Module: <name>` headers in a single TASKS.md. TASKS.md SHALL contain only pending (`- [ ]`) and blocked (`- [!]`) task lines — completed tasks live exclusively in TASKS-DONE.md (REQ-D-14).
+- **REQ-P-5:** *(Replaced by REQ-TM-4. Tasks are individual files in `tasks/active/TASK-{id}.md` with YAML frontmatter. TASKS.md is an intermediate artifact parsed by the CLI into task files.)*
 - **REQ-P-6:** In multi-module projects, each file path SHALL appear in exactly one module's task group. No file SHALL be created or modified by tasks in more than one module.
 - **REQ-P-7:** Each task SHALL be a multi-line block: `- [ ] <summary>` on the first line, followed by indented metadata lines (`file:`, `skills:`, `reqs:`), followed by a free-form description. The `file:` line specifies the target file path relative to the project root; tasks without a target file omit this line. The description SHALL include enough context for a developer agent to implement without cross-referencing requirements — acceptance criteria, expected inputs/outputs, error cases, and the *why* behind the task. Tasks that say only "implement X" without specifying behavior are insufficient. The task format SHALL be defined in `resources/templates/TASK-FORMAT.md` and loaded via `get_template("TASK-FORMAT")`.
   - *Rationale:* The developer agent processes one task at a time with limited context. Front-loading implementation detail and rationale into the task description reduces the developer's dependence on loading full requirements, decreasing context window usage and improving output quality. Structured metadata on dedicated lines eliminates false matches from code examples or JSON in descriptions.
@@ -188,10 +188,10 @@
   - Given the plan prompt is constructed, When the system prompt is formatted, Then it contains the complete list of valid skill names.
 - **REQ-P-10:** `.voidrift/ARCHITECTURE.md` SHALL follow the structure defined in `ARCHITECTURE-TEMPLATE` (loaded via `get_template("ARCHITECTURE-TEMPLATE")`). The template follows the arc42 documentation standard with C4 model diagrams (Mermaid). The model SHALL populate each section with project-specific content.
   - *Rationale:* arc42 is an industry-standard architecture documentation framework providing a proven section structure. C4 (Context, Container, Component, Code) provides consistent diagram levels. Together they ensure architecture documents are complete, navigable, and familiar to engineers.
-- **REQ-P-11:** WHEN `voidrift plan <model>` is run AND `.voidrift/ARCHITECTURE.md` and `.voidrift/TASKS.md` already exist AND `--overwrite` is not specified, THE SYSTEM SHALL automatically run in update mode: read REQUIREMENTS.md, ARCHITECTURE.md, spec files, and the current source code to determine what is already implemented, then produce a revised TASKS.md containing only the delta — requirements not yet satisfied by the current implementation. Plan SHALL NOT read TASKS-DONE.md. The existing architecture SHALL be treated as a starting point, not regenerated from scratch.
-  - *Rationale:* Source code is ground truth for what's built. Reading a task log to infer implementation state is indirect and can drift. Reading the actual source files is definitive and works regardless of how the code was produced. An updated requirement produces a new task — TASKS-DONE.md is a historical record, not a planning input.
-  - Given ARCHITECTURE.md and TASKS.md exist and `--overwrite` is not specified, When `voidrift plan <model>` is run, Then update mode runs automatically — the agent reads source files to determine what's implemented and writes tasks only for the unimplemented delta.
-  - Given ARCHITECTURE.md and TASKS.md do not exist, When `voidrift plan <model>` is run, Then fresh-plan mode runs.
+- **REQ-P-11:** WHEN `voidrift plan <model>` is run AND `.voidrift/ARCHITECTURE.md` and `.voidrift/tasks/manifest.yml` already exist AND `--overwrite` is not specified, THE SYSTEM SHALL automatically run in update mode: read REQUIREMENTS.md, ARCHITECTURE.md, and the current source code to determine what is already implemented, then produce revised task files containing only the delta — requirements not yet satisfied by the current implementation. The existing architecture SHALL be treated as a starting point, not regenerated from scratch.
+  - *Rationale:* Source code is ground truth for what's built. Reading the actual source files is definitive and works regardless of how the code was produced.
+  - Given ARCHITECTURE.md and manifest.yml exist and `--overwrite` is not specified, When `voidrift plan <model>` is run, Then update mode runs automatically — the agent reads source files to determine what's implemented and writes tasks only for the unimplemented delta.
+  - Given ARCHITECTURE.md and manifest.yml do not exist, When `voidrift plan <model>` is run, Then fresh-plan mode runs.
 - **REQ-P-12:** Tasks SHALL NOT target `.voidrift/` paths. The `.voidrift/` directory contains framework artifacts (requirements, architecture, specs, logs) produced by gather and plan — not the develop command. Dot-prefixed project files (`.github/`, `.dockerignore`, `.eslintrc`, etc.) are valid develop targets.
   - *Rationale:* `.voidrift/` contains framework artifacts produced by gather and plan. Develop tasks that target `.voidrift/` paths overwrite planning artifacts or create redundant specs. However, many projects legitimately require dot-prefixed config files (CI workflows, linter configs, Docker ignore files) that the develop command must create.
   - Given TASKS.md contains a task targeting `.voidrift/spec/backend.md`, When the plan is reviewed, Then the task is invalid — spec files are plan artifacts.
@@ -200,7 +200,7 @@
 - **REQ-P-13:** WHEN `voidrift plan <model>` is run, THE SYSTEM SHALL validate that `.voidrift/REQUIREMENTS.md` exists before performing any model calls. IF `.voidrift/REQUIREMENTS.md` does not exist, THE SYSTEM SHALL exit with an error prompting `voidrift gather`.
   - Given no `.voidrift/REQUIREMENTS.md` exists, When `voidrift plan <model>` is run, Then the command exits with an error containing "Run 'voidrift gather'" — no model call is made.
   - Given `.voidrift/REQUIREMENTS.md` exists and no plan artifacts exist, When `voidrift plan <model>` runs, Then fresh-plan mode runs.
-  - Given `.voidrift/REQUIREMENTS.md` exists and `.voidrift/ARCHITECTURE.md` and `.voidrift/TASKS.md` exist, When `voidrift plan <model>` runs without `--overwrite`, Then update mode runs automatically.
+  - Given `.voidrift/REQUIREMENTS.md` exists and `.voidrift/ARCHITECTURE.md` and `.voidrift/tasks/manifest.yml` exist, When `voidrift plan <model>` runs without `--overwrite`, Then update mode runs automatically.
 - **REQ-VF-1:** WHEN the Plan command generates ARCHITECTURE.md for a project with a runnable entry point, THE SYSTEM SHALL include a `startup_command:` field.
   - *Rationale:* Verify needs to start the system under test. The startup command must be captured during planning when the project type and entry point are known — not inferred at verify time.
   - Given a web API project, When Plan generates ARCHITECTURE.md, Then `startup_command:` is present with the command to start the server.
@@ -605,9 +605,9 @@ Two log roots, two intents:
 
 | ID | Requirement | Method | Evidence Required |
 |----|-------------|--------|-------------------|
-| V-CTX-3 | REQ-CTX-3 | Test | `test_task_store.py` — module parsing, single and multi |
-| V-CTX-4 | REQ-CTX-3 | Test | `test_task_store.py::test_get_next` — returns first unchecked |
-| V-CTX-5 | REQ-CTX-3 | Test | `test_task_store.py::test_complete_writes_through` |
+| V-CTX-3 | REQ-TM-1 | Test | `test_manifest.py` — ManifestManager load, save, task registration |
+| V-CTX-4 | REQ-TM-3 | Test | `test_manifest.py::TestDispatch` — dispatchable returns ready tasks |
+| V-CTX-5 | REQ-TM-2 | Test | `test_manifest.py::TestStatusTransitions` — status changes and side effects |
 | V-RES-1 | REQ-RES-6 | Test | `test_commands.py` — format variable substitution in prompt templates |
 | V-ARCH-1 | REQ-ARCH-2 | Test | `test_commands.py::TestCLICommands` — subcommands exist |
 | V-ARCH-2 | REQ-ARCH-4 | Test | `test_agent.py` — agent loop sends/receives messages |
@@ -640,8 +640,8 @@ Two log roots, two intents:
 | V-D-7 | REQ-D-4 | Inspection | `develop.py::_develop_module` — task loop calls `task_store.get_next()`, skills pre-injected into system prompt at task-init time |
 | V-D-8 | REQ-D-6 | Inspection | `develop.py::_consult_architect` — escalation prompt loaded directly from disk |
 | V-D-9 | REQ-D-8 | Inspection | `develop.py::_consult_architect` — provides reqs + arch + task, no source files |
-| V-D-10 | REQ-D-9 | Test | `test_task_store.py` — `complete()` removes from TASKS.md and appends to TASKS-DONE.md |
-| V-D-13 | REQ-D-14 | Test | `test_task_store.py` — completed task absent from TASKS.md, present in TASKS-DONE.md with timestamp |
+| V-D-10 | REQ-D-9 | Test | `test_manifest.py` — `set_status("implemented")` updates manifest after write verification |
+| V-D-13 | REQ-TM-5 | Test | `test_manifest.py::TestArchive` — archived task moved to `archived/`, removed from manifest, history.log appended |
 | V-D-11 | REQ-D-11 | Inspection | `develop.py::run_develop` — `threading.Lock` passed to all `_develop_module` calls, acquired around git ops |
 | V-D-12 | REQ-D-13 | Inspection | `develop.py::run_develop` — SIGTERM/SIGINT set interrupted flag, lock cleaned in finally block |
 | V-U-1 | REQ-U-1 | Test | `test_commands.py::TestCLICommands::test_status_command` |
@@ -682,12 +682,22 @@ Two log roots, two intents:
 ├── REQUIREMENTS.md           # Project requirements
 ├── ARCHITECTURE.md           # Architecture reference
 ├── STATE.md                  # Project state summary
-├── TASKS.md                  # Task list (single file, module headers for multi-module)
+├── TASKS.md                  # Intermediate task list (parsed into task files by CLI)
+├── ideas/                    # Operator-owned idea backlog
+│   └── IDEA-{id}.md
+├── tasks/                    # System-owned work items
+│   ├── manifest.yml          # Task status, dependencies, modules, idea tracking
+│   ├── active/               # Task and bug tickets in progress
+│   │   ├── TASK-{id}.md
+│   │   └── BUG-{id}.md
+│   ├── archived/             # Verified tasks and resolved bugs
+│   └── history.log           # Lifecycle event log (append-only)
 ├── arch/                     # Module architecture (produced by Plan)
 │   └── <module>.md
 ├── spec/                     # Module requirements (produced by Gather)
 │   └── <module>.md
-├── <command>-*.log           # Command logs
+├── logs/                     # Command run logs
+│   └── <command>-<timestamp>.log
 └── .develop.lock             # Concurrent execution lock
 ```
 
