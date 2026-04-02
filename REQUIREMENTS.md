@@ -571,7 +571,7 @@ Two log roots, two intents:
 
 ### 4.20 Idea Refinement
 
-- **REQ-IDEA-1:** WHEN the operator types `/idea` during a chat session, THE SYSTEM SHALL start a guided idea refinement flow. `/idea` with no argument SHALL prompt the operator to create a new idea or load an existing one. `/idea <id>` SHALL load `IDEA-<id>.md` from `.voidrift/tasks/active/` and resume refinement. The idea flow operates within the existing chat session — all chat tools remain available.
+- **REQ-IDEA-1:** WHEN the operator types `/idea` during a chat session, THE SYSTEM SHALL start a guided idea refinement flow. `/idea` with no argument SHALL prompt the operator to create a new idea or load an existing one. `/idea <id>` SHALL load `IDEA-<id>.md` from `.voidrift/ideas/` and resume refinement. The idea flow operates within the existing chat session — all chat tools remain available.
   - *Rationale:* Ideas are rough user stories that need structured conversation to become actionable. A guided flow inside chat formalizes the natural pattern of iterative refinement — the agent drives the conversation through stages rather than waiting for the operator to direct it.
   - Given a chat session is active, When the operator types `/idea`, Then the system prompts "Create new or load existing?"
   - Given a chat session is active, When the operator types `/idea 3`, Then IDEA-3.md is loaded and the agent summarizes the current state and asks what to refine.

@@ -593,7 +593,7 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
             "role": "user",
             "content": (
                 f"The operator chose '{cat}'. Write the final structured idea to "
-                f"tasks/active/IDEA-{idea_id}.md using write_framework_file. "
+                f"ideas/IDEA-{idea_id}.md using write_framework_file. "
                 f"Include: title, user story, context, acceptance criteria, "
                 f"affected modules, and affected files (if modifying existing behavior)."
             ),

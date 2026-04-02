@@ -23,14 +23,16 @@ class ManifestManager:
         self._active_dir = self._tasks_dir / "active"
         self._archived_dir = self._tasks_dir / "archived"
         self._history_path = self._tasks_dir / "history.log"
+        self._ideas_dir = self._project / ".voidrift" / "ideas"
         self._data: dict = {}
 
     # ── Bootstrap ────────────────────────────────────────────────────────
 
     def ensure_dirs(self) -> None:
-        """Create task directories if they don't exist."""
+        """Create task and idea directories if they don't exist."""
         self._active_dir.mkdir(parents=True, exist_ok=True)
         self._archived_dir.mkdir(parents=True, exist_ok=True)
+        self._ideas_dir.mkdir(parents=True, exist_ok=True)
 
     def exists(self) -> bool:
         """Return True if manifest.yml exists."""
@@ -251,8 +253,8 @@ class ManifestManager:
         return self._data.get("ideas", {})
 
     def idea_path(self, idea_id: int) -> Path:
-        """Return the path to an idea file in active/."""
-        return self._active_dir / f"IDEA-{idea_id}.md"
+        """Return the path to an idea file in ideas/."""
+        return self._ideas_dir / f"IDEA-{idea_id}.md"
 
     def add_idea(self, idea_id: int, status: str = "draft") -> None:
         """Register an idea in the manifest."""

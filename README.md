@@ -93,7 +93,7 @@ voidrift chat <model> --doc new-feature.md     # create a new artifact
 
 Interactive session with full tool access — the central command for iterating on any `.voidrift/` artifact. Review requirements before running plan, refine architecture after plan, debug issues, explore ideas. Type `/compact` to summarize conversation history when context fills up.
 
-**Idea refinement:** Type `/idea` to start a guided idea flow — the agent walks you through intake, exploration, shaping, and summary. Ideas are stored as `IDEA-{id}.md` in `tasks/active/` and categorized as `now`, `next`, or `later`. Type `/idea 3` to resume an existing idea. Type `/done` to save and return to normal chat.
+**Idea refinement:** Type `/idea` to start a guided idea flow — the agent walks you through intake, exploration, shaping, and summary. Ideas are stored as `IDEA-{id}.md` in `.voidrift/ideas/` and categorized as `now`, `next`, or `later`. Type `/idea 3` to resume an existing idea. Type `/done` to save and return to normal chat.
 
 **Example workflow — new project:**
 ```bash
@@ -276,9 +276,11 @@ your-project/
 │   ├── ARCHITECTURE.md      # System map, cross-module contracts ← Plan
 │   ├── arch/<module>.md     # Module design, components, interfaces ← Plan
 │   ├── TASKS.md             # Pending and blocked tasks         ← Plan
-│   ├── tasks/
+│   ├── ideas/               # Operator-owned idea backlog       ← Chat
+│   │   └── IDEA-{id}.md
+│   ├── tasks/               # System-owned work items           ← Plan/CLI
 │   │   ├── manifest.yml     # Task status, deps, modules       ← CLI
-│   │   ├── active/          # Task tickets in progress         ← Plan/CLI
+│   │   ├── active/          # Task and bug tickets             ← Plan/CLI
 │   │   ├── archived/        # Verified tasks                   ← CLI
 │   │   └── history.log      # Lifecycle event log              ← CLI
 │   ├── VERIFY.md            # Test results, verdict             ← Verify
