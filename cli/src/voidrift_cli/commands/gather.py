@@ -80,10 +80,6 @@ def _make_chunks(text: str, size: int, overlap: int = 200) -> list[str]:
     return chunks
 
 
-def _is_truncated_json_error(err: str) -> bool:
-    """Return True if the error string indicates a truncated tool call JSON."""
-    return "Invalid JSON" in err or "EOF while parsing" in err
-
 
 # ── Context block & preamble helpers ────────────────────────────────────────
 

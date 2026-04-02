@@ -70,32 +70,6 @@ class TestGatherInputChunking:
         assert len(chunks) == 1  # no consolidation needed
 
 
-class TestGatherRetryOn400:
-    """_is_truncated_json_error utility — detects truncated tool call JSON errors."""
-
-    def test_is_truncated_json_error_detects_invalid_json(self):
-        from voidrift_cli.commands.gather import _is_truncated_json_error
-        assert _is_truncated_json_error("Invalid JSON: something")
-        assert _is_truncated_json_error("HTTP 400: EOF while parsing a string at line 1")
-        assert not _is_truncated_json_error("HTTP 500: server error")
-        assert not _is_truncated_json_error("Connection refused")
-
-    def test_retry_tokens_are_halved(self):
-        """Retry formula: max(original // 2, 256)."""
-        from voidrift_cli.config import get_max_tokens
-        from voidrift_cli.models import ModelConfig
-        mc = ModelConfig(alias="t", model_id="t", max_tokens=4096)
-        max_tok = get_max_tokens(mc, "analysis")
-        retry_tok = max(max_tok // 2, 256)
-        assert retry_tok <= max_tok
-
-    def test_retry_tokens_floor_at_256(self):
-        """Retry floor is 256 even if stage default is tiny."""
-        original = 100
-        retry = max(original // 2, 256)
-        assert retry == 256
-
-
 class TestContextBuild:
     """V-G-8: REQ-G-17 — context summaries built from non-source categories (≤10 items)."""
 
