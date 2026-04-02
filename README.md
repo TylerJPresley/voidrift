@@ -143,7 +143,6 @@ Generates architecture and task breakdown from requirements:
 ```bash
 voidrift plan <model>             # auto-detects: update if artifacts exist, fresh plan if not
 voidrift plan <model> --overwrite # remove previous plan artifacts and start fresh
-voidrift plan <model> <feature>   # scope to a specific spec file
 ```
 
 Produces: `ARCHITECTURE.md`, `tasks/manifest.yml`, `tasks/active/TASK-*.md`, `arch/<module>.md`

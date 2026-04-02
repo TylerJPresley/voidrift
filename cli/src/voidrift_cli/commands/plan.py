@@ -16,7 +16,6 @@ from .. import ui
 
 def run_plan(
     model: ModelConfig,
-    feature: str | None = None,
     overwrite: bool = False,
 ) -> int:
     """Execute the two-stage plan command (REQ-P-1).

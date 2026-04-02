@@ -34,7 +34,7 @@ Getting started:
 
 Framework commands:
   gather <model> <path> [--overwrite]
-  plan <model> [<feature>] [--overwrite]
+  plan <model> [--overwrite]
   develop <model> [<architect>]              Execute implementation tasks
   deploy <model> [<architect>]
   verify <model>
@@ -202,14 +202,13 @@ def gather(model, path, overwrite) -> None:
 
 @cli.command()
 @click.argument("model", shell_complete=_complete_model)
-@click.argument("feature", required=False)
 @click.option("--overwrite", is_flag=True, help="Remove previous plan artifacts and start fresh")
-def plan(model, feature, overwrite) -> None:
+def plan(model, overwrite) -> None:
     """Plan: Generate architecture and task breakdown."""
     _check_setup()
     from .commands.plan import run_plan
     mc = resolve_model(model)
-    sys.exit(run_plan(mc, feature=feature, overwrite=overwrite))
+    sys.exit(run_plan(mc, overwrite=overwrite))
 
 
 @cli.command()
