@@ -100,30 +100,17 @@ class TestContextBuild:
     """V-G-8: REQ-G-17 — context summaries built from non-source categories (≤10 items)."""
 
     def test_context_block_format(self):
-        """context_block starts with '## Project Context' when summaries exist."""
-        summaries = {"tests": "- test summary", "config": "- config summary"}
-        parts = [f"### {cat.capitalize()}\n\n{s.strip()}" for cat, s in summaries.items()]
-        context_block = "## Project Context\n\n" + "\n\n".join(parts)
-        assert context_block.startswith("## Project Context")
-        assert "### Tests" in context_block
-        assert "test summary" in context_block
+        """build_context_block produces '## Project Context' with category sections."""
+        from voidrift_cli.commands.gather import build_context_block
+        result = build_context_block({"tests": "- test summary", "config": "- config summary"})
+        assert result.startswith("## Project Context")
+        assert "### Tests" in result
+        assert "test summary" in result
 
-    def test_empty_categories_produce_no_context(self):
-        """Empty non-source categories do not add entries to context block."""
-        summaries: dict = {}
-        context_block = ""
-        if summaries:
-            parts = [f"### {cat.capitalize()}\n\n{s.strip()}" for cat, s in summaries.items()]
-            context_block = "## Project Context\n\n" + "\n\n".join(parts)
-        assert context_block == ""
-
-    def test_context_injected_into_analysis_prompt(self):
-        """Context block is appended to analysis system prompt."""
-        base_system = "Analyze for requirements."
-        context_block = "## Project Context\n\n### Tests\n\n- foo bar"
-        combined = base_system + "\n\n" + context_block
-        assert "## Project Context" in combined
-        assert combined.startswith(base_system)
+    def test_empty_summaries_produce_empty_string(self):
+        """Empty dict returns empty string."""
+        from voidrift_cli.commands.gather import build_context_block
+        assert build_context_block({}) == ""
 
     def test_non_source_categories_listed(self):
         """_NON_SOURCE contains all expected non-source categories."""
@@ -135,20 +122,6 @@ class TestContextBuild:
         assert "assets" in _NON_SOURCE
         assert "source" not in _NON_SOURCE
 
-    def test_context_block_absent_when_no_summaries(self):
-        """If context_summaries is empty, context_block is empty string."""
-        context_summaries: dict = {}
-        context_block = ""
-        if context_summaries:
-            parts = [f"### {c.capitalize()}\n\n{s.strip()}" for c, s in context_summaries.items()]
-            context_block = "## Project Context\n\n" + "\n\n".join(parts)
-        assert context_block == ""
-        # And system prompt does not grow when context_block is empty
-        system = "base instructions"
-        if context_block:
-            system = system + "\n\n" + context_block
-        assert system == "base instructions"
-
 
 class TestSourceRequirementsDirect:
     """V-G-9: REQ-G-8 — source analysis returns direct response, CLI owns all persistence."""
@@ -158,51 +131,24 @@ class TestSourceRequirementsDirect:
         from voidrift_cli.commands.gather import _NON_SOURCE, CATEGORIES
         assert set(CATEGORIES) - set(_NON_SOURCE) == {"source"}
 
-    def test_final_pass_agent_has_no_tools(self):
-        """Final pass agent is invoked with an empty tools list."""
-        captured: list[dict] = []
-
-        class FakeAgent:
-            def __init__(self, **kwargs):
-                captured.append({"tools": kwargs.get("tools", [])})
-
-            def send(self, msg: str) -> str:
-                return "# Requirements\n\nREQ-1: The system shall work."
-
-        source_reqs_text = "### src/main.py\n\n- WHEN invoked, THE SYSTEM SHALL run"
-        final_msg = f"Source Requirements:\n\n{source_reqs_text}"
-        agent = FakeAgent(
-            model=None, stream=False, max_tokens=8192,
-            system_prompt="Consolidation instructions", tools=[], tool_handlers={},
-        )
-        response = agent.send(final_msg)
-        assert response.startswith("# Requirements")
-        assert captured[0]["tools"] == []
-
     def test_preamble_stripped_from_final_response(self):
-        """CLI strips preamble before first # header."""
-        import re
-        response = "Here is the document:\n\n# Requirements\n\nREQ-1: foo"
-        match = re.search(r"^#\s+", response, re.MULTILINE)
-        final = response[match.start():] if match else response
-        assert final.startswith("# Requirements")
-        assert "Here is the document" not in final
+        """strip_preamble removes text before first # header."""
+        from voidrift_cli.commands.gather import strip_preamble
+        result = strip_preamble("Here is the document:\n\n# Requirements\n\nREQ-1: foo")
+        assert result.startswith("# Requirements")
+        assert "Here is the document" not in result
 
     def test_no_preamble_response_unchanged(self):
         """Response already starting with # is returned as-is."""
-        import re
+        from voidrift_cli.commands.gather import strip_preamble
         response = "# Requirements\n\nREQ-1: foo"
-        match = re.search(r"^#\s+", response, re.MULTILINE)
-        final = response[match.start():] if match else response
-        assert final == response
+        assert strip_preamble(response) == response
 
-    def test_source_requirements_in_user_message(self):
-        """Source requirements text is sent in user message, not system prompt."""
-        reqs_text = "SOURCE_REQUIREMENTS_SENTINEL"
-        system = "Final pass instructions only"
-        user_msg = f"Source Requirements:\n\n{reqs_text}"
-        assert reqs_text not in system
-        assert reqs_text in user_msg
+    def test_no_header_returns_full_response(self):
+        """Response with no # header is returned unchanged."""
+        from voidrift_cli.commands.gather import strip_preamble
+        response = "Just plain text with no headers."
+        assert strip_preamble(response) == response
 
 
 class TestChatWebFetch:

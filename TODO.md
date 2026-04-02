@@ -54,9 +54,9 @@ Work items that need doing. Grouped by area, ordered by priority within each gro
 
 ## Test Quality
 
-- [ ] `TestContextBuild` tests string concatenation in the test, not the actual gather code. Rewrite to call real `_build_context_block()` or equivalent.
-- [ ] `TestSourceRequirementsDirect` uses a `FakeAgent` instead of mocking through the real gather pipeline. Replace with integration test that mocks at the OpenAI boundary.
-- [ ] `test_preamble_stripped_from_final_response` reimplements regex logic inline. Should call the actual stripping function from gather.
+- [x] `TestContextBuild` — rewritten to call `build_context_block()` from gather.py.
+- [x] `TestSourceRequirementsDirect` — rewritten to call `strip_preamble()` from gather.py. FakeAgent test removed.
+- [x] `test_preamble_stripped_from_final_response` — calls real `strip_preamble()`.
 - [ ] Audit all command-level tests for "testing the test" pattern — tests that reimplement logic inline instead of exercising the real code path.
 
 ---

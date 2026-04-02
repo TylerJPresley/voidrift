@@ -85,6 +85,23 @@ def _is_truncated_json_error(err: str) -> bool:
     return "Invalid JSON" in err or "EOF while parsing" in err
 
 
+# ── Context block & preamble helpers ────────────────────────────────────────
+
+def build_context_block(context_summaries: dict[str, str]) -> str:
+    """Build a '## Project Context' block from category summaries (REQ-G-17)."""
+    if not context_summaries:
+        return ""
+    parts = [f"### {cat.capitalize()}\n\n{s.strip()}" for cat, s in context_summaries.items()]
+    return "## Project Context\n\n" + "\n\n".join(parts)
+
+
+def strip_preamble(response: str) -> str:
+    """Strip text before the first markdown # header."""
+    import re
+    match = re.search(r"^#\s+", response, re.MULTILINE)
+    return response[match.start():] if match else response
+
+
 # ── Analysis cache (REQ-CTX-5) ──────────────────────────────────────────────
 
 def _analysis_path(voidrift_dir: Path, filepath: str) -> Path:
@@ -337,12 +354,7 @@ def _gather_from(
                 ms.done(f"{cat} ({len(cat_files)} files)", f"{cat}", 0, failed=True)
 
     # Build context block to inject into every source analysis agent (REQ-G-17)
-    context_block = ""
-    if context_summaries:
-        ctx_parts = []
-        for cat, summary in context_summaries.items():
-            ctx_parts.append(f"### {cat.capitalize()}\n\n{summary.strip()}")
-        context_block = "## Project Context\n\n" + "\n\n".join(ctx_parts)
+    context_block = build_context_block(context_summaries)
 
     # --- Stage 3: Source Analysis — one agent per source file, direct response ---
     ui.stage(f"Stage 3: Analyzing {len(source_files)} source files...")
@@ -563,8 +575,7 @@ def _gather_from(
         return 1
 
     # Strip any preamble — find first `#` header
-    match = _re.search(r"^#\s+", final_response, _re.MULTILINE)
-    final_content = final_response[match.start():] if match else final_response
+    final_content = strip_preamble(final_response)
 
     target.write_text(final_content, encoding="utf-8")
 
