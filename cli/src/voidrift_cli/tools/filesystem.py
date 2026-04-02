@@ -144,10 +144,10 @@ class WriteContext:
         ctx.write_source_file("src/main.py", "...")
     """
 
-    def __init__(self, project_dir: Path | None = None, model_type: str = "local") -> None:
+    def __init__(self, project_dir: Path | None = None, max_read_lines: int = 2000) -> None:
         self._project_dir = (project_dir or Path.cwd()).resolve()
         self._framework_dir = self._project_dir / ".voidrift"
-        self._model_type = model_type
+        self._max_read_lines = max_read_lines
         self._source_write_count: int = 0
         self._written_this_run: set[str] = set()
         self._rewrite_allowed: set[str] = set()
@@ -186,13 +186,12 @@ class WriteContext:
         return None
 
     def _check_write_size(self, path: str, content: str) -> str | None:
-        from ..config import get_max_read_lines
-        limit = get_max_read_lines(self._model_type)
+        limit = self._max_read_lines
         line_count = content.count("\n") + (1 if content and not content.endswith("\n") else 0)
         if line_count > limit:
             return (
-                f"Error: {path} is {line_count} lines, which exceeds the {limit}-line limit "
-                f"(model_type={self._model_type}). This file exceeds the max_read_lines limit. "
+                f"Error: {path} is {line_count} lines, which exceeds the {limit}-line limit. "
+                f"This file exceeds the max_read_lines limit. "
                 f"Decompose into smaller files and write each separately."
             )
         return None
@@ -256,8 +255,7 @@ class WriteContext:
 
     def _read_with_guard(self, full: Path, display_path: str, offset: int, limit: int | None) -> str:
         """Read lines from a file with optional pagination and size guard (REQ-FSZ-1)."""
-        from ..config import get_max_read_lines
-        effective_limit = limit if limit is not None else get_max_read_lines(self._model_type)
+        effective_limit = limit if limit is not None else self._max_read_lines
         explicit_limit = limit is not None or offset > 0
 
         lines = full.read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
@@ -340,6 +338,11 @@ class WriteContext:
 # ---------------------------------------------------------------------------
 
 _ctx = WriteContext()
+
+
+def configure(max_read_lines: int = 2000) -> None:
+    """Configure the module-level context with model limits."""
+    _ctx._max_read_lines = max_read_lines
 
 
 def reset_write_count() -> None:

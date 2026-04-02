@@ -1,7 +1,7 @@
 [project]
 name = "voidrift-cli"
 dynamic = ["version"]
-description = "VoidRift CLI — local-first agentic development framework"
+description = "VoidRift CLI — agentic software engineering framework"
 requires-python = ">=3.11"
 dependencies = [
     "click>=8.1",

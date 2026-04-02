@@ -65,7 +65,7 @@ class AgentLoop(BaseModel):
         Returns:
             Configured OpenAI client instance.
         """
-        from .config import get_api_key, get_worker_config
+        from .config import get_api_key
 
         kwargs: dict[str, Any] = {}
         if self.model.api_base:
@@ -79,7 +79,7 @@ class AgentLoop(BaseModel):
             kwargs["api_key"] = get_api_key("gemini") or ""
             kwargs["base_url"] = "https://generativelanguage.googleapis.com/v1beta/openai/"
         else:
-            kwargs["api_key"] = get_worker_config().get("api_key", "no-key")
+            kwargs["api_key"] = "no-key"
         return OpenAI(
             timeout=httpx.Timeout(connect=30.0, read=600.0, write=60.0, pool=30.0),
             **kwargs,
@@ -185,6 +185,8 @@ class AgentLoop(BaseModel):
         model_name = self._model_name()
         last_call_sig: str | None = None
         stall_nudges = 0
+        max_tokens_continuations = 0
+        accumulated_text = ""
 
         # Log system prompt and latest user message
         if self.log_path:
@@ -211,18 +213,35 @@ class AgentLoop(BaseModel):
 
             try:
                 if self.stream:
-                    text, tool_calls = self._stream_response(client, kwargs)
+                    text, tool_calls, finish_reason = self._stream_response(client, kwargs)
                 else:
-                    text, tool_calls = self._sync_response(client, kwargs)
+                    text, tool_calls, finish_reason = self._sync_response(client, kwargs)
             except Exception as exc:
                 if self._is_context_truncation(exc) and self._trim_messages():
                     self._log("[CONTEXT_TRIM] Tools JSON truncated — trimmed messages, retrying")
                     continue
                 raise
 
+            # Max-tokens recovery (REQ-ARCH-11)
+            truncated = finish_reason == "length"
+            if truncated and tool_calls:
+                self._log("[MAX_TOKENS_TOOL_TRUNCATION] Response truncated with tool calls present")
+
             if not tool_calls:
-                text = self._strip_think(text)
+                # Handle text truncation via continuation (REQ-ARCH-11)
+                if truncated and max_tokens_continuations < 2:
+                    max_tokens_continuations += 1
+                    accumulated_text += text
+                    self._log(f"[MAX_TOKENS_RECOVERY] attempt {max_tokens_continuations}/2")
+                    self.messages.append({"role": "assistant", "content": text})
+                    from . import prompts as _prompts
+                    resume = _prompts.load_prompt("system", "MAX-TOKENS-RESUME")
+                    self.messages.append({"role": "user", "content": resume})
+                    continue
+                text = self._strip_think(accumulated_text + text)
                 self.messages.append({"role": "assistant", "content": text})
+                if truncated:
+                    self._log("[MAX_TOKENS_EXHAUSTED] 2 continuations exhausted, returning partial")
                 self._log(f"[ASSISTANT] {text}")
                 return text
 
@@ -291,9 +310,9 @@ class AgentLoop(BaseModel):
         if self.extra_body:
             kwargs["extra_body"] = self.extra_body
         if self.stream:
-            text, tool_calls = self._stream_response(client, kwargs)
+            text, tool_calls, _fr = self._stream_response(client, kwargs)
         else:
-            text, tool_calls = self._sync_response(client, kwargs)
+            text, tool_calls, _fr = self._sync_response(client, kwargs)
 
         # Process any write_file/done calls from the final attempt
         if tool_calls:
@@ -392,11 +411,11 @@ class AgentLoop(BaseModel):
 
         return False
 
-    def _sync_response(self, client: OpenAI, kwargs: dict) -> tuple[str, list[dict]]:
+    def _sync_response(self, client: OpenAI, kwargs: dict) -> tuple[str, list[dict], str | None]:
         """Non-streaming response with exponential backoff retry (REQ-ARCH-10).
 
         Returns:
-            Tuple of (text, tool_calls_list).
+            Tuple of (text, tool_calls_list, finish_reason).
         """
         _call_start = time.time()
 
@@ -432,7 +451,9 @@ class AgentLoop(BaseModel):
 
         if response is None:
             raise last_exc  # type: ignore[misc]
-        msg = response.choices[0].message
+        choice = response.choices[0]
+        msg = choice.message
+        finish_reason = getattr(choice, "finish_reason", None)
         text = msg.content or ""
         tool_calls = []
         if msg.tool_calls:
@@ -470,9 +491,9 @@ class AgentLoop(BaseModel):
                     "ctx_pct": ctx_pct,
                 })
 
-        return text, tool_calls
+        return text, tool_calls, finish_reason
 
-    def _stream_response(self, client: OpenAI, kwargs: dict) -> tuple[str, list[dict]]:
+    def _stream_response(self, client: OpenAI, kwargs: dict) -> tuple[str, list[dict], str | None]:
         """Stream a response, printing tokens as they arrive.
 
         Args:
@@ -488,6 +509,7 @@ class AgentLoop(BaseModel):
         collected_tool_calls: dict[int, dict] = {}
         token_count = 0
         usage_data: dict = {}
+        finish_reason: str | None = None
         stream_start = time.time()
 
         # Background on_progress timer — fires every 250ms while waiting for first token.
@@ -564,6 +586,8 @@ class AgentLoop(BaseModel):
                         }
                     continue
                 delta = chunk.choices[0].delta
+                if chunk.choices[0].finish_reason:
+                    finish_reason = chunk.choices[0].finish_reason
 
                 # Accumulate text
                 if delta.content:
@@ -688,7 +712,7 @@ class AgentLoop(BaseModel):
                     "ctx_pct": ctx_pct,
                 })
 
-        return collected_text, tool_calls_list
+        return collected_text, tool_calls_list, finish_reason
 
     def _execute_tool(self, name: str, arguments: str) -> str:
         """Parse arguments and execute a tool handler by name.

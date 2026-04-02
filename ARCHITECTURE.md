@@ -1,6 +1,6 @@
 # VoidRift Architecture
 
-**Local-first Agentic Development Framework**
+**Agentic Software Engineering Framework**
 
 This document describes the bounded contexts, component responsibilities, and key design decisions for the VoidRift framework itself. For a quickstart, see [README.md](README.md).
 
@@ -14,15 +14,12 @@ VoidRift orchestrates AI models to produce a deployable project from requirement
 Operator
   │
   ▼
-voidrift CLI  ──reads──►  ~/.voidrift/
-  │                       models.yml
-  │                       resources/
+voidrift CLI  ──reads──►  ~/.voidrift/ (config, resources)
+  │                       ~/.worker-cli/models.yml (model registry)
   │
   ├── HTTP ──►  Local vLLM (GPU worker node)
   ├── HTTP ──►  Kiro Gateway
   └── HTTPS ►  Cloud APIs (Anthropic, Google)
-
-worker CLI  ──SSH──►  Worker Node (Docker, GPU)
 ```
 
 ---
@@ -36,7 +33,7 @@ worker CLI  ──SSH──►  Worker Node (Docker, GPU)
 The CLI is the orchestration layer. It owns:
 - Framework command execution (Gather → Plan → Develop → Automate → Verify)
 - Agent loop (message routing, tool dispatch, stall detection, think-tag stripping, retry)
-- Model alias resolution (`models.yml` + `worker-models.yml`)
+- Model alias resolution (models file at configured path)
 - Local agent tools (`tools/` sub-package): filesystem, process management, HTTP client, browser automation
 - Interactive UI (spinners, progress, streaming output, `/compact`)
 - System log (`~/.voidrift/logs/voidrift.log`)
@@ -49,20 +46,7 @@ Agent tools live in `cli/src/voidrift_cli/tools/`:
 
 The CLI does **not** manage containers, SSH connections, or gateway processes. Every model is just a `(base_url, api_key, model_id)` tuple.
 
-### 2.2 Worker CLI (`worker-cli/`)
-
-**Entry point:** `voidrift_worker.main:cli`
-
-Manages the GPU worker node over SSH. It owns:
-- Container lifecycle (`worker start/stop/status`)
-- Model weight management (`worker models list/add/remove`)
-- Image source management (`worker images list/add/update`)
-- Kiro Gateway lifecycle (`worker kiro start/stop/status`)
-- Worker health checks (`worker check`)
-
-The Worker CLI is installed independently from the VoidRift CLI and has no import dependency on it.
-
-### 2.3 Framework Resources (`resources/`)
+### 2.2 Framework Resources (`resources/`)
 
 Static guidance loaded at command init:
 - `skills/` — methodology guidance (SYSTEMS-ENG, QUALITY-QA, ARCH-DESIGN, RELIABILITY-ENG, PROD-STRATEGY, CLOUD-OPS, ANALYSIS-REQS)
@@ -92,13 +76,13 @@ Agent tools live in `cli/src/voidrift_cli/tools/` (a Python package). These run 
 
 The `tools/` package was split out from `tools.py` to support multiple tool modules (filesystem, process, HTTP, browser) without naming conflicts.
 
-### 3.4 `worker-models.yml` is the source of truth for local models
+### 3.4 Single external models file
 
-The CLI auto-discovers local models from `worker-models.yml` without requiring duplicate entries in `models.yml`. Explicit `models.yml` entries take precedence for overrides. **Why:** `worker models add` already maintains `worker-models.yml`. Requiring operators to also edit `models.yml` adds toil and introduces drift (REQ-MC-1).
+The CLI reads all model definitions from a single file maintained by an external tool (worker-cli). The path is configurable via `models_file` in `config.yml` (default `~/.worker-cli/models.yml`). Each entry is self-contained with its own connection details. **Why:** Voidrift is model-agnostic — it doesn't care how models are provisioned. One file, one source of truth, no merging (REQ-MC-1).
 
 ### 3.6 `max_context` in config, not code
 
-Cloud model context window sizes live in `models.yml` as `max_context:` fields. No lookup table in the CLI code. **Why:** Hardcoded tables go stale silently. Config files are visible, auditable, and operator-controlled (REQ-MC-3).
+Context window sizes live in the models file as `max_context:` fields. No lookup table in the CLI code. **Why:** Hardcoded tables go stale silently. Config files are visible, auditable, and operator-controlled (REQ-MC-3).
 
 ### 3.6 Tool choice modes
 
@@ -244,7 +228,6 @@ Two log roots, two intents:
 | Command logs | `<project>/.voidrift/logs/` | `<command>-<timestamp>.log` — full agent dialog | Until `voidrift prune` |
 | System log | `~/.voidrift/logs/voidrift.log` | CLI invocations, command outcomes | Rotating (1MB × 5) |
 
-| Model config | `~/.voidrift/models.yml` | Cloud and gateway model aliases | Operator-managed |
-| Worker models | `~/.voidrift/worker-models.yml` | Local model configs | `worker models add/remove` |
-| Active container | `~/.voidrift/.active-container` | Running model alias (line 2) | `worker start/stop` |
+| Model config | `~/.worker-cli/models.yml` | All model aliases (local, cloud, gateway) | Maintained by worker-cli |
+| Active container | `~/.worker-cli/.active-container` | Running model alias (line 2) | Maintained by worker-cli |
 | State history | `<project>/.voidrift/STATE.md` | Command run history, file manifests | Append-only |

@@ -1,11 +1,49 @@
 """Tests for models.py — alias resolution (REQ-MC-1, REQ-MC-3)."""
 
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+import yaml
 
 from voidrift_cli.config import expand_config_refs
-from voidrift_cli.models import resolve_model, list_models, ModelConfig, _synthesize_from_worker_models
+from voidrift_cli.models import resolve_model, list_models, ModelConfig
+
+
+# Sample models file content for tests
+_SAMPLE_MODELS = {
+    "models": {
+        "claude": {
+            "model_id": "anthropic/claude-opus-4-6",
+            "type": "cloud",
+            "provider": "anthropic",
+            "max_context": 200000,
+        },
+        "qwen35": {
+            "model_id": "qwen35",
+            "base_url": "http://192.168.50.100:8000/v1",
+            "api_key": "${OPENAI_API_KEY:-no-key}",
+            "type": "local",
+            "max_context": 262144,
+        },
+        "kiro-sonnet": {
+            "model_id": "openai/claude-sonnet-4.6",
+            "base_url": "http://localhost:8000/v1",
+            "api_key": "test-key",
+            "type": "gateway",
+            "max_context": 1048576,
+        },
+    }
+}
+
+
+@pytest.fixture
+def models_file(tmp_path):
+    """Write a sample models file and patch get_models_file to return it."""
+    p = tmp_path / "models.yml"
+    p.write_text(yaml.dump(_SAMPLE_MODELS))
+    with patch("voidrift_cli.models.get_models_file", return_value=p):
+        yield p
 
 
 class TestExpandConfigRefs:
@@ -34,147 +72,73 @@ class TestExpandConfigRefs:
 
 
 class TestResolveModel:
-    def test_cloud_model(self):
+    """REQ-MC-1: alias resolution from configured models file."""
+
+    def test_cloud_model(self, models_file):
         m = resolve_model("claude")
         assert m.model_type == "cloud"
         assert m.model_id == "anthropic/claude-opus-4-6"
         assert m.provider == "anthropic"
-        assert m.api_base is None
         assert m.max_context == 200000
 
-    def test_gemini(self):
-        m = resolve_model("gemini")
-        assert m.model_id == "gemini/gemini-2.5-pro"
-        assert m.provider == "gemini"
-        assert m.max_context == 1048576
+    def test_local_model(self, models_file):
+        m = resolve_model("qwen35")
+        assert m.model_type == "local"
+        assert m.api_base == "http://192.168.50.100:8000/v1"
+        assert m.max_context == 262144
 
-    def test_kiro_model(self):
+    def test_gateway_model(self, models_file):
         m = resolve_model("kiro-sonnet")
         assert m.model_type == "gateway"
         assert m.model_id == "openai/claude-sonnet-4.6"
+        assert m.max_context == 1048576
 
-    def test_unknown_model_raises(self):
+    def test_unknown_model_raises(self, models_file):
         with pytest.raises(ValueError, match="Unknown model"):
             resolve_model("nonexistent-model-xyz")
 
-    def test_error_lists_available(self):
+    def test_error_lists_available(self, models_file):
         with pytest.raises(ValueError) as exc_info:
             resolve_model("nope")
         msg = str(exc_info.value)
         assert "claude" in msg
 
-    def test_gateway_model_max_context(self):
-        m = resolve_model("kiro-sonnet")
-        # kiro-sonnet is Claude Sonnet 4.6 — 1M context per kiro.dev/docs/models/
-        assert m.max_context == 1048576
-
-
-class TestWorkerModelDiscovery:
-    """Tests for REQ-MC-1: local models synthesized from worker-models.yml."""
-
-    _WORKER_MODELS = {
-        "models": {
-            "test-local": {
-                "served_model_name": "test-local",
-                "max_model_len": 65536,
-            }
-        },
-        "worker": {"port": 8000},
-    }
-
-    @patch("voidrift_cli.models._load_models_config", return_value={"models": {}})
-    @patch("voidrift_cli.models._synthesize_from_worker_models",
-           return_value={"test-local": {
-               "model_id": "openai/test-local",
-               "base_url": "http://192.168.1.1:8000/v1",
-               "api_key": "no-key",
-               "type": "local",
-               "max_context": 65536,
-           }})
-    def test_req_mc1_resolves_worker_only_alias(self, _synth, _models):
-        """REQ-MC-1: alias from worker-models.yml resolves without models.yml entry."""
-        m = resolve_model("test-local")
-        assert m.model_type == "local"
-        assert m.model_id == "openai/test-local"
-        assert m.api_base == "http://192.168.1.1:8000/v1"
-        assert m.max_context == 65536
-
-    @patch("voidrift_cli.models._load_models_config",
-           return_value={"models": {"test-local": {
-               "model_id": "openai/override",
-               "base_url": "http://override:9999/v1",
-               "api_key": "key",
-               "type": "local",
-           }}})
-    @patch("voidrift_cli.models._synthesize_from_worker_models",
-           return_value={"test-local": {
-               "model_id": "openai/test-local",
-               "base_url": "http://192.168.1.1:8000/v1",
-               "api_key": "no-key",
-               "type": "local",
-           }})
-    def test_req_mc1_explicit_takes_precedence(self, _synth, _models):
-        """REQ-MC-1: models.yml entry overrides worker-models.yml synthesis."""
-        m = resolve_model("test-local")
-        assert m.api_base == "http://override:9999/v1"
-        assert m.model_id == "openai/override"
-
-    @patch("voidrift_cli.models._load_models_config", return_value={"models": {}})
-    @patch("voidrift_cli.models._synthesize_from_worker_models",
-           return_value={"test-local": {
-               "model_id": "openai/test-local",
-               "base_url": "http://192.168.1.1:8000/v1",
-               "api_key": "no-key",
-               "type": "local",
-           }})
-    def test_req_mc1_list_includes_worker_models(self, _synth, _models):
-        """REQ-MC-1: list_models() includes synthesized worker aliases."""
-        models = list_models()
-        assert "test-local" in models
-
-    def test_synth_returns_empty_without_worker_ip(self):
-        """_synthesize_from_worker_models returns {} when worker.ip is unset."""
-        with patch("voidrift_cli.config.get_worker_config", return_value={}):
-            result = _synthesize_from_worker_models()
-        assert result == {}
-
-    def test_synth_returns_empty_without_worker_models_file(self, tmp_path, monkeypatch):
-        """_synthesize_from_worker_models returns {} when worker-models.yml is missing."""
-        monkeypatch.setenv("VOIDRIFT_HOME", str(tmp_path))
-        from voidrift_cli.config import clear_config_cache
-        clear_config_cache()
-        with patch("voidrift_cli.config.get_worker_config", return_value={"ip": "192.168.1.1"}):
-            result = _synthesize_from_worker_models()
-        assert result == {}
+    def test_missing_models_file_raises(self, tmp_path):
+        """REQ-MC-1: missing models file means no models available."""
+        missing = tmp_path / "nope.yml"
+        with patch("voidrift_cli.models.get_models_file", return_value=missing):
+            with pytest.raises(ValueError, match="Unknown model"):
+                resolve_model("claude")
 
 
 class TestMaxContext:
-    """Tests for REQ-MC-3: max_context field from models.yml."""
+    """REQ-MC-3: max_context field from models file."""
 
-    def test_req_mc3_max_context_on_cloud_model(self):
-        """REQ-MC-3: max_context from models.yml is populated on ModelConfig."""
+    def test_max_context_populated(self, models_file):
         m = resolve_model("claude")
         assert m.max_context == 200000
 
-    def test_req_mc3_max_context_none_when_unset(self):
-        """REQ-MC-3: max_context is None when not present in models.yml."""
-        m = resolve_model("kiro")  # auto-routing — conservative 200K lower bound
-        assert m.max_context == 200000
-
-    @patch("voidrift_cli.models._merged_models", return_value={
-        "no-ctx": {"model_id": "openai/x", "type": "cloud"}
-    })
-    def test_req_mc3_max_context_none_if_missing_from_entry(self, _):
-        m = resolve_model("no-ctx")
+    def test_max_context_none_when_unset(self, tmp_path):
+        """REQ-MC-3: max_context is None when not in entry."""
+        p = tmp_path / "models.yml"
+        p.write_text(yaml.dump({"models": {"bare": {"model_id": "x", "type": "cloud"}}}))
+        with patch("voidrift_cli.models.get_models_file", return_value=p):
+            m = resolve_model("bare")
         assert m.max_context is None
 
 
 class TestListModels:
-    def test_returns_sorted(self):
+    def test_returns_sorted(self, models_file):
         models = list_models()
         assert models == sorted(models)
 
-    def test_includes_cloud_types(self):
+    def test_includes_all_types(self, models_file):
         models = list_models()
         assert "claude" in models
+        assert "qwen35" in models
         assert "kiro-sonnet" in models
+
+    def test_empty_when_no_file(self, tmp_path):
+        missing = tmp_path / "nope.yml"
+        with patch("voidrift_cli.models.get_models_file", return_value=missing):
+            assert list_models() == []

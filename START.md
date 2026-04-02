@@ -1,12 +1,13 @@
 # VoidRift Development Guide
 
-Follow this instruction: You are helping develop Project VoidRift: Local-first Agentic Development Framework.
+Follow this instruction: You are helping develop Project VoidRift: The Agentic Software Engineering Framework.
 
 ## Context Files
 
 Load these before starting work:
 - `REQUIREMENTS.md` — Acceptance criteria and the contract for all changes
 - `README.md` — Project overview, architecture, and usage
+- `ARCHITECTURE.md` — Component design, data flows, and key decisions
 
 ## CRITICAL: Requirements-First Workflow
 
@@ -19,21 +20,23 @@ Load these before starting work:
 
 2. **Implement to satisfy ACs**
    - Write code that passes the new/modified ACs
-   - Test against each AC as you go
+   - Write tests per Testing Standards below
 
 3. **Verify against REQUIREMENTS.md**
    - Does this satisfy all related ACs?
    - Does this break any existing ACs?
-   - REQUIREMENTS.md is the test suite - all ACs must pass
 
-4. **Update documentation**
-   - README.md for framework-level changes
-   - ARCHITECTURE.md for component, data flow, or design decision changes
-   - CHANGELOG.md for all notable changes
+4. **Update documentation — EVERY change must pass this checklist:**
+   - [ ] REQUIREMENTS.md — Did acceptance criteria change? Are new REQs needed?
+   - [ ] ARCHITECTURE.md — Did components, data flows, or design decisions change?
+   - [ ] README.md — Did user-facing behavior, commands, or configuration change?
+   - [ ] CHANGELOG.md — What changed, added, or fixed?
+   - [ ] `make test` passes — work is NOT complete until all tests pass
 
 5. **Commit with AC references**
 
 **NEVER implement first and update requirements later. Requirements are the contract.**
+**NEVER consider work complete with stale documentation. The context files ARE the project.**
 
 ## No Bandaids
 
@@ -52,19 +55,6 @@ NEVER run without confirmation:
 - git reset --hard, push --force, branch -D, clean -fd, rebase, filter-branch
 - rm -rf, changes to >5 files, system config changes
 
-ALWAYS:
-- Verify bash syntax before committing scripts
-- Keep commits atomic with clear messages
-- Ask before breaking changes
-
-## Communication
-
-- Direct and concise
-- Explain reasoning
-- Ask clarifying questions
-- Technical language for developers
-- Practical implementations
-
 ## Framework Context
 
 Python monorepo with three packages:
@@ -72,11 +62,29 @@ Python monorepo with three packages:
 - `worker-cli/` — Click-based CLI providing the `worker` command for GPU node management
 - `resources/` — Framework guidance files (skills/, templates/, prompts/)
 - Five framework commands: Gather → Plan → Develop → Automate → Verify
-- Per-command prompts replace static role files — a command can have multiple distinct agent invocations
+- A framework command can have multiple distinct agent invocations
 - Local worker models (vLLM) + Kiro Gateway + cloud APIs, all as OpenAI-compatible endpoints
 - Pydantic models, Google-style docstrings, src/ layout
 - Build: hatchling, VERSION file (shared), Makefile
 - Tests: pytest across cli/tests/, worker-cli/tests/
+
+## Testing Standards
+
+Tests validate behavior through the real code path. Mock at the external boundary (API clients, filesystem, SSH), not at internal functions.
+
+**What makes a meaningful test:**
+- Calls the actual function/method under test
+- Mocks only external I/O (OpenAI client, disk, network)
+- Asserts on observable outcomes (return values, side effects, log output)
+- Breaks when the implementation changes in ways that affect behavior
+
+**Red flags — rewrite these:**
+- Test reimplements the logic it's testing (string building, regex) instead of calling the real function
+- Test creates a fake class instead of mocking through the real code path
+- Test asserts only on constants or type shapes with no behavioral verification
+- Test passes regardless of implementation changes
+
+**Test naming:** `test_<requirement>_<scenario>` when testing an AC. Reference the REQ ID in the docstring.
 
 ## When User Requests a Feature
 
@@ -91,17 +99,7 @@ Python monorepo with three packages:
 
 ## Eat Your Own Dogfood
 
-When building the framework itself, consult `resources/skills/` and follow them. This validates the skills work in practice.
-
-Relevant skills for framework development:
-- **ANALYSIS-REQS** — Requirements authoring, EARS notation, BDD acceptance criteria, traceability
-- **SYSTEMS-ENG** — CLI conventions (stdout/stderr, signals, POSIX, packaging)
-- **ARCH-DESIGN** — Component design, API contracts, state management, decision rationale
-- **QUALITY-QA** — TDD, no completion claims without evidence, regression tests
-- **RELIABILITY-ENG** — Eliminate toil, observability, retry logic, error budgets
-- **PROD-STRATEGY** — Documentation as code, user-centric docs, onboarding, conventional commits
-- **CLOUD-OPS** — Container lifecycle, secrets management, SSH operations, environment parity
-- **WORKFLOW** — Atomic commits, worktree isolation, verifiable units of work
+When building the framework itself, consult `resources/skills/` and follow them. This validates the skills work in practice. The directory contents are the authoritative list — don't maintain a separate inventory here.
 
 Skills are authoritative. Don't just reference them — follow them. If a skill says "use stdout for results, stderr for errors", do it. If a skill seems wrong or incomplete, raise it with the operator before changing anything.
 
@@ -110,11 +108,3 @@ Skills are authoritative. Don't just reference them — follow them. If a skill 
 When writing or editing prompts in `resources/prompts/`:
 - Use positive instructions only. Tell the model what to do, not what to avoid. Negative instructions ("NEVER", "do NOT", "don't") waste context tokens and are less effective than clear positive direction.
 - Keep prompts compact. Every token in the system prompt competes with the model's working memory for the task.
-
-## Change Management
-
-After implementing, explicitly check:
-- Does this affect REQUIREMENTS.md, README.md, or ARCHITECTURE.md?
-- Update CHANGELOG.md with the change
-- Run `make test` to verify all tests pass
-- Don't consider work complete until documentation is updated

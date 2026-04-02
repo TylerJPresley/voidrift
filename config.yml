@@ -2,33 +2,12 @@
 # Source of truth: ~/Projects/voidrift/config.yml
 # Runtime location: ~/.voidrift/config.yml (synced via make sync)
 
-worker:
-  user: tjpresley
-  ip: 192.168.50.100
-  api_key: ${OPENAI_API_KEY:-no-key}
-  hf_token: ${HF_TOKEN}
-
-kiro:
-  port: 8000
-  api_key: ${KIRO_API_KEY}
+models_file: ~/.worker-cli/models.yml
 
 api_keys:
   anthropic: ${ANTHROPIC_API_KEY}
   gemini: ${GEMINI_API_KEY}
 
-concurrency:
-  local: 1
-  cloud: 8
-  gateway: 8
-
 retention:
   project: 5
   global: 30
-
-limits:
-  local_max_tokens: 4096
-  cloud_max_tokens: 32768
-  max_input_chars: 8000
-  local_max_read_lines: 2000
-  cloud_max_read_lines: 2000
-  gateway_max_read_lines: 2000

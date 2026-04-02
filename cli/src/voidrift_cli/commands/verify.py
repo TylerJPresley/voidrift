@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 
 from ..agent import AgentLoop, build_local_tools
-from ..config import get_concurrency, get_max_tokens
+from ..config import get_max_tokens
 from ..models import ModelConfig
 from ..utils import (
     append_state,
@@ -109,7 +109,7 @@ def _run_sub_agent(
         tools=tools,
         tool_handlers=handlers,
         stream=False,
-        max_tokens=get_max_tokens(worker.model_type, "verify-execute"),
+        max_tokens=get_max_tokens(worker, "verify-execute"),
         log_path=log,
         show_spinner=False,
     )
@@ -268,13 +268,16 @@ def run_verify(worker: ModelConfig) -> int:
         # ── Stage 1: Plan agent ──────────────────────────────────────────
         ui.stage("Stage 1 — Planning test cases...")
         plan_tools, plan_handlers = build_local_tools("verify-plan")
+
+        from ..tools.filesystem import configure as _configure_fs
+        _configure_fs(max_read_lines=worker.max_read_lines)
         plan_agent = AgentLoop(
             model=worker,
             system_prompt=_build_plan_prompt(),
             tools=plan_tools,
             tool_handlers=plan_handlers,
             stream=False,
-            max_tokens=get_max_tokens(worker.model_type, "verify-plan"),
+            max_tokens=get_max_tokens(worker, "verify-plan"),
             log_path=log,
             show_spinner=False,
         )
@@ -355,7 +358,7 @@ def run_verify(worker: ModelConfig) -> int:
 
         if testable:
             (d / "bugs").mkdir(exist_ok=True)
-            max_workers = get_concurrency(worker.model_type)
+            max_workers = worker.concurrency
             if max_workers == 0:
                 max_workers = len(testable)
             max_workers = max(1, max_workers)

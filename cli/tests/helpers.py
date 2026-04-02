@@ -3,7 +3,7 @@
 from unittest.mock import MagicMock
 
 
-def make_openai_response(content: str = "test response", tool_calls=None):
+def make_openai_response(content: str = "test response", tool_calls=None, finish_reason="stop"):
     """Build a mock OpenAI ChatCompletion response."""
     msg = MagicMock()
     msg.content = content
@@ -15,6 +15,7 @@ def make_openai_response(content: str = "test response", tool_calls=None):
     }
     choice = MagicMock()
     choice.message = msg
+    choice.finish_reason = finish_reason
     resp = MagicMock()
     resp.choices = [choice]
     return resp

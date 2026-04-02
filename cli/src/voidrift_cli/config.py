@@ -1,6 +1,8 @@
 """Framework configuration loader (REQ-CFG-1..4).
 
 Loads config from ~/.voidrift/config.yml with env var expansion.
+Operational limits (max_tokens, concurrency, etc.) live on each model entry
+in the models file — not in config.yml. See models.py and REQ-MC-3.
 """
 
 from __future__ import annotations
@@ -46,7 +48,6 @@ def load_config() -> dict:
     with open(p) as f:
         config = yaml.safe_load(f) or {}
 
-    # Expand env vars in all string values
     def expand_recursive(obj):
         if isinstance(obj, dict):
             return {k: expand_recursive(v) for k, v in obj.items()}
@@ -65,12 +66,7 @@ def clear_config_cache() -> None:
 
 
 def expand_config_refs(value: str) -> str:
-    """Expand ${section.key} config references and ${VAR} env vars in a string.
-
-    Config references (e.g., ${worker.ip}) are resolved from config.yml.
-    Env vars (e.g., ${ANTHROPIC_API_KEY}) are resolved from environment.
-    Config refs take precedence over env vars.
-    """
+    """Expand ${section.key} config references and ${VAR} env vars in a string."""
     if not isinstance(value, str) or "${" not in value:
         return value
 
@@ -81,42 +77,30 @@ def expand_config_refs(value: str) -> str:
         default = ""
         if ":-" in var:
             var, default = var.split(":-", 1)
-
-        # Try config reference first (section.key)
         if "." in var:
             parts = var.split(".", 1)
             section = config.get(parts[0], {})
             if isinstance(section, dict) and parts[1] in section:
                 return str(section[parts[1]])
-
-        # Fall back to env var
         return os.environ.get(var, default)
 
     return re.sub(r"\$\{([^}]+)}", _replace, value)
 
 
-def get_worker_config() -> dict:
-    """Get worker section from config."""
-    return load_config().get("worker", {})
+def get_models_file() -> Path:
+    """Get the path to the models registry file (REQ-MC-1, REQ-CFG-2).
 
-
-def get_kiro_config() -> dict:
-    """Get kiro section from config."""
-    return load_config().get("kiro", {})
+    Reads ``models_file`` from config.yml, defaulting to ``~/.worker-cli/models.yml``.
+    """
+    configured = load_config().get("models_file", "")
+    if configured:
+        return Path(os.path.expanduser(configured))
+    return Path.home() / ".worker-cli" / "models.yml"
 
 
 def get_api_key(provider: str) -> str | None:
     """Get API key for a provider."""
     return load_config().get("api_keys", {}).get(provider)
-
-
-def get_concurrency(model_type: str) -> int:
-    """Get max concurrent workers for a model type. 0 means unbounded."""
-    defaults = {"local": 1, "cloud": 8, "gateway": 8}
-    val = load_config().get("concurrency", {}).get(model_type)
-    if val is not None:
-        return int(val)
-    return defaults.get(model_type, 2)
 
 
 def get_retention(scope: str) -> int:
@@ -136,80 +120,20 @@ _STAGE_MAX_TOKENS: dict[str, int] = {
     "consolidation":    8192,
     "task":             4000,
     "plan":             32768,
-    "verify-plan":      32768,   # plan agent reads all docs + writes VERIFY-PLAN.md
-    "verify-execute":   8192,    # sub-agent executes one test case + optional bug report
-}
-
-# Model-type default caps (REQ-CFG-6)
-_MODEL_TYPE_CAPS: dict[str, int] = {
-    "local":   4096,
-    "cloud":   32768,
-    "gateway": 32768,
-}
-
-# Default input char limits per model type (REQ-CFG-6)
-_MODEL_INPUT_CHARS: dict[str, int] = {
-    "local":   8000,
-    "cloud":   0,      # 0 = unlimited
-    "gateway": 0,
+    "verify-plan":      32768,
+    "verify-execute":   8192,
 }
 
 
-def get_max_tokens(model_type: str, stage: str) -> int:
-    """Return max_tokens for an agent given its model type and stage (REQ-CFG-6, REQ-CFG-7).
-
-    Returns min(stage_default, model_type_cap). Both are configurable via
-    config.yml limits: section.
+def get_max_tokens(mc: "ModelConfig", stage: str) -> int:  # noqa: F821
+    """Return max_tokens for an agent: min(stage_default, model.max_tokens) (REQ-CFG-7).
 
     Args:
-        model_type: "local", "cloud", or "gateway".
-        stage: Stage key matching _STAGE_MAX_TOKENS (e.g. "analysis", "task").
+        mc: Resolved ModelConfig with max_tokens field.
+        stage: Stage key (e.g. "analysis", "task", "plan").
     """
-    limits = load_config().get("limits", {})
-    cap_key = f"{model_type}_max_tokens"
-    cap = int(limits.get(cap_key, _MODEL_TYPE_CAPS.get(model_type, 32768)))
     stage_default = _STAGE_MAX_TOKENS.get(stage, 4096)
-    return min(stage_default, cap)
-
-
-def get_max_input_chars(model_type: str) -> int:
-    """Return max input characters for file content sent to analysis agents (REQ-CFG-6).
-
-    Returns 0 for unlimited (cloud/gateway). Configurable via config.yml
-    limits.max_input_chars.
-
-    Args:
-        model_type: "local", "cloud", or "gateway".
-    """
-    limits = load_config().get("limits", {})
-    if "max_input_chars" in limits:
-        return int(limits["max_input_chars"])
-    return _MODEL_INPUT_CHARS.get(model_type, 0)
-
-
-# Default max_read_lines per model type (REQ-CFG-6, REQ-FSZ-1, REQ-FSZ-2)
-_MODEL_MAX_READ_LINES: dict[str, int] = {
-    "local":   2000,
-    "cloud":   2000,
-    "gateway": 2000,
-}
-
-
-def get_max_read_lines(model_type: str) -> int:
-    """Return max lines for read/write size guards for a model type (REQ-FSZ-1, REQ-FSZ-2).
-
-    Configurable via config.yml limits.<model_type>_max_read_lines.
-    Defaults to 2000 for all types if not configured.
-
-    Args:
-        model_type: "local", "cloud", or "gateway".
-    """
-    limits = load_config().get("limits", {})
-    key = f"{model_type}_max_read_lines"
-    val = limits.get(key)
-    if val is not None:
-        return int(val)
-    return _MODEL_MAX_READ_LINES.get(model_type, 2000)
+    return min(stage_default, mc.max_tokens)
 
 
 def get_skills_config() -> dict:

@@ -84,7 +84,7 @@ def run_plan(
         tools=tools,
         tool_handlers=handlers,
         stream=False,
-        max_tokens=get_max_tokens(model.model_type, "plan"),
+        max_tokens=get_max_tokens(model, "plan"),
         log_path=log,
         show_spinner=False,
     )
@@ -147,7 +147,7 @@ def run_plan(
         tools=tools,
         tool_handlers=handlers,
         stream=False,
-        max_tokens=get_max_tokens(model.model_type, "plan"),
+        max_tokens=get_max_tokens(model, "plan"),
         log_path=log,
         show_spinner=False,
     )

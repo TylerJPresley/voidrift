@@ -404,3 +404,84 @@ class TestBuildLocalTools:
         assert "list_skills" in tool_names
         assert "get_skill" in handlers
         assert "list_skills" in handlers
+
+
+class TestMaxTokensRecovery:
+    """V-ARCH-6a: REQ-ARCH-11 — max output token truncation detection and recovery."""
+
+    @patch("voidrift_cli.agent.OpenAI")
+    def test_text_truncation_triggers_continuation(self, MockOpenAI, cloud_model, tmp_path):
+        """Given finish_reason='length' on text, agent injects resume and retries."""
+        log = tmp_path / "test.log"
+        agent = AgentLoop(model=cloud_model, stream=False, log_path=log)
+        mock_client = MagicMock()
+        MockOpenAI.return_value = mock_client
+
+        truncated = make_openai_response("partial ", finish_reason="length")
+        complete = make_openai_response("content here", finish_reason="stop")
+        mock_client.chat.completions.create.side_effect = [truncated, complete]
+
+        result = agent.send("generate something long")
+        assert result == "partial content here"
+        assert mock_client.chat.completions.create.call_count == 2
+        log_text = log.read_text()
+        assert "[MAX_TOKENS_RECOVERY] attempt 1/2" in log_text
+
+    @patch("voidrift_cli.agent.OpenAI")
+    def test_exhaustion_returns_partial(self, MockOpenAI, cloud_model, tmp_path):
+        """Given 2 continuations exhausted, agent returns concatenated partial text."""
+        log = tmp_path / "test.log"
+        agent = AgentLoop(model=cloud_model, stream=False, log_path=log)
+        mock_client = MagicMock()
+        MockOpenAI.return_value = mock_client
+
+        t1 = make_openai_response("part1 ", finish_reason="length")
+        t2 = make_openai_response("part2 ", finish_reason="length")
+        t3 = make_openai_response("part3", finish_reason="length")
+        mock_client.chat.completions.create.side_effect = [t1, t2, t3]
+
+        result = agent.send("generate")
+        assert result == "part1 part2 part3"
+        assert mock_client.chat.completions.create.call_count == 3
+        log_text = log.read_text()
+        assert "[MAX_TOKENS_RECOVERY] attempt 1/2" in log_text
+        assert "[MAX_TOKENS_RECOVERY] attempt 2/2" in log_text
+        assert "[MAX_TOKENS_EXHAUSTED]" in log_text
+
+    @patch("voidrift_cli.agent.OpenAI")
+    def test_tool_truncation_logged_not_blocked(self, MockOpenAI, cloud_model, tmp_path):
+        """Given finish_reason='length' with tool calls, log warning and process normally."""
+        log = tmp_path / "test.log"
+        agent = AgentLoop(model=cloud_model, stream=False, log_path=log)
+        agent.tools = [{"type": "function", "function": {"name": "read_source_file", "parameters": {}}}]
+        agent.tool_handlers = {"read_source_file": lambda **kw: "file content"}
+        agent.tool_choice = "auto"
+        mock_client = MagicMock()
+        MockOpenAI.return_value = mock_client
+
+        tc = make_tool_call("read_source_file", '{"path": "x.py"}')
+        truncated_with_tools = make_openai_response(content=None, tool_calls=[tc], finish_reason="length")
+        truncated_with_tools.choices[0].message.content = None
+        final = make_openai_response("done", finish_reason="stop")
+        mock_client.chat.completions.create.side_effect = [truncated_with_tools, final]
+
+        result = agent.send("read file")
+        assert result == "done"
+        log_text = log.read_text()
+        assert "[MAX_TOKENS_TOOL_TRUNCATION]" in log_text
+
+    @patch("voidrift_cli.agent.OpenAI")
+    def test_normal_stop_no_recovery(self, MockOpenAI, cloud_model, tmp_path):
+        """Given finish_reason='stop', no recovery logic triggers."""
+        log = tmp_path / "test.log"
+        agent = AgentLoop(model=cloud_model, stream=False, log_path=log)
+        mock_client = MagicMock()
+        MockOpenAI.return_value = mock_client
+
+        mock_client.chat.completions.create.return_value = make_openai_response("complete", finish_reason="stop")
+
+        result = agent.send("test")
+        assert result == "complete"
+        assert mock_client.chat.completions.create.call_count == 1
+        log_text = log.read_text()
+        assert "MAX_TOKENS" not in log_text

@@ -20,7 +20,10 @@ from rich.prompt import Prompt, IntPrompt
 from .models import resolve_model, list_models
 from . import ui
 
-HELP_TEXT = """Local-first Agentic Development Framework.
+HELP_TEXT = """The Agentic Software Engineering Framework.
+
+AI agents reverse-engineer requirements, generate architecture, implement code,
+produce infrastructure-as-code, and validate against acceptance criteria.
 
 Getting started:
   voidrift gather <model> <path>          Reverse-engineer requirements
@@ -109,11 +112,10 @@ def main() -> None:
 def _active_model_alias() -> str | None:
     """Return the alias of the currently running local model, or None (REQ-ARCH-3).
 
-    Reads ~/.voidrift/.active-container written by worker start.
+    Reads ~/.worker-cli/.active-container written by worker start.
     Second line of the file is the model alias.
     """
-    from .config import voidrift_home
-    p = voidrift_home() / ".active-container"
+    p = Path.home() / ".worker-cli" / ".active-container"
     if not p.exists():
         return None
     lines = p.read_text().strip().splitlines()
@@ -122,7 +124,7 @@ def _active_model_alias() -> str | None:
 
 def _interactive_mode():
     """Interactive guided flow when no subcommand given (REQ-ARCH-3)."""
-    ui.header("VoidRift — Local-first Agentic Development Framework")
+    ui.header("VoidRift — The Agentic Software Engineering Framework")
 
     actions = ["gather", "plan", "develop", "automate", "verify", "chat", "status"]
     for i, a in enumerate(actions, 1):
@@ -177,12 +179,12 @@ def _interactive_mode():
 
 
 def _check_setup() -> None:
-    """Exit with a setup error if VOIDRIFT_HOME is not initialized (REQ-CFG-8)."""
-    from .config import voidrift_home
-    home = voidrift_home()
-    if not (home / "models.yml").exists():
+    """Exit with a setup error if the models file is missing (REQ-CFG-8)."""
+    from .config import get_models_file
+    models_path = get_models_file()
+    if not models_path.exists():
         raise click.ClickException(
-            f"{home} is not initialized. Run 'make setup' to initialize."
+            f"Models file not found at {models_path}. Configure 'models_file' in config.yml or set up your model registry."
         )
 
 
@@ -676,6 +678,9 @@ def chat(model, doc) -> None:
     log, run_id = boot_run("chat")
 
     tools, handlers = build_local_tools(cmd="chat")
+
+    from .tools.filesystem import configure as _configure_fs
+    _configure_fs(max_read_lines=mc.max_read_lines)
 
     # Override web_fetch placeholder with real implementation (REQ-U-8).
     # confirm_fn is injected by _interactive_loop after spinner functions are defined

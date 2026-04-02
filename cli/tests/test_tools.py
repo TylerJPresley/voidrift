@@ -17,16 +17,16 @@ def _make_lines(n: int) -> str:
 
 @pytest.fixture
 def ctx(tmp_path):
-    """WriteContext with local model type (limit=2000) and a tmp project dir."""
+    """WriteContext with default limit (2000) and a tmp project dir."""
     (tmp_path / ".voidrift").mkdir()
-    return WriteContext(project_dir=tmp_path, model_type="local")
+    return WriteContext(project_dir=tmp_path, max_read_lines=2000)
 
 
 @pytest.fixture
 def ctx_cloud(tmp_path):
-    """WriteContext with cloud model type."""
+    """WriteContext with higher limit (4000)."""
     (tmp_path / ".voidrift").mkdir()
-    return WriteContext(project_dir=tmp_path, model_type="cloud")
+    return WriteContext(project_dir=tmp_path, max_read_lines=4000)
 
 
 class TestReadGuard:
@@ -44,8 +44,7 @@ class TestReadGuard:
         """Files exceeding max_read_lines return a WARNING header."""
         f = tmp_path / "big.py"
         f.write_text(_make_lines(2500))
-        with patch("voidrift_cli.config.load_config", return_value={}):
-            result = ctx.read_source_file("big.py")
+        result = ctx.read_source_file("big.py")
         assert "WARNING" in result
         assert "2500 lines" in result
         assert "offset=2000" in result
@@ -54,8 +53,7 @@ class TestReadGuard:
         """Without explicit limit, only the first max_read_lines lines are returned."""
         f = tmp_path / "big.py"
         f.write_text(_make_lines(2500))
-        with patch("voidrift_cli.config.load_config", return_value={}):
-            result = ctx.read_source_file("big.py")
+        result = ctx.read_source_file("big.py")
         assert "line 2000" in result
         assert "line 2001" not in result
 
@@ -63,8 +61,7 @@ class TestReadGuard:
         """An explicit limit returns exactly those lines with no warning."""
         f = tmp_path / "big.py"
         f.write_text(_make_lines(2500))
-        with patch("voidrift_cli.config.load_config", return_value={}):
-            result = ctx.read_source_file("big.py", limit=500)
+        result = ctx.read_source_file("big.py", limit=500)
         assert "WARNING" not in result
         assert "line 500" in result
         assert "line 501" not in result
@@ -73,8 +70,7 @@ class TestReadGuard:
         """An explicit offset (pagination in progress) suppresses the warning."""
         f = tmp_path / "big.py"
         f.write_text(_make_lines(2500))
-        with patch("voidrift_cli.config.load_config", return_value={}):
-            result = ctx.read_source_file("big.py", offset=2000)
+        result = ctx.read_source_file("big.py", offset=2000)
         assert "WARNING" not in result
         assert "line 2001" in result
 
@@ -82,8 +78,7 @@ class TestReadGuard:
         """read_framework_file applies the same guard."""
         f = tmp_path / ".voidrift" / "TASKS.md"
         f.write_text(_make_lines(2500))
-        with patch("voidrift_cli.config.load_config", return_value={}):
-            result = ctx.read_framework_file("TASKS.md")
+        result = ctx.read_framework_file("TASKS.md")
         assert "WARNING" in result
         assert "2500 lines" in result
 
@@ -99,19 +94,16 @@ class TestReadGuard:
         f = tmp_path / "big.py"
         content = _make_lines(3000)
         f.write_text(content)
-        with patch("voidrift_cli.config.load_config", return_value={}):
-            result = ctx.read_source_file("big.py")
+        result = ctx.read_source_file("big.py")
         assert "offset=2000" in result
 
     def test_configurable_limit_respected(self, tmp_path):
-        """Custom max_read_lines from config is respected."""
+        """Custom max_read_lines is respected."""
         (tmp_path / ".voidrift").mkdir()
-        ctx = WriteContext(project_dir=tmp_path, model_type="local")
+        ctx = WriteContext(project_dir=tmp_path, max_read_lines=500)
         f = tmp_path / "medium.py"
         f.write_text(_make_lines(600))
-        cfg = {"limits": {"local_max_read_lines": 500}}
-        with patch("voidrift_cli.config.load_config", return_value=cfg):
-            result = ctx.read_source_file("medium.py")
+        result = ctx.read_source_file("medium.py")
         assert "WARNING" in result
         assert "600 lines" in result
 
@@ -121,63 +113,53 @@ class TestWriteGuard:
 
     def test_small_write_succeeds(self, ctx):
         """Files within the limit are written successfully."""
-        with patch("voidrift_cli.config.load_config", return_value={}):
-            result = ctx.write_source_file("src/main.py", _make_lines(100))
+        result = ctx.write_source_file("src/main.py", _make_lines(100))
         assert "Wrote" in result
         assert "Error" not in result
 
     def test_large_write_rejected(self, ctx):
         """Files exceeding max_read_lines are rejected with a decomposition directive."""
-        with patch("voidrift_cli.config.load_config", return_value={}):
-            result = ctx.write_source_file("src/main.py", _make_lines(2500))
+        result = ctx.write_source_file("src/main.py", _make_lines(2500))
         assert "Error" in result
         assert "exceeds the max_read_lines limit" in result
         assert "Decompose" in result
 
     def test_large_write_does_not_create_file(self, ctx, tmp_path):
         """Rejected writes leave no file on disk."""
-        with patch("voidrift_cli.config.load_config", return_value={}):
-            ctx.write_source_file("src/big.py", _make_lines(2500))
+        ctx.write_source_file("src/big.py", _make_lines(2500))
         assert not (tmp_path / "src" / "big.py").exists()
 
     def test_write_error_includes_line_count(self, ctx):
         """Error message contains actual line count and the limit."""
-        with patch("voidrift_cli.config.load_config", return_value={}):
-            result = ctx.write_source_file("src/main.py", _make_lines(2500))
+        result = ctx.write_source_file("src/main.py", _make_lines(2500))
         assert "2500" in result
         assert "2000" in result
 
     def test_framework_write_large_rejected(self, ctx):
         """write_framework_file applies the same guard."""
-        with patch("voidrift_cli.config.load_config", return_value={}):
-            result = ctx.write_framework_file("TASKS.md", _make_lines(2500))
+        result = ctx.write_framework_file("TASKS.md", _make_lines(2500))
         assert "Error" in result
         assert "exceeds the max_read_lines limit" in result
 
     def test_framework_write_small_succeeds(self, ctx):
         """Small framework writes are not blocked."""
-        with patch("voidrift_cli.config.load_config", return_value={}):
-            result = ctx.write_framework_file("REQUIREMENTS.md", _make_lines(100))
+        result = ctx.write_framework_file("REQUIREMENTS.md", _make_lines(100))
         assert "Wrote" in result
 
     def test_cloud_model_uses_cloud_limit(self, ctx_cloud, tmp_path):
-        """Cloud model type uses cloud_max_read_lines (default 2000)."""
-        cfg = {"limits": {"cloud_max_read_lines": 4000}}
-        with patch("voidrift_cli.config.load_config", return_value=cfg):
-            # 3500 lines — within cloud limit of 4000
-            result = ctx_cloud.write_source_file("src/main.py", _make_lines(3500))
+        """Higher max_read_lines allows larger writes."""
+        # 3500 lines — within limit of 4000
+        result = ctx_cloud.write_source_file("src/main.py", _make_lines(3500))
         assert "Wrote" in result
 
     def test_boundary_at_limit_succeeds(self, ctx):
         """Writing exactly max_read_lines lines is allowed."""
-        with patch("voidrift_cli.config.load_config", return_value={}):
-            result = ctx.write_source_file("src/main.py", _make_lines(2000))
+        result = ctx.write_source_file("src/main.py", _make_lines(2000))
         assert "Wrote" in result
 
     def test_boundary_one_over_limit_rejected(self, ctx):
         """Writing max_read_lines + 1 lines is rejected."""
-        with patch("voidrift_cli.config.load_config", return_value={}):
-            result = ctx.write_source_file("src/main.py", _make_lines(2001))
+        result = ctx.write_source_file("src/main.py", _make_lines(2001))
         assert "Error" in result
         assert "exceeds the max_read_lines limit" in result
 
@@ -187,36 +169,31 @@ class TestDuplicateWriteGuard:
 
     def test_identical_content_blocked(self, ctx):
         """Writing the exact same content a second time is rejected."""
-        with patch("voidrift_cli.config.load_config", return_value={}):
-            ctx.write_source_file("src/main.py", "content A")
-            result = ctx.write_source_file("src/main.py", "content A")
+        ctx.write_source_file("src/main.py", "content A")
+        result = ctx.write_source_file("src/main.py", "content A")
         assert "Already written" in result
 
     def test_different_content_allowed(self, ctx):
         """Writing different content to an already-written path is allowed (correction)."""
-        with patch("voidrift_cli.config.load_config", return_value={}):
-            ctx.write_source_file("src/main.py", "stub")
-            result = ctx.write_source_file("src/main.py", "full content replacing the stub")
+        ctx.write_source_file("src/main.py", "stub")
+        result = ctx.write_source_file("src/main.py", "full content replacing the stub")
         assert "Wrote" in result
         assert "Already written" not in result
 
     def test_same_length_different_content_allowed(self, ctx):
         """Same byte length but different text is not a duplicate — allowed."""
-        with patch("voidrift_cli.config.load_config", return_value={}):
-            ctx.write_source_file("src/main.py", "aaa")
-            result = ctx.write_source_file("src/main.py", "bbb")
+        ctx.write_source_file("src/main.py", "aaa")
+        result = ctx.write_source_file("src/main.py", "bbb")
         assert "Wrote" in result
 
     def test_stub_correction_allowed_framework_file(self, ctx):
         """A stub framework file (e.g. TASKS.md written with filename as content) can be corrected."""
-        with patch("voidrift_cli.config.load_config", return_value={}):
-            ctx.write_framework_file("TASKS.md", "TASKS.md")
-            result = ctx.write_framework_file("TASKS.md", "# Tasks\n\n- [ ] Do something real\n")
+        ctx.write_framework_file("TASKS.md", "TASKS.md")
+        result = ctx.write_framework_file("TASKS.md", "# Tasks\n\n- [ ] Do something real\n")
         assert "Wrote" in result
         assert "Already written" not in result
 
     def test_first_write_never_blocked(self, ctx):
         """First write to any path is always allowed."""
-        with patch("voidrift_cli.config.load_config", return_value={}):
-            result = ctx.write_source_file("src/new.py", "content")
+        result = ctx.write_source_file("src/new.py", "content")
         assert "Wrote" in result

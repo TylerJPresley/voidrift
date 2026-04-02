@@ -1,6 +1,6 @@
 # VoidRift CLI
 
-Python CLI providing the `voidrift` command for the VoidRift local-first agentic development framework.
+Python CLI providing the `voidrift` command for the VoidRift agentic software engineering framework.
 
 See the [framework README](../README.md) for full documentation.
 

@@ -1,11 +1,11 @@
-"""Tests for config.py token budget helpers (REQ-CFG-6, REQ-CFG-7)."""
+"""Tests for config.py — per-stage max_tokens (REQ-CFG-7) and model limits (REQ-MC-3)."""
 
 from __future__ import annotations
 
 import pytest
-from unittest.mock import patch
 
-from voidrift_cli.config import get_max_tokens, get_max_input_chars, get_max_read_lines, clear_config_cache
+from voidrift_cli.config import get_max_tokens, clear_config_cache
+from voidrift_cli.models import ModelConfig
 
 
 @pytest.fixture(autouse=True)
@@ -15,112 +15,66 @@ def clear_cache():
     clear_config_cache()
 
 
+def _mc(**overrides) -> ModelConfig:
+    """Build a ModelConfig with defaults, overriding specified fields."""
+    defaults = dict(alias="test", model_id="test-model", max_tokens=16384)
+    return ModelConfig(**{**defaults, **overrides})
+
+
 class TestGetMaxTokens:
-    def test_local_analysis_uses_stage_default(self):
-        with patch("voidrift_cli.config.load_config", return_value={}):
-            assert get_max_tokens("local", "analysis") == 2000
+    """REQ-CFG-7: min(stage_default, model.max_tokens)."""
 
-    def test_local_task_uses_stage_default(self):
-        with patch("voidrift_cli.config.load_config", return_value={}):
-            assert get_max_tokens("local", "task") == 4000
+    def test_stage_default_wins_when_lower(self):
+        mc = _mc(max_tokens=32768)
+        assert get_max_tokens(mc, "analysis") == 2000
 
-    def test_cloud_consolidation_uses_stage_default(self):
-        with patch("voidrift_cli.config.load_config", return_value={}):
-            assert get_max_tokens("cloud", "consolidation") == 8192
+    def test_model_cap_wins_when_lower(self):
+        mc = _mc(max_tokens=4096)
+        assert get_max_tokens(mc, "consolidation") == 4096  # stage=8192, cap=4096
 
-    def test_cloud_plan_uses_stage_default(self):
-        with patch("voidrift_cli.config.load_config", return_value={}):
-            assert get_max_tokens("cloud", "plan") == 32768
+    def test_plan_stage_high_cap(self):
+        mc = _mc(max_tokens=32768)
+        assert get_max_tokens(mc, "plan") == 32768
 
-    def test_cap_wins_when_lower_than_stage_default(self):
-        # local cap 1500 < task default 4000 → cap wins
-        cfg = {"limits": {"local_max_tokens": 1500}}
-        with patch("voidrift_cli.config.load_config", return_value=cfg):
-            assert get_max_tokens("local", "task") == 1500
+    def test_plan_stage_low_cap(self):
+        mc = _mc(max_tokens=4096)
+        assert get_max_tokens(mc, "plan") == 4096
 
-    def test_stage_default_wins_when_lower_than_cap(self):
-        # local cap 3000 > analysis default 2000 → stage default wins
-        cfg = {"limits": {"local_max_tokens": 3000}}
-        with patch("voidrift_cli.config.load_config", return_value=cfg):
-            assert get_max_tokens("local", "analysis") == 2000
+    def test_unknown_stage_defaults_to_4096(self):
+        mc = _mc(max_tokens=16384)
+        assert get_max_tokens(mc, "unknown_stage") == 4096
 
-    def test_missing_limits_section_uses_defaults(self):
-        with patch("voidrift_cli.config.load_config", return_value={}):
-            # local default cap is 4096; triage default is 4096
-            assert get_max_tokens("local", "triage") == 4096
+    def test_task_stage(self):
+        mc = _mc(max_tokens=16384)
+        assert get_max_tokens(mc, "task") == 4000
 
-    def test_unknown_stage_falls_back_to_4096(self):
-        with patch("voidrift_cli.config.load_config", return_value={}):
-            result = get_max_tokens("local", "unknown_stage")
-            assert result == 4096
-
-    def test_gateway_treated_like_cloud(self):
-        with patch("voidrift_cli.config.load_config", return_value={}):
-            assert get_max_tokens("gateway", "task") == 4000
+    def test_triage_stage(self):
+        mc = _mc(max_tokens=16384)
+        assert get_max_tokens(mc, "triage") == 4096
 
 
-class TestGetMaxInputChars:
-    def test_local_returns_default_8000(self):
-        with patch("voidrift_cli.config.load_config", return_value={}):
-            assert get_max_input_chars("local") == 8000
+class TestModelConfigDefaults:
+    """REQ-MC-3: ModelConfig carries operational limits with defaults."""
 
-    def test_cloud_returns_unlimited(self):
-        with patch("voidrift_cli.config.load_config", return_value={}):
-            assert get_max_input_chars("cloud") == 0
+    def test_default_max_tokens(self):
+        mc = _mc()
+        assert mc.max_tokens == 16384
 
-    def test_gateway_returns_unlimited(self):
-        with patch("voidrift_cli.config.load_config", return_value={}):
-            assert get_max_input_chars("gateway") == 0
+    def test_default_max_read_lines(self):
+        mc = _mc()
+        assert mc.max_read_lines == 2000
 
-    def test_config_override_applies_to_all_types(self):
-        cfg = {"limits": {"max_input_chars": 5000}}
-        with patch("voidrift_cli.config.load_config", return_value=cfg):
-            assert get_max_input_chars("local") == 5000
-            assert get_max_input_chars("cloud") == 5000
+    def test_default_max_input_chars(self):
+        mc = _mc()
+        assert mc.max_input_chars == 0
 
-    def test_zero_means_unlimited(self):
-        cfg = {"limits": {"max_input_chars": 0}}
-        with patch("voidrift_cli.config.load_config", return_value=cfg):
-            assert get_max_input_chars("local") == 0
+    def test_default_concurrency(self):
+        mc = _mc()
+        assert mc.concurrency == 1
 
-
-class TestMaxReadLines:
-    """V-CFG-6a: get_max_read_lines returns configured value; defaults to 2000 (REQ-CFG-6)."""
-
-    def test_local_default_is_2000(self):
-        with patch("voidrift_cli.config.load_config", return_value={}):
-            assert get_max_read_lines("local") == 2000
-
-    def test_cloud_default_is_2000(self):
-        with patch("voidrift_cli.config.load_config", return_value={}):
-            assert get_max_read_lines("cloud") == 2000
-
-    def test_gateway_default_is_2000(self):
-        with patch("voidrift_cli.config.load_config", return_value={}):
-            assert get_max_read_lines("gateway") == 2000
-
-    def test_local_config_override(self):
-        cfg = {"limits": {"local_max_read_lines": 1000}}
-        with patch("voidrift_cli.config.load_config", return_value=cfg):
-            assert get_max_read_lines("local") == 1000
-
-    def test_cloud_config_override(self):
-        cfg = {"limits": {"cloud_max_read_lines": 4000}}
-        with patch("voidrift_cli.config.load_config", return_value=cfg):
-            assert get_max_read_lines("cloud") == 4000
-
-    def test_gateway_config_override(self):
-        cfg = {"limits": {"gateway_max_read_lines": 3000}}
-        with patch("voidrift_cli.config.load_config", return_value=cfg):
-            assert get_max_read_lines("gateway") == 3000
-
-    def test_missing_limits_section_returns_default(self):
-        with patch("voidrift_cli.config.load_config", return_value={}):
-            assert get_max_read_lines("unknown_type") == 2000
-
-    def test_per_type_overrides_are_independent(self):
-        cfg = {"limits": {"local_max_read_lines": 500, "cloud_max_read_lines": 5000}}
-        with patch("voidrift_cli.config.load_config", return_value=cfg):
-            assert get_max_read_lines("local") == 500
-            assert get_max_read_lines("cloud") == 5000
-            assert get_max_read_lines("gateway") == 2000
+    def test_override_all(self):
+        mc = _mc(max_tokens=4096, max_read_lines=1000, max_input_chars=8000, concurrency=8)
+        assert mc.max_tokens == 4096
+        assert mc.max_read_lines == 1000
+        assert mc.max_input_chars == 8000
+        assert mc.concurrency == 8

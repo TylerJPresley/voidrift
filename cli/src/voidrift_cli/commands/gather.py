@@ -165,8 +165,11 @@ def _gather_from(
 
     all_tools, all_handlers = build_local_tools(cmd="gather")
 
-    from ..config import get_max_input_chars, get_max_tokens as _get_max_tokens
-    _input_limit = get_max_input_chars(model.model_type)
+    from ..tools.filesystem import configure as _configure_fs
+    _configure_fs(max_read_lines=model.max_read_lines)
+
+    from ..config import get_max_tokens as _get_max_tokens
+    _input_limit = model.max_input_chars
 
     def read_from_source(path: str) -> str:
         full = (from_path / path).resolve()
@@ -184,10 +187,7 @@ def _gather_from(
             {k: v for k, v in all_handlers.items() if k in names},
         )
 
-    extra = (
-        {"chat_template_kwargs": {"enable_thinking": False}}
-        if model.model_type == "local" else None
-    )
+    extra = None
 
     ui.header("VoidRift Gather (Reverse Engineering)")
     ui.detail(f"Log: {log}")
@@ -209,8 +209,6 @@ def _gather_from(
     import re as _re
     import time as _time
     from concurrent.futures import ThreadPoolExecutor, as_completed
-    from ..config import get_concurrency
-
     # --- Stage 1: Triage — categorize files ---
     ui.stage("Stage 1: Triaging files...")
     triage_prompt = prompts.load_prompt("gather", "TRIAGE")
@@ -311,7 +309,7 @@ def _gather_from(
             system = ctx_build_prompt_tpl.format(category=cat, context_lens=lens)
             ctx_agent = AgentLoop(
                 model=model, stream=True, extra_body=extra,
-                max_tokens=_get_max_tokens(model.model_type, "analysis"),
+                max_tokens=_get_max_tokens(model, "analysis"),
                 log_path=log,
                 system_prompt=system,
                 tools=[], tool_handlers={}, show_spinner=False,
@@ -353,7 +351,7 @@ def _gather_from(
     analysis_prompt_tpl = prompts.load_prompt("gather","ANALYSIS")
     source_requirements: dict[str, str] = {}
 
-    concurrency = get_concurrency(model.model_type)
+    concurrency = model.concurrency
     max_workers = len(source_files) if concurrency == 0 else concurrency
     _counter = {"done": 0}
     _lock = __import__("threading").Lock()
@@ -366,7 +364,7 @@ def _gather_from(
         system = analysis_prompt_tpl.format(analysis_lens=lens)
         if context_block:
             system = system + "\n\n" + context_block
-        max_tok = _get_max_tokens(model.model_type, "analysis")
+        max_tok = _get_max_tokens(model, "analysis")
         _pt: list[int] = [0]
         _ct: list[int] = [0]
         _ctx: list[int | None] = [None]
@@ -546,7 +544,7 @@ def _gather_from(
     try:
         final_agent = AgentLoop(
             model=model, stream=True, extra_body=extra,
-            max_tokens=_get_max_tokens(model.model_type, "consolidation"),
+            max_tokens=_get_max_tokens(model, "consolidation"),
             log_path=log,
             system_prompt=final_system,
             tools=[], tool_handlers={}, show_spinner=False,

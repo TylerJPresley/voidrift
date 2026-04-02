@@ -211,8 +211,14 @@ class _MultiSpinner:
 
     def _ensure_group(self, group: str) -> dict:
         if group not in self._groups:
-            self._groups[group] = {"active": {}, "completed": []}
+            self._groups[group] = {"active": {}, "completed": [], "total": 0}
         return self._groups[group]
+
+    def set_group_total(self, group: str, total: int) -> None:
+        """Set the known total task count for a group."""
+        with self._lock:
+            g = self._ensure_group(group)
+            g["total"] = total
 
     def track(self, descriptor: str, group: str = ""):
         """Register a descriptor and return its on_progress callback."""
@@ -277,7 +283,8 @@ class _MultiSpinner:
         with self._lock:
             groups_snap = {
                 name: {"active": {d: dict(s) for d, s in g["active"].items()},
-                       "completed": list(g["completed"])}
+                       "completed": list(g["completed"]),
+                       "total": g.get("total", 0)}
                 for name, g in self._groups.items()
             }
         now = time.time()
@@ -286,14 +293,14 @@ class _MultiSpinner:
             # Group header (skip for unnamed default group)
             if name:
                 total_done = len(g["completed"])
-                total_active = len(g["active"])
-                total = total_done + total_active
-                if total_active == 0:
-                    rows.append(_RText(f"▸ {name} ✓ complete ({total}/{total})", style="bold"))
+                total = g["total"] or (total_done + len(g["active"]))
+                if not g["active"]:
+                    rows.append(_RText(f"▸ {name} ✓ complete ({total_done}/{total})", style="bold"))
                 else:
                     rows.append(_RText(f"▸ {name} ({total_done}/{total})", style="bold"))
-            # Completed rows
-            rows.extend(g["completed"])
+            # Last completed row only (older ones scroll off the live display)
+            if g["completed"]:
+                rows.append(g["completed"][-1])
             # Active rows
             for desc, state in g["active"].items():
                 if state["start"] is None:

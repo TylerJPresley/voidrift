@@ -72,10 +72,14 @@ def run_develop(
     reset_session_files()
 
     _interrupted = False
+    _interrupt_count = 0
 
     def _handle_sigterm(signum: int, frame: object) -> None:
-        nonlocal _interrupted
+        nonlocal _interrupted, _interrupt_count
+        _interrupt_count += 1
         _interrupted = True
+        if _interrupt_count >= 2:
+            raise KeyboardInterrupt
 
     prev_sigterm = signal.signal(signal.SIGTERM, _handle_sigterm)
     prev_sigint = signal.signal(signal.SIGINT, _handle_sigterm)
@@ -87,6 +91,9 @@ def run_develop(
         f.write(f"\n=== Develop session: {datetime.now().isoformat()} ===\n")
 
     tools, handlers = build_local_tools(cmd="develop")
+
+    from ..tools.filesystem import configure as _configure_fs
+    _configure_fs(max_read_lines=worker.max_read_lines)
 
     task_store = TaskStore()
     task_store.load(task_file)
@@ -101,9 +108,8 @@ def run_develop(
     try:
         if is_multi:
             from concurrent.futures import ThreadPoolExecutor, as_completed
-            from ..config import get_concurrency
 
-            max_w = get_concurrency(worker.model_type)
+            max_w = worker.concurrency
             if max_w == 0:
                 max_w = len(modules)
 
@@ -143,6 +149,10 @@ def run_develop(
                             except Exception as e:
                                 ui.error(f"[{mod}] failed: {e}")
                                 results[mod] = 1
+                            if _interrupted:
+                                for f in futures:
+                                    f.cancel()
+                                break
 
                 result = 1 if any(r != 0 for r in results.values()) else 0
         else:
@@ -189,6 +199,11 @@ def _develop_module(
     d = voidrift_dir()
     mod_arg = "" if module == "_default" else module
     arch_guidance: dict[int, str] = {}  # task_num -> latest architect response
+
+    # Set real task total for the multi-spinner group header
+    if ms:
+        initial_status = task_store.status(mod_arg)
+        ms.set_group_total(module, initial_status["done"] + initial_status["blocked"] + initial_status["remaining"])
 
     while True:
         if is_interrupted():
@@ -251,7 +266,8 @@ def _develop_module(
                 with open(log, "a") as f:
                     f.write(f"\n--- Task {task_num}: {label} ({elapsed:.1f}s) ---\n{response}\n")
             except (RuntimeError, OSError, ValueError) as e:
-                ui.error(f"Task failed: {e}")
+                elapsed = time.time() - start_time
+                ms.done(_ms_desc, f"FAILED: {label}", elapsed, failed=True, group=module)
                 with open(log, "a") as f:
                     f.write(f"ERROR on task {task_num}: {e}\n")
                 return 1

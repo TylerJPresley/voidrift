@@ -43,33 +43,28 @@ class TestGatherInputChunking:
         assert chunks[-1] == text[-(len(chunks[-1])):]
         assert text.endswith(chunks[-1])
 
-    def test_local_model_chunk_size_is_8000(self):
-        """Local model input limit (chunk size) defaults to 8000 chars."""
-        from voidrift_cli.config import get_max_input_chars
-        assert get_max_input_chars("local") == 8000
+    def test_local_model_chunk_size_is_8000(self, local_model):
+        """Local model input limit (chunk size) is read from model config."""
+        assert local_model.max_input_chars == 8000
 
-    def test_cloud_model_input_limit(self):
-        """Cloud model input limit matches the configured max_input_chars."""
-        from voidrift_cli.config import get_max_input_chars
-        result = get_max_input_chars("cloud")
-        assert result >= 0  # 0 means unlimited, >0 means configured limit
+    def test_cloud_model_input_limit(self, cloud_model):
+        """Cloud model input limit matches the model's max_input_chars."""
+        assert cloud_model.max_input_chars >= 0  # 0 means unlimited
 
     def test_large_file_produces_multiple_chunks(self, local_model):
         """A file 3x the limit produces at least 3 chunks."""
         from voidrift_cli.commands.gather import _make_chunks
-        from voidrift_cli.config import get_max_input_chars
 
-        limit = get_max_input_chars(local_model.model_type)
+        limit = local_model.max_input_chars
         large_content = "x" * (limit * 3)
         chunks = _make_chunks(large_content, limit)
         assert len(chunks) >= 3
 
-    def test_single_chunk_skips_consolidation(self):
+    def test_single_chunk_skips_consolidation(self, local_model):
         """A file that fits in one chunk doesn't need a consolidation agent."""
         from voidrift_cli.commands.gather import _make_chunks
-        from voidrift_cli.config import get_max_input_chars
 
-        limit = get_max_input_chars("local")
+        limit = local_model.max_input_chars
         content = "y" * (limit - 100)  # under limit
         chunks = _make_chunks(content, limit)
         assert len(chunks) == 1  # no consolidation needed
@@ -88,7 +83,9 @@ class TestGatherRetryOn400:
     def test_retry_tokens_are_halved(self):
         """Retry formula: max(original // 2, 256)."""
         from voidrift_cli.config import get_max_tokens
-        max_tok = get_max_tokens("local", "analysis")
+        from voidrift_cli.models import ModelConfig
+        mc = ModelConfig(alias="t", model_id="t", max_tokens=4096)
+        max_tok = get_max_tokens(mc, "analysis")
         retry_tok = max(max_tok // 2, 256)
         assert retry_tok <= max_tok
 
@@ -1175,8 +1172,9 @@ class TestChatSession:
         with patch("voidrift_cli.agent.AgentLoop", FakeAgent):
             with patch("voidrift_cli.main._interactive_loop"):
                 with patch("voidrift_cli.main.resolve_model", return_value=cloud_model):
-                    runner = CliRunner()
-                    runner.invoke(cli, ["chat", cloud_model.alias, "--doc", "REQUIREMENTS.md"])
+                    with patch("voidrift_cli.main._check_setup"):
+                        runner = CliRunner()
+                        runner.invoke(cli, ["chat", cloud_model.alias, "--doc", "REQUIREMENTS.md"])
 
         assert "Build a thing." in captured.get("system_prompt", ""), \
             "Doc content should appear in system prompt when --doc is specified"

@@ -1,9 +1,9 @@
-# Requirements: VoidRift — Local-first Agentic Development Framework
+# Requirements: VoidRift — The Agentic Software Engineering Framework
 
 ## 1. Introduction
 
-- **Purpose:** A local-first AI development toolkit composed of independent framework commands — Gather, Plan, Develop, Automate, Verify, Chat — each of which reads and writes artifacts in a project's `.voidrift/` directory. They are not a pipeline: each command's input is a file and its output is a file. Operators run the commands they need, skip the ones they don't, and can provide hand-authored artifacts to any command that accepts them.
-- **Project Scope:** VoidRift provides the CLI framework command layer, framework reference files, and worker node management. AI models are external (local vLLM containers, cloud APIs, or gateway endpoints). Hosting, CI/CD infrastructure, and runtime environments for generated projects are the operator's responsibility.
+- **Purpose:** An agentic software engineering framework composed of independent framework commands — Gather, Plan, Develop, Automate, Verify, Chat — each of which reads and writes artifacts in a project's `.voidrift/` directory. AI agents reverse-engineer requirements from existing codebases, generate architecture and task breakdowns, implement code, produce infrastructure-as-code, and validate the result against acceptance criteria. They are not a pipeline: each command's input is a file and its output is a file. Operators run the commands they need, skip the ones they don't, and can provide hand-authored artifacts to any command that accepts them.
+- **Project Scope:** VoidRift provides the CLI framework command layer and framework reference files. AI models are external (local vLLM containers, cloud APIs, or gateway endpoints). Worker node management is provided by the external `worker-cli` project. Hosting, CI/CD infrastructure, and runtime environments for generated projects are the operator's responsibility.
 
 ## 2. User Stories
 
@@ -26,9 +26,7 @@
   - OpenAI-compatible chat completions API (local vLLM, Kiro Gateway)
   - Anthropic native API (Claude models)
   - Google Generative AI API (Gemini models)
-  - SSH (Worker CLI → worker node for container lifecycle)
-  - Docker API (container start/stop/health on worker node, managed by Worker CLI)
-- **Communication Protocols:** HTTPS (cloud APIs), HTTP (local vLLM API, Kiro Gateway), SSH (Worker CLI → worker node)
+- **Communication Protocols:** HTTPS (cloud APIs), HTTP (local vLLM API, Kiro Gateway)
 
 ## 4. Functional Requirements (EARS Notation)
 
@@ -36,10 +34,10 @@
 
 ### 4.1 System Architecture
 
-- **REQ-ARCH-1:** The system SHALL consist of three components: a Python CLI (`cli/`), a Worker CLI (`worker-cli/`), and framework reference files (`resources/`).
+- **REQ-ARCH-1:** The system SHALL consist of two components: a Python CLI (`cli/`) and framework reference files (`resources/`). Worker node management is provided by the external `worker-cli` project.
   - *Rationale:* Separating worker node management from command orchestration makes the CLI model-agnostic. Every model — local, cloud, or gateway — is just a base URL to the CLI.
 - **REQ-ARCH-2:** The CLI SHALL provide subcommands: `gather`, `plan`, `develop`, `automate`, `verify`, `chat`, `status`, `log`, `unlock`, `prune`, `completions`, `skills`. WHEN an unknown command is given, THE SYSTEM SHALL display the error and full help text (no tracebacks). No CLI command SHALL ever display a Python traceback to the user.
-- **REQ-ARCH-3:** WHEN `voidrift` is run with no arguments, THE SYSTEM SHALL launch an interactive guided flow presenting available actions, model selection, and command-specific options. WHEN presenting the model selection prompt, THE SYSTEM SHALL default to the active local model alias (read from `~/.voidrift/.active-container`) if one is running, or the first alias in the configured model list otherwise. No hardcoded model alias SHALL appear as a default in any user-facing prompt or interactive flow.
+- **REQ-ARCH-3:** WHEN `voidrift` is run with no arguments, THE SYSTEM SHALL launch an interactive guided flow presenting available actions, model selection, and command-specific options. WHEN presenting the model selection prompt, THE SYSTEM SHALL default to the active local model alias (read from `~/.worker-cli/.active-container`) if one is running, or the first alias in the configured model list otherwise. No hardcoded model alias SHALL appear as a default in any user-facing prompt or interactive flow.
   - Given a local model with alias `qwen3-coder` is active (recorded in `.active-container`), When the interactive model prompt is shown, Then the default is `qwen3-coder`.
   - Given no local model is active, When the interactive model prompt is shown, Then the default is the first alias from the configured model list.
   - Given the configured model list is empty, When the interactive model prompt is shown, Then no default is set.
@@ -69,6 +67,11 @@
   - Given an HTTP 401 response is returned, When the agent encounters the error, Then no retry is attempted and the error is raised immediately.
   - Given a context length error occurs, When the agent encounters the error, Then no retry is attempted and the error is raised immediately.
   - Given all 3 retry attempts fail, When exhausted, Then the original exception is raised.
+- **REQ-ARCH-11:** The agent loop SHALL detect output truncation by checking `finish_reason == "length"` on every API response. WHEN a text-only response (no tool calls) is truncated, the agent SHALL inject a continuation user message (loaded from `resources/prompts/system.md` section `MAX-TOKENS-RESUME`) and retry, concatenating the partial text with the continuation. Up to 2 continuation attempts SHALL be made. Each continuation SHALL be logged as `[MAX_TOKENS_RECOVERY]` with the attempt number. WHEN tool calls are present in a truncated response, the agent SHALL log a warning (`[MAX_TOKENS_TOOL_TRUNCATION]`) but process the tool calls normally — tool call JSON may be incomplete and will fail at parse time, which is the existing error path. WHEN 2 continuation attempts are exhausted, the agent SHALL return the concatenated partial text and log `[MAX_TOKENS_EXHAUSTED]`.
+  - *Rationale:* Truncated architecture docs cascade into bad task breakdowns cascade into bad develop output. Recovery via continuation preserves the full response without requiring the operator to manually increase `max_tokens` or switch models. Tool call truncation is rare (tool JSON is small) and already handled by the JSON parse error path.
+  - Given a text response with `finish_reason: "length"`, When the agent detects truncation, Then a continuation message is injected and the agent retries.
+  - Given 2 continuation attempts have been made and the response is still truncated, When the 3rd truncation is detected, Then the concatenated partial text is returned and `[MAX_TOKENS_EXHAUSTED]` is logged.
+  - Given a response with tool calls and `finish_reason: "length"`, When the agent detects truncation, Then `[MAX_TOKENS_TOOL_TRUNCATION]` is logged and tool calls are processed normally.
 - **REQ-ARCH-9:** `build_local_tools()` SHALL accept an optional `cmd` parameter. WHEN a command name is specified, THE SYSTEM SHALL return only the agent tools relevant to that command. WHEN cmd is empty or omitted, all agent tools SHALL be returned. Each framework command SHALL pass its name as the `cmd` parameter: `gather`, `plan`, `develop`, `chat`. Agent tools SHALL enforce domain separation by name: `write_source_file` and `read_source_file` operate on the project source tree, `write_framework_file` and `read_framework_file` operate on `.voidrift/` artifacts. Per-command agent tool sets:
   - **Gather:** `read_source_file`, `write_framework_file`, `read_framework_file`. No analysis store agent tools — gather state is passed as Python data between agents by the orchestrator.
   - **Plan:** `read_framework_file`, `write_framework_file`. No skill agent tools — skills pre-injected at command init.
@@ -144,10 +147,10 @@
   - Given a source tree with 600 files, When `_build_file_tree` is called with the default 500 limit, Then a `RuntimeError` is raised with the actual file count and the limit.
 - **REQ-G-12:** All gather agents SHALL use non-streaming mode (`stream=False`). Source analysis agents use `read_source_file()` tool calls; all other stages return direct response text.
   - *Rationale:* Non-streaming mode ensures vLLM parses the complete response before returning, which is required for reliable tool call extraction in the source analysis stage.
-- **REQ-G-13:** WHEN a source file's character count exceeds the configured limit (REQ-CFG-6 `limits.max_input_chars`), THE SYSTEM SHALL split the file into overlapping chunks of that size (200-character overlap) and analyze each chunk with a separate agent. The default chunk size SHALL be 8000 characters for local models and unlimited (no chunking) for cloud models. IF the file produces more than one chunk, THE SYSTEM SHALL run a consolidation agent to merge the partial analyses into a single unified analysis before storing. IF chunking is triggered, the fact and chunk count SHALL be logged.
+- **REQ-G-13:** WHEN a source file's character count exceeds the model's `max_input_chars` limit, THE SYSTEM SHALL split the file into overlapping chunks of that size (200-character overlap) and analyze each chunk with a separate agent. IF the file produces more than one chunk, THE SYSTEM SHALL run a consolidation agent to merge the partial analyses into a single unified analysis before storing. IF chunking is triggered, the fact and chunk count SHALL be logged.
   - *Rationale:* Truncation loses the portion of the file beyond the limit. Chunking ensures every line is analyzed, at the cost of additional API calls per large file.
-  - Given a local model and a source file of 20,000 characters, When source analysis runs, Then the file is split into chunks and each chunk is analyzed separately.
-  - Given a cloud model, When source analysis runs on a 20,000 character file, Then no chunking occurs and the full file is passed in one agent call.
+  - Given a model with `max_input_chars: 8000` and a source file of 20,000 characters, When source analysis runs, Then the file is split into chunks and each chunk is analyzed separately.
+  - Given a model with `max_input_chars: 0` (unlimited), When source analysis runs on a 20,000 character file, Then no chunking occurs and the full file is passed in one agent call.
 - **REQ-G-14:** The gather ANALYSIS prompt SHALL include an explicit conciseness instruction: bullet points only, maximum 15 items per analysis. The instruction SHALL appear after the analysis lens.
   - *Rationale:* Without an explicit output constraint, models produce exhaustive analyses that exceed token budgets for local models. Bullet-point format and an item cap force proportionate output without sacrificing signal.
   - Given an analysis agent prompt is constructed, When reviewed, Then it contains a conciseness instruction specifying bullet points and a maximum item count.
@@ -244,10 +247,10 @@
   - *Rationale:* The model does not know the correct module name for multi-module projects. When the model calls `complete_task()` with an empty or wrong module, the task store cannot find the task. The framework has the correct module context from `_develop_module` and calls completion after verifying `write_source_file()` was invoked.
   - Given a task is pending `[ ]`, When the framework calls `task_store.complete(module)` after successful writes, Then the task line is removed from TASKS.md and appended to TASKS-DONE.md.
   - Given the develop prompt, When the model reads its instructions, Then the prompt contains "Do NOT call complete_task()".
-- **REQ-D-10:** WHEN `.voidrift/TASKS.md` contains `## Module:` headers, THE SYSTEM SHALL run modules concurrently using `ThreadPoolExecutor` with the concurrency limit from `get_concurrency()` for the model type (local: 1, cloud: 8, gateway: 8, configurable via `config.yml`). WHEN concurrency is 1, modules SHALL be processed sequentially. WHEN concurrency is 0, one worker SHALL be spawned per module.
-  - *Rationale:* Concurrency is a model capacity concern, not a per-command flag. The same `concurrency` config used by gather applies to develop — one place to configure, consistent behavior across commands.
-  - Given TASKS.md has 3 `## Module:` headers and the model type is cloud, When develop runs, Then up to 8 modules run concurrently via ThreadPoolExecutor.
-  - Given the model type is local (concurrency 1), When develop runs with module headers, Then modules are processed sequentially.
+- **REQ-D-10:** WHEN `.voidrift/TASKS.md` contains `## Module:` headers, THE SYSTEM SHALL run modules concurrently using `ThreadPoolExecutor` with the concurrency limit from the model's `concurrency` field (REQ-MC-3). WHEN concurrency is 1, modules SHALL be processed sequentially. WHEN concurrency is 0, one worker SHALL be spawned per module.
+  - *Rationale:* Concurrency is a model capacity concern, not a per-command flag. The model's `concurrency` field applies consistently across all commands that run concurrent agents.
+  - Given TASKS.md has 3 `## Module:` headers and the model has `concurrency: 8`, When develop runs, Then up to 8 modules run concurrently via ThreadPoolExecutor.
+  - Given the model has `concurrency: 1`, When develop runs with module headers, Then modules are processed sequentially.
 - **REQ-D-11:** WHEN multiple workers are active, git operations SHALL be serialized through a `threading.Lock` to prevent index conflicts.
   - *Rationale:* Concurrent `git diff` or future `git commit` calls from parallel module workers can corrupt the git index. A shared lock serializes access.
   - Given 3 modules running concurrently, When two workers trigger git diff simultaneously, Then only one executes at a time (the other blocks until the lock is released).
@@ -364,89 +367,18 @@ Verify is a two-stage requirements-driven acceptance testing command. Stage 1 pr
 
 ### 4.10 Model Configuration
 
-- **REQ-MC-1:** WHEN a model alias is used, THE SYSTEM SHALL resolve it to `(base_url, api_key, model_id)`. The CLI SHALL discover local model aliases from `worker-models.yml` (at `~/.voidrift/worker-models.yml`) in addition to `models.yml`. A local model present in `worker-models.yml` SHALL be accessible via its alias without requiring a duplicate entry in `models.yml`. Explicit entries in `models.yml` take precedence over synthesized worker entries. IF an alias is not found in either source, THE SYSTEM SHALL exit with an error listing all available aliases from both sources.
-  - *Rationale:* `worker-models.yml` is the source of truth for local models — it is already maintained by `worker models add/remove`. Requiring operators to duplicate entries in `models.yml` adds toil and introduces drift. Auto-discovery eliminates that toil: add a model to the worker, it immediately appears in `voidrift` tab-completion and interactive mode.
-  - Given `worker-models.yml` has alias `qwen35` and `models.yml` does not, When `resolve_model("qwen35")` is called, Then a `ModelConfig` with `type=local` and `base_url` derived from `worker.ip` and `worker.port` is returned.
-  - Given both `models.yml` and `worker-models.yml` have alias `qwen35`, When `resolve_model("qwen35")` is called, Then the `models.yml` entry is used (explicit takes precedence).
-  - Given `voidrift gather qwen35` is run with no `models.yml` entry but a `worker-models.yml` entry, When the alias is resolved, Then the command proceeds normally.
+- **REQ-MC-1:** WHEN a model alias is used, THE SYSTEM SHALL resolve it to `(base_url, api_key, model_id)`. The CLI SHALL read all model definitions from a single models file. The path to this file SHALL be configurable via `models_file` in `config.yml` (default: `~/.worker-cli/models.yml`). Each model entry SHALL be self-contained: `base_url`, `api_key`, `model_id`, and optional `provider` and `max_context`. IF an alias is not found, THE SYSTEM SHALL exit with an error listing all available aliases.
+  - *Rationale:* Voidrift is model-agnostic — it doesn't care how models are provisioned. An external tool (worker-cli) maintains the model registry with full connection details per entry. Voidrift just reads the file and connects. One file, one source of truth, no merging.
+  - Given the models file has alias `qwen35`, When `resolve_model("qwen35")` is called, Then a `ModelConfig` with the entry's `base_url`, `api_key`, `model_id`, and `type` is returned.
+  - Given the models file does not contain alias `foo`, When `resolve_model("foo")` is called, Then the CLI exits with an error listing available aliases.
+  - Given `voidrift gather qwen35` is run, When the alias is resolved, Then the command proceeds using the connection details from the models file.
 - **REQ-MC-2:** Cloud models SHALL require no initialization and be accessed directly via API endpoints.
-- **REQ-MC-3:** The models config file SHALL support three endpoint types: `local` (worker node vLLM), `cloud` (provider APIs), and `gateway` (Kiro Gateway). Each entry specifies `base_url`, `api_key` (or env var reference), and `model_id`. Cloud and gateway model entries MAY include an integer `max_context` field specifying the context window size. The CLI SHALL use this field when the model's API endpoint does not expose `max_model_len`. No hardcoded context size table SHALL exist in the CLI code.
-  - *Rationale:* Cloud APIs (Anthropic, Google) do not return `max_model_len` on their `/v1/models` endpoint. Rather than hardcoding a lookup table in the CLI that silently becomes stale, context sizes belong in the config file where they are visible, auditable, and operator-controlled. Local vLLM endpoints already return `max_model_len` via their API — no config field needed.
-  - Given `models.yml` has `max_context: 200000` for `claude`, When `_query_max_context(mc)` is called and the API returns no `max_model_len`, Then `200000` is returned.
-  - Given `models.yml` has no `max_context` for a model and the API returns no `max_model_len`, When `_query_max_context(mc)` is called, Then `None` is returned.
-
-### 4.11 Worker CLI
-
-- **REQ-WK-1:** The Worker CLI (`worker-cli/`) SHALL be a separate Python package providing the `worker` command, installed independently from the VoidRift CLI.
-- **REQ-WK-2:** `worker start <alias>` SHALL SSH to the worker node, stop any running model container, start the requested model container, and poll until the API health check responds. During polling, the system SHALL check `docker ps` to detect container exit — IF the container is no longer running, THE SYSTEM SHALL exit immediately with the container's logs as error context.
-  - Given alias `qwen3-coder` is configured in `worker-models.yml`, When `worker start qwen3-coder` is run, Then the previous container is stopped, the new container starts, and the command exits after the health check passes.
-  - Given the container exits during polling, When `docker ps` shows no running container, Then the command exits with code 1 and prints the container logs.
-- **REQ-WK-3:** `worker stop` SHALL SSH to the worker node and stop the active model container.
-  - Given a model container is running, When `worker stop` is run, Then the container is stopped and the command exits with code 0.
-- **REQ-WK-4:** `worker status` SHALL report the active model (if any), container health, and API endpoint URL.
-  - Given a model container is running, When `worker status` is run, Then the output includes the model alias, health status, and endpoint URL.
-  - Given no container is running, When `worker status` is run, Then the output indicates no active model.
-- **REQ-WK-5:** `worker bench [<num_prompts>] [<req_rate>]` SHALL benchmark the active model using vLLM's benchmark tool via SSH.
-- **REQ-WK-6:** `worker models list` SHALL display configured models (from `worker-models.yml`) and cached models (from HF cache) with clear section headers. Each configured model SHALL show a status: `✅ running` (active container), `✓ current` (cached, matches remote HEAD SHA), `⬆ update` (cached, remote has newer revision), `⚠ not downloaded` (not cached). Remote revision checks SHALL use the HuggingFace API (`/api/models/<repo>/revision/main`). IF the API is unreachable, the status SHALL fall back to `✓ cached`.
-  - Given a configured model is cached and matches the remote HEAD SHA, When `worker models list` is run, Then the model shows `✓ current`.
-  - Given a configured model is cached but the remote HEAD SHA differs, When `worker models list` is run, Then the model shows `⬆ update`.
-  - Given the HuggingFace API is unreachable, When `worker models list` is run, Then cached models show `✓ cached` (graceful fallback).
-- **REQ-WK-6a:** `worker models add <alias> <repo>` SHALL add a new model to `worker-models.yml` AND download the weights. IF the alias already exists, THE SYSTEM SHALL exit with an error.
-  - Given alias `new-model` does not exist, When `worker models add new-model org/repo` is run, Then the alias is added to `worker-models.yml` and weights are downloaded.
-  - Given alias `qwen3-coder` already exists, When `worker models add qwen3-coder org/repo` is run, Then the command exits with an error and `worker-models.yml` is unchanged.
-- **REQ-WK-6b:** `worker models remove <alias>` SHALL delete the cached weights AND move the model config to a `retired` section in `worker-models.yml`.
-- **REQ-WK-6c:** `worker models check` SHALL audit all configured models, verify cache integrity, and attempt to download missing weights for configured models. It SHALL report unconfigured models in the cache. With `--prune`, it SHALL remove unconfigured cached models.
-- **REQ-WK-7:** Only one local model container SHALL run at a time on the worker node.
-  - Given container A is running, When `worker start` launches container B, Then container A is stopped before container B starts.
-- **REQ-WK-8:** Model configurations SHALL be defined in `worker-models.yml` specifying: repository, image source (alias referencing `worker-images.yml`), GPU memory utilization, max model length, vLLM args, served model name, cache mounts, and optional recipe name. A `default_image` key at the top level SHALL set the image source for all models that do not specify one. IF a model specifies `image`, it SHALL override the default. IF neither `image` nor `default_image` is set, THE SYSTEM SHALL exit with an error identifying the model. WHEN a model specifies a `recipe` field AND the resolved image source is type `git`, `worker start` SHALL execute the recipe via the image source's run command (e.g. `./run-recipe.sh <recipe> --solo`) instead of constructing a `docker run` command. The recipe handles container creation, mods, environment, and vLLM arguments — `vllm_args`, `gpu_memory_utilization`, and `max_model_len` from the model config are ignored when a recipe is active. `worker start` SHALL still poll the API endpoint until ready and enforce the single-container constraint (REQ-WK-7).
-  - *Rationale:* Decoupling image sources from model configs means switching all models from one image (e.g. scitrera) to another (e.g. eugr) is a single `default_image` change, not an edit per model. Recipe support allows image sources with their own launch systems (mods, patches, chat templates) to manage the full container lifecycle while the worker-cli handles health polling and the single-container constraint.
-  - Given `default_image: eugr` and a model with no `image` field, When the model is started, Then the `eugr` image source is used.
-  - Given `default_image: eugr` and a model with `image: scitrera`, When the model is started, Then the `scitrera` image source is used.
-  - Given no `default_image` and a model with no `image` field, When the model is started, Then the command exits with an error.
-  - Given a model with `recipe: qwen3.5-35b-a3b-fp8` and `image: eugr` (git source at `~/opt/eugr`), When `worker start` is run, Then the CLI executes `cd ~/opt/eugr && ./run-recipe.sh qwen3.5-35b-a3b-fp8 --solo` on the worker and polls until the API responds.
-  - Given a model with `recipe` set but the image source is type `docker`, When `worker start` is run, Then the CLI ignores the recipe and uses the standard `docker run` path.
-- **REQ-WK-9:** `worker kiro start` SHALL start the Kiro Gateway container. `worker kiro stop` SHALL stop it. `worker kiro status` SHALL report health and available models.
-- **REQ-WK-10:** WHEN Kiro Gateway credentials are invalid (expired token, database permissions), THE SYSTEM SHALL stop immediately with a clear error message identifying the failure mode.
-  - *Rationale:* Prevents the CLI from entering an infinite retry loop against invalid credentials. The error message directs the operator to the specific fix (re-login, chmod).
-  - Given the Kiro Gateway returns a 401 during health check, When the CLI detects the auth failure, Then the command exits with an error message identifying expired credentials.
-- **REQ-WK-11:** `worker logs [-f]` SHALL list all worker containers (running and stopped) with status, mark the active one, and prompt the user to select one. It SHALL then show that container's logs. IF no containers exist, it SHALL exit with an error.
-  - Given no containers exist on the worker node, When `worker logs` is run, Then the command exits with an error message.
-- **REQ-WK-12:** `worker info` SHALL report worker node GPU status (`nvidia-smi`), disk usage (`df -h`), and memory (`free -h`) over SSH.
-- **REQ-WK-13:** Image sources SHALL be defined in `worker-images.yml`. Each source SHALL have an alias, a type (`git` or `docker`), and type-specific fields. The Worker CLI SHALL provide subcommands to manage image sources:
-  - `worker images list` SHALL display all configured image sources with their type, status (built/pulled, version, last updated), and which models reference them. It SHALL also list Docker images present on the worker node.
-  - `worker images add <alias> <url>` SHALL register a new image source. The CLI SHALL auto-detect the type from the URL: git repository URLs (ending in `.git` or matching known hosts) create `git` type sources; Docker Hub or registry URLs create `docker` type sources. For `git` sources, the CLI SHALL clone the repository on the worker node AND build the Docker image. For `docker` sources, the CLI SHALL pull the image on the worker node. In both cases, the command SHALL not return until a usable Docker image exists on the worker. IF the alias already exists, THE SYSTEM SHALL exit with an error.
-  - `worker images remove <alias>` SHALL remove the image source from `worker-images.yml` AND delete all associated assets from the worker node: cloned repositories, built Docker images, and pulled Docker images. IF any model references the alias, THE SYSTEM SHALL warn and require `--force`.
-  - `worker images update <alias>` SHALL update the image source on the worker node. For `git` sources, this SHALL `git pull` the repository and rebuild the Docker image. For `docker` sources, this SHALL pull the latest tag. The CLI SHALL report what changed (new commits, new tag, no changes). The command SHALL not return until the updated Docker image exists on the worker.
-  - `worker images build <alias>` SHALL build (or rebuild) the Docker image for a `git` source on the worker node by executing the source's build command. SHALL exit with an error for `docker` type sources.
-  - *Rationale:* Different vLLM images serve different needs — pre-built images (scitrera, official vllm) are convenient, while source-built images (eugr) provide latest patches and model-specific fixes. Managing them as named sources decouples image lifecycle from model configuration.
-  - Given `worker-images.yml` has `eugr` (git) and `scitrera` (docker), When `worker images list` is run, Then both sources are shown with their type and status.
-  - Given alias `eugr` does not exist, When `worker images add eugr https://github.com/eugr/spark-vllm-docker.git` is run, Then the alias is added to `worker-images.yml` and the repo is cloned on the worker.
-  - Given alias `scitrera` does not exist, When `worker images add scitrera scitrera/dgx-spark-vllm:0.17.0-t5` is run, Then the alias is added to `worker-images.yml` and the image is pulled on the worker.
-  - Given alias `eugr` exists and a model references it, When `worker images remove eugr` is run without `--force`, Then the command exits with a warning listing the referencing models.
-  - Given alias `eugr` exists, When `worker images remove eugr --force` is run, Then the repo and built images are deleted from the worker and the alias is removed from config.
-  - Given alias `eugr` is a git source, When `worker images update eugr` is run, Then the repo is pulled and the image is rebuilt on the worker.
-- **REQ-WK-13a:** `worker-images.yml` SHALL define image sources with the following structure:
-  ```yaml
-  sources:
-    <alias>:
-      type: git | docker
-      # git sources:
-      url: <repository URL>
-      build_cmd: <build command, default: ./build-and-copy.sh>
-      image_name: <resulting Docker image name, default: vllm-node>
-      clone_path: <path on worker, default: ~/opt/<alias>>
-      # docker sources:
-      image: <registry/image:tag>
-  ```
-  For `git` sources, the `build_cmd` SHALL be executed in the cloned repository directory on the worker node via SSH. For `docker` sources, the `image` field SHALL be the full Docker image reference used for `docker pull` and `docker run`.
-  - *Rationale:* Git sources need a clone location, build command, and resulting image name because different repos have different build conventions. Docker sources just need the image reference. Defaults minimize config for common cases.
-- **REQ-WK-14:** `worker cache clear` SHALL remove compiled kernel caches (flashinfer, vllm) on the worker node over SSH.
-- **REQ-WK-15:** `worker check` SHALL verify worker node prerequisites over SSH: Docker available, NVIDIA GPU accessible (`nvidia-smi`), `uvx` on PATH, and SSH connectivity. Each check SHALL report pass/fail. IF any check fails, THE SYSTEM SHALL exit with code 1.
-  - Given Docker is available and GPU is accessible, When `worker check` is run, Then all checks report pass and the command exits with code 0.
-  - Given SSH connectivity fails, When `worker check` is run, Then the SSH check reports fail and the command exits with code 1.
-- **REQ-WK-16:** All `worker` CLI help output SHALL follow the CLI Help Convention defined in SYSTEMS-ENG skill. WHEN an unknown command or invalid arguments are given, THE SYSTEM SHALL display the error and help text (no tracebacks).
-  - Given an unknown subcommand `worker foo`, When the command is run, Then the output contains the error and help text with no Python traceback.
-- **REQ-WK-17:** `worker completions <shell>` SHALL output shell completion scripts for bash, zsh, and fish. Alias arguments SHALL complete from configured models in `worker-models.yml`.
+- **REQ-MC-3:** The models file SHALL support a `defaults:` section specifying fallback values for operational limits. Each model entry inherits defaults and MAY override any field. Supported operational fields: `max_tokens` (integer, default 16384), `max_context` (integer, default null — query API), `max_read_lines` (integer, default 2000), `max_input_chars` (integer, default 0 — unlimited), `concurrency` (integer, default 1). The CLI SHALL NOT infer operational behavior from a `type` field. No hardcoded per-type limit tables SHALL exist in the CLI code.
+  - *Rationale:* Different models have different capabilities. Making limits explicit per entry — with operator-controlled defaults — eliminates type-based inference and puts the operator in full control. A local model that can handle 32K output tokens gets `max_tokens: 32768`; a constrained model gets `max_tokens: 4096`. No guessing.
+  - Given the models file has `max_context: 200000` for `claude`, When `_query_max_context(mc)` is called and the API returns no `max_model_len`, Then `200000` is returned.
+  - Given the models file has no `max_context` for a model and the API returns no `max_model_len`, When `_query_max_context(mc)` is called, Then `None` is returned.
+  - Given `defaults: {max_tokens: 16384}` and a model entry with no `max_tokens`, When the model is resolved, Then `max_tokens` is `16384`.
+  - Given `defaults: {max_tokens: 16384}` and a model entry with `max_tokens: 4096`, When the model is resolved, Then `max_tokens` is `4096`.
 
 ### 4.12 Git
 
@@ -526,27 +458,21 @@ Two log roots, two intents:
 ### 4.16 Framework Configuration
 
 - **REQ-CFG-1:** All framework configuration SHALL be read from `~/.voidrift/config.yml`. Config files SHALL support `${VAR}` and `${VAR:-default}` for environment variable expansion, and `${section.key}` for cross-referencing values from config.yml.
-- **REQ-CFG-2:** `config.yml` SHALL contain sections for: `worker` (user, ip, api_key, hf_token), `kiro` (port, api_key), and `api_keys` (anthropic, gemini). Connection settings are literal values; secrets use env var references.
-- **REQ-CFG-3:** Framework resources (skills, templates, prompts), `models.yml`, and `worker-models.yml` SHALL be read from `~/.voidrift/`. The repo is the source of truth; `make sync` copies to `~/.voidrift/`. `make sync` SHALL also create `~/.voidrift/domain-skills/` if it does not exist.
+- **REQ-CFG-2:** `config.yml` SHALL contain sections for: `models_file` (path to the models registry, default `~/.worker-cli/models.yml`), `api_keys` (anthropic, gemini), `retention`, and `skills`. Connection settings are literal values; secrets use env var references.
+- **REQ-CFG-3:** Framework resources (skills, templates, prompts) SHALL be read from `~/.voidrift/`. The repo is the source of truth; `make sync` copies to `~/.voidrift/`. `make sync` SHALL also create `~/.voidrift/domain-skills/` if it does not exist.
 - **REQ-CFG-4:** `VOIDRIFT_HOME` env var MAY override `~/.voidrift/` for testing and CI. IF not set, `~/.voidrift/` is used.
 - **REQ-CFG-5:** `config.yml` SHALL contain a `retention:` section with `project` (integer, default 5 — number of recent project logs to keep) and `global` (integer, default 30 — days of global framework logs to keep). `voidrift prune` uses these limits.
-- **REQ-CFG-6:** `config.yml` SHALL support a `limits:` section with: `local_max_tokens` (integer, default 4096), `cloud_max_tokens` (integer, default 32768), `max_input_chars` (integer, default 8000 for local / 0 = unlimited for cloud), `local_max_read_lines` (integer, default 2000), `cloud_max_read_lines` (integer, default 2000), and `gateway_max_read_lines` (integer, default 2000). These caps are applied by `get_max_tokens(model_type, stage)`, `get_max_input_chars(model_type)`, and `get_max_read_lines(model_type)` in `config.py`. IF the section or a key is absent, the defaults apply.
-  - *Rationale:* Local models hallucinate and produce truncated JSON when asked to generate more tokens than their effective working window supports. Hard-coding 16384 everywhere gives local models too large an output budget. Making the cap configurable lets operators tune for their specific hardware without code changes. The `max_read_lines` cap enforces the same discipline on file I/O — models cannot reliably reason about files longer than their effective context; making it configurable allows cloud models to be tuned higher while keeping local models conservative.
-  - Given `limits.local_max_tokens: 3000` is set, When a local model agent is constructed with stage "analysis", Then its max_tokens is 2000 (the per-stage default is lower than the cap, so the stage default wins).
-  - Given `limits.local_max_tokens: 1500` is set, When a local model agent is constructed with stage "task", Then its max_tokens is 1500 (the cap is lower than the stage default of 4000, so the cap wins).
-  - Given no `limits:` section exists, When any agent is constructed, Then the model-type defaults apply.
-  - Given `limits.local_max_read_lines: 1000` is set and model_type is "local", When `get_max_read_lines("local")` is called, Then it returns 1000.
-  - Given no `limits:` section exists, When `get_max_read_lines` is called for any model type, Then it returns 2000.
-- **REQ-CFG-8:** WHEN any framework command (`gather`, `plan`, `develop`, `automate`, `verify`, `chat`) is invoked AND `~/.voidrift/models.yml` does not exist, THE SYSTEM SHALL exit with a clear error directing the operator to run `make setup`. WHEN `VOIDRIFT_HOME` is explicitly set, this check SHALL apply against the overridden path.
-  - *Rationale:* Without `models.yml`, all model resolution fails with a cryptic "Unknown model: X. Available: " error. A direct setup prompt is more actionable than a silent empty list. Utility commands (`status`, `log`, `prune`, `unlock`, `completions`, `skills`) are exempt — they do not perform model resolution and must remain usable even in a partially initialized state.
-  - Given `~/.voidrift/models.yml` does not exist, When `voidrift gather claude ./src` is run, Then the command exits with an error containing "make setup".
-  - Given `VOIDRIFT_HOME=/tmp/empty` and no `models.yml` there, When any framework command is run, Then the same error appears referencing the overridden path.
-  - Given `~/.voidrift/models.yml` exists, When any framework command is run, Then no setup check error is raised.
+- **REQ-CFG-6:** Operational limits (`max_tokens`, `max_context`, `max_read_lines`, `max_input_chars`, `concurrency`) SHALL be read from each model's entry in the models file (REQ-MC-3). The models file `defaults:` section provides fallback values. The CLI SHALL NOT maintain per-type limit tables or infer limits from model type.
+- **REQ-CFG-8:** WHEN any framework command (`gather`, `plan`, `develop`, `automate`, `verify`, `chat`) is invoked AND the configured models file (per `models_file` in `config.yml`, default `~/.worker-cli/models.yml`) does not exist, THE SYSTEM SHALL exit with a clear error directing the operator to configure their models. WHEN `VOIDRIFT_HOME` is explicitly set, this check SHALL apply against the overridden config path.
+  - *Rationale:* Without the models file, all model resolution fails with a cryptic "Unknown model: X. Available: " error. A direct error identifying the missing file is more actionable than a silent empty list. Utility commands (`status`, `log`, `prune`, `unlock`, `completions`, `skills`) are exempt — they do not perform model resolution and must remain usable even in a partially initialized state.
+  - Given the configured models file does not exist, When `voidrift gather claude ./src` is run, Then the command exits with an error identifying the missing path.
+  - Given `VOIDRIFT_HOME=/tmp/empty` and no models file at the configured path, When any framework command is run, Then the same error appears.
+  - Given the configured models file exists, When any framework command is run, Then no setup check error is raised.
 
-- **REQ-CFG-7:** `get_max_tokens(model_type, stage)` SHALL apply per-stage default max_tokens, capped by the model-type limit from REQ-CFG-6. Stage defaults: `triage` 4096, `analysis` 2000, `synthesis` 2000, `consolidation` 8192, `task` 4000, `plan` 32768. The result is `min(stage_default, model_type_cap)`.
-  - *Rationale:* Different internal agent stages have fundamentally different output requirements. Analysis needs a concise bullet list; consolidation needs a full requirements document. Per-stage defaults encode these expectations while the model-type cap prevents runaway output on constrained hardware.
-  - Given model_type="local" and stage="analysis", When get_max_tokens is called, Then it returns min(2000, local_max_tokens_cap).
-  - Given model_type="cloud" and stage="consolidation", When get_max_tokens is called, Then it returns min(8192, cloud_max_tokens_cap).
+- **REQ-CFG-7:** `get_max_tokens(model, stage)` SHALL apply per-stage default max_tokens, capped by the model's `max_tokens` field. Stage defaults: `triage` 4096, `analysis` 2000, `synthesis` 2000, `consolidation` 8192, `task` 4000, `plan` 32768. The result is `min(stage_default, model.max_tokens)`.
+  - *Rationale:* Different internal agent stages have fundamentally different output requirements. Analysis needs a concise bullet list; consolidation needs a full requirements document. Per-stage defaults encode these expectations while the model's cap prevents runaway output on constrained hardware.
+  - Given model.max_tokens=4096 and stage="analysis", When get_max_tokens is called, Then it returns min(2000, 4096) = 2000.
+  - Given model.max_tokens=4096 and stage="consolidation", When get_max_tokens is called, Then it returns min(8192, 4096) = 4096.
 
 ### 4.17 Skills System
 
@@ -590,18 +516,18 @@ Two log roots, two intents:
 
 ### 4.18 File Size Standards
 
-- **REQ-FSZ-1:** `read_source_file` and `read_framework_file` SHALL accept `offset` (integer, default 0) and `limit` (integer, default `get_max_read_lines(model_type)`) parameters. WHEN a file is read AND its total line count exceeds `limit` AND no explicit `limit` was provided by the caller, THE SYSTEM SHALL return the first `limit` lines prefixed with a warning header: the total line count, the number of lines returned, and pagination instructions (`use offset=N to read the next chunk`). WHEN an explicit `limit` is provided, THE SYSTEM SHALL return exactly the requested lines with no warning. The `model_type` used for the default limit SHALL be derived from the active agent's model configuration.
+- **REQ-FSZ-1:** `read_source_file` and `read_framework_file` SHALL accept `offset` (integer, default 0) and `limit` (integer, default the model's `max_read_lines`) parameters. WHEN a file is read AND its total line count exceeds `limit` AND no explicit `limit` was provided by the caller, THE SYSTEM SHALL return the first `limit` lines prefixed with a warning header: the total line count, the number of lines returned, and pagination instructions (`use offset=N to read the next chunk`). WHEN an explicit `limit` is provided, THE SYSTEM SHALL return exactly the requested lines with no warning.
   - *Rationale:* A model that reads a 5000-line file in full fills its context with raw code, leaving little room for reasoning and output. Pagination keeps each read within the model's effective working window. The warning header ensures the model knows there is more content and knows how to request it — without this, models assume they have the full file and produce incorrect analyses.
   - Given a 3000-line file is read with no `limit` param and `max_read_lines=2000`, When `read_source_file` is called, Then lines 1–2000 are returned with a header: "WARNING: file has 3000 lines. Returning lines 1–2000. Use offset=2000 to read the next chunk."
   - Given a 3000-line file is read with `limit=500`, When `read_source_file` is called, Then lines 1–500 are returned with no warning.
   - Given a 3000-line file is read with `offset=2000`, When `read_source_file` is called, Then lines 2001–3000 are returned with no warning (explicit offset signals intentional pagination).
   - Given a 500-line file is read with no `limit` param and `max_read_lines=2000`, When `read_source_file` is called, Then the full file is returned with no warning.
 
-- **REQ-FSZ-2:** WHEN `write_source_file` or `write_framework_file` is called AND the content to be written exceeds `get_max_read_lines(model_type)` lines, THE SYSTEM SHALL reject the write and return an error. The error SHALL include: the actual line count, the configured limit, and a decomposition directive: "This file exceeds the max_read_lines limit. Decompose into smaller files and write each separately." No data SHALL be written to disk on a rejected write.
+- **REQ-FSZ-2:** WHEN `write_source_file` or `write_framework_file` is called AND the content to be written exceeds the model's `max_read_lines` limit, THE SYSTEM SHALL reject the write and return an error. The error SHALL include: the actual line count, the configured limit, and a decomposition directive: "This file exceeds the max_read_lines limit. Decompose into smaller files and write each separately." No data SHALL be written to disk on a rejected write.
   - *Rationale:* A file that exceeds `max_read_lines` cannot be fully read back in a single call by the same model that wrote it. Writing it creates a file the model cannot reason about in subsequent commands. The rejection message is intentionally a design signal — if a write is this large, the architecture needs decomposition, not truncation. Truncation silently destroys content; decomposition produces a better design.
   - Given a model attempts to write 2500 lines to `src/main.py` with `max_read_lines=2000`, When `write_source_file` is called, Then the write is rejected with an error containing "exceeds the max_read_lines limit" and the actual vs limit line counts.
   - Given a model attempts to write 1800 lines to `.voidrift/TASKS.md` with `max_read_lines=2000`, When `write_framework_file` is called, Then the write succeeds.
-  - Given a cloud model with `cloud_max_read_lines=4000` attempts to write 3500 lines, When `write_source_file` is called, Then the write succeeds.
+  - Given a cloud model with `max_read_lines=4000` attempts to write 3500 lines, When `write_source_file` is called, Then the write succeeds.
 
 - **REQ-FSZ-3:** `resources/prompts/system.md` SHALL include a file size guidance section instructing models to: (1) read the pagination warning when present and use `offset`/`limit` to retrieve the remaining content before proceeding; (2) treat a write-rejection error as a design signal and decompose the intended output into multiple smaller, logically cohesive files; (3) never truncate content to fit the limit — decomposition is always the correct response.
   - *Rationale:* Without prompt-level guidance, models will attempt workarounds (truncating, re-requesting the same oversized write, or ignoring the warning). The prompt establishes the expected behavior as a first principle rather than relying on error messages alone to teach it.
@@ -612,7 +538,7 @@ Two log roots, two intents:
 
 - **Reliability:** Framework file writes SHALL be write-through (written to disk immediately, not buffered). The develop command SHALL use a lock file to prevent concurrent sessions. SIGTERM SHALL trigger graceful shutdown with cleanup.
 - **Performance:** Local models SHALL be served via vLLM with FlashInfer backend. Framework resources (skills, prompts) SHALL be cached in process memory for sub-millisecond repeated access. Agents SHALL receive one task at a time to minimize context window usage.
-- **Security:** The CLI SHALL NOT hardcode secrets. A PATH shim SHALL prevent the worker model from executing package managers on the host. File operations SHALL be sandboxed to the project directory (path traversal denied). The Worker CLI SHALL validate Kiro Gateway credentials before reporting the endpoint as ready.
+- **Security:** The CLI SHALL NOT hardcode secrets. File operations SHALL be sandboxed to the project directory (path traversal denied).
 - **Portability:** The framework SHALL run on Linux, macOS, and WSL2. Local model support requires an NVIDIA GPU worker node accessible via SSH and the Worker CLI. Cloud-only mode requires no special hardware or Worker CLI.
 - **Maintainability:** All packages SHALL use `pyproject.toml` with hatchling, a shared `VERSION` file, and editable installs. Google-style docstrings and type hints SHALL be used throughout. Tests SHALL use pytest. `uv` SHALL be the package manager for all development operations (install, test, build); developers SHALL NOT need pip or python3 directly for project setup.
 
@@ -629,6 +555,7 @@ Two log roots, two intents:
 | V-ARCH-3 | REQ-ARCH-6 | Test | `test_agent.py::TestBuildLocalTools` — tools present, skills pre-injected |
 | V-ARCH-4 | REQ-ARCH-8 | Test | `test_agent.py` — think tags stripped from response, logged as `[THINKING]` |
 | V-ARCH-5 | REQ-ARCH-9 | Test | `test_agent.py::TestBuildLocalTools` — command filtering returns correct tool subsets |
+| V-ARCH-6a | REQ-ARCH-11 | Test | `test_agent.py::TestMaxTokensRecovery` — text truncation triggers continuation; tool truncation logged; exhaustion returns partial |
 | V-G-1 | REQ-G-1 | Test | `test_commands.py::TestGatherPreflightChecks` |
 | V-G-2 | REQ-G-11 | Test | `test_agent.py` — context length error detection |
 | V-G-3 | REQ-G-12 | Inspection | `gather.py` — all gather agents use `stream=False` |
@@ -662,8 +589,8 @@ Two log roots, two intents:
 | V-U-2 | REQ-U-2 | Test | `test_commands.py` — chat session loads skill, prompt, and --doc context |
 | V-LOG-1 | REQ-LOG-4 | Test | `test_cli.py::test_system_log_created` — system log file exists after startup |
 | V-ARCH-6 | REQ-ARCH-3 | Test | `test_cli.py::test_interactive_default_uses_active_model` — no hardcoded alias |
-| V-MC-1 | REQ-MC-1 | Test | `test_models.py::TestWorkerModelDiscovery` — alias from worker-models.yml resolves without models.yml entry |
-| V-MC-2 | REQ-MC-3 | Test | `test_models.py::TestMaxContext` — max_context from models.yml used when API returns no max_model_len |
+| V-MC-1 | REQ-MC-1 | Test | `test_models.py::TestResolveModel` — alias resolution from configured models file |
+| V-MC-2 | REQ-MC-3 | Test | `test_models.py::TestMaxContext` — max_context from models file used when API returns no max_model_len |
 | V-CFG-1 | REQ-CFG-6 | Test | `test_config.py` — get_max_tokens returns min(stage_default, model_cap); missing limits section uses defaults |
 | V-CFG-2 | REQ-CFG-7 | Test | `test_config.py` — per-stage defaults: analysis=2000, task=4000, consolidation=8192 |
 | V-CFG-3 | REQ-CFG-8 | Test | `test_cli.py::TestSetupCheck` — framework commands exit with setup error when models.yml missing; utility commands unaffected |
@@ -681,28 +608,11 @@ Two log roots, two intents:
 | V-UI-3 | REQ-UI-10 | Inspection | `ui.py::stats_str` — all fields present when usage data available; no gating |
 | V-MC-1 | REQ-MC-1 | Test | `test_models.py::TestResolveModel` — alias resolution from config |
 | V-MC-2 | REQ-MC-2 | Test | `test_models.py::TestResolveModel::test_cloud_models` |
-| V-WK-1 | REQ-WK-2 | Test | `test_worker.py` — container start/stop via SSH |
-| V-WK-2 | REQ-WK-10 | Test | `test_worker.py::TestKiroGateway::test_validate_credentials_expired` |
-| V-WK-3 | REQ-WK-3 | Test | `test_worker.py` — stop command halts active container |
-| V-WK-4 | REQ-WK-4 | Test | `test_worker.py` — status reports model, health, and endpoint |
-| V-WK-5 | REQ-WK-6 | Test | `test_worker.py` — models list shows configured and cached sections |
-| V-WK-6 | REQ-WK-6a | Test | `test_worker.py` — models add succeeds for new alias, errors on duplicate |
-| V-WK-7 | REQ-WK-7 | Test | `test_worker.py` — start stops previous container before launching new one |
-| V-WK-8 | REQ-WK-11 | Test | `test_worker.py` — logs errors when no containers exist |
-| V-WK-9 | REQ-WK-15 | Test | `test_worker.py::TestWorkerCheck` — pass/fail per prerequisite |
-| V-WK-10 | REQ-WK-16 | Test | `test_worker.py` — unknown command shows error and help, no traceback |
-| V-WK-11 | REQ-WK-6b | Test | `test_worker.py::TestModelsRemove` — retires alias and deletes cached weights |
-| V-WK-12 | REQ-WK-6c | Test | `test_worker.py::TestModelsCheck` — audits cache, downloads missing, reports unconfigured, prunes with --prune |
-| V-WK-13 | REQ-WK-9 | Test | `test_worker.py::TestGateway` — kiro start/stop/status and credential validation |
-| V-WK-14 | REQ-WK-12 | Test | `test_worker.py::TestWorkerInfo` — reports GPU/disk/memory via SSH |
-| V-WK-15 | REQ-WK-13 | Test | `test_worker.py::TestImagesAdd`, `TestImagesRemove`, `TestImagesList` — image source CRUD |
-| V-WK-16 | REQ-WK-14 | Test | `test_worker.py::TestCacheClear` — clears flashinfer and vllm caches over SSH |
-| V-WK-17 | REQ-WK-17 | Test | `test_worker.py::TestCompletions` — bash/zsh/fish scripts generated, invalid shell rejected |
 | V-U-8 | REQ-U-8 | Test | `test_commands.py::TestChatWebFetch` — cache hit skips HTTP, HTTP error returns message, summary cached after fetch, tool absent from non-chat commands |
 | V-FSZ-1 | REQ-FSZ-1 | Test | `test_tools.py::TestReadGuard` — pagination warning returned when file exceeds limit; explicit limit/offset suppresses warning |
 | V-FSZ-2 | REQ-FSZ-2 | Test | `test_tools.py::TestWriteGuard` — write rejected with error when content exceeds max_read_lines; write succeeds when within limit |
 | V-FSZ-3 | REQ-FSZ-3 | Inspection | `resources/prompts/system.md` — contains file size guidance section covering pagination and decomposition |
-| V-CFG-6a | REQ-CFG-6 | Test | `test_config.py::TestMaxReadLines` — `get_max_read_lines` returns configured value per model type; missing key returns 2000 |
+| V-CFG-6a | REQ-CFG-6 | Test | `test_config.py::TestModelConfigDefaults` — ModelConfig carries operational limits with correct defaults |
 
 ---
 

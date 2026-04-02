@@ -87,7 +87,7 @@ def cloud_model():
 
 @pytest.fixture
 def local_model():
-    """A local ModelConfig."""
+    """A local ModelConfig with conservative limits."""
     from voidrift_cli.models import ModelConfig
     return ModelConfig(
         alias="test-local",
@@ -95,6 +95,9 @@ def local_model():
         model_type="local",
         api_base="http://192.168.50.100:8000/v1",
         api_key="no-key",
+        max_tokens=4096,
+        max_input_chars=8000,
+        concurrency=1,
     )
 
 
