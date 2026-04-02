@@ -604,16 +604,16 @@ class TestDevelopPreflightChecks:
         assert manifest["tasks"][2]["status"] == "implemented"
 
 
-# ── Automate ────────────────────────────────────────────────────────────
+# ── Deploy ────────────────────────────────────────────────────────────
 
 
-class TestAutomatePreflightChecks:
+class TestDeployPreflightChecks:
     def test_missing_requirements(self, tmp_project, cloud_model):
-        from voidrift_cli.commands.automate import run_automate
-        result = run_automate(cloud_model)
+        from voidrift_cli.commands.deploy import run_deploy
+        result = run_deploy(cloud_model)
         assert result == 1
 
-    @patch("voidrift_cli.commands.automate.AgentLoop")
+    @patch("voidrift_cli.commands.deploy.AgentLoop")
     def test_generate_mode(self, MockAgent, tmp_project, cloud_model, sample_requirements):
         def fake_send(msg):
             # Simulate creating a compose file
@@ -624,21 +624,21 @@ class TestAutomatePreflightChecks:
         mock_instance.send.side_effect = fake_send
         MockAgent.return_value = mock_instance
 
-        from voidrift_cli.commands.automate import run_automate
-        result = run_automate(cloud_model)
+        from voidrift_cli.commands.deploy import run_deploy
+        result = run_deploy(cloud_model)
         assert result == 0
 
-    @patch("voidrift_cli.commands.automate.AgentLoop")
+    @patch("voidrift_cli.commands.deploy.AgentLoop")
     def test_generate_fails_no_iac(self, MockAgent, tmp_project, cloud_model, sample_requirements):
         mock_instance = MagicMock()
         mock_instance.send.return_value = "I described the infrastructure but didn't create files."
         MockAgent.return_value = mock_instance
 
-        from voidrift_cli.commands.automate import run_automate
-        result = run_automate(cloud_model)
+        from voidrift_cli.commands.deploy import run_deploy
+        result = run_deploy(cloud_model)
         assert result == 1
 
-    @patch("voidrift_cli.commands.automate.AgentLoop")
+    @patch("voidrift_cli.commands.deploy.AgentLoop")
     def test_review_mode(self, MockAgent, tmp_project, cloud_model, sample_requirements):
         # Pre-existing IaC
         (tmp_project / "docker-compose.yml").write_text("version: '3'")
@@ -647,8 +647,8 @@ class TestAutomatePreflightChecks:
         mock_instance.send.return_value = "Reviewed and reconciled."
         MockAgent.return_value = mock_instance
 
-        from voidrift_cli.commands.automate import run_automate
-        result = run_automate(cloud_model)
+        from voidrift_cli.commands.deploy import run_deploy
+        result = run_deploy(cloud_model)
         assert result == 0
 
 

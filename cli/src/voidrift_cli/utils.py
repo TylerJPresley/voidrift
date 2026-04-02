@@ -42,7 +42,7 @@ def log_path(cmd: str) -> Path:
     """Generate a timestamped log file path (AC-LOG1).
 
     Args:
-        cmd: Command name (gather, plan, develop, automate, verify).
+        cmd: Command name (gather, plan, develop, deploy, verify).
 
     Returns:
         Path to the new log file.

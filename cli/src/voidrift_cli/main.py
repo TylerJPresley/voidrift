@@ -36,7 +36,7 @@ Framework commands:
   gather <model> <path> [--overwrite]
   plan <model> [<feature>] [--overwrite]
   develop <model> [<architect>]              Execute implementation tasks
-  automate <model> [<architect>]
+  deploy <model> [<architect>]
   verify <model>
 
 Utility:
@@ -126,7 +126,7 @@ def _interactive_mode():
     """Interactive guided flow when no subcommand given (REQ-ARCH-3)."""
     ui.header("VoidRift — The Agentic Software Engineering Framework")
 
-    actions = ["gather", "plan", "develop", "automate", "verify", "chat", "status"]
+    actions = ["gather", "plan", "develop", "deploy", "verify", "chat", "status"]
     for i, a in enumerate(actions, 1):
         ui._con.print(f"  {i}. {a}")
 
@@ -227,13 +227,13 @@ def develop(model, architect) -> None:
 @cli.command()
 @click.argument("model", shell_complete=_complete_model)
 @click.argument("architect", required=False, shell_complete=_complete_model)
-def automate(model, architect) -> None:
-    """Automate: Generate infrastructure-as-code."""
+def deploy(model, architect) -> None:
+    """Deploy: Generate infrastructure-as-code."""
     _check_setup()
-    from .commands.automate import run_automate
+    from .commands.deploy import run_deploy
     mc = resolve_model(model)
     am = resolve_model(architect) if architect else mc
-    sys.exit(run_automate(mc, architect=am))
+    sys.exit(run_deploy(mc, architect=am))
 
 
 @cli.command()
@@ -877,11 +877,11 @@ def _status():
     else:
         ui._con.print("  ⬜ Develop: No tasks")
 
-    from .commands.automate import _detect_iac
+    from .commands.deploy import _detect_iac
     if _detect_iac():
-        ui._con.print("  ✅ Automate: IaC detected")
+        ui._con.print("  ✅ Deploy: IaC detected")
     else:
-        ui._con.print("  ⬜ Automate: Run 'voidrift automate <model>'")
+        ui._con.print("  ⬜ Deploy: Run 'voidrift deploy <model>'")
 
     if (d / "VERIFY.md").exists():
         text = (d / "VERIFY.md").read_text()
@@ -910,7 +910,7 @@ def log(command, prune, follow) -> None:
     from .utils import voidrift_dir
 
     d = voidrift_dir() / "logs"
-    valid_commands = ["gather", "plan", "develop", "automate", "verify", "chat"]
+    valid_commands = ["gather", "plan", "develop", "deploy", "verify", "chat"]
 
     if prune:
         pattern = f"{command}-*.log" if command else "*.log"

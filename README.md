@@ -2,14 +2,14 @@
 
 **Agentic Software Engineering Framework**
 
-An agentic software engineering framework composed of independent framework commands — Gather, Plan, Develop, Verify, Automate, Chat — each of which reads and writes artifacts in a project's `.voidrift/` directory. AI agents reverse-engineer requirements from existing codebases, generate architecture and task breakdowns, implement code, produce infrastructure-as-code, and validate the result against acceptance criteria. They are not a pipeline: each command's input is a file and its output is a file. Operators run the commands they need, skip the ones they don't, and can provide hand-authored artifacts to any command that accepts them. Any model can fill any role: local vLLM, cloud API, or gateway.
+An agentic software engineering framework composed of independent framework commands — Gather, Plan, Develop, Verify, Deploy, Chat — each of which reads and writes artifacts in a project's `.voidrift/` directory. AI agents reverse-engineer requirements from existing codebases, generate architecture and task breakdowns, implement code, produce infrastructure-as-code, and validate the result against acceptance criteria. They are not a pipeline: each command's input is a file and its output is a file. Operators run the commands they need, skip the ones they don't, and can provide hand-authored artifacts to any command that accepts them. Any model can fill any role: local vLLM, cloud API, or gateway.
 
 ```
   Gather ─── reads codebase, writes REQUIREMENTS.md
   Plan ───── reads REQUIREMENTS.md, writes ARCHITECTURE.md + task tickets
   Develop ── reads task tickets, writes source code
   Verify ─── reads REQUIREMENTS.md, tests the implementation
-  Automate ─ reads REQUIREMENTS.md + ARCHITECTURE.md, writes IaC
+  Deploy ── reads REQUIREMENTS.md + ARCHITECTURE.md, writes IaC
   Chat ───── interactive refinement of any .voidrift/ artifact
 ```
 
@@ -196,13 +196,13 @@ voidrift verify <model>
 
 Verify never modifies source files. Failures become tasks for Develop.
 
-### Automate
+### Deploy
 
 Generates infrastructure-as-code from `REQUIREMENTS.md` and `ARCHITECTURE.md`:
 
 ```bash
-voidrift automate <model>
-voidrift automate <model> <architect>
+voidrift deploy <model>
+voidrift deploy <model> <architect>
 ```
 
 Produces IaC files in the project. Reconciles gaps if IaC already exists. No hardcoded secrets — all sensitive values parameterized.
@@ -360,7 +360,7 @@ voidrift/
 │       ├── tools/                # Local agent tools: filesystem, process, HTTP, browser
 │       ├── utils.py              # Utilities: STATE.md, system log, task helpers
 │       ├── config.py             # Config loading, variable expansion
-│       └── commands/             # command implementations: gather, plan, develop, automate, verify
+│       └── commands/             # command implementations: gather, plan, develop, deploy, verify
 ├── resources/                    # Framework guidance → ~/.voidrift/resources/
 │   ├── prompts/                  # system.md + per-command prompts (5 files)
 │   ├── skills/                   # Domain methodology (16 files)

@@ -6,7 +6,7 @@ Command prompt file for the interactive chat session. Each section is loaded via
 
 **Role:** Interactive Assistant — help the operator review, refine, and debug `.voidrift/` artifacts.
 
-**Chat cannot run framework commands.** `voidrift gather`, `voidrift plan`, `voidrift develop`, `voidrift automate`, and `voidrift verify` are CLI commands the operator runs directly. Chat has no ability to invoke them, trigger them, or produce their outputs. If the operator asks chat to run a framework command, respond with the exact CLI command they should run instead.
+**Chat cannot run framework commands.** `voidrift gather`, `voidrift plan`, `voidrift develop`, `voidrift deploy`, and `voidrift verify` are CLI commands the operator runs directly. Chat has no ability to invoke them, trigger them, or produce their outputs. If the operator asks chat to run a framework command, respond with the exact CLI command they should run instead.
 
 Chat helps the operator review and edit artifacts that already exist: reviewing requirements before running plan, refining architecture after plan, editing tasks, etc. Chat cannot create `REQUIREMENTS.md` from a codebase, generate `ARCHITECTURE.md` from requirements, or produce any artifact that a framework command would produce.
 

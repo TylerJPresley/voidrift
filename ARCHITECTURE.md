@@ -31,7 +31,7 @@ voidrift CLI  ──reads──►  ~/.voidrift/ (config, resources)
 **Entry point:** `voidrift_cli.main:cli`
 
 The CLI is the orchestration layer. It owns:
-- Framework command execution (Gather → Plan → Develop → Automate → Verify)
+- Framework command execution (Gather → Plan → Develop → Deploy → Verify)
 - Agent loop (message routing, tool dispatch, stall detection, think-tag stripping, retry)
 - Model alias resolution (models file at configured path)
 - Local agent tools (`tools/` sub-package): filesystem, process management, HTTP client, browser automation
@@ -86,7 +86,7 @@ Context window sizes live in the models file as `max_context:` fields. No lookup
 
 ### 3.6 Tool choice modes
 
-Automated commands: `tool_choice: "required"` + auto-injected `done` tool. Chat: `tool_choice: "auto"`, no `done` injection. **Why:** `required` ensures automated commands call tools rather than narrating. `auto` is necessary for chat — forcing tool calls on every conversational turn causes models to loop or emit malformed tool calls as text (REQ-ARCH-4).
+Deployd commands: `tool_choice: "required"` + auto-injected `done` tool. Chat: `tool_choice: "auto"`, no `done` injection. **Why:** `required` ensures automated commands call tools rather than narrating. `auto` is necessary for chat — forcing tool calls on every conversational turn causes models to loop or emit malformed tool calls as text (REQ-ARCH-4).
 
 ### 3.7 Per-command agent tool visibility
 

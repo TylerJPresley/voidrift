@@ -1,4 +1,4 @@
-"""Automate command: Infrastructure-as-code generation (AC-A1 through AC-A10)."""
+"""Deploy command: Infrastructure-as-code generation (AC-A1 through AC-A10)."""
 
 from __future__ import annotations
 
@@ -25,8 +25,8 @@ def _detect_iac() -> bool:
     return False
 
 
-def run_automate(worker: ModelConfig, architect: ModelConfig | None = None) -> int:
-    """Execute the automate command."""
+def run_deploy(worker: ModelConfig, architect: ModelConfig | None = None) -> int:
+    """Execute the deploy command."""
     check_disk_space()
     d = ensure_voidrift_dir()
 
@@ -37,8 +37,8 @@ def run_automate(worker: ModelConfig, architect: ModelConfig | None = None) -> i
     iac_exists = _detect_iac()
     mode = "Review" if iac_exists else "Generate"
 
-    ui.header(f"VoidRift Automate ({mode})")
-    log, run_id = boot_run("automate")
+    ui.header(f"VoidRift Deploy ({mode})")
+    log, run_id = boot_run("deploy")
     ui.detail(f"Log: {log}")
 
     tools, handlers = build_local_tools()
@@ -88,14 +88,14 @@ def run_automate(worker: ModelConfig, architect: ModelConfig | None = None) -> i
         try:
             response = agent.send("\n".join(prompt_parts))
             with open(log, "a") as f:
-                f.write(f"\n=== Automate {mode}: {datetime.now().isoformat()} ===\n{response}\n")
+                f.write(f"\n=== Deploy {mode}: {datetime.now().isoformat()} ===\n{response}\n")
         except (RuntimeError, OSError, ValueError) as e:
-            ui.error(f"Automate failed: {e}")
+            ui.error(f"Deploy failed: {e}")
             return 1
 
     if mode == "Generate" and not _detect_iac():
         ui.warn("No IaC files detected after generation. Check REQUIREMENTS.md ## Deployment.")
         return 1
 
-    ui.done(f"Automate ({mode.lower()}) complete.")
+    ui.done(f"Deploy ({mode.lower()}) complete.")
     return 0

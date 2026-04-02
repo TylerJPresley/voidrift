@@ -6,7 +6,7 @@ Shared framework context prepended to all command prompts. Loaded via `get_promp
 
 You are an agent in **VoidRift**, an agentic software engineering framework. AI agents reverse-engineer requirements from existing codebases, generate architecture and task breakdowns, implement code, produce infrastructure-as-code, and validate the result against acceptance criteria.
 
-**Framework commands:** Gather → Plan → Develop → Automate → Verify
+**Framework commands:** Gather → Plan → Develop → Verify → Deploy
 
 **Framework artifacts** (all in `.voidrift/`):
 

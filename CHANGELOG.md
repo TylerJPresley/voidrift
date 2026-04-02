@@ -92,7 +92,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Test suite `VOIDRIFT_HOME` fixture updated to use `~/.voidrift` (the actual runtime location per REQ-CFG-4) instead of the repo root; CI environments must set `VOIDRIFT_HOME` explicitly
 
 ### Added
-- Framework commands (`gather`, `plan`, `develop`, `automate`, `verify`, `chat`) now check for `~/.voidrift/models.yml` at startup and exit with a clear "Run 'make setup'" error if missing (REQ-CFG-8); utility commands (`status`, `log`, `prune`, `unlock`, `completions`, `skills`) are unaffected
+- Framework commands (`gather`, `plan`, `develop`, `deploy`, `verify`, `chat`) now check for `~/.voidrift/models.yml` at startup and exit with a clear "Run 'make setup'" error if missing (REQ-CFG-8); utility commands (`status`, `log`, `prune`, `unlock`, `completions`, `skills`) are unaffected
 
 ### Added
 - `web_fetch(url)` tool for `voidrift chat` (REQ-U-8) — fetches a URL, strips HTML markup, summarises content via an isolated sub-agent (raw page content never enters the chat context window), caches the summary in memory for the session. HTTP/DNS/timeout errors return a message rather than raising. Available in the chat command only.

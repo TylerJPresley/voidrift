@@ -2,7 +2,7 @@
 
 ## 1. Introduction
 
-- **Purpose:** An agentic software engineering framework composed of independent framework commands — Gather, Plan, Develop, Automate, Verify, Chat — each of which reads and writes artifacts in a project's `.voidrift/` directory. AI agents reverse-engineer requirements from existing codebases, generate architecture and task breakdowns, implement code, produce infrastructure-as-code, and validate the result against acceptance criteria. They are not a pipeline: each command's input is a file and its output is a file. Operators run the commands they need, skip the ones they don't, and can provide hand-authored artifacts to any command that accepts them.
+- **Purpose:** An agentic software engineering framework composed of independent framework commands — Gather, Plan, Develop, Deploy, Verify, Chat — each of which reads and writes artifacts in a project's `.voidrift/` directory. AI agents reverse-engineer requirements from existing codebases, generate architecture and task breakdowns, implement code, produce infrastructure-as-code, and validate the result against acceptance criteria. They are not a pipeline: each command's input is a file and its output is a file. Operators run the commands they need, skip the ones they don't, and can provide hand-authored artifacts to any command that accepts them.
 - **Project Scope:** VoidRift provides the CLI framework command layer and framework reference files. AI models are external (local vLLM containers, cloud APIs, or gateway endpoints). Worker node management is provided by the external `worker-cli` project. Hosting, CI/CD infrastructure, and runtime environments for generated projects are the operator's responsibility.
 
 ## 2. User Stories
@@ -13,7 +13,7 @@
 - **As an** Operator, **I want to** run `voidrift develop` to have an AI execute tasks automatically, **so that** code is written, tested, and committed without manual intervention.
 - **As an** Operator, **I want to** use concurrency configuration to process multiple modules in parallel, **so that** large projects complete faster.
 - **As an** Operator, **I want to** use local models for bulk implementation and cloud models for escalation, **so that** I minimize API costs while maintaining quality on hard problems.
-- **As an** Operator, **I want to** run `voidrift automate` to generate infrastructure-as-code, **so that** my project is deployable without manual IaC authoring.
+- **As an** Operator, **I want to** run `voidrift deploy` to generate infrastructure-as-code, **so that** my project is deployable without manual IaC authoring.
 - **As an** Operator, **I want to** run `voidrift verify` to validate the implementation against requirements, **so that** I have confidence the project meets its acceptance criteria.
 - **As a** model executing tasks, **I want to** receive one task at a time, **so that** my context window stays small and focused.
 - **As a** model consulted during escalation, **I want to** receive only the problem description and architecture docs, **so that** I provide design guidance without implementation bias.
@@ -36,7 +36,7 @@
 
 - **REQ-ARCH-1:** The system SHALL consist of two components: a Python CLI (`cli/`) and framework reference files (`resources/`). Worker node management is provided by the external `worker-cli` project.
   - *Rationale:* Separating worker node management from command orchestration makes the CLI model-agnostic. Every model — local, cloud, or gateway — is just a base URL to the CLI.
-- **REQ-ARCH-2:** The CLI SHALL provide subcommands: `gather`, `plan`, `develop`, `automate`, `verify`, `chat`, `status`, `log`, `unlock`, `prune`, `completions`, `skills`. WHEN an unknown command is given, THE SYSTEM SHALL display the error and full help text (no tracebacks). No CLI command SHALL ever display a Python traceback to the user.
+- **REQ-ARCH-2:** The CLI SHALL provide subcommands: `gather`, `plan`, `develop`, `deploy`, `verify`, `chat`, `status`, `log`, `unlock`, `prune`, `completions`, `skills`. WHEN an unknown command is given, THE SYSTEM SHALL display the error and full help text (no tracebacks). No CLI command SHALL ever display a Python traceback to the user.
 - **REQ-ARCH-3:** WHEN `voidrift` is run with no arguments, THE SYSTEM SHALL launch an interactive guided flow presenting available actions, model selection, and command-specific options. WHEN presenting the model selection prompt, THE SYSTEM SHALL default to the active local model alias (read from `~/.worker-cli/.active-container`) if one is running, or the first alias in the configured model list otherwise. No hardcoded model alias SHALL appear as a default in any user-facing prompt or interactive flow.
   - Given a local model with alias `qwen3-coder` is active (recorded in `.active-container`), When the interactive model prompt is shown, Then the default is `qwen3-coder`.
   - Given no local model is active, When the interactive model prompt is shown, Then the default is the first alias from the configured model list.
@@ -253,16 +253,16 @@
 
 - **REQ-D-14:** *(Replaced by REQ-TM-5 and REQ-TM-6. Task completion tracked in manifest; archival moves files to `archived/` and appends to history.log.)*
 
-### 4.7 Command: Automate
+### 4.7 Command: Deploy
 
 - **REQ-A-1:** WHEN no IaC files are detected, THE SYSTEM SHALL generate infrastructure-as-code based on REQUIREMENTS.md and ARCHITECTURE.md.
 - **REQ-A-2:** WHEN IaC files exist, THE SYSTEM SHALL review them for consistency and reconcile gaps without deleting existing files.
 - **REQ-A-3:** Generated IaC SHALL NOT contain hardcoded secrets. All sensitive values SHALL be parameterized.
 - **REQ-A-4:** Every generated cloud resource SHALL be tagged with project name and environment.
-- **REQ-A-5:** WHEN `voidrift automate <model>` is run, THE SYSTEM SHALL validate that both `.voidrift/REQUIREMENTS.md` and `.voidrift/ARCHITECTURE.md` exist before performing any model calls. IF either file is missing, THE SYSTEM SHALL exit with a clear error identifying which artifact is missing and which command produces it.
-  - Given no `.voidrift/REQUIREMENTS.md` exists, When `voidrift automate <model>` is run, Then the command exits with an error containing "Run 'voidrift gather'" — no model call is made.
-  - Given `.voidrift/REQUIREMENTS.md` exists but `.voidrift/ARCHITECTURE.md` does not, When `voidrift automate <model>` is run, Then the command exits with an error containing "Run 'voidrift plan'" — no model call is made.
-  - Given both `.voidrift/REQUIREMENTS.md` and `.voidrift/ARCHITECTURE.md` exist, When `voidrift automate <model>` runs, Then automation proceeds normally.
+- **REQ-A-5:** WHEN `voidrift deploy <model>` is run, THE SYSTEM SHALL validate that both `.voidrift/REQUIREMENTS.md` and `.voidrift/ARCHITECTURE.md` exist before performing any model calls. IF either file is missing, THE SYSTEM SHALL exit with a clear error identifying which artifact is missing and which command produces it.
+  - Given no `.voidrift/REQUIREMENTS.md` exists, When `voidrift deploy <model>` is run, Then the command exits with an error containing "Run 'voidrift gather'" — no model call is made.
+  - Given `.voidrift/REQUIREMENTS.md` exists but `.voidrift/ARCHITECTURE.md` does not, When `voidrift deploy <model>` is run, Then the command exits with an error containing "Run 'voidrift plan'" — no model call is made.
+  - Given both `.voidrift/REQUIREMENTS.md` and `.voidrift/ARCHITECTURE.md` exist, When `voidrift deploy <model>` runs, Then deployment proceeds normally.
 
 ### 4.8 Command: Verify
 
@@ -413,7 +413,7 @@ Two log roots, two intents:
   - **Model** (`◆`): light blue (ANSI 256-color 117), indented 2 spaces. All model-generated text — streamed responses, summaries, analysis output. Prefix: `◆ alias` dim italic label on first line.
   - **Operator** (`▶`): bold white. Reprinted user input in interactive sessions. Preceded by a horizontal rule (`console.rule`, `bright_black` style).
   All framework commands SHALL use these roles identically. A shared output module SHALL enforce the convention — commands SHALL NOT use raw `console.print` with ad-hoc styling.
-- **REQ-UI-2:** ALL framework commands (gather, plan, develop, automate, verify) SHALL display progress through their stages. Each command SHALL show: a command title line, stage transitions (e.g. `▸ Stage 1/3: Triaging files...`), per-item progress with elapsed time (e.g. `▸ 3/28 backend/main.py... ✓ 4.8s`), and a final summary line. Automated commands (plan, develop, automate, verify) SHALL show the same level of progress detail as interactive commands.
+- **REQ-UI-2:** ALL framework commands (gather, plan, develop, deploy, verify) SHALL display progress through their stages. Each command SHALL show: a command title line, stage transitions (e.g. `▸ Stage 1/3: Triaging files...`), per-item progress with elapsed time (e.g. `▸ 3/28 backend/main.py... ✓ 4.8s`), and a final summary line. Automated commands (plan, develop, deploy, verify) SHALL show the same level of progress detail as interactive commands.
 - **REQ-UI-3:** The `voidrift chat` command SHALL use a plain-terminal interface with: a dim header block (command name, log path, model label), a `prompt_toolkit` single-line input where Enter submits and `\` + Enter inserts a newline for multi-line messages (backspace/arrows work across lines), streamed model responses via `on_token` callback, and a dim stats line after each response (per REQ-UI-10).
 - **REQ-UI-4:** Chat SHALL always have its full tool set available. IF a model request fails mid-session, THE SYSTEM SHALL print the error and return to the prompt.
   - Given a chat session is active, When the operator sends a message, Then all configured chat tools are available to the agent.
@@ -439,7 +439,7 @@ Two log roots, two intents:
   - Given the operator types while the model is streaming, When the response completes, Then no stray characters from the operator's typing appear in the terminal output.
   - Given agent.send() raises an exception, When the exception propagates, Then the terminal is restored to normal mode before the error is displayed.
   - Given web_fetch confirmation is required mid-stream, When the prompt appears, Then the operator can see their keystrokes and the input is handled correctly.
-- **REQ-UI-10:** ALL agent stats lines — spinner progress during model calls and completion summaries after — SHALL display: elapsed time, token counts (`tkns: ↓ Nk - ↑ Nk`), context utilization (`ctx N%`), and a status indicator. Format: `(elapsed · tkns: ↓ Nk - ↑ Nk · ctx N% · status)`. Fields with no data from the model response SHALL be omitted. This applies uniformly to automated commands (gather, plan, develop, automate, verify) and interactive commands (chat).
+- **REQ-UI-10:** ALL agent stats lines — spinner progress during model calls and completion summaries after — SHALL display: elapsed time, token counts (`tkns: ↓ Nk - ↑ Nk`), context utilization (`ctx N%`), and a status indicator. Format: `(elapsed · tkns: ↓ Nk - ↑ Nk · ctx N% · status)`. Fields with no data from the model response SHALL be omitted. This applies uniformly to automated commands (gather, plan, develop, deploy, verify) and interactive commands (chat).
   - *Rationale:* Token and context telemetry is essential operational feedback. Operators need to see context pressure building before it causes failures. A single consistent format across all commands reduces cognitive load.
   - Given an agent call returns usage data, When the stats line is rendered, Then elapsed, tkns, ctx%, and status are all present.
   - Given an agent call returns no usage data, When the stats line is rendered, Then only elapsed and status are present.
@@ -452,7 +452,7 @@ Two log roots, two intents:
 - **REQ-CFG-4:** `VOIDRIFT_HOME` env var MAY override `~/.voidrift/` for testing and CI. IF not set, `~/.voidrift/` is used.
 - **REQ-CFG-5:** `config.yml` SHALL contain a `retention:` section with `project` (integer, default 5 — number of recent project logs to keep) and `global` (integer, default 30 — days of global framework logs to keep). `voidrift prune` uses these limits.
 - **REQ-CFG-6:** Operational limits (`max_tokens`, `max_context`, `max_read_lines`, `max_input_chars`, `concurrency`) SHALL be read from each model's entry in the models file (REQ-MC-3). The models file `defaults:` section provides fallback values. The CLI SHALL NOT maintain per-type limit tables or infer limits from model type.
-- **REQ-CFG-8:** WHEN any framework command (`gather`, `plan`, `develop`, `automate`, `verify`, `chat`) is invoked AND the configured models file (per `models_file` in `config.yml`, default `~/.worker-cli/models.yml`) does not exist, THE SYSTEM SHALL exit with a clear error directing the operator to configure their models. WHEN `VOIDRIFT_HOME` is explicitly set, this check SHALL apply against the overridden config path.
+- **REQ-CFG-8:** WHEN any framework command (`gather`, `plan`, `develop`, `deploy`, `verify`, `chat`) is invoked AND the configured models file (per `models_file` in `config.yml`, default `~/.worker-cli/models.yml`) does not exist, THE SYSTEM SHALL exit with a clear error directing the operator to configure their models. WHEN `VOIDRIFT_HOME` is explicitly set, this check SHALL apply against the overridden config path.
   - *Rationale:* Without the models file, all model resolution fails with a cryptic "Unknown model: X. Available: " error. A direct error identifying the missing file is more actionable than a silent empty list. Utility commands (`status`, `log`, `prune`, `unlock`, `completions`, `skills`) are exempt — they do not perform model resolution and must remain usable even in a partially initialized state.
   - Given the configured models file does not exist, When `voidrift gather claude ./src` is run, Then the command exits with an error identifying the missing path.
   - Given `VOIDRIFT_HOME=/tmp/empty` and no models file at the configured path, When any framework command is run, Then the same error appears.

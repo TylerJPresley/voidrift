@@ -17,7 +17,7 @@ voidrift                          # Interactive mode
 voidrift gather <model>           # Gather: requirements elicitation
 voidrift plan <model>             # Plan: architecture and task breakdown
 voidrift develop <worker> [arch]  # Develop: execute tasks
-voidrift automate <worker>        # Automate: generate IaC
+voidrift deploy <model>          # Deploy: generate IaC
 voidrift verify <worker> [arch]   # Verify: quality checks
 voidrift chat <model>             # Chat: ad-hoc session
 voidrift status                   # Project status
