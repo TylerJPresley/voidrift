@@ -257,6 +257,24 @@
 
 ### 4.7 Command: Deploy
 
+Deploy prepares verified code for release: version management, changelog generation, git tagging, and optional IaC generation.
+
+- **REQ-DPL-1:** WHEN `voidrift deploy <model>` is run, THE SYSTEM SHALL determine the version bump type (major, minor, or patch) from verified tasks since the last release tag. The model reads task files and requirements to classify: new features = minor, breaking changes = major, bug fixes = patch. The operator SHALL be prompted to confirm or override the suggested bump before it is applied. The version SHALL follow Semantic Versioning (SemVer).
+  - *Rationale:* Automated classification from task content prevents version drift. Operator confirmation prevents incorrect bumps from propagating.
+  - Given 3 verified feature tasks since the last tag, When deploy runs, Then the model suggests a minor bump and the operator confirms.
+  - Given a verified task that modifies a public API contract, When deploy runs, Then the model suggests a major bump.
+- **REQ-DPL-2:** Deploy SHALL generate a changelog entry from `.voidrift/tasks/history.log` listing verified tasks since the last release tag, grouped by module, with task summaries. The changelog SHALL be appended to the project's CHANGELOG.md (or created if absent).
+  - *Rationale:* history.log is the canonical record of completed work. Generating the changelog from it ensures accuracy and eliminates manual changelog maintenance.
+  - Given 5 tasks verified since the last tag, When deploy generates the changelog, Then all 5 appear grouped by module with summaries.
+- **REQ-DPL-3:** Deploy SHALL create a git tag (`v{version}`) marking the release candidate. The tag SHALL be annotated with the changelog entry as the tag message.
+  - *Rationale:* A git tag locks the changeset. The annotated message provides release context without requiring a separate file lookup.
+  - Given version 1.2.0 is confirmed, When deploy tags, Then `v1.2.0` is created as an annotated tag.
+- **REQ-DPL-4:** WHEN ARCHITECTURE.md indicates infrastructure requirements (IaC sections present), deploy SHALL generate or update infrastructure-as-code per REQ-A-1 through REQ-A-4. WHEN no infrastructure sections exist in ARCHITECTURE.md, IaC generation SHALL be skipped.
+  - *Rationale:* Not all projects need IaC. Skipping when unnecessary avoids generating empty or irrelevant infrastructure files.
+- **REQ-DPL-5:** WHEN a `post_deploy` field exists in ARCHITECTURE.md, deploy SHALL execute it as a shell command after tagging. The command receives the new version as `$VERSION`. IF the command fails, deploy SHALL warn but NOT roll back the tag.
+  - *Rationale:* Post-deploy hooks let the operator trigger project-specific actions (CI pipelines, registry pushes, notifications) without deploy prescribing a deployment strategy.
+  - Given `post_deploy: ./scripts/release.sh`, When deploy completes tagging v1.2.0, Then `./scripts/release.sh` is executed with `VERSION=1.2.0` in the environment.
+  - Given the post-deploy script exits non-zero, When deploy checks the result, Then a warning is printed but the tag remains.
 - **REQ-A-1:** WHEN no IaC files are detected, THE SYSTEM SHALL generate infrastructure-as-code based on REQUIREMENTS.md and ARCHITECTURE.md.
 - **REQ-A-2:** WHEN IaC files exist, THE SYSTEM SHALL review them for consistency and reconcile gaps without deleting existing files.
 - **REQ-A-3:** Generated IaC SHALL NOT contain hardcoded secrets. All sensitive values SHALL be parameterized.

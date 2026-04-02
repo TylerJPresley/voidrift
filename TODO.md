@@ -54,7 +54,7 @@ Work items that need doing. Grouped by area, ordered by priority within each gro
 
 ## Deploy Command
 
-- [ ] **Deploy is a renamed stub** — `automate.py` was renamed to `deploy.py` but the implementation is unchanged. REQ-A-1 through REQ-A-5 define the current scope. Future scope (release management, CI/CD) is undefined — needs requirements before implementation.
+- [x] **Deploy requirements written** — REQ-DPL-1 (version bump), REQ-DPL-2 (changelog from history.log), REQ-DPL-3 (git tag), REQ-DPL-4 (conditional IaC). Implementation not started.
 
 ---
 

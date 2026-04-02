@@ -9,7 +9,7 @@ An agentic software engineering framework composed of independent framework comm
   Plan ───── reads REQUIREMENTS.md, writes ARCHITECTURE.md + task tickets
   Develop ── reads task tickets, writes source code
   Verify ─── reads REQUIREMENTS.md, tests the implementation
-  Deploy ── reads REQUIREMENTS.md + ARCHITECTURE.md, writes IaC
+  Deploy ── reads verified tasks + history.log, tags release
   Chat ───── interactive refinement of any .voidrift/ artifact
 ```
 
@@ -199,14 +199,14 @@ Verify never modifies source files. Failures become tasks for Develop.
 
 ### Deploy
 
-Generates infrastructure-as-code from `REQUIREMENTS.md` and `ARCHITECTURE.md`:
+Prepares verified code for release:
 
 ```bash
 voidrift deploy <model>
 voidrift deploy <model> <architect>
 ```
 
-Produces IaC files in the project. Reconciles gaps if IaC already exists. No hardcoded secrets — all sensitive values parameterized.
+Determines version bump (major/minor/patch) from verified tasks since the last release tag. Generates a changelog entry from history.log. Creates an annotated git tag locking the changeset. Optionally generates IaC when ARCHITECTURE.md indicates infrastructure requirements.
 
 ---
 
