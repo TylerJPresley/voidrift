@@ -1144,18 +1144,64 @@ class TestDevelopRetryEscalation:
     def test_no_writes_no_architect_skips_task(
         self, MockAgent, tmp_project, cloud_model, sample_requirements
     ):
-        """When no writes after retry and no architect, task is skipped (not escalated)."""
+        """When no writes after retry and no architect, task returns failure."""
         vd = tmp_project / ".voidrift"
-        (vd / "TASKS.md").write_text("- [ ] Create src/empty.py: stub [backend]\n")
+        self._setup_manifest(vd, [{"id": 1, "title": "Create stub"}])
 
         mock_instance = MagicMock()
         mock_instance.send.return_value = "I thought about it."
+        mock_instance.on_progress = None
+        mock_instance.on_token = None
+        mock_instance.on_complete = None
+        mock_instance.messages = []
         MockAgent.return_value = mock_instance
 
         from voidrift_cli.commands.develop import run_develop
-        # Without an architect, task should be skipped gracefully
         result = run_develop(cloud_model)
-        assert result in (0, 1)  # Doesn't crash
+        assert result in (0, 1)
+
+    @patch("voidrift_cli.commands.develop.AgentLoop")
+    def test_no_writes_with_architect_escalates(
+        self, MockAgent, tmp_project, cloud_model, sample_requirements
+    ):
+        """When no writes after retry and architect is configured, architect is consulted
+        and fix plan is appended to the task file (REQ-D-6, REQ-TM-7)."""
+        vd = tmp_project / ".voidrift"
+        self._setup_manifest(vd, [{"id": 1, "title": "Create stub"}])
+        (vd / "REQUIREMENTS.md").write_text("# Reqs\n")
+        (vd / "ARCHITECTURE.md").write_text("# Arch\n")
+
+        send_count = 0
+
+        class FakeAgent:
+            def __init__(self, **kwargs):
+                self.on_progress = None
+                self.on_token = None
+                self.on_complete = None
+                self.messages = []
+                self._has_tools = bool(kwargs.get("tools"))
+
+            def send(self, msg: str) -> str:
+                nonlocal send_count
+                send_count += 1
+                # Architect agent (no tools) returns guidance
+                if not self._has_tools:
+                    return "Fix: create the file with a stub function."
+                # After architect guidance (send 3+), produce writes
+                if send_count >= 5:
+                    from voidrift_cli.tools import _ctx
+                    _ctx._source_write_count += 1
+                return "done"
+
+        MockAgent.side_effect = FakeAgent
+
+        from voidrift_cli.commands.develop import run_develop
+        result = run_develop(cloud_model, architect=cloud_model)
+
+        # Architect guidance should be appended to the task file
+        task_file = vd / "tasks" / "active" / "TASK-1.md"
+        content = task_file.read_text()
+        assert "Architect Fix Plan" in content
 
 
 class TestChatSession:

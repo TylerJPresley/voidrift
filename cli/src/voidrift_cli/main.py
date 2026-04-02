@@ -297,7 +297,13 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
     def _context_prompt():
         """Build colored context percentage prompt (REQ-UI-6)."""
         from prompt_toolkit import ANSI
+        mode = ""
+        if _idea_state.get("active"):
+            idea_id = _idea_state.get("id")
+            mode = f" idea:{idea_id}" if idea_id else " idea"
         if not max_ctx:
+            if mode:
+                return ANSI(f"\n\033[36m[{mode.strip()}]\033[0m > ")
             return ANSI("\n> ")
         pct = min(100, _estimate_tokens(agent.messages) * 100 // max_ctx)
         if pct > 80:
@@ -306,6 +312,8 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
             color = "\033[33m"  # yellow
         else:
             color = "\033[37m"  # white
+        if mode:
+            return ANSI(f"\n{color}[{pct}%\033[36m{mode}{color}]\033[0m > ")
         return ANSI(f"\n{color}[{pct}%]\033[0m > ")
 
     from rich.console import Group as _RGroup
@@ -529,15 +537,10 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
     # ── Idea refinement state (REQ-IDEA-1 through REQ-IDEA-4) ───────
     _idea_state: dict = {}  # {"active": True, "id": N, "mm": ManifestManager}
 
-    def _handle_idea(agent, log, user_input: str) -> None:
-        """Start or resume an idea refinement flow."""
+    def _handle_idea(agent, log, user_input: str) -> str:
+        """Start or resume an idea refinement flow. Returns message to send to agent."""
         from .manifest import ManifestManager
         from . import prompts as _prompts
-
-        mm = ManifestManager()
-        if mm.exists():
-            mm.load()
-        mm.ensure_dirs()
 
         arg = user_input.strip()[5:].strip()  # strip "/idea"
 
@@ -547,35 +550,44 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
                 idea_id = int(arg)
             except ValueError:
                 ui.error(f"Invalid idea ID: {arg}")
-                return
+                return ""
+            mm = ManifestManager()
+            if mm.exists():
+                mm.load()
             content = mm.read_idea(idea_id)
             if not content:
                 ui.error(f"IDEA-{idea_id} not found.")
-                return
+                return ""
             idea_context = f"Existing idea:\n\n{content}"
             overlay = _prompts.load_prompt("chat", "IDEA").format(idea_context=idea_context)
             agent.messages[0]["content"] += f"\n\n{overlay}"
             _idea_state.update(active=True, id=idea_id, mm=mm)
             ui.info(f"Loaded IDEA-{idea_id}. Type /done when finished.")
-            # Ask agent to summarize and continue
-            agent.messages.append({"role": "user", "content": f"I've loaded IDEA-{idea_id}. Summarize where we left off and ask what I'd like to refine."})
+            return f"I've loaded IDEA-{idea_id}. Summarize where we left off and ask what I'd like to refine."
         else:
-            # New idea
-            idea_id = mm.next_idea_id
-            mm.add_idea(idea_id, status="draft")
+            # New idea — no ID until /done
             idea_context = "This is a new idea. Start with Stage 1 — Intake."
             overlay = _prompts.load_prompt("chat", "IDEA").format(idea_context=idea_context)
             agent.messages[0]["content"] += f"\n\n{overlay}"
-            _idea_state.update(active=True, id=idea_id, mm=mm)
-            ui.info(f"Created IDEA-{idea_id}. Type /done when finished.")
-            agent.messages.append({"role": "user", "content": "I want to develop a new idea."})
+            _idea_state.update(active=True, id=None)
+            ui.info("Starting idea refinement. Type /done when finished.")
+            return "I want to develop a new idea."
 
-    def _finish_idea(agent, log) -> None:
-        """Save the idea and return to normal chat."""
-        idea_id = _idea_state["id"]
-        mm = _idea_state["mm"]
+    def _finish_idea(agent, log) -> str:
+        """Save the idea and return to normal chat. Returns message to send to agent."""
+        from .manifest import ManifestManager
 
-        # Ask agent for category
+        mm = ManifestManager()
+        if mm.exists():
+            mm.load()
+        mm.ensure_dirs()
+
+        idea_id = _idea_state.get("id")
+        is_new = idea_id is None
+        if is_new:
+            idea_id = mm.next_idea_id
+
+        # Ask operator for category
         ui.info("Categorize this idea:")
         ui._con.print("  [bold]now[/bold] — high priority, work on it soon")
         ui._con.print("  [bold]next[/bold] — upcoming, after current work")
@@ -588,21 +600,23 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
                 break
             ui.warn("Choose: now, next, or later")
 
-        # Ask agent to write the final structured idea
-        agent.messages.append({
-            "role": "user",
-            "content": (
-                f"The operator chose '{cat}'. Write the final structured idea to "
-                f"ideas/IDEA-{idea_id}.md using write_framework_file. "
-                f"Include: title, user story, context, acceptance criteria, "
-                f"affected modules, and affected files (if modifying existing behavior)."
-            ),
-        })
+        if is_new:
+            mm.add_idea(idea_id, status=cat)
+        else:
+            mm.set_idea_status(idea_id, cat)
 
-        mm.set_idea_status(idea_id, cat)
+        ui.info(f"IDEA-{idea_id} saved as {cat}.")
         with open(log, "a") as f:
             f.write(f"\n[IDEA] IDEA-{idea_id} saved as {cat}\n")
+
+        msg = (
+            f"Write the final structured idea to "
+            f"ideas/IDEA-{idea_id}.md using write_framework_file. "
+            f"Include: title, user story, context, acceptance criteria, "
+            f"affected modules, and affected files (if modifying existing behavior)."
+        )
         _idea_state.clear()
+        return msg
 
     try:
         while True:
@@ -631,13 +645,15 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
             # /idea — guided idea refinement (REQ-IDEA-1)
             low = user_input.lower().strip()
             if low == "/idea" or low.startswith("/idea "):
-                _handle_idea(agent, log, user_input)
-                continue
+                user_input = _handle_idea(agent, log, user_input)
+                if not user_input:
+                    continue
 
             # /done — save idea and return to normal chat (REQ-IDEA-3)
             if low == "/done" and _idea_state.get("active"):
-                _finish_idea(agent, log)
-                continue
+                user_input = _finish_idea(agent, log)
+                if not user_input:
+                    continue
 
             # /write enables tools for this turn (REQ-UI-3)
             if write_tools is not None:
