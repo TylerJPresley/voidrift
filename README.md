@@ -97,7 +97,7 @@ Interactive session with full tool access — the central command for iterating 
 
 **Example workflow — new project:**
 ```bash
-voidrift gather <model> ./src         # reverse-engineer requirements
+voidrift gather <model> --path ./src         # reverse-engineer requirements
 voidrift chat <model> --doc REQUIREMENTS.md  # review and refine
 voidrift plan <model>                 # generate architecture + tasks
 voidrift chat <model> --doc ARCHITECTURE.md  # review architecture
@@ -107,11 +107,11 @@ voidrift verify <model>               # acceptance testing
 
 **Example workflow — new feature on existing project:**
 ```bash
-voidrift chat <model>                 # /idea to capture and refine
-voidrift chat <model> --doc REQUIREMENTS.md  # update requirements
-voidrift plan <model>                 # plan produces tasks for the delta
-voidrift develop <model>              # implement
-voidrift verify <model>               # validate
+voidrift chat <model>                        # /idea to capture and refine
+voidrift gather <model> --idea 3             # generate requirements from idea
+voidrift plan <model> --idea 3               # plan tasks scoped to idea
+voidrift develop <model>                     # implement
+voidrift verify <model>                      # validate
 ```
 
 ### Gather
@@ -128,13 +128,16 @@ flowchart LR
 ```
 
 ```bash
-voidrift gather <model> <path>             # update REQUIREMENTS.md if it exists; create if not
-voidrift gather <model> <path> --overwrite # remove previous gather artifacts and start fresh
+voidrift gather <model> --path <path>        # reverse-engineer requirements from codebase
+voidrift gather <model> --idea <id>          # generate requirements from a refined idea
+voidrift gather <model> --path <path> --overwrite  # remove previous gather artifacts and start fresh
 ```
 
 Produces: `REQUIREMENTS.md`, `ANALYSIS.md` (index), `analysis/<file>.md` (per-file), `spec/<module>.md`
 
-Re-running gather updates requirements in place: the existing `REQUIREMENTS.md` is passed as context to the final consolidation pass, which merges new analysis with preserved rationale and user stories. Gather never auto-commits. Respects `.gitignore`. Use `voidrift chat <model>` to iterate on requirements interactively.
+`--path` mode reverse-engineers requirements from the codebase using a four-stage pipeline. `--idea` mode reads a refined idea file and uses the same ANALYSIS-REQS skill and REQUIREMENTS-TEMPLATE to generate or update requirements — recording the affected REQ IDs and a diff in the idea file.
+
+Re-running gather updates requirements in place: the existing `REQUIREMENTS.md` is passed as context to the final consolidation pass, which merges new analysis with preserved rationale and user stories. Gather never auto-commits. Respects `.gitignore`.
 
 ### Plan
 
@@ -142,6 +145,7 @@ Generates architecture and task breakdown from requirements:
 
 ```bash
 voidrift plan <model>             # auto-detects: update if artifacts exist, fresh plan if not
+voidrift plan <model> --idea <id> # scope planning to a specific idea (requires reqs)
 voidrift plan <model> --overwrite # remove previous plan artifacts and start fresh
 ```
 

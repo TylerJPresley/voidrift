@@ -108,6 +108,9 @@ Each command sees only the agent tools relevant to its role (REQ-ARCH-9). Gather
 
 ### 4.1 Gather command
 
+Two modes: `--path <path>` (reverse-engineer from codebase) and `--idea <id>` (generate from idea).
+
+**--path mode** (four-stage pipeline):
 ```
 CLI: build file tree → triage agent (categorize) → validation pass (prune bad entries)
 
@@ -131,6 +134,13 @@ Stage 4 — Final Pass:
   CLI: send source_requirements + context_summaries in user message to final agent (no tools)
   model: returns complete REQUIREMENTS.md content as direct response text
   CLI: strip preamble, write .voidrift/REQUIREMENTS.md
+```
+
+**--idea mode:**
+```
+CLI: read IDEA-{id}.md → use ANALYSIS-REQS skill + REQUIREMENTS-TEMPLATE
+  → agent updates REQUIREMENTS.md with new/modified requirements
+CLI: record affected REQ IDs (reqs: field) and diff in idea file
 ```
 
 ### 4.2 Plan command

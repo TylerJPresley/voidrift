@@ -8,7 +8,8 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Changed
-- **Idea refinement (REQ-IDEA-1 through REQ-IDEA-4):** `/idea` command in chat starts a guided flow — intake, exploration, shaping, summary. Ideas stored as `IDEA-{id}.md` with now/next/later categorization. Operator-owned backlog that feeds into planning through manual requirements updates.
+- **Idea-to-implementation flow (REQ-IDEA-1 through REQ-IDEA-5):** `/idea` in chat for guided refinement. `gather --idea <id>` generates requirements from ideas using ANALYSIS-REQS skill — records affected REQ IDs and diff in the idea file. `plan --idea <id>` scopes planning to an idea, gates on requirements existing. Tasks trace back to originating idea. Ideas archived when all derived tasks verified.
+- **Gather modes (REQ-G-1):** `--path <path>` for codebase reverse-engineering, `--idea <id>` for idea-driven requirements. Bare `gather` without either flag shows help.
 - **Task system redesign (REQ-TM-1 through REQ-TM-7):** Tasks are self-contained ticket files (`tasks/active/TASK-{id}.md`) with YAML frontmatter and full context. CLI-owned `manifest.yml` tracks status, dependencies, and module grouping. Develop dispatches at the task level (not module level) from the manifest. Bugs are independent entities (`BUG-{id}.md`). Verified tasks archived to `tasks/archived/` with history.log event trail. TaskStore and TASKS-DONE.md removed.
 - **Develop rewrite (REQ-D-4, REQ-D-10):** Simplified dispatch loop — CLI reads manifest, finds ready tasks, dispatches sub-agents with task file content as prompt. No context-loading tool calls. Task-level concurrency replaces module-level.
 - **Project split:** Worker CLI extracted to separate project (`~/Projects/worker-cli/`). VoidRift no longer contains worker code, tests, or config. The only touchpoint is a single models file at a configurable path (`models_file` in config.yml, default `~/.worker-cli/models.yml`).
