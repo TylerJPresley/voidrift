@@ -242,7 +242,7 @@ def _build_task_files(d: Path, requirements: str, architecture: str) -> int:
                 "module": mod_name,
                 "skills": task.skills,
                 "files": [task.file] if task.file else [],
-                "depends": [],
+                "depends": task.depends,
             }
 
             # Extract task body from raw lines
@@ -250,7 +250,7 @@ def _build_task_files(d: Path, requirements: str, architecture: str) -> int:
             # First line is the marker — extract summary
             summary = re.sub(r"^- \[.\] ", "", body_lines[0]).strip() if body_lines else task.text
             # Remaining lines are description
-            desc_lines = [l.strip() for l in body_lines[1:] if not l.strip().lower().startswith(("skills:", "reqs:", "file:"))]
+            desc_lines = [l.strip() for l in body_lines[1:] if not l.strip().lower().startswith(("skills:", "reqs:", "file:", "depends:"))]
             description = "\n".join(desc_lines).strip()
 
             # Build self-contained ticket content
@@ -268,7 +268,7 @@ def _build_task_files(d: Path, requirements: str, architecture: str) -> int:
             task_path.write_text(content)
 
             # Register in manifest
-            mm.add_task(task_id, mod_name)
+            mm.add_task(task_id, mod_name, depends=task.depends or None)
 
     mm.save()
     return task_id

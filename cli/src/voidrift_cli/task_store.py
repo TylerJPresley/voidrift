@@ -26,6 +26,7 @@ class Task(BaseModel):
     file: str = ""
     skills: list[str] = []
     reqs: list[str] = []
+    depends: list[int] = []
     line_start: int = 0
     line_end: int = 0  # exclusive
 
@@ -79,6 +80,7 @@ class TaskStore(BaseModel):
 
             skills: list[str] = []
             reqs: list[str] = []
+            depends: list[int] = []
             file_path: str = ""
             for j in range(line_num + 1, end):
                 stripped = self._raw_lines[j].strip()
@@ -86,12 +88,14 @@ class TaskStore(BaseModel):
                     skills = [s.strip() for s in stripped.split(":", 1)[1].split(",") if s.strip()]
                 elif stripped.lower().startswith("reqs:"):
                     reqs = [r.strip() for r in stripped.split(":", 1)[1].split(",") if r.strip()]
+                elif stripped.lower().startswith("depends:"):
+                    depends = [int(d.strip()) for d in stripped.split(":", 1)[1].split(",") if d.strip().isdigit()]
                 elif stripped.lower().startswith("file:"):
                     file_path = stripped.split(":", 1)[1].strip()
 
             self._modules[module].append(
                 Task(text=text, status=status, file=file_path, skills=skills, reqs=reqs,
-                     line_start=line_num, line_end=end)
+                     depends=depends, line_start=line_num, line_end=end)
             )
 
         # Remove _default if empty and other modules exist
