@@ -26,8 +26,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for component design, data flows, and key
 5. [Utilities](#utilities)
 6. [Worker Node](#worker-node)
 7. [Project Layout](#project-layout)
-8. [Tried Local Models](#tried-local-models)
-9. [Development](#development)
+8. [Development](#development)
 
 ---
 
@@ -303,38 +302,6 @@ your-project/
 └── logs/
     └── voidrift.log         # CLI invocations, command outcomes (rotating)
 ```
-
----
-
-## Tried Local Models
-
-All benchmarks: ASUS Ascent GX10, 100 req @ 1 req/s (ShareGPT). Run your own: `worker bench 100 1`.
-
-Benchmark table standard — columns:
-- **Model:** alias · [HF repo link](url) · date benchmarked
-- **vLLM Settings:** image tag · gpu_util · max_model_len · key args
-- **Results:** throughput · TTFT (mean/median/P99) · TPOT · model GiB · KV cache GiB · startup
-- **Summary:** verdict, retirement reason if applicable
-
-### Active
-
-| Model | vLLM Settings | Results | Summary |
-|---|---|---|---|
-| **`qwen35`**<br>[Qwen3.5-35B-A3B-FP8](https://huggingface.co/Qwen/Qwen3.5-35B-A3B-FP8)<br>*Mar 2026* | scitrera 0.17.0-t5<br>gpu_util: 0.90<br>max_len: 262144<br>prefix-caching, qwen3_xml, flashinfer | 155 tok/s<br>TTFT: 337ms / 345ms / 528ms P99<br>TPOT: 86ms / 89ms / 126ms P99 | General-purpose. 35B MoE, 3B active. Solid throughput, tight P99. Current default. |
-| **`qwen35-nvfp4`**<br>[Qwen3.5-35B-A3B-NVFP4](https://huggingface.co/Sehyo/Qwen3.5-35B-A3B-NVFP4)<br>*TBD* | eugr image<br>gpu_util: 0.90<br>max_len: 262144<br>qwen3_xml parser, flashinfer | TBD | Blackwell-native FP4 (~20 GiB). Candidate for lowest-latency interactive use. |
-| **`qwen35-perf`**<br>[Qwen3.5-122B-A10B-FP8](https://huggingface.co/Qwen/Qwen3.5-122B-A10B-FP8)<br>*TBD* | scitrera 0.17.0-t5<br>gpu_util: 0.90<br>max_len: 65536<br>qwen3_xml parser, flashinfer | TBD | 122B MoE, 10B active. High-capability tier. |
-| **`glm47`**<br>[GLM-4.7-Flash-FP8-Dynamic](https://huggingface.co/unsloth/GLM-4.7-Flash-FP8-Dynamic)<br>*TBD* | scitrera 0.17.0-t4<br>gpu_util: 0.85<br>max_len: 131072<br>glm47 parser, flashinfer | TBD | MoE Flash, 128K context, GX10 optimized. |
-
-### Tried
-
-| Model | vLLM Settings | Results | Summary |
-|---|---|---|---|
-| **`qwen3-coder`**<br>[Qwen3-Coder-30B-A3B-Instruct-FP8](https://huggingface.co/Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8)<br>*Feb 2026* | scitrera 0.17.0-t5<br>gpu_util: 0.90<br>max_len: 65536<br>qwen3_coder parser, flashinfer | 152 tok/s<br>TTFT: 273ms / 249ms / 887ms P99<br>TPOT: 82ms / 84ms median<br>Model: 29 GiB · KV: 76 GiB (~900k tok)<br>Startup: ~4.5 min | Code-focused develop model. Replaced by Qwen3.5 series (Mar 2026). |
-| **`qwen3-instruct`**<br>[Qwen3-30B-A3B-Instruct-2507-FP8](https://huggingface.co/Qwen/Qwen3-30B-A3B-Instruct-2507-FP8)<br>*Feb 2026* | scitrera 0.17.0-t5<br>gpu_util: 0.90<br>max_len: 65536<br>qwen3_xml parser, flashinfer | 158 tok/s<br>TTFT: 318ms / 253ms / 2279ms P99<br>TPOT: 83ms / 86ms median<br>Model: 29 GiB · KV: 76 GiB (~830k tok)<br>Startup: ~4 min | General-purpose gather/plan model. Replaced by Qwen3.5 series (Mar 2026). |
-| **`qwen3-8b`**<br>[Qwen3-8B-FP8](https://huggingface.co/Qwen/Qwen3-8B-FP8)<br>*Feb 2026* | scitrera 0.17.0-t5<br>gpu_util: 0.95<br>max_len: 40960<br>qwen3_xml parser, flashinfer | 176 tok/s<br>TTFT: 307ms / 149ms / 3288ms P99<br>TPOT: 44ms / 44ms median<br>Model: ~8 GiB · KV: ~97 GiB (~2.4M tok)<br>Startup: ~2.5 min | Fastest in Qwen3 series. Dense 8B, large KV pool. Replaced by Qwen3.5 series (Mar 2026). |
-| **`qwen3-coder-next`**<br>[Qwen3-Coder-Next-FP8-dynamic](https://huggingface.co/RedHatAI/Qwen3-Coder-Next-FP8-dynamic)<br>*Feb 2026* | scitrera 0.17.0-t5<br>gpu_util: 0.90<br>max_len: 65536<br>qwen3_coder parser, flashinfer | 124 tok/s<br>TTFT: 1070ms / 634ms / 5385ms P99<br>TPOT: 166ms / 171ms median<br>Model: 76 GiB · KV: 29 GiB (~318k tok)<br>Startup: ~9.5 min | 80B MoE. High latency vs. qwen3-coder — most tokens on weights, not context. Replaced by Qwen3.5 series (Mar 2026). |
-| **`qwen3-32b-dense`**<br>[Qwen3-32B-FP8](https://huggingface.co/Qwen/Qwen3-32B-FP8)<br>*Feb 2026* | scitrera 0.17.0-t5<br>gpu_util: 0.90<br>max_len: 40960<br>qwen3_coder parser, flashinfer | 102 tok/s<br>TTFT: 562ms / 508ms / 2194ms P99<br>TPOT: 183ms / 183ms median<br>— | Dense 32B is 33% slower than MoE 30B-A3B at the same parameter count. Blackwell favors MoE — 3B active params per token vs. all 32B. No use case justifies the penalty. |
-| **`granite-4-small`**<br>[granite-4.0-h-small-FP8](https://huggingface.co/ibm-granite/granite-4.0-h-small-FP8)<br>*Feb 2026* | scitrera 0.17.0-t5<br>gpu_util: 0.95<br>max_len: 65536<br>granite parser, flashinfer | Unacceptable latency<br>— | MoE + Mamba-2 hybrid (32B / ~9B active). Strong benchmarks but Mamba-2 SSM kernels not optimized for SM_121 in current vLLM. Worth revisiting when Mamba support for GB10 matures. |
 
 ---
 
