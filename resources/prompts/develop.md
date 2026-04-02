@@ -1,22 +1,22 @@
 # Develop Prompts
 
-Command prompt file for the develop command. Each section is loaded via `get_prompt("develop", "<section>")`. The developer loads task-specific skills dynamically via `get_skill()` calls per REQ-RES-4.
+Command prompt file for the develop command. Each section is loaded via `get_prompt("develop", "<section>")`. Skills are pre-injected into the system prompt at task-init time (REQ-CTX-2).
 
 ## TASK
 
 **Role:** Developer — implement the assigned task by writing project source files.
 
-Steps (follow this order):
-1. Call `read_framework_file("arch/<module>.md")` — review your module's architecture. Identify the components, interfaces, and patterns relevant to this task.
-2. Call `read_framework_file("spec/<module>.md")` — review your module's requirements. Identify the acceptance criteria and constraints for this task.
-3. If task skills are provided below, apply the guidance from each skill before implementing.
-4. Implement the task using `write_source_file()`. Use `read_source_file()` to examine existing project code as needed.
-5. Call `done()`.
+The task ticket below contains everything you need: user story, context, acceptance criteria, and target files. Read it carefully before writing code.
 
-Write complete file contents. One task at a time. Be precise and minimal.
-The framework handles task completion automatically after verifying your writes. Do NOT call complete_task().
+Steps:
+1. Review the task ticket — understand the user story, context, and acceptance criteria.
+2. Use `read_source_file()` to examine existing project code as needed.
+3. Implement using `write_source_file()`. Write complete file contents.
+4. Call `done()`.
 
-When writing test files, name each test function to reference the AC identifier it validates. For example, a test covering AC-ARCH-4 becomes `test_req_arch4_tool_choice_required`. The AC identifier comes from the requirements loaded in step 2.
+Be precise and minimal. One task at a time.
+
+When writing test files, name each test function to reference the AC identifier it validates (e.g. `test_req_wx1_weather_endpoint`).
 
 TASK:
 {task_text}
@@ -26,11 +26,11 @@ TASK:
 
 ## ESCALATION
 
-**Role:** Architect — provide design guidance to unblock a developer.
+**Role:** Architect — diagnose the issue and write a planned fix for the developer.
 
-Provide specific direction: file paths, interfaces, data flow, and expected behavior.
+Write a concrete implementation plan: what went wrong, which files to create or modify, what the code should do, and how it satisfies the acceptance criteria. The developer will receive your plan appended to the task ticket.
 
-Question from developer:
+Issue:
 {question}
 
 Task:
@@ -49,7 +49,3 @@ Execute this task.
 ## TASK-RETRY
 
 Execute this task. You must call write_source_file() to produce output.
-
-## ESCALATION-USER
-
-Provide guidance for this blocked task.

@@ -184,32 +184,95 @@ def run_plan(
             _strip_invalid_tags(d / "TASKS.md", invalid)
             ui.warn(f"Stripped invalid skill tags: {', '.join(sorted(invalid))}")
 
-    task_files = list(d.glob("TASKS*.md"))
-    for tf in task_files:
-        lines = [l for l in tf.read_text().splitlines() if l.strip().startswith("- [ ]")]
-        ui.success(f"{tf.name}: {len(lines)} tasks")
+    # Build task files + manifest from TASKS.md (REQ-TM-1, REQ-TM-4)
+    task_count = _build_task_files(d, requirements, architecture)
+    ui.success(f"TASKS.md: {task_count} tasks")
 
     from ..utils import append_state
     files_created = []
     if (d / "ARCHITECTURE.md").exists():
         files_created.append(".voidrift/ARCHITECTURE.md")
-    for tf in task_files:
-        files_created.append(f".voidrift/{tf.name}")
+    files_created.append(".voidrift/TASKS.md")
     for af in sorted((d / "arch").glob("*.md")) if (d / "arch").is_dir() else []:
         files_created.append(f".voidrift/arch/{af.name}")
-    task_count = sum(
-        len([l for l in tf.read_text().splitlines() if l.strip().startswith("- [ ]")])
-        for tf in task_files
-    )
+    files_created.append(".voidrift/tasks/manifest.yml")
     append_state(
         cmd="plan",
         model_alias=model.alias,
-        summary=f"Wrote ARCHITECTURE.md, {len(files_created) - 1} supporting files, {task_count} tasks.",
+        summary=f"Wrote ARCHITECTURE.md, {task_count} tasks, manifest.yml.",
         files_created=files_created,
     )
 
     ui.done("Plan complete.")
     return 0
+
+
+def _build_task_files(d: Path, requirements: str, architecture: str) -> int:
+    """Parse TASKS.md and create individual task files + manifest (REQ-TM-1, REQ-TM-4).
+
+    Returns the number of tasks created.
+    """
+    import re
+    import yaml
+    from ..manifest import ManifestManager
+    from ..task_store import TaskStore
+
+    tasks_path = d / "TASKS.md"
+    if not tasks_path.exists():
+        return 0
+
+    # Parse TASKS.md using existing TaskStore parser
+    store = TaskStore()
+    store.load(tasks_path)
+
+    mm = ManifestManager(project_dir=d.parent)
+    mm.ensure_dirs()
+    mm._data = {"tasks": {}, "modules": {}, "dependencies": {}, "next_id": 1, "next_bug_id": 1}
+
+    task_id = 0
+    for module in store.modules():
+        mod_name = module if module != "_default" else "default"
+        for task in store._modules.get(module, []):
+            if task.status != " ":
+                continue
+            task_id += 1
+
+            # Build frontmatter
+            frontmatter = {
+                "id": task_id,
+                "module": mod_name,
+                "skills": task.skills,
+                "files": [task.file] if task.file else [],
+                "depends": [],
+            }
+
+            # Extract task body from raw lines
+            body_lines = store._raw_lines[task.line_start:task.line_end]
+            # First line is the marker — extract summary
+            summary = re.sub(r"^- \[.\] ", "", body_lines[0]).strip() if body_lines else task.text
+            # Remaining lines are description
+            desc_lines = [l.strip() for l in body_lines[1:] if not l.strip().lower().startswith(("skills:", "reqs:", "file:"))]
+            description = "\n".join(desc_lines).strip()
+
+            # Build self-contained ticket content
+            fm_str = yaml.dump(frontmatter, default_flow_style=False).strip()
+            content = f"---\n{fm_str}\n---\n\n# {summary}\n"
+            if description:
+                content += f"\n## Implementation Notes\n\n{description}\n"
+            if task.reqs:
+                content += f"\n## Acceptance Criteria\n\n"
+                for r in task.reqs:
+                    content += f"- {r}\n"
+
+            # Write task file
+            task_path = mm._active_dir / f"TASK-{task_id}.md"
+            task_path.write_text(content)
+
+            # Register in manifest
+            mm.add_task(task_id, mod_name)
+
+    mm.save()
+    return task_id
 
 
 def _available_skills() -> set[str]:

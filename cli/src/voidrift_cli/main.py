@@ -527,6 +527,84 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
             f.write(f"\n[COMPACT] {summary}\n")
         _compact_nudged = False  # allow nudge again if context fills back up
 
+    # ── Idea refinement state (REQ-IDEA-1 through REQ-IDEA-4) ───────
+    _idea_state: dict = {}  # {"active": True, "id": N, "mm": ManifestManager}
+
+    def _handle_idea(agent, log, user_input: str) -> None:
+        """Start or resume an idea refinement flow."""
+        from .manifest import ManifestManager
+        from . import prompts as _prompts
+
+        mm = ManifestManager()
+        if mm.exists():
+            mm.load()
+        mm.ensure_dirs()
+
+        arg = user_input.strip()[5:].strip()  # strip "/idea"
+
+        if arg:
+            # Load existing idea
+            try:
+                idea_id = int(arg)
+            except ValueError:
+                ui.error(f"Invalid idea ID: {arg}")
+                return
+            content = mm.read_idea(idea_id)
+            if not content:
+                ui.error(f"IDEA-{idea_id} not found.")
+                return
+            idea_context = f"Existing idea:\n\n{content}"
+            overlay = _prompts.load_prompt("chat", "IDEA").format(idea_context=idea_context)
+            agent.messages[0]["content"] += f"\n\n{overlay}"
+            _idea_state.update(active=True, id=idea_id, mm=mm)
+            ui.info(f"Loaded IDEA-{idea_id}. Type /done when finished.")
+            # Ask agent to summarize and continue
+            agent.messages.append({"role": "user", "content": f"I've loaded IDEA-{idea_id}. Summarize where we left off and ask what I'd like to refine."})
+        else:
+            # New idea
+            idea_id = mm.next_idea_id
+            mm.add_idea(idea_id, status="draft")
+            idea_context = "This is a new idea. Start with Stage 1 — Intake."
+            overlay = _prompts.load_prompt("chat", "IDEA").format(idea_context=idea_context)
+            agent.messages[0]["content"] += f"\n\n{overlay}"
+            _idea_state.update(active=True, id=idea_id, mm=mm)
+            ui.info(f"Created IDEA-{idea_id}. Type /done when finished.")
+            agent.messages.append({"role": "user", "content": "I want to develop a new idea."})
+
+    def _finish_idea(agent, log) -> None:
+        """Save the idea and return to normal chat."""
+        idea_id = _idea_state["id"]
+        mm = _idea_state["mm"]
+
+        # Ask agent for category
+        ui.info("Categorize this idea:")
+        ui._con.print("  [bold]now[/bold] — high priority, work on it soon")
+        ui._con.print("  [bold]next[/bold] — upcoming, after current work")
+        ui._con.print("  [bold]later[/bold] — parked for future consideration")
+
+        from prompt_toolkit import prompt as _pt_prompt
+        while True:
+            cat = _pt_prompt("\nCategory (now/next/later): ").strip().lower()
+            if cat in ("now", "next", "later"):
+                break
+            ui.warn("Choose: now, next, or later")
+
+        # Ask agent to write the final structured idea
+        agent.messages.append({
+            "role": "user",
+            "content": (
+                f"The operator chose '{cat}'. Write the final structured idea to "
+                f"tasks/active/IDEA-{idea_id}.md using write_framework_file. "
+                f"Include: title, user story, context, acceptance criteria, "
+                f"affected modules, and affected files (if modifying existing behavior)."
+            ),
+        })
+
+        mm.set_idea_status(idea_id, cat)
+        with open(log, "a") as f:
+            f.write(f"\n[IDEA] IDEA-{idea_id} saved as {cat}\n")
+        _idea_state.clear()
+
     try:
         while True:
             try:
@@ -549,6 +627,17 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
             # /compact — summarize history to free context (REQ-U-7)
             if user_input.lower().strip() == "/compact":
                 _do_compact()
+                continue
+
+            # /idea — guided idea refinement (REQ-IDEA-1)
+            low = user_input.lower().strip()
+            if low == "/idea" or low.startswith("/idea "):
+                _handle_idea(agent, log, user_input)
+                continue
+
+            # /done — save idea and return to normal chat (REQ-IDEA-3)
+            if low == "/done" and _idea_state.get("active"):
+                _finish_idea(agent, log)
                 continue
 
             # /write enables tools for this turn (REQ-UI-3)
@@ -741,7 +830,7 @@ def status() -> None:
 
 def _status():
     """Print project status."""
-    from .utils import voidrift_dir, count_tasks
+    from .utils import voidrift_dir
 
     d = voidrift_dir()
 
@@ -753,24 +842,38 @@ def _status():
     else:
         ui._con.print("  ⬜ Gather: Run 'voidrift gather <model>'")
 
-    has_tasks = (d / "TASKS.md").exists()
+    has_manifest = (d / "tasks" / "manifest.yml").exists()
     has_arch = (d / "ARCHITECTURE.md").exists()
-    if has_tasks and has_arch:
+    if has_manifest and has_arch:
         ui._con.print("  ✅ Plan: Tasks and architecture exist")
-    elif has_tasks:
-        ui._con.print("  🔄 Plan: Tasks exist, no architecture")
+    elif has_arch:
+        ui._con.print("  🔄 Plan: Architecture exists, no tasks")
     else:
         ui._con.print("  ⬜ Plan: Run 'voidrift plan <model>'")
 
-    task_file = d / "TASKS.md"
-    if task_file.exists():
-        done, blocked, total = count_tasks(task_file)
-        if done == total and total > 0:
-            ui._con.print(f"  ✅ Develop: All {total} tasks complete")
-        elif done > 0 or blocked > 0:
-            ui._con.print(f"  🔄 Develop: {done}/{total} done, {blocked} blocked")
+    if has_manifest:
+        from .manifest import ManifestManager
+        mm = ManifestManager()
+        mm.load()
+        s = mm.summary()
+        total = sum(s.values())
+        verified = s.get("verified", 0)
+        implemented = s.get("implemented", 0)
+        planned = s.get("planned", 0)
+        blocked = s.get("blocked", 0)
+        failed = s.get("failed", 0)
+        if total == 0:
+            ui._con.print("  ⬜ Develop: No tasks")
+        elif verified == total:
+            ui._con.print(f"  ✅ Develop: All {total} tasks verified")
         else:
-            ui._con.print(f"  ⬜ Develop: {total} tasks pending")
+            parts = []
+            if verified: parts.append(f"{verified} verified")
+            if implemented: parts.append(f"{implemented} implemented")
+            if planned: parts.append(f"{planned} planned")
+            if blocked: parts.append(f"{blocked} blocked")
+            if failed: parts.append(f"{failed} failed")
+            ui._con.print(f"  🔄 Develop: {', '.join(parts)} ({total} total)")
     else:
         ui._con.print("  ⬜ Develop: No tasks")
 

@@ -12,12 +12,11 @@ from pathlib import Path
 from ..agent import AgentLoop, build_local_tools
 from .. import prompts
 from ..skills import find_skill
-from ..task_store import TaskStore
+from ..manifest import ManifestManager
 from ..models import ModelConfig
 from ..utils import (
     ensure_voidrift_dir, voidrift_dir, boot_run, check_disk_space,
-    check_requirements_exist, check_task_files, count_tasks,
-    truncate_task_label, append_state,
+    check_requirements_exist, truncate_task_label, append_state,
 )
 from .. import ui
 
@@ -28,7 +27,7 @@ def run_develop(
     worker: ModelConfig,
     architect: ModelConfig | None = None,
 ) -> int:
-    """Execute the develop command.
+    """Execute the develop command — dispatch tasks from manifest (REQ-D-4).
 
     Args:
         worker: Model configuration for the developer role.
@@ -44,13 +43,16 @@ def run_develop(
         ui.error("REQUIREMENTS.md not found. Run 'voidrift gather <model>' first.")
         return 1
 
-    task_file, is_multi = check_task_files()
-    if not task_file:
-        ui.error("No task files found. Run 'voidrift plan <model>' first.")
+    # REQ-D-1: Check manifest exists
+    mm = ManifestManager()
+    if not mm.exists():
+        ui.error("No task manifest found. Run 'voidrift plan <model>' first.")
         return 1
 
-    done_count, blocked, total = count_tasks(task_file)
-    if done_count + blocked >= total and total > 0:
+    mm.load()
+
+    # REQ-D-2: Check for dispatchable work
+    if not mm.has_work():
         ui.done("All tasks complete.")
         return 0
 
@@ -69,7 +71,9 @@ def run_develop(
     lock.write_text(f"{os.getpid()}\n{datetime.now().isoformat()}")
 
     from ..tools import reset_session_files, get_session_files
+    from ..tools.filesystem import configure as _configure_fs
     reset_session_files()
+    _configure_fs(max_read_lines=worker.max_read_lines)
 
     _interrupted = False
     _interrupt_count = 0
@@ -91,77 +95,17 @@ def run_develop(
         f.write(f"\n=== Develop session: {datetime.now().isoformat()} ===\n")
 
     tools, handlers = build_local_tools(cmd="develop")
-
-    from ..tools.filesystem import configure as _configure_fs
-    _configure_fs(max_read_lines=worker.max_read_lines)
-
-    task_store = TaskStore()
-    task_store.load(task_file)
-    modules = task_store.modules()
-
     dev_prompt_tpl = prompts.load_prompt("develop", "TASK")
     esc_prompt_tpl = prompts.load_prompt("develop", "ESCALATION")
+    git_lock = threading.Lock()
 
-    git_lock = threading.Lock()  # REQ-D-11: serialize git operations across workers
-
-    result = 1
+    result = 0
     try:
-        if is_multi:
-            from concurrent.futures import ThreadPoolExecutor, as_completed
-
-            max_w = worker.concurrency
-            if max_w == 0:
-                max_w = len(modules)
-
-            if max_w == 1:
-                # Sequential — same as single module
-                for module in modules:
-                    if _interrupted:
-                        ui.warn("Interrupted — stopping after current task.")
-                        break
-                    label = f"[{module}] "
-                    result = _develop_module(worker, architect, module, label, tools, handlers, log, dev_prompt_tpl, esc_prompt_tpl, git_lock, task_store, lambda: _interrupted)
-                    if result != 0:
-                        break
-            else:
-                ui.info(f"Running {len(modules)} modules with {max_w} concurrent worker(s)")
-                results = {}
-
-                with ui.multi_spinner(f"{len(modules)} modules") as ms:
-                    with ThreadPoolExecutor(max_workers=max_w) as pool:
-                        futures = {}
-                        for module in modules:
-                            if _interrupted:
-                                break
-                            label = f"[{module}] "
-                            fut = pool.submit(
-                                _develop_module, worker, architect, module, label,
-                                tools, handlers, log, dev_prompt_tpl, esc_prompt_tpl,
-                                git_lock, task_store, lambda: _interrupted,
-                                ms=ms,
-                            )
-                            futures[fut] = module
-
-                        for fut in as_completed(futures):
-                            mod = futures[fut]
-                            try:
-                                results[mod] = fut.result()
-                            except Exception as e:
-                                ui.error(f"[{mod}] failed: {e}")
-                                results[mod] = 1
-                            if _interrupted:
-                                for f in futures:
-                                    f.cancel()
-                                break
-
-                result = 1 if any(r != 0 for r in results.values()) else 0
-        else:
-            for module in modules:
-                if _interrupted:
-                    ui.warn("Interrupted — stopping after current task.")
-                    break
-                label = ""
-                result = _develop_module(worker, architect, module, label, tools, handlers, log, dev_prompt_tpl, esc_prompt_tpl, git_lock, task_store, lambda: _interrupted)
+        result = _dispatch_loop(
+            mm, worker, architect, tools, handlers, log,
+            dev_prompt_tpl, esc_prompt_tpl, git_lock,
+            lambda: _interrupted,
+        )
     except KeyboardInterrupt:
         _interrupted = True
         ui.warn("Interrupted — stopping after current task.")
@@ -170,7 +114,6 @@ def run_develop(
         signal.signal(signal.SIGINT, prev_sigint)
         lock.unlink(missing_ok=True)
 
-    # Record command entry in STATE.md (REQ-PS-3)
     files_written = get_session_files()
     summary = "completed" if result == 0 else ("interrupted" if _interrupted else "failed")
     append_state("develop", worker.alias, summary, files_created=files_written or None)
@@ -178,232 +121,151 @@ def run_develop(
     return result
 
 
-def _develop_module(
+def _dispatch_loop(
+    mm: ManifestManager,
     worker: ModelConfig,
     architect: ModelConfig | None,
-    module: str,
-    prefix: str,
     tools: list,
     handlers: dict,
     log: Path,
     dev_prompt_tpl: str,
     esc_prompt_tpl: str,
     git_lock: threading.Lock,
-    task_store: TaskStore,
-    is_interrupted: callable = lambda: False,
-    ms=None,
+    is_interrupted: callable,
 ) -> int:
-    """Execute tasks for a single module (REQ-D-4)."""
-    escalation_count = 0
-    blocked_tasks = 0
-    d = voidrift_dir()
-    mod_arg = "" if module == "_default" else module
-    arch_guidance: dict[int, str] = {}  # task_num -> latest architect response
+    """Dispatch ready tasks until none remain (REQ-D-4, REQ-D-10)."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    # Set real task total for the multi-spinner group header
-    if ms:
-        initial_status = task_store.status(mod_arg)
-        ms.set_group_total(module, initial_status["done"] + initial_status["blocked"] + initial_status["remaining"])
+    max_w = worker.concurrency
+    escalation_count = 0
+    total_tasks = sum(mm.summary().values())
 
     while True:
         if is_interrupted():
-            ui.warn(f"{prefix}Interrupted — exiting module.")
+            ui.warn("Interrupted — stopping.")
             return 1
 
-        task = task_store.get_next(mod_arg)
-        if not task:
-            break
+        mm.load()  # re-read manifest for latest state
+        ready = mm.dispatchable()
+        if not ready:
+            if mm.has_work():
+                blocked = [tid for tid, t in mm.tasks().items() if t.get("status") == "blocked"]
+                if blocked:
+                    ui.warn(f"{len(blocked)} task(s) blocked by failed dependencies.")
+                return 1 if blocked else 0
+            ui.done("All tasks complete.")
+            return 0
 
-        status = task_store.status(mod_arg)
-        task_num = status["done"] + status["blocked"] + 1
-        total = status["done"] + status["blocked"] + status["remaining"]
-        label = truncate_task_label(f"- [ ] {task.text}")
-
-        # Track in multi-spinner (concurrent) or print stage (sequential)
-        _ms_desc = f"{task_num}/{total} {label}" if ms else None
-        if ms:
-            _ms_tracker = ms.track(_ms_desc, group=module)
-        else:
-            ui.stage(f"{prefix}Task {task_num}/{total}: {label}")
-
-        arch_context = ""
-        if task_num in arch_guidance:
-            arch_context = f"Architect guidance:\n{arch_guidance[task_num]}"
-
-        # Pre-load task skills and inject into system prompt
-        skill_parts = []
-        for skill_name in task.skills:
-            content = find_skill(skill_name)
-            if content:
-                skill_parts.append(f"### Skill: {skill_name}\n\n{content}")
-        skill_content = "\n\n".join(skill_parts) if skill_parts else ""
-
-        system = dev_prompt_tpl.format(
-            task_text=task.text,
-            arch_context=arch_context,
-            skill_content=skill_content,
-        )
-
-        from ..tools import reset_write_count, get_write_count
-        reset_write_count()
-
-        agent = AgentLoop(
-            model=worker,
-            system_prompt=system,
-            tools=tools,
-            tool_handlers=handlers,
-            stream=False,
-            log_path=log,
-            show_spinner=False,
-        )
-
-        start_time = time.time()
-        if ms and _ms_desc:
-            agent.on_progress = _ms_tracker
-            try:
-                response = agent.send(prompts.load_prompt("develop", "TASK-USER"))
-                elapsed = time.time() - start_time
-                with open(log, "a") as f:
-                    f.write(f"\n--- Task {task_num}: {label} ({elapsed:.1f}s) ---\n{response}\n")
-            except (RuntimeError, OSError, ValueError) as e:
-                elapsed = time.time() - start_time
-                ms.done(_ms_desc, f"FAILED: {label}", elapsed, failed=True, group=module)
-                with open(log, "a") as f:
-                    f.write(f"ERROR on task {task_num}: {e}\n")
-                return 1
-        else:
-            with ui.spinner(ui.random_label(), f"task {task_num}") as spin:
-                agent.on_progress = spin.on_progress
-                try:
-                    response = agent.send(prompts.load_prompt("develop", "TASK-USER"))
-                    elapsed = time.time() - start_time
-                    with open(log, "a") as f:
-                        f.write(f"\n--- Task {task_num}: {label} ({elapsed:.1f}s) ---\n{response}\n")
-                except (RuntimeError, OSError, ValueError) as e:
-                    ui.error(f"Task failed: {e}")
-                    with open(log, "a") as f:
-                        f.write(f"ERROR on task {task_num}: {e}\n")
+        if max_w <= 1 or len(ready) == 1:
+            # Sequential
+            for tid in ready:
+                if is_interrupted():
                     return 1
-
-        # Verify writes occurred (REQ-D-5)
-        if get_write_count() == 0:
-            ui.warn("No files written — retrying task...")
-            reset_write_count()
-            with ui.spinner("Retrying...", f"task {task_num} retry") as spin2:
-                try:
-                    agent2 = AgentLoop(
-                        model=worker, system_prompt=system,
-                        tools=tools, tool_handlers=handlers,
-                        stream=False, log_path=log, show_spinner=False,
-                    )
-                    agent2.on_progress = spin2.on_progress
-                    response = agent2.send(prompts.load_prompt("develop", "TASK-RETRY"))
-                    with open(log, "a") as f:
-                        f.write(f"\n--- Task {task_num} RETRY ---\n{response}\n")
-                except (RuntimeError, OSError, ValueError) as e:
-                    ui.error(f"Retry failed: {e}")
-
-            if get_write_count() == 0:
-                if architect:
-                    ui.warn("Still no writes after retry — escalating...")
-                    esc_dir = d / "escalations"
-                    if mod_arg:
-                        esc_dir = esc_dir / mod_arg
-                    esc_dir.mkdir(parents=True, exist_ok=True)
-                    (esc_dir / f"{task_num}.md").write_text(
-                        f"Task produced no file output after two attempts.\n\nTask: {task.text}"
-                    )
-                else:
-                    ui.warn("No writes after retry and no architect configured — skipping task")
-                    with open(log, "a") as f:
-                        f.write(f"SKIPPED task {task_num}: no writes, no architect\n")
-
-        # Git diff check (REQ-D-5) — advisory warning
-        if get_write_count() > 0:
-            try:
-                import subprocess
-                with git_lock:  # REQ-D-11: serialize git operations
-                    git_result = subprocess.run(
-                        ["git", "diff", "--quiet", "HEAD"],
-                        capture_output=True, cwd=str(d.parent),
-                    )
-                if git_result.returncode == 0:
-                    ui.warn("write_source_file() called but git shows no changes")
-                    with open(log, "a") as f:
-                        f.write(f"WARNING task {task_num}: writes occurred but git diff HEAD is clean\n")
-            except (FileNotFoundError, subprocess.SubprocessError):
-                pass  # git not available or no repo — skip
-
-        # Check for escalation file (REQ-D-6)
-        esc_dir = d / "escalations"
-        if mod_arg:
-            esc_dir = esc_dir / mod_arg
-        esc_file = esc_dir / f"{task_num}.md"
-        if esc_file.exists():
-            question = esc_file.read_text()
-            esc_file.unlink()  # ephemeral — clean up immediately
-
-            escalation_count += 1
-            if escalation_count > MAX_ESCALATIONS:
-                task_store.block(mod_arg)
-                blocked_tasks += 1
-                ui.warn("Task blocked (max escalations reached)")
-                continue
-
-            ui.warn(f"Escalation: {question[:200]}")
-
-            guidance = _consult_architect(architect, question, task.text, tools, handlers, log, esc_prompt_tpl, mod_arg or None)
-            if guidance:
-                arch_guidance[task_num] = guidance
-                continue
-            else:
-                return 1
-
-        task_store.complete(mod_arg)
-        if ms and _ms_desc:
-            ms.done(_ms_desc, label, elapsed, group=module)
+                rc = _run_task(
+                    mm, tid, worker, architect, tools, handlers, log,
+                    dev_prompt_tpl, esc_prompt_tpl, git_lock, total_tasks,
+                )
+                if rc != 0:
+                    escalation_count += 1
+                    if escalation_count > MAX_ESCALATIONS:
+                        mm.set_status(tid, "failed")
+                        ui.warn(f"TASK-{tid} blocked (max escalations reached)")
         else:
-            ui.success(f"{label} ({elapsed:.1f}s)")
+            # Concurrent — dispatch all ready tasks up to concurrency limit
+            batch = ready[:max_w] if max_w > 0 else ready
+            ui.info(f"Dispatching {len(batch)} tasks concurrently")
 
-    # Clean up any leftover escalation dirs
-    esc_root = d / "escalations"
-    if esc_root.is_dir():
-        import shutil
-        shutil.rmtree(esc_root)
+            with ui.multi_spinner(f"{len(batch)} tasks") as ms:
+                with ThreadPoolExecutor(max_workers=len(batch)) as pool:
+                    futures = {}
+                    for tid in batch:
+                        if is_interrupted():
+                            break
+                        task_info = mm.get_task(tid)
+                        module = task_info.get("module", "") if task_info else ""
+                        label = truncate_task_label(mm.read_task(tid).split("\n")[0] if mm.read_task(tid) else f"TASK-{tid}")
+                        desc = f"TASK-{tid} {label}"
+                        tracker = ms.track(desc, group=module)
+                        ms.set_group_total(module, len([t for t in mm.tasks().values() if t.get("module") == module]))
 
-    if blocked_tasks > 0:
-        ui.warn(f"{blocked_tasks} task(s) blocked — marked [!] in TASKS.md")
-        return 1
+                        fut = pool.submit(
+                            _run_task, mm, tid, worker, architect, tools, handlers,
+                            log, dev_prompt_tpl, esc_prompt_tpl, git_lock, total_tasks,
+                            tracker=tracker,
+                        )
+                        futures[fut] = (tid, desc, module)
 
-    mod_label = module if module != "_default" else "all"
-    ui.done(f"{prefix}All tasks complete ({mod_label})")
-    return 0
+                    for fut in as_completed(futures):
+                        tid, desc, module = futures[fut]
+                        try:
+                            rc = fut.result()
+                            elapsed = 0  # TODO: track per-task elapsed
+                            if rc == 0:
+                                ms.done(desc, desc, elapsed, group=module)
+                            else:
+                                ms.done(desc, f"FAILED: {desc}", elapsed, failed=True, group=module)
+                        except Exception as e:
+                            ms.done(desc, f"ERROR: {desc}", 0, failed=True, group=module)
+                            ui.error(f"TASK-{tid}: {e}")
+                        if is_interrupted():
+                            for f in futures:
+                                f.cancel()
+                            return 1
 
 
-def _consult_architect(
-    architect: ModelConfig,
-    question: str,
-    task_text: str,
+def _run_task(
+    mm: ManifestManager,
+    task_id: int,
+    worker: ModelConfig,
+    architect: ModelConfig | None,
     tools: list,
     handlers: dict,
     log: Path,
+    dev_prompt_tpl: str,
     esc_prompt_tpl: str,
-    module: str | None = None,
-) -> str | None:
-    """Consult the architect model for guidance (REQ-D-6, REQ-D-8)."""
-    d = voidrift_dir()
-    req = d / "REQUIREMENTS.md"
-    arch = d / "ARCHITECTURE.md"
+    git_lock: threading.Lock,
+    total_tasks: int,
+    tracker=None,
+) -> int:
+    """Execute a single task (REQ-D-4)."""
+    from ..tools import reset_write_count, get_write_count
 
-    system = esc_prompt_tpl.format(
-        question=question,
-        task_text=task_text,
-        requirements=req.read_text() if req.exists() else "(not found)",
-        architecture=arch.read_text() if arch.exists() else "(not found)",
+    task_content = mm.read_task(task_id)
+    if not task_content:
+        ui.error(f"TASK-{task_id}.md not found in active/")
+        return 1
+
+    task_info = mm.get_task(task_id)
+    module = task_info.get("module", "") if task_info else ""
+
+    # Parse frontmatter for skills
+    skills: list[str] = []
+    if task_content.startswith("---"):
+        import yaml
+        end = task_content.index("---", 3)
+        fm = yaml.safe_load(task_content[3:end]) or {}
+        skills = fm.get("skills", [])
+
+    # Pre-load skills into system prompt (REQ-CTX-2)
+    skill_parts = []
+    for skill_name in skills:
+        content = find_skill(skill_name)
+        if content:
+            skill_parts.append(f"### Skill: {skill_name}\n\n{content}")
+    skill_content = "\n\n".join(skill_parts)
+
+    # Build system prompt — task content IS the context
+    system = dev_prompt_tpl.format(
+        task_text=task_content,
+        arch_context="",
+        skill_content=skill_content,
     )
 
+    mm.set_status(task_id, "in-progress")
+    reset_write_count()
+
     agent = AgentLoop(
-        model=architect,
+        model=worker,
         system_prompt=system,
         tools=tools,
         tool_handlers=handlers,
@@ -412,14 +274,120 @@ def _consult_architect(
         show_spinner=False,
     )
 
-    ui.info("Consulting architect...")
-    with ui.spinner(ui.random_label(), "architect") as spin:
-        agent.on_progress = spin.on_progress
+    start_time = time.time()
+    if tracker:
+        agent.on_progress = tracker
+
+    label = truncate_task_label(task_content.split("\n")[0])
+
+    try:
+        if not tracker:
+            with ui.spinner(ui.random_label(), f"TASK-{task_id}") as spin:
+                agent.on_progress = spin.on_progress
+                response = agent.send(prompts.load_prompt("develop", "TASK-USER"))
+        else:
+            response = agent.send(prompts.load_prompt("develop", "TASK-USER"))
+        elapsed = time.time() - start_time
+        with open(log, "a") as f:
+            f.write(f"\n--- TASK-{task_id}: {label} ({elapsed:.1f}s) ---\n{response}\n")
+    except (RuntimeError, OSError, ValueError) as e:
+        elapsed = time.time() - start_time
+        with open(log, "a") as f:
+            f.write(f"ERROR on TASK-{task_id}: {e}\n")
+        ui.error(f"TASK-{task_id} failed: {e}")
+        return 1
+
+    # Verify writes occurred (REQ-D-5)
+    if get_write_count() == 0:
+        ui.warn(f"TASK-{task_id}: No files written — retrying...")
+        reset_write_count()
         try:
-            response = agent.send(prompts.load_prompt("develop", "ESCALATION-USER"))
+            agent2 = AgentLoop(
+                model=worker, system_prompt=system,
+                tools=tools, tool_handlers=handlers,
+                stream=False, log_path=log, show_spinner=False,
+            )
+            if tracker:
+                agent2.on_progress = tracker
+            response = agent2.send(prompts.load_prompt("develop", "TASK-RETRY"))
             with open(log, "a") as f:
-                f.write(f"\n--- Architect consultation ---\n{response}\n")
-            return response
+                f.write(f"\n--- TASK-{task_id} RETRY ---\n{response}\n")
         except (RuntimeError, OSError, ValueError) as e:
-            ui.error(f"Architect consultation failed: {e}")
-            return None
+            ui.error(f"TASK-{task_id} retry failed: {e}")
+
+        if get_write_count() == 0:
+            if architect:
+                ui.warn(f"TASK-{task_id}: No writes after retry — consulting architect")
+                guidance = _consult_architect(
+                    architect, "Task produced no file output after two attempts.",
+                    task_content, tools, handlers, log, esc_prompt_tpl,
+                )
+                if guidance:
+                    # Append guidance to task file for next dispatch
+                    task_path = mm.task_path(task_id)
+                    if task_path.exists():
+                        with open(task_path, "a") as f:
+                            f.write(f"\n\n## Architect Fix Plan\n\n{guidance}\n")
+                    mm.set_status(task_id, "planned")  # re-queue for next dispatch
+                    return 0  # not a failure — task will be re-dispatched
+            ui.warn(f"TASK-{task_id}: Still no writes after retry")
+            return 1
+
+    # Git diff check (REQ-D-5)
+    if get_write_count() > 0:
+        try:
+            import subprocess
+            with git_lock:
+                git_result = subprocess.run(
+                    ["git", "diff", "--quiet", "HEAD"],
+                    capture_output=True, cwd=str(mm._project),
+                )
+            if git_result.returncode == 0:
+                ui.warn(f"TASK-{task_id}: writes occurred but git shows no changes")
+        except (FileNotFoundError, subprocess.SubprocessError):
+            pass
+
+    # Mark implemented (REQ-D-9)
+    mm.set_status(task_id, "implemented")
+    if not tracker:
+        ui.success(f"TASK-{task_id}: {label} ({elapsed:.1f}s)")
+
+    return 0
+
+
+def _consult_architect(
+    architect: ModelConfig,
+    question: str,
+    task_content: str,
+    tools: list,
+    handlers: dict,
+    log: Path,
+    esc_prompt_tpl: str,
+) -> str | None:
+    """Consult the architect model for guidance (REQ-D-6, REQ-D-8, REQ-TM-7)."""
+    d = voidrift_dir()
+    reqs = (d / "REQUIREMENTS.md").read_text() if (d / "REQUIREMENTS.md").exists() else ""
+    arch = (d / "ARCHITECTURE.md").read_text() if (d / "ARCHITECTURE.md").exists() else ""
+
+    system = esc_prompt_tpl.format(
+        question=question,
+        task_text=task_content,
+        requirements=reqs,
+        architecture=arch,
+    )
+
+    agent = AgentLoop(
+        model=architect,
+        system_prompt=system,
+        tools=[], tool_handlers={},
+        stream=False, log_path=log,
+    )
+
+    try:
+        response = agent.send("Provide guidance for this task.")
+        with open(log, "a") as f:
+            f.write(f"\n--- ARCHITECT GUIDANCE ---\n{response}\n")
+        return response
+    except (RuntimeError, OSError) as e:
+        ui.error(f"Architect consultation failed: {e}")
+        return None

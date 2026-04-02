@@ -92,11 +92,7 @@
   - Given no skill exists at any layer for `UNKNOWN`, When `find_skill("UNKNOWN", project_dir)` is called, Then `None` is returned.
 - **REQ-CTX-2:** WHEN a structured framework command (gather, plan, develop) runs, THE SYSTEM SHALL resolve required skills via `find_skill()` and pre-inject their content into the system prompt. Skills SHALL appear in the system prompt before any task instructions. Skills referenced in task tags SHALL be resolved and injected into the per-task system prompt at task-init time. IF a referenced skill does not exist, THE SYSTEM SHALL log a warning and continue.
   - *Rationale:* Pre-injection delivers skill content at turn 0 with no tool call overhead. Content is paid for once per agent, not accumulated across turns as tool results.
-- **REQ-CTX-3:** `cli/src/voidrift_cli/task_store.py` SHALL provide a `TaskStore` class with `load(path)`, `get_next(module) -> Task | None`, `complete(module) -> Task | None`, `status(module) -> dict`, and `modules() -> list[str]`. `load()` SHALL parse `## Module: <name>` headers to split tasks into per-module queues. Each task is a multi-line block: it starts at an unindented `- [ ]` / `- [x]` / `- [!]` line and extends to the next unindented task marker or `## Module:` header. Indented `skills:` lines SHALL be extracted as skill tags. Indented `reqs:` lines SHALL be extracted as requirement references. Tasks without a module header SHALL be assigned to a default module. `complete()` SHALL mark the first unchecked (`- [ ]`) task as `- [x]` and write through to the source TASKS.md file. `get_next()` SHALL return one unchecked task at a time.
-  - *Rationale:* Task state management is a pure Python concern — no protocol layer needed. Write-through to a single TASKS.md is simpler than multiple files: no glob discovery, and module state is visible in one place. Multi-line blocks with structured metadata lines separate parseable fields from free-form descriptions, eliminating false matches from code examples or JSON in task descriptions.
-  - Given a task block with `skills: BACKEND-ENG, QUALITY-QA` on an indented line, When `get_next("_default")` is called, Then a Task with skills `["BACKEND-ENG", "QUALITY-QA"]` is returned.
-  - Given a task description containing brackets, JSON, or code examples, When the task store parses it, Then no false skill tags are extracted.
-  - Given `complete("_default")` is called, Then the first unchecked task is marked `- [x]` and TASKS.md is updated on disk.
+- **REQ-CTX-3:** *(Replaced by REQ-TM-1 through REQ-TM-7. Task management moved from TaskStore/TASKS.md to ManifestManager + individual task files.)*
 - **REQ-CTX-4:** ALL command runs SHALL be scoped to a run ID. The run ID SHALL be the log filename stem (e.g. `gather-20260318-101048`). The log file serves as the run's canonical record.
 - **REQ-CTX-5:** WHEN a gather command run completes file analysis for a source file, THE SYSTEM SHALL write the result to `.voidrift/analysis/<filepath>.md` with YAML frontmatter containing `file`, `hash` (SHA-256 content hash), and `timestamp`. On subsequent gather runs, THE SYSTEM SHALL read the analysis file by path and compare the frontmatter `hash` against the current file's content hash. If they match, the cached analysis is used and model inference is skipped.
   - *Rationale:* Large codebases have many stable files unchanged between gather runs. Caching skips expensive model calls for those files, making iterative gather on large projects practical. Storing the cache as frontmatter in the analysis file eliminates a separate cache layer — one file serves both as readable artifact and cache entry.
@@ -165,7 +161,7 @@
 
 ### 4.5 Command: Plan
 
-- **REQ-P-1:** Plan SHALL execute in two stages, each using a separate agent instance (per REQ-ARCH-7). Stage 1 produces `.voidrift/ARCHITECTURE.md` and `.voidrift/arch/<module>.md` for each module. Stage 2 receives the Stage 1 architecture as input context and produces `.voidrift/TASKS.md`. Each stage starts with a clean message history. For multi-module projects, ARCHITECTURE.md SHALL contain system-level context only: introduction, constraints, context diagram, module inventory, cross-module API contracts, and cross-cutting concerns. Module arch files SHALL contain module-specific design detail (component internals, data models, internal interfaces, error handling patterns, and any cross-module interfaces this module exposes or consumes). Module filenames in `arch/` SHALL match the `## Module: <name>` headers in TASKS.md (lowercased, spaces replaced with hyphens). IF a stage's required artifact is missing after one retry, THE SYSTEM SHALL exit with code 1 — subsequent stages SHALL NOT run. The agent's system prompt SHALL be constructed per REQ-RES-7: the ARCH-DESIGN skill (loaded once via `get_skill("ARCH-DESIGN")`) concatenated with the stage-specific prompt (loaded via `get_prompt("plan", "<stage>")`). All instructions SHALL live in `resources/prompts/plan.md`. Each stage prompt SHALL enumerate explicit numbered steps including upsert logic: read existing artifacts if present, update rather than regenerate, create if absent.
+- **REQ-P-1:** Plan SHALL execute in two stages, each using a separate agent instance (per REQ-ARCH-7). Stage 1 produces `.voidrift/ARCHITECTURE.md` and `.voidrift/arch/<module>.md` for each module. Stage 2 receives the Stage 1 architecture as input context and produces individual task files in `.voidrift/tasks/active/`. The CLI parses the task files and builds `.voidrift/tasks/manifest.yml`. Each stage starts with a clean message history. For multi-module projects, ARCHITECTURE.md SHALL contain system-level context only: introduction, constraints, context diagram, module inventory, cross-module API contracts, and cross-cutting concerns. Module arch files SHALL contain module-specific design detail (component internals, data models, internal interfaces, error handling patterns, and any cross-module interfaces this module exposes or consumes). Module filenames in `arch/` SHALL match the `## Module: <name>` headers in TASKS.md (lowercased, spaces replaced with hyphens). IF a stage's required artifact is missing after one retry, THE SYSTEM SHALL exit with code 1 — subsequent stages SHALL NOT run. The agent's system prompt SHALL be constructed per REQ-RES-7: the ARCH-DESIGN skill (loaded once via `get_skill("ARCH-DESIGN")`) concatenated with the stage-specific prompt (loaded via `get_prompt("plan", "<stage>")`). All instructions SHALL live in `resources/prompts/plan.md`. Each stage prompt SHALL enumerate explicit numbered steps including upsert logic: read existing artifacts if present, update rather than regenerate, create if absent.
   - *Rationale:* A single agent producing all architecture and task artifacts loses coherence after writing multiple large files via tool calls. Splitting into two stages keeps each agent focused on one deliverable with a fresh context window. The architecture produced in Stage 1 becomes high-quality input context for Stage 2's task breakdown. Explicit numbered steps with upsert logic in each prompt prevent the model from losing track of remaining work and handle partial re-runs (e.g. arch files exist but TASKS.md does not).
   - Given REQUIREMENTS.md exists, When `voidrift plan <model>` completes for a multi-module project, Then ARCHITECTURE.md, TASKS.md, and `arch/<module>.md` for each module exist in `.voidrift/`.
   - Given Stage 1 produced ARCHITECTURE.md, When Stage 2 starts, Then its system prompt contains the Stage 1 architecture and its message history is empty.
@@ -186,10 +182,9 @@
   - Given a task for creating a UI component, When the planner writes the task, Then the task includes props, behavior, accessibility requirements, and which requirement it addresses.
   - Given a task creates test files, When the planner writes the task description, Then the description identifies the AC identifier(s) the tests must validate (e.g. "validates AC-ARCH-4 and AC-ARCH-8").
 - **REQ-P-8:** Tasks SHALL NOT contain shell commands. Tasks describe file content only.
-- **REQ-P-9:** WHEN the architect writes TASKS.md, THE SYSTEM SHALL parse all skill tags (`skills:` lines) and validate them against available skill files. IF invalid tags are found, THE SYSTEM SHALL strip them from TASKS.md directly and log a warning. Valid tags on the same task line SHALL be preserved. The plan prompt SHALL include the complete list of valid skill names so the model cannot invent nonexistent tags.
-  - *Rationale:* Asking the model to rewrite a large TASKS.md via tool calls is unreliable — the model's context is exhausted after the initial plan, and tool call parsing fails on large payloads. Direct string manipulation is deterministic and instant. Injecting valid skill names into the prompt prevents the problem at the source.
-  - Given TASKS.md contains `skills: WEB-ENG, documentation` and `documentation` is not a valid skill, When validation runs, Then the line is rewritten to `skills: WEB-ENG` and a warning is logged.
-  - Given TASKS.md contains `skills: documentation` (only tag is invalid), When validation runs, Then the skills line is removed entirely from the task block.
+- **REQ-P-9:** WHEN the architect writes task files, THE SYSTEM SHALL parse all skill tags (`skills:` frontmatter) and validate them against available skill files. IF invalid tags are found, THE SYSTEM SHALL strip them from the task file and log a warning. The plan prompt SHALL include the complete list of valid skill names so the model cannot invent nonexistent tags.
+  - *Rationale:* Injecting valid skill names into the prompt prevents the problem at the source. Post-write validation catches any that slip through.
+  - Given a task file contains `skills: [WEB-ENG, documentation]` and `documentation` is not a valid skill, When validation runs, Then the skills list is rewritten to `[WEB-ENG]` and a warning is logged.
   - Given the plan prompt is constructed, When the system prompt is formatted, Then it contains the complete list of valid skill names.
 - **REQ-P-10:** `.voidrift/ARCHITECTURE.md` SHALL follow the structure defined in `ARCHITECTURE-TEMPLATE` (loaded via `get_template("ARCHITECTURE-TEMPLATE")`). The template follows the arc42 documentation standard with C4 model diagrams (Mermaid). The model SHALL populate each section with project-specific content.
   - *Rationale:* arc42 is an industry-standard architecture documentation framework providing a proven section structure. C4 (Context, Container, Component, Code) provides consistent diagram levels. Together they ensure architecture documents are complete, navigable, and familiar to engineers.
@@ -217,21 +212,19 @@
 
 ### 4.6 Command: Develop
 
-- **REQ-D-1:** WHEN `.voidrift/TASKS.md` does not exist, THE SYSTEM SHALL exit with an error prompting `voidrift plan`.
-  - Given no `.voidrift/TASKS.md` exists, When `voidrift develop <model>` is run, Then the command exits with an error containing "Run 'voidrift plan'".
-- **REQ-D-2:** WHEN all tasks are marked `[x]`, THE SYSTEM SHALL exit with "all tasks complete" and return 0.
-  - Given all tasks in TASKS.md are `[x]`, When `voidrift develop <model>` is run, Then the command exits with code 0 and prints "All tasks complete."
+- **REQ-D-1:** WHEN `.voidrift/tasks/manifest.yml` does not exist, THE SYSTEM SHALL exit with an error prompting `voidrift plan`.
+  - Given no `.voidrift/tasks/manifest.yml` exists, When `voidrift develop <model>` is run, Then the command exits with an error containing "Run 'voidrift plan'".
+- **REQ-D-2:** WHEN the manifest contains no dispatchable tasks (all `verified`, `blocked`, or empty), THE SYSTEM SHALL exit with "all tasks complete" and return 0.
+  - Given all tasks in the manifest are `verified`, When `voidrift develop <model>` is run, Then the command exits with code 0 and prints "All tasks complete."
 - **REQ-D-3:** WHEN a develop session starts, THE SYSTEM SHALL create `.voidrift/.develop.lock` with PID and timestamp. IF the lock exists with a live PID, THE SYSTEM SHALL exit with error.
   - Given no lock file exists, When a develop session starts, Then `.develop.lock` is created with the current PID.
   - Given a lock file exists with a live PID, When `voidrift develop <model>` is run, Then the command exits with an error containing the PID.
   - Given a lock file exists with a dead PID, When `voidrift develop <model>` is run, Then the stale lock is removed and the session starts.
-- **REQ-D-4:** WHILE the develop loop is active, THE SYSTEM SHALL process the first unchecked task from TASKS.md via `get_next_task()`. WHEN no unchecked tasks remain, the loop SHALL exit. Each developer agent SHALL use the narrowed per-task tool set (REQ-ARCH-9) and load context on demand via tool calls following the step sequence in the develop prompt: load the module's architecture (`arch/<module>.md` via `read_framework_file`), load the module's requirements (`spec/<module>.md` via `read_framework_file`), then implement the task. Module filenames are derived from the `## Module:` header (lowercased, spaces to hyphens). The system prompt SHALL contain only: the develop task prompt with the task text, any architect guidance, and the names of tagged skills (if present) — the CLI SHALL NOT pre-load system context or full skill content into the system prompt. Tagged skill names SHALL appear in the task text so the agent can call `get_skill()` on demand. Architect guidance (when present) MAY be included in the system prompt as it is already specific to the task. All instructions SHALL live in `resources/prompts/develop.md`.
-  - *Rationale:* On-demand loading lets the model process each document intentionally — reading it, extracting what's relevant to the task, and keeping those decisions in message history. This produces higher fidelity than pre-loading everything into the system prompt as an undifferentiated blob. Module-scoped files keep each load small. Fresh agents per task (REQ-ARCH-7) prevent context accumulation. Excluding system context and pre-loaded skills reduces the system prompt to the minimum needed to start, keeping local model context overhead proportionate.
-  - Given TASKS.md has 3 unchecked tasks, When the develop loop runs, Then tasks are processed in order via `get_next_task()` until none remain.
-  - Given `arch/backend-api.md` and `spec/backend-api.md` exist, When a "Backend API" task runs, Then the agent loads both via `read_framework_file` tool calls during execution.
-  - Given a task has `[web-eng, quality-qa]` tags, When the task prompt is constructed, Then the task text contains the tag names but the skill content is NOT pre-loaded in the system prompt.
-  - Given no `arch/` file exists for a module, When the agent attempts to load it, Then the tool returns a not-found message and the agent proceeds with available context.
-  - Given a task implements test files, When the developer writes test functions, Then each test function name includes the AC identifier it validates (e.g. `test_req_arch4_tool_choice_required`).
+- **REQ-D-4:** WHILE the develop loop is active, THE SYSTEM SHALL read the manifest, find all tasks where status=`planned` and all dependencies are `implemented` or `verified`, and dispatch them as sub-agents up to the model's `concurrency` limit. Each sub-agent receives the task file content as its prompt and uses the narrowed per-task tool set (REQ-ARCH-9). WHEN a sub-agent completes with writes, the CLI sets the task to `implemented`. WHEN no dispatchable tasks remain, the loop exits. Skills referenced in task frontmatter SHALL be resolved and injected into the sub-agent's system prompt. All instructions SHALL live in `resources/prompts/develop.md`.
+  - *Rationale:* Self-contained task files eliminate context-loading tool calls. The CLI dispatches at the task level, not the module level — if 4 tasks across 3 modules are all ready, all 4 dispatch concurrently (within the concurrency limit). Fresh agents per task (REQ-ARCH-7) prevent context accumulation.
+  - Given the manifest has 3 dispatchable tasks and concurrency is 3, When develop runs, Then all 3 are dispatched concurrently.
+  - Given a task file contains a user story, context, and ACs, When the sub-agent receives it, Then the agent writes code without making context-loading tool calls.
+  - Given a task has skills `[BACKEND-ENG]` in frontmatter, When the sub-agent is created, Then the BACKEND-ENG skill content is in the system prompt.
 - **REQ-D-5:** AFTER a task completes, THE SYSTEM SHALL verify that `write_source_file()` was called at least once during the task. IF no writes occurred, THE SYSTEM SHALL retry the task once. IF the retry also produces no writes AND an architect is configured, THE SYSTEM SHALL escalate. Additionally, IF git is initialized and HEAD exists, THE SYSTEM SHALL check `git diff HEAD` — if no changes are detected despite writes, THE SYSTEM SHALL log a warning.
   - Given a task completes without any `write_source_file()` calls, When the system checks, Then the task is retried.
   - Given a retry also produces no writes and an architect is configured, When the system checks, Then the task is escalated.
@@ -243,26 +236,22 @@
   - Given 5 escalations have occurred, When the developer escalates again, Then the task is marked `[!]` and the next task begins.
 - **REQ-D-8:** WHEN architect is consulted, THE SYSTEM SHALL provide: problem description, REQUIREMENTS.md, ARCHITECTURE.md, and task text. Source code files SHALL NOT be loaded.
   - Given a developer escalates, When the architect prompt is constructed, Then it contains the question, task text, full REQUIREMENTS.md, and full ARCHITECTURE.md — no source files.
-- **REQ-D-9:** Task completion SHALL be managed by the develop command framework code, which calls `task_store.complete()` with the correct module name after verifying writes occurred. The model SHALL NOT call task completion directly — the develop prompt SHALL explicitly instruct the model not to. `task_store.complete()` removes the task from TASKS.md and appends it to TASKS-DONE.md (REQ-D-14).
-  - *Rationale:* The model does not know the correct module name for multi-module projects. When the model calls `complete_task()` with an empty or wrong module, the task store cannot find the task. The framework has the correct module context from `_develop_module` and calls completion after verifying `write_source_file()` was invoked.
-  - Given a task is pending `[ ]`, When the framework calls `task_store.complete(module)` after successful writes, Then the task line is removed from TASKS.md and appended to TASKS-DONE.md.
-  - Given the develop prompt, When the model reads its instructions, Then the prompt contains "Do NOT call complete_task()".
-- **REQ-D-10:** WHEN `.voidrift/TASKS.md` contains `## Module:` headers, THE SYSTEM SHALL run modules concurrently using `ThreadPoolExecutor` with the concurrency limit from the model's `concurrency` field (REQ-MC-3). WHEN concurrency is 1, modules SHALL be processed sequentially. WHEN concurrency is 0, one worker SHALL be spawned per module.
-  - *Rationale:* Concurrency is a model capacity concern, not a per-command flag. The model's `concurrency` field applies consistently across all commands that run concurrent agents.
-  - Given TASKS.md has 3 `## Module:` headers and the model has `concurrency: 8`, When develop runs, Then up to 8 modules run concurrently via ThreadPoolExecutor.
-  - Given the model has `concurrency: 1`, When develop runs with module headers, Then modules are processed sequentially.
+- **REQ-D-9:** Task completion SHALL be managed by the develop command framework code, which updates the manifest status to `implemented` after verifying writes occurred. The model SHALL NOT manage task status — the develop prompt SHALL instruct the model to write code and call `done()`.
+  - *Rationale:* CLI ownership of status transitions prevents agents from corrupting the manifest. The CLI verifies writes before marking implemented.
+  - Given a task is `in-progress`, When the framework verifies writes occurred, Then the manifest status is set to `implemented`.
+  - Given the develop prompt, When the model reads its instructions, Then the prompt contains no task completion tools.
+- **REQ-D-10:** THE SYSTEM SHALL dispatch ready tasks concurrently using `ThreadPoolExecutor` with the model's `concurrency` field (REQ-MC-3). Tasks are dispatched at the task level, not the module level — ready tasks from any module are dispatched together. WHEN concurrency is 1, tasks SHALL be processed sequentially. WHEN concurrency is 0, all ready tasks SHALL be dispatched simultaneously.
+  - *Rationale:* Task-level concurrency is more efficient than module-level — if 4 tasks across 3 modules are all ready, all 4 dispatch concurrently instead of waiting for module boundaries.
+  - Given 4 ready tasks across 3 modules and concurrency is 3, When develop runs, Then 3 tasks are dispatched concurrently regardless of module.
+  - Given concurrency is 1, When develop runs, Then tasks are processed one at a time.
 - **REQ-D-11:** WHEN multiple workers are active, git operations SHALL be serialized through a `threading.Lock` to prevent index conflicts.
-  - *Rationale:* Concurrent `git diff` or future `git commit` calls from parallel module workers can corrupt the git index. A shared lock serializes access.
-  - Given 3 modules running concurrently, When two workers trigger git diff simultaneously, Then only one executes at a time (the other blocks until the lock is released).
-- **REQ-D-12:** WHEN the concurrency config is greater than 1 AND no module headers exist in TASKS.md, THE SYSTEM SHALL process tasks sequentially (single module behavior).
-  - Given TASKS.md has no `## Module:` headers, When develop runs with cloud concurrency config of 8, Then tasks are processed sequentially.
+  - *Rationale:* Concurrent `git diff` or future `git commit` calls from parallel task workers can corrupt the git index. A shared lock serializes access.
+  - Given 3 tasks running concurrently, When two workers trigger git diff simultaneously, Then only one executes at a time (the other blocks until the lock is released).
+- **REQ-D-12:** *(Removed — module-level dispatch replaced by task-level dispatch per REQ-D-10.)*
 - **REQ-D-13:** WHEN Ctrl+C or SIGTERM is received, THE SYSTEM SHALL set an interrupted flag and stop after the current task completes. The lock file SHALL be cleaned up in all cases. WHEN multiple workers are active (REQ-D-10), THE SYSTEM SHALL send SIGTERM to active workers, allow a 2-second grace period, then SIGKILL.
   - Given a develop session is running a task, When Ctrl+C is pressed, Then the current task finishes and the session exits with the lock file removed.
 
-- **REQ-D-14:** WHEN the CLI marks a task complete, THE SYSTEM SHALL remove the task line from TASKS.md and append it to `.voidrift/TASKS-DONE.md` in the format `- [x] <task text>  <!-- <ISO timestamp> -->`. TASKS-DONE.md is written exclusively by the CLI via `task_store.complete()` — no agent tool provides write access to it.
-  - *Rationale:* TASKS.md is a work queue. Moving completed tasks out keeps it lean and makes remaining work immediately visible. The log file preserves history without polluting the queue. CLI-only writes prevent accidental or adversarial modification of the completion record.
-  - Given a task completes, When `task_store.complete()` is called, Then the line is absent from TASKS.md and present in TASKS-DONE.md with a timestamp.
-  - Given TASKS.md has no pending (`- [ ]`) tasks, When develop's preflight runs, Then the "all tasks complete" check triggers.
+- **REQ-D-14:** *(Replaced by REQ-TM-5 and REQ-TM-6. Task completion tracked in manifest; archival moves files to `archived/` and appends to history.log.)*
 
 ### 4.7 Command: Automate
 
@@ -533,6 +522,76 @@ Two log roots, two intents:
   - *Rationale:* Without prompt-level guidance, models will attempt workarounds (truncating, re-requesting the same oversized write, or ignoring the warning). The prompt establishes the expected behavior as a first principle rather than relying on error messages alone to teach it.
   - Given a model receives a pagination warning, When the model proceeds, Then it calls `read_source_file` again with the next `offset` before forming conclusions about the file.
   - Given a model receives a write-rejection error, When the model responds, Then it proposes a decomposed file structure and writes each part separately.
+
+### 4.19 Task Management
+
+- **REQ-TM-1:** `cli/src/voidrift_cli/manifest.py` SHALL provide a `ManifestManager` class that reads and writes `.voidrift/tasks/manifest.yml`. The manifest tracks: task status, module grouping, dependencies, bug references, assignment, and next ID counters (`next_id`, `next_bug_id`). The manifest is owned exclusively by the CLI — no agent tool provides write access to it. The manifest SHALL only contain active work — archived entries are removed from the manifest and recorded in history.log.
+  - *Rationale:* Separating orchestration state from task content keeps the manifest small and fast. CLI ownership prevents agents from corrupting the dependency graph or status tracking.
+  - Given a manifest with 10 active tasks, When the CLI reads it, Then all task statuses, dependencies, and module groupings are available.
+  - Given an agent tool call attempts to write manifest.yml, When the tool executes, Then the write is denied.
+
+- **REQ-TM-2:** Each task SHALL have a lifecycle status: `planned`, `in-progress`, `implemented`, `verified`, `failed`, `blocked`. Status transitions SHALL be:
+  - `planned → in-progress`: develop dispatches the task
+  - `in-progress → implemented`: agent completes writes successfully
+  - `implemented → verified`: verify passes all ACs
+  - `implemented → failed`: verify fails ACs
+  - `failed → in-progress`: develop re-dispatches with bug context and architect guidance
+  - `planned → blocked`: a dependency is set to `failed`
+  - `blocked → planned`: all dependencies are `implemented` or `verified`
+  - *Rationale:* Explicit lifecycle states make task progress visible and enable the CLI to make correct dispatch decisions without inference.
+  - Given a task with status `planned` and all dependencies `verified`, When develop runs, Then the task transitions to `in-progress`.
+  - Given a task with status `implemented`, When verify fails its ACs, Then the task transitions to `failed`.
+  - Given a task with status `failed`, When develop re-dispatches it, Then the task transitions to `in-progress` with bug context appended.
+
+- **REQ-TM-3:** The CLI SHALL resolve dependencies before dispatching tasks. A task is dispatchable WHEN status=`planned` AND all dependencies are `implemented` or `verified`. WHEN a task is set to `failed`, the CLI SHALL transitively block all dependent tasks. WHEN a failed task is set to `implemented`, the CLI SHALL unblock dependents whose other dependencies are all met.
+  - *Rationale:* Dependency resolution prevents dispatching tasks that depend on incomplete or broken work. Transitive blocking prevents cascading failures. Automatic unblocking resumes work as soon as blockers are resolved.
+  - Given task 6 depends on tasks 1 and 2, and task 1 is `verified` but task 2 is `planned`, When the CLI checks dispatchability, Then task 6 is not dispatched.
+  - Given task 5 is set to `failed` and task 8 depends on task 5, When the CLI updates status, Then task 8 is set to `blocked`.
+  - Given task 5 is set to `implemented` and task 8 was `blocked` only by task 5, When the CLI updates status, Then task 8 is set to `planned`.
+
+- **REQ-TM-4:** Each task SHALL be a self-contained markdown file in `.voidrift/tasks/active/` named `TASK-{id}.md` where `id` is a monotonically increasing integer. The file SHALL have YAML frontmatter (`id`, `module`, `skills`, `files`, `depends`) and body sections: title, user story, context (relevant architecture and requirements excerpts), acceptance criteria, and implementation notes. The task file SHALL contain everything a developer agent needs to implement without loading additional context via tool calls.
+  - *Rationale:* Self-contained tickets eliminate context-loading tool calls from the develop agent. The agent receives the ticket as its prompt and writes code immediately. The same format supports greenfield tasks (files: create) and change requests (files: modify) with existing code excerpts in the context section.
+  - Given a task file for a weather endpoint, When a developer agent receives it, Then the file contains the user story, relevant architecture excerpt, acceptance criteria, and target file paths.
+  - Given a change request task, When the task file is created, Then the context section includes excerpts of the existing code that needs modification.
+
+- **REQ-TM-5:** WHEN a task is archived, the CLI SHALL append a one-line event to `.voidrift/tasks/history.log` with timestamp, entity ID, new status, module, and assignment. The history log is append-only and never modified. It is read for reporting, not on the dispatch hot path.
+  - *Rationale:* The history log provides an audit trail without bloating the manifest. One line per event keeps it simple and greppable.
+  - Given task 1 is archived, When the CLI writes history.log, Then a line like `2026-04-01T10:00:00 TASK-1 verified module=backend assigned=kiro` is appended.
+
+- **REQ-TM-6:** WHEN a task reaches `verified`, the CLI SHALL move the task file from `active/` to `archived/`, remove the task from manifest.yml, and append to history.log. Referenced bug files SHALL move to `archived/` when all tasks referencing that bug are verified.
+  - *Rationale:* Moving verified work out of `active/` keeps the working directory lean. Archived files remain available for reference by change requests and reporting.
+  - Given task 5 is `verified` and BUG-1 references only task 5, When the CLI archives, Then both TASK-5.md and BUG-1.md move to `archived/`.
+  - Given BUG-2 references tasks 5 and 8, and task 5 is `verified` but task 8 is `implemented`, When task 5 is archived, Then BUG-2.md stays in `active/`.
+
+- **REQ-TM-7:** Bugs SHALL be independent entities in `.voidrift/tasks/active/` named `BUG-{id}.md` with their own monotonically increasing ID sequence. The manifest tracks references between bugs and tasks but does not enforce a 1:1 relationship. WHEN a task fails verification, the CLI SHALL create a bug file with failure evidence and link it to the task via manifest refs. WHEN a failed task is re-dispatched, the architect SHALL be consulted first — receiving the task ticket and bug report to diagnose the root cause and append guidance to the task file.
+  - *Rationale:* Independent bug tracking allows bugs to exist without originating tasks (operator-reported, discovered during change requests). Architect consultation on failures produces better fixes than blindly re-running the same agent.
+  - Given verify fails task 5, When the CLI creates BUG-1.md, Then the manifest links BUG-1 to TASK-5 via refs.
+  - Given task 5 is `failed` with BUG-1 linked, When develop re-dispatches, Then the architect is consulted with the task ticket + BUG-1.md before the developer agent runs.
+  - Given an operator reports a bug not tied to any task, When BUG-2.md is created, Then it exists in `active/` with no task refs in the manifest.
+
+### 4.20 Idea Refinement
+
+- **REQ-IDEA-1:** WHEN the operator types `/idea` during a chat session, THE SYSTEM SHALL start a guided idea refinement flow. `/idea` with no argument SHALL prompt the operator to create a new idea or load an existing one. `/idea <id>` SHALL load `IDEA-<id>.md` from `.voidrift/tasks/active/` and resume refinement. The idea flow operates within the existing chat session — all chat tools remain available.
+  - *Rationale:* Ideas are rough user stories that need structured conversation to become actionable. A guided flow inside chat formalizes the natural pattern of iterative refinement — the agent drives the conversation through stages rather than waiting for the operator to direct it.
+  - Given a chat session is active, When the operator types `/idea`, Then the system prompts "Create new or load existing?"
+  - Given a chat session is active, When the operator types `/idea 3`, Then IDEA-3.md is loaded and the agent summarizes the current state and asks what to refine.
+  - Given `/idea 99` is typed and IDEA-99.md does not exist, When the system checks, Then an error is displayed and the chat prompt returns.
+
+- **REQ-IDEA-2:** WHEN a new idea is created, THE SYSTEM SHALL guide the conversation through stages: (1) **Intake** — ask the operator to describe the idea at a high level; (2) **Exploration** — ask clarifying questions, reference existing requirements and architecture, challenge scope and assumptions; (3) **Shaping** — propose a structured user story, acceptance criteria, affected modules and files; (4) **Summary** — present the complete structured idea for operator review. The agent SHALL drive the conversation — it knows which stage it is in and what to ask next. The agent's system prompt SHALL include an idea-refinement overlay loaded from `resources/prompts/chat.md` section `IDEA`.
+  - *Rationale:* Unguided conversations produce unstructured output. The staged flow ensures every idea reaches a consistent level of detail before it becomes a planning input. The agent driving the conversation prevents the operator from having to remember what comes next.
+  - Given a new idea flow starts, When the agent responds, Then it asks the operator to describe the idea at a high level.
+  - Given the operator has described the idea, When the agent responds, Then it asks clarifying questions referencing existing project artifacts.
+  - Given exploration is complete, When the agent responds, Then it proposes a structured user story with acceptance criteria.
+
+- **REQ-IDEA-3:** Ideas SHALL be stored as `IDEA-{id}.md` in `.voidrift/tasks/active/` with their own monotonically increasing ID sequence (`next_idea_id` in manifest). The manifest SHALL track ideas in an `ideas` section with status: `draft` (in progress), `now` (refined, high priority), `next` (refined, upcoming), `later` (parked). The idea file SHALL contain: title, user story, context (references to requirements and architecture), acceptance criteria, affected modules, and affected files (when modifying existing behavior). WHEN `/done` is typed during an idea flow, the agent SHALL ask the operator to categorize the idea as `now`, `next`, or `later`, write the final structured content to the idea file, register it in the manifest with the chosen category, and return to normal chat.
+  - *Rationale:* Ideas are the operator's backlog. The now/next/later categorization gives the operator control over prioritization without a numeric priority field. Affected files are captured during exploration when the idea modifies existing behavior — this context helps the operator produce targeted requirements updates.
+  - Given an idea flow completes, When the operator types `/done`, Then the agent asks "Is this now, next, or later?" and the idea is saved with the chosen category.
+  - Given an idea flow is interrupted (operator types something else or `/quit`), When the session ends, Then the idea file contains whatever was last saved as `draft`.
+
+- **REQ-IDEA-4:** Ideas are a backlog. They do NOT automatically feed into `voidrift plan`. WHEN the operator wants to act on an idea, they load it in chat via `/idea <id>` and use the conversation to create requirements (via `write_framework_file`) and task tickets manually. The now/next/later categorization is for the operator's own prioritization — the CLI does not consume ideas programmatically.
+  - *Rationale:* Ideas are a lightweight way to track a backlog without overcomplicating the planning pipeline. The operator decides when and how to act on them through chat, keeping full control over what enters the planning and development workflow.
+  - Given two `now` ideas exist, When `voidrift plan` runs, Then neither idea is included — plan reads only REQUIREMENTS.md and existing architecture.
+  - Given the operator loads IDEA-3 in chat, When they refine it, Then they can use `write_framework_file` to create task tickets or update requirements directly.
 
 ## 5. Non-Functional Requirements
 

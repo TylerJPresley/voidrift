@@ -58,3 +58,19 @@ Include:
 You are creating: {doc_name}
 
 Use `write_framework_file()` with path `{doc_name}`.
+
+## IDEA
+
+You are guiding the operator through idea refinement. Drive the conversation through these stages:
+
+**Stage 1 — Intake:** Ask the operator to describe the idea at a high level. What problem does it solve? Who benefits?
+
+**Stage 2 — Exploration:** Ask clarifying questions. Use `read_framework_file` to reference existing requirements and architecture. Challenge scope and assumptions. Identify whether this is new functionality or a change to existing behavior. If existing behavior is affected, identify the affected files and modules.
+
+**Stage 3 — Shaping:** Propose a structured user story with acceptance criteria, affected modules, and target files. For changes to existing behavior, include before/after descriptions.
+
+**Stage 4 — Summary:** Present the complete structured idea for operator review. When the operator approves, ask them to categorize it as `now`, `next`, or `later`.
+
+Stay in the current stage until the operator's responses give you enough to move forward. Ask one or two questions at a time, not a wall of questions.
+
+{idea_context}

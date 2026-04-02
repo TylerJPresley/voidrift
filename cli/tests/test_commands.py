@@ -502,84 +502,106 @@ class TestPlanPreflightChecks:
 
 
 class TestDevelopPreflightChecks:
+    def _setup_manifest(self, vd, tasks=None):
+        """Create manifest + task files for testing."""
+        import yaml
+        tasks_dir = vd / "tasks"
+        active = tasks_dir / "active"
+        active.mkdir(parents=True, exist_ok=True)
+        (tasks_dir / "archived").mkdir(exist_ok=True)
+        if tasks is None:
+            return
+        manifest = {"tasks": {}, "modules": {}, "dependencies": {}, "next_id": 1}
+        for t in tasks:
+            tid = t["id"]
+            manifest["tasks"][tid] = {"status": t.get("status", "planned"), "module": t.get("module", "default")}
+            mod = t.get("module", "default")
+            manifest["modules"].setdefault(mod, [])
+            if tid not in manifest["modules"][mod]:
+                manifest["modules"][mod].append(tid)
+            if t.get("depends"):
+                manifest["dependencies"][tid] = t["depends"]
+            manifest["next_id"] = max(manifest["next_id"], tid + 1)
+            # Write task file
+            content = f"---\nid: {tid}\nmodule: {mod}\nskills: []\n---\n# {t.get('title', f'Task {tid}')}\n"
+            (active / f"TASK-{tid}.md").write_text(content)
+        (tasks_dir / "manifest.yml").write_text(yaml.dump(manifest, default_flow_style=False))
+
     def test_missing_requirements(self, tmp_project, cloud_model):
         from voidrift_cli.commands.develop import run_develop
         result = run_develop(cloud_model)
         assert result == 1
 
-    def test_missing_tasks(self, tmp_project, cloud_model, sample_requirements):
+    def test_missing_manifest(self, tmp_project, cloud_model, sample_requirements):
         from voidrift_cli.commands.develop import run_develop
         result = run_develop(cloud_model)
         assert result == 1
 
     def test_all_tasks_complete(self, tmp_project, cloud_model, sample_requirements):
         vd = tmp_project / ".voidrift"
-        (vd / "TASKS.md").write_text("- [x] Done 1\n- [x] Done 2\n")
+        self._setup_manifest(vd, [
+            {"id": 1, "status": "verified", "title": "Done 1"},
+            {"id": 2, "status": "verified", "title": "Done 2"},
+        ])
         from voidrift_cli.commands.develop import run_develop
         result = run_develop(cloud_model)
         assert result == 0
 
-    def test_workers_without_modules(self, tmp_project, cloud_model, sample_requirements):
-        vd = tmp_project / ".voidrift"
-        (vd / "TASKS.md").write_text("- [ ] Task [analysis-reqs]\n")
-        from voidrift_cli.commands.develop import run_develop
-        result = run_develop(cloud_model)
-        # Single module, processes sequentially
-        assert result in (0, 1)
-
-    def test_lock_file_stale(self, tmp_project, cloud_model, sample_requirements, sample_tasks):
+    def test_lock_file_stale(self, tmp_project, cloud_model, sample_requirements):
         """Stale lock (dead PID) should be cleaned up."""
-        lock = tmp_project / ".voidrift" / ".develop.lock"
-        lock.write_text("99999999\n2020-01-01T00:00:00")  # Dead PID
+        vd = tmp_project / ".voidrift"
+        self._setup_manifest(vd, [{"id": 1, "title": "Task 1"}])
+        lock = vd / ".develop.lock"
+        lock.write_text("99999999\n2020-01-01T00:00:00")
 
         with patch("voidrift_cli.commands.develop.AgentLoop") as MockAgent:
             mock_instance = MagicMock()
             mock_instance.send.return_value = "done"
             MockAgent.return_value = mock_instance
-
             from voidrift_cli.commands.develop import run_develop
-            # Will proceed past lock check (stale PID), then try to run tasks
-            result = run_develop(cloud_model)
+            run_develop(cloud_model)
 
-        # Lock should be cleaned up
         assert not lock.exists()
 
     @patch("voidrift_cli.commands.develop.AgentLoop")
-    def test_develop_loop_marks_tasks(self, MockAgent, tmp_project, cloud_model, sample_requirements):
+    def test_develop_loop_marks_implemented(self, MockAgent, tmp_project, cloud_model, sample_requirements):
+        """REQ-D-9: Task marked implemented after writes."""
         vd = tmp_project / ".voidrift"
-        (vd / "TASKS.md").write_text("- [ ] Create src/main.py: entry [analysis-reqs]\n")
+        self._setup_manifest(vd, [{"id": 1, "title": "Create main.py"}])
 
         mock_instance = MagicMock()
         mock_instance.send.return_value = "Created the file."
         MockAgent.return_value = mock_instance
 
-        from voidrift_cli.commands.develop import run_develop
-        result = run_develop(cloud_model)
-        assert result == 0
-        # Completed tasks are removed from TASKS.md and appended to TASKS-DONE.md
-        assert "[x]" not in (vd / "TASKS.md").read_text()
-        assert "[x]" in (vd / "TASKS-DONE.md").read_text()
+        # Simulate write_source_file being called
+        with patch("voidrift_cli.tools.get_write_count", return_value=1):
+            from voidrift_cli.commands.develop import run_develop
+            result = run_develop(cloud_model)
+
+        import yaml
+        manifest = yaml.safe_load((vd / "tasks" / "manifest.yml").read_text())
+        assert manifest["tasks"][1]["status"] == "implemented"
 
     @patch("voidrift_cli.commands.develop.AgentLoop")
     def test_sequential_multi_module(self, MockAgent, tmp_project, cloud_model, sample_requirements):
         vd = tmp_project / ".voidrift"
-        (vd / "TASKS.md").write_text(
-            "## Module: backend\n- [ ] Task A [analysis-reqs]\n"
-            "## Module: frontend\n- [ ] Task B [frontend]\n"
-        )
+        self._setup_manifest(vd, [
+            {"id": 1, "module": "backend", "title": "Task A"},
+            {"id": 2, "module": "frontend", "title": "Task B"},
+        ])
 
         mock_instance = MagicMock()
         mock_instance.send.return_value = "done"
         MockAgent.return_value = mock_instance
 
-        from voidrift_cli.commands.develop import run_develop
-        result = run_develop(cloud_model)
-        assert result == 0
-        # Completed tasks are moved to TASKS-DONE.md; TASKS.md has none
-        tasks_text = (vd / "TASKS.md").read_text()
-        done_text = (vd / "TASKS-DONE.md").read_text()
-        assert tasks_text.count("[x]") == 0
-        assert done_text.count("[x]") == 2
+        with patch("voidrift_cli.tools.get_write_count", return_value=1):
+            from voidrift_cli.commands.develop import run_develop
+            result = run_develop(cloud_model)
+
+        import yaml
+        manifest = yaml.safe_load((vd / "tasks" / "manifest.yml").read_text())
+        assert manifest["tasks"][1]["status"] == "implemented"
+        assert manifest["tasks"][2]["status"] == "implemented"
 
 
 # ── Automate ────────────────────────────────────────────────────────────
@@ -1066,32 +1088,46 @@ class TestPlanUpdateMode:
 class TestDevelopRetryEscalation:
     """V-D-4: No writes triggers retry, then escalation."""
 
+    def _setup_manifest(self, vd, tasks=None):
+        """Create manifest + task files for testing."""
+        import yaml as _yaml
+        tasks_dir = vd / "tasks"
+        active = tasks_dir / "active"
+        active.mkdir(parents=True, exist_ok=True)
+        (tasks_dir / "archived").mkdir(exist_ok=True)
+        if tasks is None:
+            return
+        manifest = {"tasks": {}, "modules": {}, "dependencies": {}, "next_id": 1}
+        for t in tasks:
+            tid = t["id"]
+            manifest["tasks"][tid] = {"status": t.get("status", "planned"), "module": t.get("module", "default")}
+            mod = t.get("module", "default")
+            manifest["modules"].setdefault(mod, [])
+            if tid not in manifest["modules"][mod]:
+                manifest["modules"][mod].append(tid)
+            manifest["next_id"] = max(manifest["next_id"], tid + 1)
+            content = f"---\nid: {tid}\nmodule: {mod}\nskills: []\n---\n# {t.get('title', f'Task {tid}')}\n"
+            (active / f"TASK-{tid}.md").write_text(content)
+        (tasks_dir / "manifest.yml").write_text(_yaml.dump(manifest, default_flow_style=False))
+
     @patch("voidrift_cli.commands.develop.AgentLoop")
     def test_no_writes_triggers_retry(self, MockAgent, tmp_project, cloud_model, sample_requirements):
         """When the first task attempt writes nothing, a retry is attempted."""
         vd = tmp_project / ".voidrift"
-        (vd / "TASKS.md").write_text("- [ ] Create src/stub.py: stub [backend]\n")
+        self._setup_manifest(vd, [{"id": 1, "title": "Create stub"}])
 
         call_count = 0
 
         class FakeAgent:
             def __init__(self, **kwargs):
-                self.model = kwargs.get("model")
-                self.system_prompt = kwargs.get("system_prompt", "")
-                self.tools = kwargs.get("tools", [])
-                self.tool_handlers = kwargs.get("tool_handlers", {})
-                self.stream = kwargs.get("stream", False)
-                self.log_path = kwargs.get("log_path")
+                self.on_progress = None
                 self.on_token = None
                 self.on_complete = None
-                self.on_tool_call = None
                 self.messages = []
-                self.extra_body = {}
 
             def send(self, msg: str) -> str:
                 nonlocal call_count
                 call_count += 1
-                # Second call (retry) writes a file
                 if call_count >= 2:
                     from voidrift_cli.tools import _ctx
                     _ctx._source_write_count += 1

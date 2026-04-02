@@ -50,20 +50,6 @@ def voidrift_dir(tmp_project):
 
 
 @pytest.fixture
-def sample_tasks(voidrift_dir):
-    """Write a sample TASKS.md and return its path."""
-    tf = voidrift_dir / "TASKS.md"
-    tf.write_text(
-        "# Feature: Sample\n\n## Tasks\n"
-        "- [x] Create src/main.py: entry point [backend]\n"
-        "- [ ] Create src/utils.py: helpers [backend, tdd]\n"
-        "- [ ] Create tests/test_main.py: unit tests [tdd]\n"
-        "- [!] Create src/broken.py: blocked task [backend]\n"
-    )
-    return tf
-
-
-@pytest.fixture
 def sample_requirements(voidrift_dir):
     """Write a minimal REQUIREMENTS.md and return its path."""
     rf = voidrift_dir / "REQUIREMENTS.md"

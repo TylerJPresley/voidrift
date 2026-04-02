@@ -141,22 +141,38 @@ CLI: create planner agent → get_skill(ARCH-DESIGN)
                           → write_framework_file(ARCHITECTURE.md)
                           → write_framework_file(TASKS.md)
                           → write_framework_file(arch/<module>.md) × N
-CLI: validate skill tags in TASKS.md, strip invalid ones
+CLI: parse TASKS.md → create task files in tasks/active/TASK-{id}.md
+CLI: build tasks/manifest.yml (status, modules, dependencies)
+CLI: validate skill tags in task files, strip invalid ones
 ```
 
 ### 4.3 Develop command
 
 ```
-CLI: load TASKS.md → for each module (concurrent):
-  create developer agent → get_next_task(module)
-                         → read_framework_file(arch/<module>.md)
-                         → read_framework_file(spec/<module>.md)
-                         → write_source_file(path, content)
-  CLI: verify write occurred → complete_task(module)
-  CLI: if no write → retry → if still no write → escalate
+CLI: load tasks/manifest.yml → find dispatchable tasks (planned + deps met)
+  dispatch sub-agents concurrently (up to model.concurrency):
+    each agent receives task file content as prompt
+    → write_source_file(path, content)
+    → done()
+  CLI: verify write occurred → set status=implemented in manifest
+  CLI: if no write → retry → if still no write → escalate to architect
+  CLI: loop until no dispatchable tasks remain
 ```
 
-### 4.4 Verify command
+### 4.4 Idea refinement (chat)
+
+```
+/idea       → create new IDEA-{id}.md, inject IDEA prompt overlay
+/idea <id>  → load existing IDEA-{id}.md, resume refinement
+  Agent drives: intake → exploration → shaping → summary
+  All chat tools remain available during idea flow
+/done       → operator picks now/next/later, agent writes final idea file
+```
+
+Ideas are operator-owned backlog items. They do not feed into plan automatically.
+The operator acts on them through chat — writing requirements and task tickets manually.
+
+### 4.5 Verify command
 
 ```
 Stage 1 — Plan agent:
@@ -224,7 +240,7 @@ Two log roots, two intents:
 
 | Store | Location | Contents | Lifetime |
 |---|---|---|---|
-| Project artifacts | `<project>/.voidrift/` | REQUIREMENTS.md, ANALYSIS.md, analysis/, ARCHITECTURE.md, TASKS.md, spec/, arch/, VERIFY-PLAN.md, VERIFY.md, bugs/ | Project |
+| Project artifacts | `<project>/.voidrift/` | REQUIREMENTS.md, ANALYSIS.md, analysis/, ARCHITECTURE.md, tasks/manifest.yml, tasks/active/TASK-*.md, arch/, VERIFY-PLAN.md, VERIFY.md, bugs/ | Project |
 | Command logs | `<project>/.voidrift/logs/` | `<command>-<timestamp>.log` — full agent dialog | Until `voidrift prune` |
 | System log | `~/.voidrift/logs/voidrift.log` | CLI invocations, command outcomes | Rotating (1MB × 5) |
 

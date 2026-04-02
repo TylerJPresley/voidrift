@@ -49,6 +49,8 @@ Don't patch symptoms — find root causes. When something breaks:
 
 If a proper fix isn't feasible (e.g. upstream bug), say so explicitly and get operator approval before adding a workaround. Label workarounds in code with the reason and what would remove them.
 
+Don't leave dead code behind. When a function, class, or module is no longer called by production code, remove it and its tests. Dead code is debt.
+
 ## Safety Rules
 
 NEVER run without confirmation:

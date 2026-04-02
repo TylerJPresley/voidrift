@@ -2,16 +2,15 @@
 
 **Agentic Software Engineering Framework**
 
-An agentic software engineering framework composed of independent framework commands — Gather, Plan, Develop, Automate, Verify — each of which reads and writes artifacts in a project's `.voidrift/` directory. AI agents reverse-engineer requirements from existing codebases, generate architecture and task breakdowns, implement code, produce infrastructure-as-code, and validate the result against acceptance criteria. Any model can fill any role: local vLLM, cloud API, or gateway.
+An agentic software engineering framework composed of independent framework commands — Gather, Plan, Develop, Verify, Automate, Chat — each of which reads and writes artifacts in a project's `.voidrift/` directory. AI agents reverse-engineer requirements from existing codebases, generate architecture and task breakdowns, implement code, produce infrastructure-as-code, and validate the result against acceptance criteria. They are not a pipeline: each command's input is a file and its output is a file. Operators run the commands they need, skip the ones they don't, and can provide hand-authored artifacts to any command that accepts them. Any model can fill any role: local vLLM, cloud API, or gateway.
 
-```mermaid
-flowchart LR
-    G[Gather] --> P[Plan] --> D[Develop] --> A[Automate] --> V[Verify]
-    style G fill:#1e3a5f,color:#fff
-    style P fill:#1e3a5f,color:#fff
-    style D fill:#1e3a5f,color:#fff
-    style A fill:#1e3a5f,color:#fff
-    style V fill:#1e3a5f,color:#fff
+```
+  Gather ─── reads codebase, writes REQUIREMENTS.md
+  Plan ───── reads REQUIREMENTS.md, writes ARCHITECTURE.md + task tickets
+  Develop ── reads task tickets, writes source code
+  Verify ─── reads REQUIREMENTS.md, tests the implementation
+  Automate ─ reads REQUIREMENTS.md + ARCHITECTURE.md, writes IaC
+  Chat ───── interactive refinement of any .voidrift/ artifact
 ```
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for component design, data flows, and key decisions.
@@ -23,8 +22,8 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for component design, data flows, and key
 1. [Installation](#installation)
 2. [Configuration](#configuration)
 3. [Models](#models)
-4. [Framework Commands](#framework-commands)
-5. [Utility Commands](#utility-commands)
+4. [Commands](#commands)
+5. [Utilities](#utilities)
 6. [Worker Node](#worker-node)
 7. [Project Layout](#project-layout)
 8. [Tried Local Models](#tried-local-models)
@@ -50,7 +49,6 @@ voidrift          # opens interactive mode if no args
 
 ---
 
-## Configuration
 ## Configuration
 
 All settings in `~/.voidrift/config.yml`:
@@ -83,9 +81,40 @@ See [Appendix C](#appendix-c-model-registry) for the full model table, or run `v
 
 ---
 
-## Framework Commands
+## Commands
 
-Each command writes artifacts to `<project>/.voidrift/`. Run commands from your project directory.
+All commands write artifacts to `<project>/.voidrift/`. Run commands from your project directory.
+
+### Chat
+
+```bash
+voidrift chat <model>
+voidrift chat <model> --doc REQUIREMENTS.md    # scope to a .voidrift/ artifact
+voidrift chat <model> --doc new-feature.md     # create a new artifact
+```
+
+Interactive session with full tool access — the central command for iterating on any `.voidrift/` artifact. Review requirements before running plan, refine architecture after plan, debug issues, explore ideas. Type `/compact` to summarize conversation history when context fills up.
+
+**Idea refinement:** Type `/idea` to start a guided idea flow — the agent walks you through intake, exploration, shaping, and summary. Ideas are stored as `IDEA-{id}.md` in `tasks/active/` and categorized as `now`, `next`, or `later`. Type `/idea 3` to resume an existing idea. Type `/done` to save and return to normal chat.
+
+**Example workflow — new project:**
+```bash
+voidrift gather <model> ./src         # reverse-engineer requirements
+voidrift chat <model> --doc REQUIREMENTS.md  # review and refine
+voidrift plan <model>                 # generate architecture + tasks
+voidrift chat <model> --doc ARCHITECTURE.md  # review architecture
+voidrift develop <model>              # implement tasks
+voidrift verify <model>               # acceptance testing
+```
+
+**Example workflow — new feature on existing project:**
+```bash
+voidrift chat <model>                 # /idea to capture and refine
+voidrift chat <model> --doc REQUIREMENTS.md  # update requirements
+voidrift plan <model>                 # plan produces tasks for the delta
+voidrift develop <model>              # implement
+voidrift verify <model>               # validate
+```
 
 ### Gather
 
@@ -119,7 +148,7 @@ voidrift plan <model> --overwrite # remove previous plan artifacts and start fre
 voidrift plan <model> <feature>   # scope to a specific spec file
 ```
 
-Produces: `ARCHITECTURE.md`, `TASKS.md`, `arch/<module>.md`
+Produces: `ARCHITECTURE.md`, `tasks/manifest.yml`, `tasks/active/TASK-*.md`, `arch/<module>.md`
 
 Re-running plan automatically detects existing artifacts and switches to update mode: plan reads current source files to determine what is already implemented, then writes a fresh task list covering only what remains. Tasks that no longer apply are removed; new tasks are added for unaddressed requirements. `ARCHITECTURE.md` is a lean system map (module inventory, cross-module contracts). `arch/<module>.md` carries the design depth for each module (components, data models, interfaces). Tasks are single atomic file operations with enough context for an agent to implement without cross-referencing requirements.
 
@@ -151,17 +180,6 @@ flowchart TD
 
 Multi-module projects run modules concurrently. Concurrency is automatic: local models run 1 module at a time, cloud/gateway models run up to 8 concurrently.
 
-### Automate
-
-Generates infrastructure-as-code from `REQUIREMENTS.md` and `ARCHITECTURE.md`:
-
-```bash
-voidrift automate <model>
-voidrift automate <model> <architect>
-```
-
-Produces IaC files in the project. Reconciles gaps if IaC already exists. No hardcoded secrets — all sensitive values parameterized.
-
 ### Verify
 
 Two-stage requirements-driven acceptance testing:
@@ -178,9 +196,20 @@ voidrift verify <model>
 
 Verify never modifies source files. Failures become tasks for Develop.
 
+### Automate
+
+Generates infrastructure-as-code from `REQUIREMENTS.md` and `ARCHITECTURE.md`:
+
+```bash
+voidrift automate <model>
+voidrift automate <model> <architect>
+```
+
+Produces IaC files in the project. Reconciles gaps if IaC already exists. No hardcoded secrets — all sensitive values parameterized.
+
 ---
 
-## Utility Commands
+## Utilities
 
 ### Interactive Mode
 
@@ -188,17 +217,7 @@ Verify never modifies source files. Failures become tasks for Develop.
 voidrift
 ```
 
-Launched with no arguments — prompts for command, model, and options. Defaults the model to the active local model (from `~/.voidrift/.active-container`) or the first configured alias.
-
-### Chat
-
-```bash
-voidrift chat <model>
-voidrift chat <model> --doc REQUIREMENTS.md    # scope to a .voidrift/ artifact
-voidrift chat <model> --doc new-feature.md     # create a new artifact
-```
-
-Interactive session with full tool access. Use to iterate on any `.voidrift/` artifact before or after a framework command. Type `/compact` to summarize conversation history when context fills up.
+Launched with no arguments — prompts for command, model, and options. Defaults the model to the active local model (from `~/.worker-cli/.active-container`) or the first configured alias.
 
 ### Status
 
@@ -268,7 +287,11 @@ your-project/
 │   ├── ARCHITECTURE.md      # System map, cross-module contracts ← Plan
 │   ├── arch/<module>.md     # Module design, components, interfaces ← Plan
 │   ├── TASKS.md             # Pending and blocked tasks         ← Plan
-│   ├── TASKS-DONE.md        # Completed task log (append-only)  ← Develop
+│   ├── tasks/
+│   │   ├── manifest.yml     # Task status, deps, modules       ← CLI
+│   │   ├── active/          # Task tickets in progress         ← Plan/CLI
+│   │   ├── archived/        # Verified tasks                   ← CLI
+│   │   └── history.log      # Lifecycle event log              ← CLI
 │   ├── VERIFY.md            # Test results, verdict             ← Verify
 │   ├── STATE.md             # Command run history (append-only)
 │   └── logs/
