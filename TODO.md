@@ -46,6 +46,12 @@ Work items that need doing. Grouped by area, ordered by priority within each gro
 
 ---
 
+## Gather Command — Code/Reqs Mismatch
+
+- [ ] **Gather still uses positional `<path>`** — REQ-G-1 says `--path <path>` and `--idea <id>` with a help message if neither is provided. The code still has `path` as a positional Click argument. Need to change to `--path` option, add `--idea` option, and add the help message. Location: `cli/src/voidrift_cli/main.py` line ~193, `cli/src/voidrift_cli/commands/gather.py` `run_gather()`.
+
+---
+
 ## Deploy Command
 
 - [ ] **Deploy is a renamed stub** — `automate.py` was renamed to `deploy.py` but the implementation is unchanged. REQ-A-1 through REQ-A-5 define the current scope. Future scope (release management, CI/CD) is undefined — needs requirements before implementation.
@@ -57,7 +63,7 @@ Work items that need doing. Grouped by area, ordered by priority within each gro
 - [x] `TestContextBuild` — rewritten to call `build_context_block()` from gather.py.
 - [x] `TestSourceRequirementsDirect` — rewritten to call `strip_preamble()` from gather.py. FakeAgent test removed.
 - [x] `test_preamble_stripped_from_final_response` — calls real `strip_preamble()`.
-- [ ] Audit all command-level tests for "testing the test" pattern — tests that reimplement logic inline instead of exercising the real code path.
+- [x] Audit all command-level tests — scanned all test files. FakeAgent usage in web_fetch tests is correct (injected via `agent_loop_cls` parameter). One minor inline formula test (`test_retry_tokens_floor_at_256`) but the retry logic isn't extracted as a function. No other offenders found.
 
 ---
 
