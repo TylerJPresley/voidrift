@@ -261,6 +261,9 @@ class _MultiSpinner:
         style = "yellow" if failed else "dim"
         with self._lock:
             g = self._ensure_group(group or self._DEFAULT)
+            # Guard: skip if already completed
+            if descriptor not in g["active"]:
+                return
             # Fall back to accumulated tracker data when caller passes zeros
             tracked = g["active"].get(descriptor, {})
             if not tokens_in and tracked.get("pt"):
