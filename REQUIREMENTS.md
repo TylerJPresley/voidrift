@@ -583,7 +583,7 @@ Two log roots, two intents:
   - Given the operator has described the idea, When the agent responds, Then it asks clarifying questions referencing existing project artifacts.
   - Given exploration is complete, When the agent responds, Then it proposes a structured user story with acceptance criteria.
 
-- **REQ-IDEA-3:** Ideas SHALL be stored as `IDEA-{id}.md` in `.voidrift/tasks/active/` with their own monotonically increasing ID sequence (`next_idea_id` in manifest). The manifest SHALL track ideas in an `ideas` section with status: `draft` (in progress), `now` (refined, high priority), `next` (refined, upcoming), `later` (parked). The idea file SHALL contain: title, user story, context (references to requirements and architecture), acceptance criteria, affected modules, and affected files (when modifying existing behavior). WHEN `/done` is typed during an idea flow, the agent SHALL ask the operator to categorize the idea as `now`, `next`, or `later`, write the final structured content to the idea file, register it in the manifest with the chosen category, and return to normal chat.
+- **REQ-IDEA-3:** Ideas SHALL be stored as `IDEA-{id}.md` in `.voidrift/ideas/` with their own monotonically increasing ID sequence (`next_idea_id` in manifest). The manifest SHALL track ideas in an `ideas` section with status: `draft` (in progress), `now` (refined, high priority), `next` (refined, upcoming), `later` (parked), `done` (all derived tasks verified). The idea file SHALL contain: title, user story, context (references to requirements and architecture), acceptance criteria, affected modules, and affected files (when modifying existing behavior). WHEN `/done` is typed during an idea flow, the agent SHALL ask the operator to categorize the idea as `now`, `next`, or `later`, write the final structured content to the idea file, register it in the manifest with the chosen category, and return to normal chat.
   - *Rationale:* Ideas are the operator's backlog. The now/next/later categorization gives the operator control over prioritization without a numeric priority field. Affected files are captured during exploration when the idea modifies existing behavior — this context helps the operator produce targeted requirements updates.
   - Given an idea flow completes, When the operator types `/done`, Then the agent asks "Is this now, next, or later?" and the idea is saved with the chosen category.
   - Given an idea flow is interrupted (operator types something else or `/quit`), When the session ends, Then the idea file contains whatever was last saved as `draft`.
@@ -592,6 +592,13 @@ Two log roots, two intents:
   - *Rationale:* Ideas are a lightweight way to track a backlog without overcomplicating the planning pipeline. The operator decides when and how to act on them through chat, keeping full control over what enters the planning and development workflow.
   - Given two `now` ideas exist, When `voidrift plan` runs, Then neither idea is included — plan reads only REQUIREMENTS.md and existing architecture.
   - Given the operator loads IDEA-3 in chat, When they refine it, Then they can use `write_framework_file` to create task tickets or update requirements directly.
+
+- **REQ-IDEA-5:** WHEN `voidrift plan <model> --idea <id>` is run, THE SYSTEM SHALL read the idea file and include its content as planning context alongside REQUIREMENTS.md. Tasks produced by this plan run SHALL include `idea: <id>` in their frontmatter. The manifest SHALL record the idea reference on each task entry. WHEN all tasks with `idea: <id>` reach `verified` status, the CLI SHALL set the idea status to `done`, move the idea file from `ideas/` to `ideas/archived/`, and append to history.log.
+  - *Rationale:* Scoping plan to a single idea produces targeted tasks instead of re-planning the entire project. The idea reference on tasks closes the loop — the operator can trace from idea to requirements to tasks to implementation. Automatic archival when all derived tasks are verified keeps the active idea list clean.
+  - Given IDEA-3 exists with status `now`, When `voidrift plan <model> --idea 3` runs, Then the planning agent receives IDEA-3 content in its context.
+  - Given plan produces TASK-7 and TASK-8 from `--idea 3`, When the tasks are created, Then both task files have `idea: 3` in frontmatter and the manifest records the link.
+  - Given TASK-7 and TASK-8 both reach `verified`, When the CLI checks idea status, Then IDEA-3 is set to `done` and moved to `ideas/archived/`.
+  - Given TASK-7 is `verified` but TASK-8 is `implemented`, When the CLI checks, Then IDEA-3 remains active.
 
 ## 5. Non-Functional Requirements
 
@@ -684,7 +691,8 @@ Two log roots, two intents:
 ├── STATE.md                  # Project state summary
 ├── TASKS.md                  # Intermediate task list (parsed into task files by CLI)
 ├── ideas/                    # Operator-owned idea backlog
-│   └── IDEA-{id}.md
+│   ├── IDEA-{id}.md
+│   └── archived/             # Completed ideas (all derived tasks verified)
 ├── tasks/                    # System-owned work items
 │   ├── manifest.yml          # Task status, dependencies, modules, idea tracking
 │   ├── active/               # Task and bug tickets in progress

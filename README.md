@@ -277,7 +277,8 @@ your-project/
 │   ├── arch/<module>.md     # Module design, components, interfaces ← Plan
 │   ├── TASKS.md             # Pending and blocked tasks         ← Plan
 │   ├── ideas/               # Operator-owned idea backlog       ← Chat
-│   │   └── IDEA-{id}.md
+│   │   ├── IDEA-{id}.md
+│   │   └── archived/        # Completed ideas                  ← CLI
 │   ├── tasks/               # System-owned work items           ← Plan/CLI
 │   │   ├── manifest.yml     # Task status, deps, modules       ← CLI
 │   │   ├── active/          # Task and bug tickets             ← Plan/CLI
