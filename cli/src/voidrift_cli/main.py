@@ -26,14 +26,14 @@ AI agents reverse-engineer requirements, generate architecture, implement code,
 produce infrastructure-as-code, and validate against acceptance criteria.
 
 Getting started:
-  voidrift gather <model> <path>          Reverse-engineer requirements
+  voidrift gather <model> --path <dir>     Reverse-engineer requirements
   voidrift chat <model>                   Interactive requirements & planning
   voidrift plan <model>                   Generate architecture and tasks
   voidrift develop <model> [<architect>]  Execute implementation tasks
   voidrift verify <model>                  Requirements-driven acceptance testing
 
 Framework commands:
-  gather <model> <path> [--overwrite]
+  gather <model> --path <dir> [--overwrite]
   plan <model> [--overwrite]
   develop <model> [<architect>]              Execute implementation tasks
   deploy <model> [<architect>]
@@ -190,14 +190,20 @@ def _check_setup() -> None:
 
 @cli.command()
 @click.argument("model", shell_complete=_complete_model)
-@click.argument("path", type=click.Path(exists=True))
+@click.option("--path", type=click.Path(exists=True), help="Path to codebase directory")
+@click.option("--idea", type=int, help="Idea ID to generate requirements from")
 @click.option("--overwrite", is_flag=True, help="Remove previous gather artifacts and start fresh")
-def gather(model, path, overwrite) -> None:
-    """Gather: Reverse-engineer requirements from a codebase."""
+def gather(model, path, idea, overwrite) -> None:
+    """Gather: Reverse-engineer requirements from a codebase or idea."""
+    if not path and idea is None:
+        click.echo("Error: specify --path <dir> or --idea <id>\n")
+        click.echo("  voidrift gather <model> --path ./src")
+        click.echo("  voidrift gather <model> --idea 3")
+        sys.exit(1)
     _check_setup()
     from .commands.gather import run_gather
     mc = resolve_model(model)
-    sys.exit(run_gather(mc, from_path=path, overwrite=overwrite))
+    sys.exit(run_gather(mc, from_path=path, idea_id=idea, overwrite=overwrite))
 
 
 @cli.command()

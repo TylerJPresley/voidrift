@@ -142,16 +142,116 @@ def _write_analysis(analysis_file: Path, filepath: str, file_hash: str, analysis
 
 def run_gather(
     model: ModelConfig,
-    from_path: str,
+    from_path: str | None = None,
+    idea_id: int | None = None,
     overwrite: bool = False,
 ) -> int:
-    """Execute the gather command — reverse-engineer requirements from a codebase."""
+    """Execute the gather command — reverse-engineer requirements (REQ-G-1)."""
     check_disk_space()
     d = ensure_voidrift_dir()
     target = d / "REQUIREMENTS.md"
-    source = Path(from_path)
 
+    if idea_id is not None:
+        return _gather_from_idea(model, target, idea_id, d)
+
+    source = Path(from_path)
     return _gather_from(model, target, source, overwrite)
+
+
+def _gather_from_idea(
+    model: ModelConfig,
+    target: Path,
+    idea_id: int,
+    d: Path,
+) -> int:
+    """Generate requirements from a refined idea (REQ-G-1 --idea mode)."""
+    from ..manifest import ManifestManager
+    from ..agent import AgentLoop
+    from .. import prompts
+    from ..skills import find_skill
+    from ..config import get_max_tokens
+
+    mm = ManifestManager(project_dir=d.parent)
+    if not mm.exists():
+        ui.error("No manifest found. Create an idea first with /idea in chat.")
+        return 1
+    mm.load()
+
+    idea_content = mm.read_idea(idea_id)
+    if not idea_content:
+        ui.error(f"IDEA-{idea_id} not found in ideas/.")
+        return 1
+
+    ui.header("VoidRift Gather — Idea Mode")
+    log, run_id = boot_run("gather")
+    ui.detail(f"Log: {log}")
+
+    # Snapshot existing requirements for diff
+    existing_reqs = target.read_text(encoding="utf-8") if target.exists() else ""
+
+    skill = find_skill("ANALYSIS-REQS") or ""
+    system_context = prompts.load_prompt("system", "CONTEXT")
+    template = prompts.load_template("REQUIREMENTS-TEMPLATE")
+
+    system = "\n\n".join(p for p in [system_context, skill] if p)
+    system += f"\n\nUse this template for requirements format:\n\n{template}"
+
+    user_msg = f"Generate or update requirements based on this idea.\n\n"
+    user_msg += f"IDEA:\n\n{idea_content}\n\n"
+    if existing_reqs:
+        user_msg += f"EXISTING REQUIREMENTS (update, do not replace):\n\n{existing_reqs}"
+
+    agent = AgentLoop(
+        model=model,
+        system_prompt=system,
+        tools=[], tool_handlers={},
+        stream=False,
+        max_tokens=get_max_tokens(model, "consolidation"),
+        log_path=log,
+        show_spinner=False,
+    )
+
+    with ui.spinner(ui.random_label(), "gather idea") as spin:
+        agent.on_progress = spin.on_progress
+        try:
+            response = agent.send(user_msg)
+        except (RuntimeError, OSError, ValueError) as e:
+            ui.error(f"Gather failed: {e}")
+            return 1
+
+    final_content = strip_preamble(response)
+    target.write_text(final_content, encoding="utf-8")
+
+    # Record affected reqs and diff in idea file (REQ-IDEA-3)
+    import re
+    new_reqs = set(re.findall(r"REQ-[A-Z]+-\d+", final_content))
+    old_reqs = set(re.findall(r"REQ-[A-Z]+-\d+", existing_reqs))
+    affected = sorted(new_reqs - old_reqs) if existing_reqs else sorted(new_reqs)
+
+    idea_path = mm.idea_path(idea_id)
+    if idea_path.exists():
+        idea_text = idea_path.read_text()
+        # Append reqs and diff
+        idea_text += f"\n\n## Requirements\n\nreqs: {', '.join(affected)}\n"
+        if existing_reqs:
+            added = new_reqs - old_reqs
+            removed = old_reqs - new_reqs
+            if added:
+                idea_text += f"\nAdded: {', '.join(sorted(added))}"
+            if removed:
+                idea_text += f"\nRemoved: {', '.join(sorted(removed))}"
+        idea_path.write_text(idea_text)
+
+    from ..utils import append_state
+    append_state(
+        cmd="gather",
+        model_alias=model.alias,
+        summary=f"Idea mode: IDEA-{idea_id} → {len(affected)} requirements.",
+        files_created=[".voidrift/REQUIREMENTS.md"],
+    )
+
+    ui.success(f"REQUIREMENTS.md updated — {len(affected)} requirements from IDEA-{idea_id}.")
+    return 0
 
 
 def _gather_from(

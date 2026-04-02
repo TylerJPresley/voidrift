@@ -78,7 +78,7 @@ class TestSetupCheck:
         from voidrift_cli.main import cli
         runner = CliRunner()
         with _patch("voidrift_cli.config.get_models_file", return_value=missing):
-            result = runner.invoke(cli, ["gather", "claude", "."])
+            result = runner.invoke(cli, ["gather", "claude", "--path", "."])
         assert result.exit_code != 0
         assert "Models file not found" in result.output
 
@@ -95,7 +95,7 @@ class TestSetupCheck:
         from voidrift_cli.main import cli
         runner = CliRunner()
         with _patch("voidrift_cli.config.get_models_file", return_value=models_path):
-            result = runner.invoke(cli, ["gather", "claude", "."])
+            result = runner.invoke(cli, ["gather", "claude", "--path", "."])
         assert "Models file not found" not in result.output
 
     def test_utility_command_unaffected_by_missing_models_yml(self, tmp_path, monkeypatch):

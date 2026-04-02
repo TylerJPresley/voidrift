@@ -48,7 +48,7 @@ Work items that need doing. Grouped by area, ordered by priority within each gro
 
 ## Gather Command — Code/Reqs Mismatch
 
-- [ ] **Gather still uses positional `<path>`** — REQ-G-1 says `--path <path>` and `--idea <id>` with a help message if neither is provided. The code still has `path` as a positional Click argument. Need to change to `--path` option, add `--idea` option, and add the help message. Location: `cli/src/voidrift_cli/main.py` line ~193, `cli/src/voidrift_cli/commands/gather.py` `run_gather()`.
+- [x] **Gather uses `--path` and `--idea`** — positional `<path>` changed to `--path` option, `--idea <id>` added, help message when neither provided. `_gather_from_idea()` implements idea mode with ANALYSIS-REQS skill, records reqs + diff in idea file.
 
 ---
 

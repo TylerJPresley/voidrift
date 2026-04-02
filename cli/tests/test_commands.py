@@ -877,7 +877,8 @@ class TestCLICommands:
         from voidrift_cli.main import cli
         runner = CliRunner()
         result = runner.invoke(cli, ["gather", "--help"])
-        assert "PATH" in result.output
+        assert "--path" in result.output
+        assert "--idea" in result.output
         assert "--overwrite" in result.output
 
     def test_develop_help(self):
