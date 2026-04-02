@@ -24,9 +24,8 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for component design, data flows, and key
 3. [Models](#models)
 4. [Commands](#commands)
 5. [Utilities](#utilities)
-6. [Worker Node](#worker-node)
-7. [Project Layout](#project-layout)
-8. [Development](#development)
+6. [Project Layout](#project-layout)
+7. [Development](#development)
 
 ---
 
@@ -60,7 +59,7 @@ api_keys:
   gemini: ${GEMINI_API_KEY}
 ```
 
-The `models_file` points to the model registry maintained by the [worker-cli](https://github.com/your-org/worker-cli) project. All model definitions — local, cloud, and gateway — live in that single file.
+The `models_file` points to a YAML file containing all model definitions — local, cloud, and gateway. The path can be anywhere on the system.
 
 Config values support variable expansion:
 
@@ -74,7 +73,7 @@ Config values support variable expansion:
 
 ## Models
 
-Models are referenced by alias in all commands. All model definitions — local, cloud, and gateway — live in a single models file maintained by the [worker-cli](https://github.com/your-org/worker-cli) project. Each entry is self-contained with its own connection details.
+Models are referenced by alias in all commands. All model definitions — local, cloud, and gateway — live in a single YAML file at the path configured in `models_file`. Each entry is self-contained with its own connection details.
 
 See [Appendix C](#appendix-c-model-registry) for the full model table, or run `voidrift` with no arguments to see available models.
 
@@ -216,7 +215,7 @@ Produces IaC files in the project. Reconciles gaps if IaC already exists. No har
 voidrift
 ```
 
-Launched with no arguments — prompts for command, model, and options. Defaults the model to the active local model (from `~/.worker-cli/.active-container`) or the first configured alias.
+Launched with no arguments — prompts for command, model, and options. Defaults to the first configured model alias.
 
 ### Status
 
@@ -261,14 +260,6 @@ voidrift completions bash > ~/.local/share/bash-completion/completions/voidrift
 ```
 
 Model alias arguments complete from configured aliases in the models file.
-
----
-
-## Worker Node
-
-The worker node is a GPU server running local LLM containers over vLLM. Worker node management — container lifecycle, model downloads, image sources, Kiro Gateway — is handled by the [worker-cli](https://github.com/your-org/worker-cli) project. VoidRift reads the model registry published by worker-cli at the path configured in `models_file` (default `~/.worker-cli/models.yml`).
-
-Cloud-only mode requires no worker node or worker-cli installation.
 
 ---
 
