@@ -54,7 +54,7 @@ Work items that need doing. Grouped by area, ordered by priority within each gro
 
 ## Deploy Command
 
-- [x] **Deploy requirements written** — REQ-DPL-1 (version bump), REQ-DPL-2 (changelog from history.log), REQ-DPL-3 (git tag), REQ-DPL-4 (conditional IaC). Implementation not started.
+- [x] **Deploy implemented** — REQ-DPL-1 (version bump via model classification + operator confirm), REQ-DPL-2 (changelog from history.log), REQ-DPL-3 (annotated git tag), REQ-DPL-4 (conditional IaC), REQ-DPL-5 (post_deploy hook). Tests rewritten for new behavior.
 
 ---
 

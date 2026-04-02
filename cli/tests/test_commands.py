@@ -559,43 +559,18 @@ class TestDeployPreflightChecks:
         result = run_deploy(cloud_model)
         assert result == 1
 
-    @patch("voidrift_cli.commands.deploy.AgentLoop")
-    def test_generate_mode(self, MockAgent, tmp_project, cloud_model, sample_requirements):
-        def fake_send(msg):
-            # Simulate creating a compose file
-            (tmp_project / "docker-compose.yml").write_text("version: '3'\nservices:\n  app:\n    build: .")
-            return "Generated IaC."
-
-        mock_instance = MagicMock()
-        mock_instance.send.side_effect = fake_send
-        MockAgent.return_value = mock_instance
-
-        from voidrift_cli.commands.deploy import run_deploy
-        result = run_deploy(cloud_model)
-        assert result == 0
-
-    @patch("voidrift_cli.commands.deploy.AgentLoop")
-    def test_generate_fails_no_iac(self, MockAgent, tmp_project, cloud_model, sample_requirements):
-        mock_instance = MagicMock()
-        mock_instance.send.return_value = "I described the infrastructure but didn't create files."
-        MockAgent.return_value = mock_instance
-
+    def test_missing_architecture(self, tmp_project, cloud_model, sample_requirements):
         from voidrift_cli.commands.deploy import run_deploy
         result = run_deploy(cloud_model)
         assert result == 1
 
-    @patch("voidrift_cli.commands.deploy.AgentLoop")
-    def test_review_mode(self, MockAgent, tmp_project, cloud_model, sample_requirements):
-        # Pre-existing IaC
-        (tmp_project / "docker-compose.yml").write_text("version: '3'")
-
-        mock_instance = MagicMock()
-        mock_instance.send.return_value = "Reviewed and reconciled."
-        MockAgent.return_value = mock_instance
-
+    def test_no_history_exits_cleanly(self, tmp_project, cloud_model, sample_requirements):
+        """No verified tasks since last release → nothing to deploy."""
+        vd = tmp_project / ".voidrift"
+        (vd / "ARCHITECTURE.md").write_text("# Architecture\n")
         from voidrift_cli.commands.deploy import run_deploy
         result = run_deploy(cloud_model)
-        assert result == 0
+        assert result == 0  # clean exit, nothing to do
 
 
 # ── Verify ──────────────────────────────────────────────────────────────
