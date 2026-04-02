@@ -229,6 +229,87 @@ def _write_verify_md(
     return verdict
 
 
+def _update_manifest(d: Path, results: list[dict], run_id: str) -> None:
+    """Create bugs for failures, archive verified tasks (REQ-TM-6, REQ-TM-7)."""
+    from ..manifest import ManifestManager
+    import shutil
+
+    mm = ManifestManager(project_dir=d.parent)
+    if not mm.exists():
+        return
+    mm.load()
+
+    tasks = mm.tasks()
+    if not tasks:
+        return
+
+    # Build req → task_ids mapping from task files
+    req_to_tasks: dict[str, list[int]] = {}
+    for tid in tasks:
+        content = mm.read_task(tid)
+        if not content:
+            continue
+        for line in content.splitlines():
+            stripped = line.strip().lower()
+            if stripped.startswith("reqs:"):
+                for r in stripped.split(":", 1)[1].split(","):
+                    r = r.strip().upper()
+                    if r:
+                        req_to_tasks.setdefault(r, []).append(tid)
+
+    failed_task_ids: set[int] = set()
+    passed_item_ids: set[str] = set()
+
+    for r in results:
+        item_id = r["item_id"]
+        if r["status"] == "fail":
+            # Extract REQ reference from item_id (e.g. ITEM-REQ-D-1 → REQ-D-1)
+            req_ref = item_id.replace("ITEM-", "")
+            task_ids = req_to_tasks.get(req_ref, [])
+            failed_task_ids.update(task_ids)
+
+            # Create bug in manifest
+            bug_id = mm.next_bug_id
+            bug_path = r.get("bug_report_path")
+            if bug_path:
+                # Move bug from .voidrift/bugs/ to tasks/active/BUG-{id}.md
+                src = Path(bug_path)
+                if src.exists():
+                    dst = mm.bug_path(bug_id)
+                    dst.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(str(src), str(dst))
+            mm.add_bug(bug_id, refs=task_ids)
+
+            # Mark linked tasks as failed
+            for tid in task_ids:
+                mm.set_status(tid, "failed")
+
+        elif r["status"] == "pass":
+            passed_item_ids.add(item_id)
+
+    # Check if any implemented tasks have all their reqs passing
+    for tid, task in tasks.items():
+        if task.get("status") != "implemented":
+            continue
+        if tid in failed_task_ids:
+            continue
+        # All reqs for this task must have passed
+        content = mm.read_task(tid)
+        if not content:
+            continue
+        task_reqs: list[str] = []
+        for line in content.splitlines():
+            stripped = line.strip().lower()
+            if stripped.startswith("reqs:"):
+                task_reqs = [r.strip().upper() for r in stripped.split(":", 1)[1].split(",") if r.strip()]
+        if not task_reqs:
+            continue
+        all_passed = all(f"ITEM-{req}" in passed_item_ids for req in task_reqs)
+        if all_passed:
+            mm.set_status(tid, "verified")
+            mm.archive(tid)
+
+
 # ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
@@ -386,6 +467,9 @@ def run_verify(worker: ModelConfig) -> int:
                     done_count += 1
                     status_icon = "✓" if result["status"] == "pass" else "✗"
                     ui.detail(f"  {status_icon} {item_id} ({done_count}/{len(testable)})")
+
+        # ── Update manifest with results (REQ-TM-6, REQ-TM-7) ─────────
+        _update_manifest(d, results, run_id)
 
         # ── Stage 3: Write report ────────────────────────────────────────
         ui.stage("Stage 3 — Writing report...")

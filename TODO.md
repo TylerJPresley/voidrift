@@ -18,9 +18,9 @@ Work items that need doing. Grouped by area, ordered by priority within each gro
 
 - [x] **Architect consultation on failure** — test added (`test_no_writes_with_architect_escalates`). Covers full path: no writes → retry → no writes → architect consulted → fix plan appended → task re-queued.
 
-- [ ] **Bug creation from verify** — `ManifestManager.add_bug()` exists and is tested (test_manifest.py), but the verify command doesn't call it yet. When verify fails a task's ACs, it should create a BUG-{id}.md and link it via manifest refs. Blocked on verify implementation. Location: `cli/src/voidrift_cli/commands/verify.py`, REQ-TM-7.
+- [x] **Bug creation from verify** — `_update_manifest()` in verify.py creates BUG entries in manifest for failed test cases, links them to tasks via req-to-task mapping, marks linked tasks as `failed`.
 
-- [ ] **Task archival flow** — `ManifestManager.archive()` exists and is tested. Nothing calls it yet — needs a trigger after verify marks a task as verified. Blocked on verify implementation. Location: `cli/src/voidrift_cli/manifest.py` method `archive()`.
+- [x] **Task archival flow** — `_update_manifest()` checks implemented tasks after verify. If all reqs pass, sets status to `verified` and calls `archive()`.
 
 ---
 
