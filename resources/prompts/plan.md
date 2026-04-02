@@ -29,16 +29,42 @@ REQUIREMENTS:
 
 Steps:
 1. Read the architecture: `ARCHITECTURE.md` and each `arch/<module>.md` file listed below.
-2. IF `TASKS.md` already exists, read it via `read_framework_file("TASKS.md")` — determine what is already covered. Read source files to determine what is already implemented. Write tasks only for the unimplemented delta.
-3. IF `TASKS.md` does not exist, create the full task breakdown from scratch.
-4. Group tasks under `## Module: <name>` headers for multi-module projects. Module names must match the `arch/` filenames (lowercased, spaces to hyphens). Tasks that span multiple modules (Dockerfile, CI, config templates) go under their own module (e.g. `## Module: deployment`). For single-module projects, use a `## Tasks` header.
-5. Write each task as a multi-line block following the TASK FORMAT below. Use `skills:` and `reqs:` metadata lines. Valid skill names: {valid_skills}. Use ONLY names from this list.
-6. For tasks that create test files, include the AC identifier(s) the tests must validate in the task description.
-7. When requirements mention authentication or pre-seeded state, add a test harness/bootstrap task.
-8. Write `TASKS.md` one module at a time. First call: `write_framework_file("TASKS.md", content)` with the header and first module section. Each subsequent module: `write_framework_file("TASKS.md", content, append=true)`.
-9. Call `done()`.
+2. IF task files already exist in `tasks/active/`, read them — determine what is already covered. Read source files to determine what is already implemented. Write tasks only for the unimplemented delta.
+3. IF no task files exist, create the full task breakdown from scratch.
+4. Write each task as an individual file: `tasks/active/TASK-{{id}}.md` using `write_framework_file`. Start IDs at 1 and increment. Each file has YAML frontmatter and a markdown body:
 
-{task_format}
+```
+---
+id: 1
+module: backend
+skills: [BACKEND-ENG]
+files:
+  - backend/routes/weather.py (create)
+depends: []
+---
+
+# Create weather endpoint
+
+## User Story
+As an operator, I want a /weather endpoint so that...
+
+## Context
+The backend module uses FastAPI (see arch/backend.md). The endpoint...
+
+## Acceptance Criteria
+- GET /weather returns 200 with JSON body containing temperature
+- Missing city parameter returns 400 with error message
+
+## Implementation Notes
+Use the OpenWeatherMap client from backend/clients/weather.py.
+```
+
+5. Module names must match the `arch/` filenames (lowercased, spaces to hyphens).
+6. Use `skills:` in frontmatter. Valid skill names: {valid_skills}. Use ONLY names from this list.
+7. Use `depends:` to specify task IDs that must complete first (e.g. `depends: [1, 2]`).
+8. Each task file must be self-contained — include enough context in the body for a developer agent to implement without reading other files.
+9. For tasks that create test files, include the AC identifier(s) the tests must validate.
+10. Call `done()`.
 
 REQUIREMENTS:
 {requirements}
@@ -61,8 +87,8 @@ ARCHITECTURE.md was not written. Read existing files if present, then write ARCH
 
 ## TASKS-USER
 
-Create the task breakdown.
+Create the task breakdown as individual task files.
 
 ## TASKS-RETRY
 
-TASKS.md was not written. Read existing files if present, then write TASKS.md now.
+No task files were written. Read existing files if present, then write tasks/active/TASK-{{id}}.md files now.

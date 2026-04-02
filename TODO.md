@@ -40,9 +40,9 @@ Work items that need doing. Grouped by area, ordered by priority within each gro
 
 - [x] **Dependency extraction** — `_build_task_files()` now parses `depends:` metadata from TASKS.md and passes it to ManifestManager.
 
-- [ ] **`_build_task_files()` edge cases** — TaskStore was designed for the old format and may not handle all edge cases the model produces (multi-line descriptions, nested code blocks in task text, etc.). Location: `cli/src/voidrift_cli/commands/plan.py`.
+- [x] **`_build_task_files()` rewritten** — no longer parses TASKS.md. Reads task files written by the model, builds manifest from YAML frontmatter. Validates skill tags in frontmatter.
 
-- [ ] **Plan prompt doesn't know about task files** — The plan stage 2 prompt still tells the model to write TASKS.md. Future: have the model write task files directly via write_framework_file, eliminating the TASKS.md intermediate.
+- [x] **Plan prompt writes task files directly** — model writes `tasks/active/TASK-{id}.md` via write_framework_file. No TASKS.md intermediate. Each file has full frontmatter and rich body content.
 
 ---
 

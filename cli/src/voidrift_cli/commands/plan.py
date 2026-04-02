@@ -21,7 +21,7 @@ def run_plan(
     """Execute the two-stage plan command (REQ-P-1).
 
     Stage 1: Produce ARCHITECTURE.md and arch/<module>.md files.
-    Stage 2: Produce TASKS.md using Stage 1 architecture as input.
+    Stage 2: Produce task files in tasks/active/ using Stage 1 architecture as input.
     """
     check_disk_space()
     d = ensure_voidrift_dir()
@@ -36,16 +36,16 @@ def run_plan(
         from ..utils import undo_command
         deleted = undo_command("plan")
         # Fallback: remove known plan artifacts not tracked in STATE.md
-        for target in [d / "ARCHITECTURE.md", d / "TASKS.md"]:
+        for target in [d / "ARCHITECTURE.md"]:
             if target.exists() and str(target) not in deleted:
                 target.unlink()
                 deleted.append(str(target))
-        arch_dir = d / "arch"
-        if arch_dir.is_dir():
-            for af in arch_dir.glob("*.md"):
-                if str(af) not in deleted:
-                    af.unlink()
-                    deleted.append(str(af))
+        for cleanup_dir in [d / "arch", d / "tasks" / "active"]:
+            if cleanup_dir.is_dir():
+                for af in cleanup_dir.glob("*.md"):
+                    if str(af) not in deleted:
+                        af.unlink()
+                        deleted.append(str(af))
         if deleted:
             ui.info(f"Cleared {len(deleted)} files from previous plan.")
 
@@ -161,8 +161,12 @@ def run_plan(
             ui.error(f"Stage 2 failed: {e}")
             return 1
 
-    if not (d / "TASKS.md").exists():
-        ui.warn("TASKS.md missing — retrying Stage 2...")
+    active_dir = d / "tasks" / "active"
+    active_dir.mkdir(parents=True, exist_ok=True)
+    has_tasks = bool(list(active_dir.glob("TASK-*.md")))
+
+    if not has_tasks:
+        ui.warn("No task files written — retrying Stage 2...")
         with ui.spinner("Retrying...", "plan stage 2 retry") as spin:
             tasks_agent.on_progress = spin.on_progress
             try:
@@ -171,27 +175,20 @@ def run_plan(
                 ui.error(f"Stage 2 retry failed: {e}")
                 return 1
 
-        if not (d / "TASKS.md").exists():
-            ui.error("Plan failed: TASKS.md still missing after retry.")
+        has_tasks = bool(list(active_dir.glob("TASK-*.md")))
+        if not has_tasks:
+            ui.error("Plan failed: no task files written after retry.")
             return 1
 
     # ── Post-processing ─────────────────────────────────────────────────
-    valid_skill_set = _available_skills()
-    if valid_skill_set:
-        invalid = _validate_skill_tags(d / "TASKS.md", valid_skill_set)
-        if invalid:
-            _strip_invalid_tags(d / "TASKS.md", invalid)
-            ui.warn(f"Stripped invalid skill tags: {', '.join(sorted(invalid))}")
-
-    # Build task files + manifest from TASKS.md (REQ-TM-1, REQ-TM-4)
+    # Build manifest from task files (REQ-TM-1, REQ-TM-4)
     task_count = _build_task_files(d, requirements, architecture)
-    ui.success(f"TASKS.md: {task_count} tasks")
+    ui.success(f"{task_count} tasks")
 
     from ..utils import append_state
     files_created = []
     if (d / "ARCHITECTURE.md").exists():
         files_created.append(".voidrift/ARCHITECTURE.md")
-    files_created.append(".voidrift/TASKS.md")
     for af in sorted((d / "arch").glob("*.md")) if (d / "arch").is_dir() else []:
         files_created.append(f".voidrift/arch/{af.name}")
     files_created.append(".voidrift/tasks/manifest.yml")
@@ -207,71 +204,53 @@ def run_plan(
 
 
 def _build_task_files(d: Path, requirements: str, architecture: str) -> int:
-    """Parse TASKS.md and create individual task files + manifest (REQ-TM-1, REQ-TM-4).
+    """Read task files written by the model and build manifest (REQ-TM-1, REQ-TM-4).
 
-    Returns the number of tasks created.
+    Returns the number of tasks registered.
     """
-    import re
     import yaml
     from ..manifest import ManifestManager
-    from ..task_store import TaskStore
-
-    tasks_path = d / "TASKS.md"
-    if not tasks_path.exists():
-        return 0
-
-    # Parse TASKS.md using existing TaskStore parser
-    store = TaskStore()
-    store.load(tasks_path)
 
     mm = ManifestManager(project_dir=d.parent)
     mm.ensure_dirs()
     mm._data = {"tasks": {}, "modules": {}, "dependencies": {}, "next_id": 1, "next_bug_id": 1}
 
-    task_id = 0
-    for module in store.modules():
-        mod_name = module if module != "_default" else "default"
-        for task in store._modules.get(module, []):
-            if task.status != " ":
-                continue
-            task_id += 1
+    active = mm._active_dir
+    count = 0
+    for task_file in sorted(active.glob("TASK-*.md")):
+        content = task_file.read_text()
+        if not content.startswith("---"):
+            continue
+        try:
+            end = content.index("---", 3)
+            fm = yaml.safe_load(content[3:end]) or {}
+        except (ValueError, yaml.YAMLError):
+            continue
 
-            # Build frontmatter
-            frontmatter = {
-                "id": task_id,
-                "module": mod_name,
-                "skills": task.skills,
-                "files": [task.file] if task.file else [],
-                "depends": task.depends,
-            }
+        tid = fm.get("id")
+        module = fm.get("module", "default")
+        depends = fm.get("depends", [])
+        if tid is None:
+            continue
 
-            # Extract task body from raw lines
-            body_lines = store._raw_lines[task.line_start:task.line_end]
-            # First line is the marker — extract summary
-            summary = re.sub(r"^- \[.\] ", "", body_lines[0]).strip() if body_lines else task.text
-            # Remaining lines are description
-            desc_lines = [l.strip() for l in body_lines[1:] if not l.strip().lower().startswith(("skills:", "reqs:", "file:", "depends:"))]
-            description = "\n".join(desc_lines).strip()
+        mm.add_task(int(tid), module, depends=depends or None)
 
-            # Build self-contained ticket content
-            fm_str = yaml.dump(frontmatter, default_flow_style=False).strip()
-            content = f"---\n{fm_str}\n---\n\n# {summary}\n"
-            if description:
-                content += f"\n## Implementation Notes\n\n{description}\n"
-            if task.reqs:
-                content += f"\n## Acceptance Criteria\n\n"
-                for r in task.reqs:
-                    content += f"- {r}\n"
+        # Validate skill tags
+        valid = _available_skills()
+        if valid:
+            skills = fm.get("skills", [])
+            invalid = [s for s in skills if s not in valid]
+            if invalid:
+                fm["skills"] = [s for s in skills if s in valid]
+                fm_str = yaml.dump(fm, default_flow_style=False).strip()
+                body = content[end + 3:].lstrip("\n")
+                task_file.write_text(f"---\n{fm_str}\n---\n{body}")
+                ui.warn(f"TASK-{tid}: stripped invalid skills: {', '.join(invalid)}")
 
-            # Write task file
-            task_path = mm._active_dir / f"TASK-{task_id}.md"
-            task_path.write_text(content)
-
-            # Register in manifest
-            mm.add_task(task_id, mod_name, depends=task.depends or None)
+        count += 1
 
     mm.save()
-    return task_id
+    return count
 
 
 def _available_skills() -> set[str]:
@@ -285,35 +264,4 @@ def _available_skills() -> set[str]:
     return names
 
 
-def _validate_skill_tags(tasks_path: Path, valid: set[str]) -> set[str]:
-    """Return set of invalid skill tags found in skills: lines of TASKS.md."""
-    valid_upper = {v.upper() for v in valid}
-    invalid = set()
-    for line in tasks_path.read_text().splitlines():
-        stripped = line.strip()
-        if stripped.lower().startswith("skills:"):
-            tags_part = stripped.split(":", 1)[1]
-            for tag in tags_part.split(","):
-                tag = tag.strip()
-                if tag and tag.upper() not in valid_upper:
-                    invalid.add(tag)
-    return invalid
 
-
-def _strip_invalid_tags(tasks_path: Path, invalid: set[str]) -> None:
-    """Remove invalid skill tags from skills: lines in TASKS.md."""
-    invalid_upper = {t.upper() for t in invalid}
-    lines = tasks_path.read_text().splitlines()
-    out = []
-    for line in lines:
-        stripped = line.strip()
-        if stripped.lower().startswith("skills:"):
-            indent = line[:len(line) - len(line.lstrip())]
-            tags_part = stripped.split(":", 1)[1]
-            kept = [t.strip() for t in tags_part.split(",") if t.strip() and t.strip().upper() not in invalid_upper]
-            if kept:
-                out.append(f"{indent}skills: {', '.join(kept)}")
-            # else: drop the entire skills line
-        else:
-            out.append(line)
-    tasks_path.write_text("\n".join(out) + "\n")

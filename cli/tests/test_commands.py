@@ -344,7 +344,6 @@ class TestPlanPreflightChecks:
         vd = tmp_project / ".voidrift"
         call_count = 0
 
-        # Stage 1 agent creates arch, Stage 2 agent creates tasks
         def make_agent(**kwargs):
             nonlocal call_count
             mock = MagicMock()
@@ -356,7 +355,9 @@ class TestPlanPreflightChecks:
                 mock.send.side_effect = stage1_send
             else:
                 def stage2_send(msg):
-                    (vd / "TASKS.md").write_text("- [ ] Create src/main.py: entry point [analysis-reqs]\n")
+                    active = vd / "tasks" / "active"
+                    active.mkdir(parents=True, exist_ok=True)
+                    (active / "TASK-1.md").write_text("---\nid: 1\nmodule: backend\nskills: []\ndepends: []\n---\n# Create entry point\n")
                     return "Tasks complete."
                 mock.send.side_effect = stage2_send
             return mock
@@ -367,7 +368,7 @@ class TestPlanPreflightChecks:
         result = run_plan(cloud_model)
         assert result == 0
         assert (vd / "ARCHITECTURE.md").exists()
-        assert (vd / "TASKS.md").exists()
+        assert (vd / "tasks" / "active" / "TASK-1.md").exists()
 
     @patch("voidrift_cli.commands.plan.AgentLoop")
     def test_retries_on_missing_artifacts(self, MockAgent, tmp_project, cloud_model, sample_requirements):
@@ -379,20 +380,20 @@ class TestPlanPreflightChecks:
             agent_count += 1
             mock = MagicMock()
             if agent_count == 1:
-                # Stage 1: create ARCHITECTURE.md
                 def send(msg):
                     (vd / "ARCHITECTURE.md").write_text("# Arch")
                     return "Done."
                 mock.send.side_effect = send
             else:
-                # Stage 2: first call misses TASKS.md, retry creates it
                 call_count = 0
                 def send(msg):
                     nonlocal call_count
                     call_count += 1
                     if call_count == 1:
                         return "Partial."
-                    (vd / "TASKS.md").write_text("- [ ] Task [analysis-reqs]\n")
+                    active = vd / "tasks" / "active"
+                    active.mkdir(parents=True, exist_ok=True)
+                    (active / "TASK-1.md").write_text("---\nid: 1\nmodule: default\nskills: []\ndepends: []\n---\n# Task\n")
                     return "Fixed."
                 mock.send.side_effect = send
             return mock
@@ -416,17 +417,17 @@ class TestPlanPreflightChecks:
     def test_overwrite_clears_artifacts(self, tmp_project, cloud_model, sample_requirements):
         vd = tmp_project / ".voidrift"
         (vd / "ARCHITECTURE.md").write_text("old arch")
-        (vd / "TASKS.md").write_text("old tasks")
+        active = vd / "tasks" / "active"
+        active.mkdir(parents=True, exist_ok=True)
+        (active / "TASK-1.md").write_text("old task")
         (vd / "arch").mkdir(exist_ok=True)
         (vd / "arch" / "backend.md").write_text("old module arch")
         (vd / "spec").mkdir(exist_ok=True)
         (vd / "spec" / "auth.md").write_text("gather spec")
 
-        # Create a STATE.md entry so undo_command knows what to remove
         (vd / "STATE.md").write_text(
             "## 2026-01-01T00:00:00 — plan (test)\nOld plan.\n### Files\n"
             "- created: .voidrift/ARCHITECTURE.md\n"
-            "- created: .voidrift/TASKS.md\n"
             "- created: .voidrift/arch/backend.md\n\n"
         )
 
@@ -439,7 +440,7 @@ class TestPlanPreflightChecks:
             run_plan(cloud_model, overwrite=True)
 
         assert not (vd / "ARCHITECTURE.md").exists()
-        assert not (vd / "TASKS.md").exists()
+        assert not (active / "TASK-1.md").exists()
         assert not (vd / "arch" / "backend.md").exists()
         assert (vd / "spec" / "auth.md").exists(), "Gather specs must be preserved"
 
@@ -906,51 +907,6 @@ class TestSkillsList:
             assert "north-star" not in result.output
 
 
-class TestPlanSkillTagValidation:
-    """V-P-4: Plan skill tag validation strips invalid tags, preserves valid ones."""
-
-    def test_validate_returns_invalid_tags(self, tmp_project, voidrift_dir):
-        """_validate_skill_tags identifies tags not in the valid set."""
-        from voidrift_cli.commands.plan import _validate_skill_tags
-        tasks_file = voidrift_dir / "TASKS.md"
-        tasks_file.write_text(
-            "- [ ] Create src/main.py: entry\n"
-            "  skills: backend, invalid-tag, another-bad\n"
-        )
-        invalid = _validate_skill_tags(tasks_file, {"backend"})
-        assert "invalid-tag" in invalid
-        assert "another-bad" in invalid
-        assert "backend" not in invalid
-
-    def test_validate_returns_empty_when_all_valid(self, tmp_project, voidrift_dir):
-        """_validate_skill_tags returns empty set when all tags are valid."""
-        from voidrift_cli.commands.plan import _validate_skill_tags
-        tasks_file = voidrift_dir / "TASKS.md"
-        tasks_file.write_text("- [ ] Create src/main.py: entry\n  skills: backend\n")
-        invalid = _validate_skill_tags(tasks_file, {"backend"})
-        assert invalid == set()
-
-    def test_strip_removes_invalid_tags(self, tmp_project, voidrift_dir):
-        """_strip_invalid_tags removes invalid tags from skills: lines."""
-        from voidrift_cli.commands.plan import _strip_invalid_tags
-        tasks_file = voidrift_dir / "TASKS.md"
-        tasks_file.write_text("- [ ] Create src/a.py: desc\n  skills: backend, bad-skill\n")
-        _strip_invalid_tags(tasks_file, {"bad-skill"})
-        content = tasks_file.read_text()
-        assert "bad-skill" not in content
-        assert "backend" in content
-
-    def test_strip_removes_whole_line_when_all_invalid(self, tmp_project, voidrift_dir):
-        """If all tags are invalid, the skills line is removed entirely."""
-        from voidrift_cli.commands.plan import _strip_invalid_tags
-        tasks_file = voidrift_dir / "TASKS.md"
-        tasks_file.write_text("- [ ] Create src/b.py: desc\n  skills: totally-invalid\n")
-        _strip_invalid_tags(tasks_file, {"totally-invalid"})
-        content = tasks_file.read_text()
-        assert "totally-invalid" not in content
-        assert "skills:" not in content
-
-
 class TestPlanUpdateMode:
     """V-P-5: plan auto-detects update mode when artifacts exist; fresh-plan when absent."""
 
@@ -958,7 +914,7 @@ class TestPlanUpdateMode:
     def test_fresh_plan_when_no_artifacts(
         self, MockAgent, tmp_project, cloud_model, sample_requirements
     ):
-        """run_plan() runs fresh-plan when ARCHITECTURE.md and TASKS.md are absent."""
+        """run_plan() runs fresh-plan when ARCHITECTURE.md and task files are absent."""
         vd = tmp_project / ".voidrift"
         agent_count = 0
 
@@ -973,7 +929,9 @@ class TestPlanUpdateMode:
                 mock.send.side_effect = send
             else:
                 def send(msg):
-                    (vd / "TASKS.md").write_text("- [ ] Create src/main.py: stub [backend]\n")
+                    active = vd / "tasks" / "active"
+                    active.mkdir(parents=True, exist_ok=True)
+                    (active / "TASK-1.md").write_text("---\nid: 1\nmodule: backend\nskills: []\ndepends: []\n---\n# Stub\n")
                     return "Tasks done."
                 mock.send.side_effect = send
             return mock
@@ -983,7 +941,6 @@ class TestPlanUpdateMode:
         from voidrift_cli.commands.plan import run_plan
         result = run_plan(cloud_model)
         assert result == 0
-        # Two agents should have been created (Stage 1 + Stage 2)
         assert MockAgent.call_count == 2
 
     @patch("voidrift_cli.commands.plan.AgentLoop")
@@ -993,7 +950,9 @@ class TestPlanUpdateMode:
         """run_plan() passes existing architecture to Stage 2 when artifacts exist."""
         vd = tmp_project / ".voidrift"
         (vd / "ARCHITECTURE.md").write_text("# Architecture\nExisting arch content")
-        (vd / "TASKS.md").write_text("- [x] Done task\n- [ ] Pending task [backend]\n")
+        active = vd / "tasks" / "active"
+        active.mkdir(parents=True, exist_ok=True)
+        (active / "TASK-1.md").write_text("---\nid: 1\nmodule: backend\nskills: []\ndepends: []\n---\n# Done task\n")
 
         mock_instance = MagicMock()
         mock_instance.send.return_value = "Updated."
