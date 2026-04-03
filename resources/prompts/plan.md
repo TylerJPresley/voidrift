@@ -64,7 +64,7 @@ Use the OpenWeatherMap client from backend/clients/weather.py.
 5. Module names must match the `arch/` filenames (lowercased, spaces to hyphens).
 6. Use `skills:` in frontmatter. Valid skill names: {valid_skills}. Use ONLY names from this list.
 7. Use `depends:` to specify task IDs that must complete first (e.g. `depends: [1, 2]`).
-8. Each task file must be self-contained — include enough context in the body for a developer agent to implement without reading other files.
+8. Each task file must be self-contained — include enough context in the body for a developer agent to implement without reading other files. Describe what to build: interfaces, data shapes, behavior, and acceptance criteria. Do NOT write implementation code — the developer agent writes the code. Code examples in task files must not exceed 5 lines (signatures and type hints only).
 9. For tasks that create test files, include the AC identifier(s) the tests must validate.
 10. Call `done()`.
 
