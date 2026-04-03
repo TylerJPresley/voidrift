@@ -124,7 +124,7 @@ class AgentLoop(BaseModel):
             elif "context length" in msg.lower() or "maximum context" in msg.lower() or ("token" in msg.lower() and "exceed" in msg.lower()):
                 msg = f"Context length exceeded. The input is too large for {self.model.alias}. Use a model with a larger context window."
             elif "json_invalid" in msg or ("EOF while parsing" in msg and "list" in msg):
-                msg = f"Context overflow — request body truncated by {self.model.alias}. The conversation history is too long. Use /compact or a model with a larger context window."
+                msg = f"Tool results exceeded context window for {self.model.alias}. The agent accumulated too much content in tool call results. Try a model with a larger context window or reduce the input size."
             raise RuntimeError(msg) from e
 
     # done tool definition — auto-injected when tools are present (REQ-ARCH-4)

@@ -18,6 +18,8 @@ Steps:
 
 For multi-module projects, ARCHITECTURE.md contains system-level context only: overview, module inventory, cross-module API contracts, cross-cutting concerns, decision log. Module-internal design goes in `arch/<module>.md`.
 
+Module arch files must be concise. Interfaces and data models as signatures only — no full implementations. Code examples must not exceed 5 lines. A module arch file that exceeds 4KB is too verbose — focus on what the developer needs to know, not how every function works.
+
 REQUIREMENTS:
 {requirements}
 
