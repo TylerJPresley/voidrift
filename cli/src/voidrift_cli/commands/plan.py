@@ -127,8 +127,8 @@ def run_plan(
     arch_dir = d / "arch"
     if arch_dir.is_dir():
         for af in sorted(arch_dir.glob("*.md")):
-            arch_files_parts.append(f"### {af.stem}\n\n{af.read_text()}")
-    arch_files_section = "\n\n".join(arch_files_parts) if arch_files_parts else "(none)"
+            arch_files_parts.append(f"- `arch/{af.name}`")
+    arch_files_section = "\n".join(arch_files_parts) if arch_files_parts else "(none)"
 
     tasks_prompt = prompts.load_prompt("plan", "PLAN-TASKS").format(
         requirements=requirements,

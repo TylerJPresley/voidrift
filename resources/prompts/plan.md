@@ -30,7 +30,7 @@ REQUIREMENTS:
 **Role:** Architect — create the implementation task breakdown from the architecture.
 
 Steps:
-1. Read the architecture: `ARCHITECTURE.md` and each `arch/<module>.md` file listed below.
+1. Read the architecture: `ARCHITECTURE.md` is provided below. Read each `arch/<module>.md` file listed below via `read_framework_file()`.
 2. IF task files already exist in `tasks/active/`, read them — determine what is already covered. Read source files to determine what is already implemented. Write tasks only for the unimplemented delta.
 3. IF no task files exist, create the full task breakdown from scratch.
 4. Write each task as an individual file: `tasks/active/TASK-{{id}}.md` using `write_framework_file`. Start IDs at 1 and increment. Each file has YAML frontmatter and a markdown body:
