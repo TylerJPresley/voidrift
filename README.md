@@ -326,7 +326,7 @@ voidrift/
 │       ├── config.py             # Config loading, variable expansion
 │       └── commands/             # command implementations: gather, plan, develop, deploy, verify
 ├── resources/                    # Framework guidance → ~/.voidrift/resources/
-│   ├── prompts/                  # system.md + per-command prompts (5 files)
+│   ├── prompts/                  # system.md + per-command prompts (6 files)
 │   ├── skills/                   # Domain methodology (16 files)
 │   └── templates/                # Document scaffolding (4 files)
 ├── config.yml                    # Default config synced to ~/.voidrift/ by make sync

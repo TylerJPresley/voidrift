@@ -384,7 +384,7 @@ def _consult_architect(
     )
 
     try:
-        response = agent.send("Provide guidance for this task.")
+        response = agent.send(prompts.load_prompt("develop", "ESCALATION-USER"))
         with open(log, "a") as f:
             f.write(f"\n--- ARCHITECT GUIDANCE ---\n{response}\n")
         return response

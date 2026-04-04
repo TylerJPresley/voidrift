@@ -132,11 +132,7 @@ def run_deploy(worker: ModelConfig, architect: ModelConfig | None = None) -> int
 
     agent = AgentLoop(
         model=worker,
-        system_prompt=(
-            "You are a release engineer. Classify the version bump for these changes.\n"
-            "Rules: breaking API changes = major, new features = minor, bug fixes = patch.\n"
-            "Respond with EXACTLY one word: major, minor, or patch."
-        ),
+        system_prompt=prompts.load_prompt("deploy", "VERSION-CLASSIFY"),
         tools=[], tool_handlers={},
         stream=False,
         max_tokens=32,
@@ -144,13 +140,16 @@ def run_deploy(worker: ModelConfig, architect: ModelConfig | None = None) -> int
         show_spinner=False,
     )
 
+    user_msg = prompts.load_prompt("deploy", "VERSION-USER").format(
+        current_version=current_version,
+        task_summary=task_summary,
+        requirements=reqs_text,
+    )
+
     with ui.spinner("Classifying changes...", "deploy version") as spin:
         agent.on_progress = spin.on_progress
         try:
-            bump_response = agent.send(
-                f"Tasks completed since {current_version}:\n{task_summary}\n\n"
-                f"Requirements context:\n{reqs_text}"
-            ).strip().lower()
+            bump_response = agent.send(user_msg).strip().lower()
         except (RuntimeError, OSError, ValueError) as e:
             ui.error(f"Version classification failed: {e}")
             return 1
@@ -213,19 +212,19 @@ def run_deploy(worker: ModelConfig, architect: ModelConfig | None = None) -> int
         iac_tools, iac_handlers = build_local_tools()
         iac_agent = AgentLoop(
             model=worker,
-            system_prompt=(
-                "Generate or review infrastructure-as-code based on ARCHITECTURE.md. "
-                "Use write_source_file() to create/modify IaC files. "
-                "No hardcoded secrets — use env vars. Tag all resources with project name."
-            ),
+            system_prompt=prompts.load_prompt("deploy", "IAC"),
             tools=iac_tools, tool_handlers=iac_handlers,
             stream=False, log_path=log, show_spinner=False,
         )
         iac_mode = "Review" if _detect_iac() else "Generate"
+        iac_user = prompts.load_prompt("deploy", "IAC-USER").format(
+            iac_mode=iac_mode,
+            architecture=arch_text[:8000],
+        )
         with ui.spinner(f"{iac_mode}ing IaC...", "deploy iac") as spin:
             iac_agent.on_progress = spin.on_progress
             try:
-                iac_agent.send(f"Mode: {iac_mode}\n\nARCHITECTURE:\n{arch_text[:8000]}")
+                iac_agent.send(iac_user)
             except (RuntimeError, OSError, ValueError) as e:
                 ui.warn(f"IaC generation failed: {e}")
 

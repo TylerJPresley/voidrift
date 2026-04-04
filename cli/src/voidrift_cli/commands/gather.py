@@ -335,7 +335,7 @@ def _gather_from(
         with ui.spinner(ui.random_label(), "triage") as spin:
             triage.on_progress = spin.on_progress
             triage.on_token = lambda t: None
-            triage_response = triage.send(f"File tree:\n{file_tree}")
+            triage_response = triage.send(prompts.load_prompt("gather", "TRIAGE-USER").format(file_tree=file_tree))
     except (RuntimeError, OSError) as e:
         ui.error(f"Triage failed: {e}")
         return 1
@@ -376,7 +376,7 @@ def _gather_from(
         with ui.spinner(ui.random_label(), "validation") as spin:
             validator.on_progress = spin.on_progress
             validator.on_token = lambda t: None
-            val_response = validator.send(f"Files to review:\n{_json.dumps(all_files)}")
+            val_response = validator.send(prompts.load_prompt("gather", "VALIDATION-USER").format(files_json=_json.dumps(all_files)))
         val_data = _json.loads(val_response.strip())
         if isinstance(val_data, dict):
             val_data = next(iter(val_data.values()), [])
@@ -440,7 +440,7 @@ def _gather_from(
                 ctx_agent.on_complete = _on_ctx_complete
                 import time as _t2
                 _s2 = _t2.time()
-                summary = ctx_agent.send(f"Files:\n\n{content_block}")
+                summary = ctx_agent.send(prompts.load_prompt("gather", "CONTEXT-USER").format(content_block=content_block))
                 _e2 = _t2.time() - _s2
                 context_summaries[cat] = summary
                 ms.done(f"{cat} ({len(cat_files)} files)", f"{cat}: {len(cat_files)} file(s)", _e2, _stats["pt"], _stats["ct"], _stats["ctx"])
@@ -560,7 +560,7 @@ def _gather_from(
         agent.on_token = lambda t: None
         agent.on_complete = _on_complete
         try:
-            response = agent.send(f"Analyze: {filepath}")
+            response = agent.send(prompts.load_prompt("gather", "ANALYSIS-USER").format(filepath=filepath))
             if file_hash and response:
                 _write_analysis(_analysis_path(target.parent, filepath), filepath, file_hash, response)
             return filepath, _time.time() - start, None, response, _pt[0], _ct[0], _ctx[0]

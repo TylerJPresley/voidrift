@@ -49,3 +49,7 @@ Execute this task.
 ## TASK-RETRY
 
 Execute this task. You must call write_source_file() to produce output.
+
+## ESCALATION-USER
+
+Provide guidance for this task.

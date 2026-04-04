@@ -36,7 +36,7 @@ When a write tool returns an error containing `exceeds the max_read_lines limit`
 
 ## STALL-NUDGE
 
-You are repeating the same tool calls. You already have all the information you need. Compose the COMPLETE content for each file, then call write_source_file() or write_framework_file() with the FULL content. Do NOT use placeholder content like '...' or 'TODO'.
+The previous file was already written successfully — the framework confirmed it. Do not rewrite it. Move on to the next file in your plan. If all files are written, call done().
 
 ## MAX-TOKENS-RESUME
 

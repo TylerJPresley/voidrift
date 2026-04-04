@@ -245,11 +245,21 @@ class AgentLoop(BaseModel):
                 self._log(f"[ASSISTANT] {text}")
                 return text
 
-            # Stall detection — same call signature as last iteration
-            call_sig = "|".join(
-                f"{tc['function']['name']}:{tc['function'].get('arguments', '')}"
-                for tc in tool_calls
-            )
+            # Stall detection — same call signature as last iteration.
+            # For write tools, signature is path-only (not content) so that
+            # rewriting a file with different content is still detected as a stall.
+            def _tc_sig(tc: dict) -> str:
+                name = tc["function"]["name"]
+                if name in ("write_framework_file", "write_source_file"):
+                    import json as _json
+                    try:
+                        args = _json.loads(tc["function"].get("arguments", "{}"))
+                        return f"{name}:{args.get('path', '')}"
+                    except (ValueError, KeyError):
+                        return name
+                return f"{name}:{tc['function'].get('arguments', '')}"
+
+            call_sig = "|".join(_tc_sig(tc) for tc in tool_calls)
             if call_sig == last_call_sig:
                 stall_nudges += 1
                 self._log(f"[STALL] Repeated call ({stall_nudges}): {call_sig}")

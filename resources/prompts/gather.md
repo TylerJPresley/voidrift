@@ -67,3 +67,23 @@ Your task:
 If an "Existing REQUIREMENTS.md" section is present in the input: update it rather than replacing it. Preserve requirements that are still valid, update any that have changed, add new ones for newly discovered behaviors, and remove any that no longer exist in the source. Preserve manually added rationale, user stories, and BDD acceptance criteria where the underlying requirement is still valid.
 
 Return ONLY the requirements document as markdown. Start directly with the `#` title — no preamble, no commentary, no markdown fences.
+
+## TRIAGE-USER
+
+File tree:
+{file_tree}
+
+## VALIDATION-USER
+
+Files to review:
+{files_json}
+
+## CONTEXT-USER
+
+Files:
+
+{content_block}
+
+## ANALYSIS-USER
+
+Analyze: {filepath}

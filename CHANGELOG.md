@@ -8,6 +8,20 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Changed
+- **North-star skills are language-agnostic (REQ-SKL-1):** Generalized `BACKEND-ENG` from VoidRift-specific Python/Click/pytest conventions to universal backend engineering principles. VoidRift-specific content moved to project skill override (`.voidrift/skills/BACKEND-ENG.md`).
+- **All prompts externalized (REQ-RES-6):** Created `resources/prompts/deploy.md`. Added user message sections to gather.md, plan.md, develop.md. Zero hardcoded prompt strings remain in CLI code.
+- **Plan UI cleanup (REQ-UI-2):** Stage headers print once per stage; items stack underneath with simplified labels (item name only, no redundant stage prefix).
+- **START.md workflow overhaul:** 9-step change workflow with explicit operator confirmation gates. Consolidated No Bandaids, Testing Standards, Eat Your Own Dogfood, and When User Requests a Feature into the workflow and Design Principles sections.
+
+### Added
+- `qwen35-eugr` model alias in models.yml (benchmarking Qwen 3.5 on eugr vLLM image).
+- `resources/prompts/deploy.md` — prompt file for deploy command (VERSION-CLASSIFY, VERSION-USER, IAC, IAC-USER).
+- `.voidrift/skills/BACKEND-ENG.md` — VoidRift-specific project skill override.
+
+### Fixed
+- `qwen35` max_tokens restored to 32768 (was incorrectly 4096).
+
+### Changed
 - **Idea-to-implementation flow (REQ-IDEA-1 through REQ-IDEA-5):** `/idea` in chat for guided refinement. `gather --idea <id>` generates requirements from ideas using ANALYSIS-REQS skill — records affected REQ IDs and diff in the idea file. `plan --idea <id>` scopes planning to an idea, gates on requirements existing. Tasks trace back to originating idea. Ideas archived when all derived tasks verified.
 - **Gather modes (REQ-G-1):** `--path <path>` for codebase reverse-engineering, `--idea <id>` for idea-driven requirements. Bare `gather` without either flag shows help.
 - **Task system redesign (REQ-TM-1 through REQ-TM-7):** Tasks are self-contained ticket files (`tasks/active/TASK-{id}.md`) with YAML frontmatter and full context. CLI-owned `manifest.yml` tracks status, dependencies, and module grouping. Develop dispatches at the task level (not module level) from the manifest. Bugs are independent entities (`BUG-{id}.md`). Verified tasks archived to `tasks/archived/` with history.log event trail. TaskStore and TASKS-DONE.md removed.

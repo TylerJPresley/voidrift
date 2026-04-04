@@ -965,7 +965,7 @@ def log(command, prune, follow) -> None:
                 while True:
                     line = f.readline()
                     if line:
-                        ui._con.print(line, end="")
+                        ui._con.print(line, end="", markup=False)
                     else:
                         _time.sleep(0.3)
         except KeyboardInterrupt:
@@ -973,7 +973,7 @@ def log(command, prune, follow) -> None:
     else:
         lines = latest.read_text().splitlines()
         for line in lines[-200:]:
-            ui._con.print(line)
+            ui._con.print(line, markup=False)
 
 
 @cli.command()

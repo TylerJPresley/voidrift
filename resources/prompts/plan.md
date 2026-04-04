@@ -1,96 +1,204 @@
 # Plan Prompts
 
-Command prompt file for the plan command. Each section is loaded via `get_prompt("plan", "<section>")`. The ARCH-DESIGN skill is prepended as the shared methodology.
+Command prompt file for the plan command. Each section is loaded via `get_prompt("plan", "<section>")`. The ARCH-DESIGN skill is prepended to architecture and module stages.
 
 ## PLAN-ARCH
 
-**Role:** Architect — design the system architecture.
+**Role:** Architect — design the system-level architecture.
+
+Requirements and spec files are provided below. The architecture template is also provided.
 
 Steps:
-1. Read REQUIREMENTS.md and any spec files provided below.
-2. IF `ARCHITECTURE.md` already exists, read it via `read_framework_file("ARCHITECTURE.md")` — treat it as a starting point to update, not regenerate from scratch.
-3. Design or revise the system architecture using the architecture template provided in context.
-4. Write `ARCHITECTURE.md` via `write_framework_file()`. Include these fields near the top:
-   - `startup_command:` — the shell command to start the system for testing (e.g. `uvicorn main:app --port 8000`). Populate for any project with a runnable server or process. Leave blank only for pure libraries with no runnable entry point.
-   - `test_bootstrap:` — the shell command to seed test data before verify runs (e.g. `python scripts/seed_test_data.py`). Include when the requirements mention authentication, user accounts, or any pre-seeded state needed to run tests.
-5. For each module: IF `arch/<module>.md` already exists, read it via `read_framework_file()` — update it. IF not, create it. Write each module file via `write_framework_file("arch/<module>.md")` with component internals, data models, internal interfaces, error handling patterns, and any cross-module interfaces this module exposes or consumes.
-6. Call `done()`.
+1. Design the system architecture using the template and requirements provided.
+2. Write `ARCHITECTURE.md` via `write_framework_file()`. The file MUST begin with a YAML frontmatter block followed by the markdown body:
 
-For multi-module projects, ARCHITECTURE.md contains system-level context only: overview, module inventory, cross-module API contracts, cross-cutting concerns, decision log. Module-internal design goes in `arch/<module>.md`.
+```
+---
+startup_command: "uvicorn main:app --port 8000"
+test_bootstrap: "python scripts/seed_test_data.py"
+modules:
+  - backend
+  - frontend
+---
 
-Module arch files must be concise. Interfaces and data models as signatures only — no full implementations. Code examples must not exceed 5 lines. A module arch file that exceeds 4KB is too verbose — focus on what the developer needs to know, not how every function works.
+# Project Name - Architecture
+...
+```
+
+   - `startup_command` — shell command to start the system for testing. Leave blank (`""`) only for pure libraries with no runnable entry point.
+   - `test_bootstrap` — shell command to seed test data. Include when requirements mention authentication, user accounts, or any pre-seeded state. Otherwise leave blank (`""`).
+   - `modules` — one entry per distinct technology layer or major subsystem. Frontend and backend are always separate modules. A data pipeline, ML layer, or mobile app is its own module. Never collapse the whole system into one module.
+3. Call `done()`.
+
+`ARCHITECTURE.md` contains system-level context only: introduction, constraints, context diagram, module list, cross-module API contracts, and cross-cutting concerns.
+
+ARCHITECTURE TEMPLATE:
+{arch_template}
 
 REQUIREMENTS:
 {requirements}
 
 {specs_section}
 
-## PLAN-TASKS
+## PLAN-MODULE
 
-**Role:** Architect — create the implementation task breakdown from the architecture.
+**Role:** Module architect — design a single module.
+
+You are designing the `{module}` module. The architecture summary below contains the system context and cross-module contracts you need — use it directly.
 
 Steps:
-1. Read the architecture: `ARCHITECTURE.md` is provided below. Read each `arch/<module>.md` file listed below via `read_framework_file()`.
-2. IF task files already exist in `tasks/active/`, read them — determine what is already covered. Read source files to determine what is already implemented. Write tasks only for the unimplemented delta.
-3. IF no task files exist, create the full task breakdown from scratch.
-4. Write each task as an individual file: `tasks/active/TASK-{{id}}.md` using `write_framework_file`. Start IDs at 1 and increment. Each file has YAML frontmatter and a markdown body:
+1. Design the module: component breakdown, data models, internal interfaces, error handling patterns, and cross-module interfaces this module exposes or consumes.
+2. Write `arch/{module}.md` via `write_framework_file("arch/{module}.md")`.
+   - Interfaces and data models as signatures only — no full implementations.
+   - Code examples must not exceed 5 lines.
+   - A module arch file that exceeds 4KB is too verbose — focus on what the developer needs to know.
+3. Call `done()`.
+
+ARCHITECTURE SUMMARY:
+{architecture}
+
+## PLAN-OUTLINE
+
+**Role:** Task planner — produce a task outline for a single module.
+
+You are outlining implementation tasks for the `{module}` module. Write the outline file only — do not write task files.
+
+Steps:
+1. Review the architecture and module arch provided below.
+2. Break the module into implementation tasks. Task IDs start at {id_offset} and increment by 1.
+3. Write `tasks/outline/{module}.md` via `write_framework_file()` using this exact format:
 
 ```
 ---
-id: 1
-module: backend
-skills: [BACKEND-ENG]
-files:
-  - backend/routes/weather.py (create)
-depends: []
+module: {module}
+tasks:
+  - id: {id_offset}
+    title: "Short task title"
+    files:
+      - relative/path/to/file.py (create)
+    depends: []
 ---
 
-# Create weather endpoint
-
-## User Story
-As an operator, I want a /weather endpoint so that...
-
-## Context
-The backend module uses FastAPI (see arch/backend.md). The endpoint...
-
-## Acceptance Criteria
-- GET /weather returns 200 with JSON body containing temperature
-- Missing city parameter returns 400 with error message
-
-## Implementation Notes
-Use the OpenWeatherMap client from backend/clients/weather.py.
+## Task {id_offset}: Short task title
+1–3 sentence description of what this task builds. No implementation detail. No code.
 ```
 
-5. Module names must match the `arch/` filenames (lowercased, spaces to hyphens).
-6. Use `skills:` in frontmatter. Valid skill names: {valid_skills}. Use ONLY names from this list.
-7. Use `depends:` to specify task IDs that must complete first (e.g. `depends: [1, 2]`).
-8. Each task file must be self-contained — include enough context in the body for a developer agent to implement without reading other files. Describe what to build: interfaces, data shapes, behavior, and acceptance criteria. Do NOT write implementation code — the developer agent writes the code. Code examples in task files must not exceed 5 lines (signatures and type hints only).
-9. For tasks that create test files, include the AC identifier(s) the tests must validate.
-10. Call `done()`.
-
-REQUIREMENTS:
-{requirements}
-
-{specs_section}
+4. `depends:` lists only intra-module task IDs. Do not reference tasks from other modules.
+5. Call `done()`.
 
 ARCHITECTURE:
 {architecture}
 
-MODULE ARCH FILES:
-{arch_files}
+MODULE ARCH:
+{module_arch}
 
-## ARCH-USER
+## PLAN-DEPS
 
-Design the system architecture.
+**Role:** Dependency resolver — resolve cross-module task dependencies.
+
+You have task outline files for all modules. Identify tasks in one module that depend on tasks in another module.
+
+Steps:
+1. Read each outline below.
+2. Identify cross-module dependencies: task A in module X must complete before task B in module Y can start.
+3. Write `tasks/outline/deps.yml` via `write_framework_file()` using this format:
+
+```
+cross_module:
+  - from_task: 5
+    depends_on: 2
+    reason: "brief reason"
+```
+
+If there are no cross-module dependencies, write `cross_module: []`.
+4. Call `done()`.
+
+OUTLINES:
+{outlines}
+
+## PLAN-TASK
+
+**Role:** Task author — write one implementation task file.
+
+Select the skill whose description best matches this task. Use ONLY names from the list below — do not invent skill names.
+
+Available skills (name: description):
+{valid_skills}
+
+The task outline and module arch are provided at the end of this prompt — use them as your context.
+
+Steps:
+1. Write `tasks/active/TASK-{task_id}.md` via `write_framework_file()` using this format:
+
+```
+---
+id: {task_id}
+module: {module}
+skills: [SKILL-NAME]
+files:
+  - path/to/file.py (create)
+depends: []
+---
+
+# Task title
+
+## User Story
+As a [role], I want [feature] so that [benefit].
+
+## Context
+[Module context from arch file. What patterns and components to follow.]
+
+## Acceptance Criteria
+- [Testable criterion]
+
+## Implementation Notes
+[Key interfaces, data shapes, behavior. No full implementations — signatures and type hints only, max 5 lines of code.]
+```
+
+2. Call `done()`.
+
+TASK OUTLINE:
+{task_outline}
+
+MODULE ARCH:
+{module_arch}
 
 ## ARCH-RETRY
 
-ARCHITECTURE.md was not written. Read existing files if present, then write ARCHITECTURE.md and arch/<module>.md files now.
+ARCHITECTURE.md was not written. Read existing files if present, then write ARCHITECTURE.md now. Ensure the module inventory table references `arch/<module>.md` for each module.
 
-## TASKS-USER
+## MODULE-RETRY
 
-Create the task breakdown as individual task files.
+arch/{module}.md was not written. Write the module arch file for `{module}` now.
 
-## TASKS-RETRY
+## OUTLINE-RETRY
 
-No task files were written. Read existing files if present, then write tasks/active/TASK-{{id}}.md files now.
+tasks/outline/{module}.md was not written. Write the task outline for the `{module}` module now.
+
+## DEPS-RETRY
+
+tasks/outline/deps.yml was not written. Write the cross-module dependency map now. Use `cross_module: []` if there are no cross-module dependencies.
+
+## TASK-RETRY
+
+tasks/active/TASK-{task_id}.md was not written. Write the task file for task {task_id} now.
+
+## ARCH-USER
+
+Design the system architecture and write ARCHITECTURE.md.
+
+## MODULE-USER
+
+Design the {module} module and write arch/{module}.md.
+
+## OUTLINE-USER
+
+Write the task outline for the {module} module.
+
+## DEPS-USER
+
+Resolve cross-module task dependencies and write deps.yml.
+
+## TASK-USER
+
+Write TASK-{task_id}.md now.
