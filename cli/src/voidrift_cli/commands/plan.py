@@ -40,13 +40,13 @@ def run_plan(
     if overwrite:
         from ..utils import undo_command
         deleted = undo_command("plan")
-        for target in [d / "ARCHITECTURE.md"]:
+        for target in [d / "ARCHITECTURE.md", d / "tasks" / "manifest.yml"]:
             if target.exists() and str(target) not in deleted:
                 target.unlink()
                 deleted.append(str(target))
-        for cleanup_dir in [d / "arch", d / "tasks" / "active"]:
+        for cleanup_dir in [d / "arch", d / "tasks" / "active", d / "tasks" / "outline"]:
             if cleanup_dir.is_dir():
-                for af in cleanup_dir.glob("*.md"):
+                for af in list(cleanup_dir.iterdir()):
                     if str(af) not in deleted:
                         af.unlink()
                         deleted.append(str(af))
