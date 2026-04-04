@@ -178,6 +178,8 @@ def run_plan(
             return 1
 
         _, tasks_in_module = _parse_outline_tasks(outline_path)
+        with open(log, "a") as f:
+            f.write(f"\n[OUTLINE] {module}: parsed {len(tasks_in_module)} tasks, next id_offset={id_offset + max(len(tasks_in_module), 1)}\n")
         id_offset += max(len(tasks_in_module), 1)
 
     ui.success(f"tasks/outline/ — {', '.join(modules)}")
@@ -224,8 +226,23 @@ def run_plan(
     for module in modules:
         outline_path = d / "tasks" / "outline" / f"{module}.md"
         _, tasks_list = _parse_outline_tasks(outline_path)
+        with open(log, "a") as f:
+            f.write(f"\n[OUTLINE] {module}: {len(tasks_list)} tasks, IDs: {[t.get('id') for t in tasks_list]}\n")
+            f.write(f"[OUTLINE] {module} raw:\n{outline_path.read_text()}\n")
         for task_entry in tasks_list:
             all_tasks.append((module, task_entry))
+
+    if not all_tasks:
+        ui.error("Plan failed: no tasks found in outline files.")
+        return 1
+
+    all_ids = [t.get("id", i + 1) for i, (_, t) in enumerate(all_tasks)]
+    expected = list(range(min(all_ids), max(all_ids) + 1))
+    missing = set(expected) - set(all_ids)
+    if missing:
+        ui.warn(f"Task ID gap detected: missing {sorted(missing)} from outlines")
+        with open(log, "a") as f:
+            f.write(f"[OUTLINE] ID gap: expected {expected}, got {all_ids}, missing {sorted(missing)}\n")
 
     if not all_tasks:
         ui.error("Plan failed: no tasks found in outline files.")
