@@ -22,7 +22,7 @@ Discrepancies between REQUIREMENTS.md, ARCHITECTURE.md, README.md, CHANGELOG.md 
 
 - [x] **8. `automate.md` ghost in ARCHITECTURE.md** — Fixed to `deploy.md`. Also added `skills.md` to the list (TODO #11) and fixed "Deployd" typo (TODO #20).
 
-- [ ] **9. README Develop section stale** — Flowchart and description say "Multi-module projects run modules concurrently" and "local models run 1 module at a time, cloud/gateway models run up to 8 concurrently." Implementation dispatches at the task level (REQ-D-10) and concurrency comes from the model's `concurrency` field. Update README.
+- [x] **9. README Develop section stale** — Rewrote description (manifest-based dispatch, task-level concurrency from model config), updated flowchart (removed get_next_task/load arch+spec, added manifest read/dispatch), fixed Verify section references (TASKS.md/spec → arch/*.md/task files).
 
 - [ ] **10. README Project Layout lists `TASKS.md`** — Should reference `tasks/manifest.yml` and `tasks/active/TASK-*.md` instead.
 

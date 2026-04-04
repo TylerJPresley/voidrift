@@ -155,7 +155,7 @@ Re-running plan when artifacts already exist triggers update mode: a delta analy
 
 ### Develop
 
-Executes tasks one at a time. Each task gets a fresh agent with its module's architecture and spec pre-loaded.
+Executes tasks from the manifest. Each task gets a fresh agent with the task file as its prompt — self-contained with user story, context, and acceptance criteria.
 
 ```bash
 voidrift develop <model>                  # single model for tasks and escalation
@@ -164,10 +164,9 @@ voidrift develop <model> <architect>      # separate model for escalation
 
 ```mermaid
 flowchart TD
-    N[get_next_task] --> L[Load arch + spec]
-    L --> W[write_source_file]
+    N[Read manifest → find ready tasks] --> W[Dispatch agent → write_source_file]
     W --> C{Write occurred?}
-    C -- yes --> K[complete_task → next]
+    C -- yes --> K[Mark implemented → next]
     C -- no --> R[Retry once]
     R --> E{Write occurred?}
     E -- yes --> K
@@ -176,10 +175,10 @@ flowchart TD
     W2 --> B{5 escalations?}
     B -- yes --> BLK[Mark blocked]
     BLK --> K
-    B -- no --> N2[continue]
+    B -- no --> N
 ```
 
-Multi-module projects run modules concurrently. Concurrency is automatic: local models run 1 module at a time, cloud/gateway models run up to 8 concurrently.
+Ready tasks from any module are dispatched concurrently up to the model's `concurrency` limit (configured per model in models.yml). When concurrency is 1, tasks run sequentially.
 
 ### Verify
 
@@ -189,7 +188,7 @@ Two-stage requirements-driven acceptance testing:
 voidrift verify <model>
 ```
 
-**Stage 1 — Plan agent:** Reads all project documentation (REQUIREMENTS.md, ARCHITECTURE.md, TASKS.md, spec files) and writes `.voidrift/VERIFY-PLAN.md` — one self-contained test case per testable requirement. Each test case embeds the requirement, scenario steps, credentials, and evidence collection instructions.
+**Stage 1 — Plan agent:** Reads all project documentation (REQUIREMENTS.md, ARCHITECTURE.md, arch/*.md, task files) and writes `.voidrift/VERIFY-PLAN.md` — one self-contained test case per testable requirement. Each test case embeds the requirement, scenario steps, credentials, and evidence collection instructions.
 
 **Stage 2 — Concurrent sub-agents:** One sub-agent per test case. Each executes its scenario using HTTP, process, and browser tools. On failure it writes a full bug report to `.voidrift/bugs/<ITEM-ID>.md` with request/response detail, process output, stack traces, and screenshots.
 
