@@ -34,7 +34,7 @@ Discrepancies between REQUIREMENTS.md, ARCHITECTURE.md, README.md, CHANGELOG.md 
 
 - [x] **13. ARCHITECTURE.md Section 3.6 duplicate numbering** — Renumbered first 3.6 (`max_context`) to 3.5. Sections now 3.1–3.9 with no gaps or duplicates.
 
-- [ ] **14. README "See Appendix C" broken reference** — README says "See Appendix C" for the model table but has no Appendix C. The table is only in REQUIREMENTS.md. Fix or remove the reference.
+- [x] **14. README "See Appendix C" broken reference** — Fixed broken anchor link. Table is in REQUIREMENTS.md, not README.
 
 - [x] **15. `plan --idea` traceability chain missing (REQ-IDEA-5)** — Implemented in TODO #1. Tasks get `idea: <id>` in frontmatter, manifest records idea reference, ideas auto-archive when all derived tasks verified.
 

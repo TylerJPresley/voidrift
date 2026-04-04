@@ -75,7 +75,7 @@ Config values support variable expansion:
 
 Models are referenced by alias in all commands. All model definitions — local, cloud, and gateway — live in a single YAML file at the path configured in `models_file`. Each entry is self-contained with its own connection details.
 
-See [Appendix C](#appendix-c-model-registry) for the full model table, or run `voidrift` with no arguments to see available models.
+See the model registry in REQUIREMENTS.md Appendix C for the full model table, or run `voidrift` with no arguments to see available models.
 
 ---
 
