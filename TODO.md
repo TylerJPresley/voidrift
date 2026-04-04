@@ -16,7 +16,7 @@ Discrepancies between REQUIREMENTS.md, ARCHITECTURE.md, README.md, CHANGELOG.md 
 
 - [x] **5. ARCHITECTURE.md Section 3.2 streaming claim is wrong** — Rewritten to document that gather and chat use `stream=True`, while plan/develop/deploy/verify use `stream=False`. Explains rationale for each.
 
-- [ ] **6. Analysis cache path stale in REQ-CTX-5** — Requirements say cache entries are in `.voidrift/cache/analyses/`. Implementation stores cache as YAML frontmatter in `.voidrift/analysis/<filepath>.md`. Update the requirement text.
+- [x] **6. Analysis cache path stale in REQ-CTX-5** — Fixed stale `.voidrift/cache/analyses/` reference in REQ-G-8 Stage 3. Now correctly says frontmatter `hash` in `.voidrift/analysis/<filepath>.md`. REQ-CTX-5 itself was already correct.
 
 - [ ] **7. `TASKS.md` ghost artifact** — system.md prompt artifact table lists `TASKS.md` as "Produced by: Plan, Consumed by: Develop". No single `TASKS.md` exists — implementation uses `tasks/active/TASK-{id}.md` + `tasks/manifest.yml`. Update system.md artifact table.
 
