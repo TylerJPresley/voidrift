@@ -38,7 +38,7 @@ Discrepancies between REQUIREMENTS.md, ARCHITECTURE.md, README.md, CHANGELOG.md 
 
 - [x] **15. `plan --idea` traceability chain missing (REQ-IDEA-5)** — Implemented in TODO #1. Tasks get `idea: <id>` in frontmatter, manifest records idea reference, ideas auto-archive when all derived tasks verified.
 
-- [ ] **16. No Deploy data flow in ARCHITECTURE.md** — Section 4 has data flows for Gather, Plan, Develop, Idea, Verify, and Agent loop but no Deploy section.
+- [x] **16. No Deploy data flow in ARCHITECTURE.md** — Added Section 4.6 Deploy command data flow. Fixed duplicate 4.5 numbering (Agent prompt → 4.7, Agent loop → 4.8).
 
 - [x] **17. Verify prompt references `TASKS.md`** — Fixed in TODO #3. Updated to `tasks/manifest.yml` and `arch/<module>.md`.
 

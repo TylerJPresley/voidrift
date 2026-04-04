@@ -254,7 +254,34 @@ Stage 3 — Report:
 try/finally: stop_all(), clear_sessions(), close_all_sessions()
 ```
 
-### 4.5 Agent system prompt construction
+### 4.6 Deploy command
+
+```
+Preflight: REQUIREMENTS.md and ARCHITECTURE.md must exist
+
+CLI: determine last release tag (vX.Y.Z) from git
+CLI: read history.log lines since last tag
+  → if no lines, exit "nothing to deploy"
+
+Version bump:
+  Agent: receives task summary + requirements → returns "major", "minor", or "patch"
+  CLI: compute new version, prompt operator to confirm or override
+
+Changelog:
+  CLI: build changelog entry from history.log (grouped by module)
+  CLI: append to CHANGELOG.md (or create)
+
+Git tag:
+  CLI: git tag -a v{version} -m <changelog entry>
+
+Conditional IaC (if ARCHITECTURE.md mentions infrastructure):
+  Agent: generate or review IaC files via write_source_file()
+
+Post-deploy hook (if ARCHITECTURE.md has post_deploy: field):
+  CLI: run shell command with $VERSION in env
+```
+
+### 4.7 Agent system prompt construction
 
 ```
 system_prompt =
@@ -264,7 +291,7 @@ system_prompt =
   + injected_context                  # task details, analyses, specs — what to work with
 ```
 
-### 4.6 Agent loop
+### 4.8 Agent loop
 
 ```
 send(user_message)
