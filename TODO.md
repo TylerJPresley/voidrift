@@ -18,7 +18,7 @@ Discrepancies between REQUIREMENTS.md, ARCHITECTURE.md, README.md, CHANGELOG.md 
 
 - [ ] **6. Analysis cache path stale in REQ-CTX-5** — Requirements say cache entries are in `.voidrift/cache/analyses/`. Implementation stores cache as YAML frontmatter in `.voidrift/analysis/<filepath>.md`. Update the requirement text.
 
-- [ ] **7. `TASKS.md` ghost artifact** — system.md prompt artifact table lists `TASKS.md` as "Produced by: Plan, Consumed by: Develop". Verify prompt step 3 references `read_framework_file("TASKS.md")`. No single `TASKS.md` exists — implementation uses `tasks/active/TASK-{id}.md` + `tasks/manifest.yml`. Update all references.
+- [ ] **7. `TASKS.md` ghost artifact** — system.md prompt artifact table lists `TASKS.md` as "Produced by: Plan, Consumed by: Develop". No single `TASKS.md` exists — implementation uses `tasks/active/TASK-{id}.md` + `tasks/manifest.yml`. Update system.md artifact table.
 
 - [ ] **8. `automate.md` ghost in ARCHITECTURE.md** — Section 2.2 lists `automate.md` as a command prompt file. No such file exists — the command was renamed to `deploy`. Update the architecture doc.
 
@@ -36,11 +36,11 @@ Discrepancies between REQUIREMENTS.md, ARCHITECTURE.md, README.md, CHANGELOG.md 
 
 - [ ] **14. README "See Appendix C" broken reference** — README says "See Appendix C" for the model table but has no Appendix C. The table is only in REQUIREMENTS.md. Fix or remove the reference.
 
-- [ ] **15. `plan --idea` traceability chain missing (REQ-IDEA-5)** — Tasks should have `idea: <id>` in frontmatter, ideas should auto-archive when derived tasks verified. Entire chain is unimplemented since `plan --idea` doesn't exist. Decide: implement or defer and update docs.
+- [x] **15. `plan --idea` traceability chain missing (REQ-IDEA-5)** — Implemented in TODO #1. Tasks get `idea: <id>` in frontmatter, manifest records idea reference, ideas auto-archive when all derived tasks verified.
 
 - [ ] **16. No Deploy data flow in ARCHITECTURE.md** — Section 4 has data flows for Gather, Plan, Develop, Idea, Verify, and Agent loop but no Deploy section.
 
-- [ ] **17. Verify prompt references `TASKS.md`** — `resources/prompts/verify.md` PLAN section step 3 says `Call read_framework_file("TASKS.md")`. Should reference `tasks/manifest.yml` or individual task files.
+- [x] **17. Verify prompt references `TASKS.md`** — Fixed in TODO #3. Updated to `tasks/manifest.yml` and `arch/<module>.md`.
 
 ## Low: Minor Issues
 
