@@ -66,9 +66,9 @@ Synced to `~/.voidrift/resources/` via `make sync`.
 
 Each agent (gather source analysis, plan, develop task) starts with a clean message history. Shared state flows through in-memory dicts (`source_requirements`, `context_summaries`) that the CLI owns; only the final pass output is written to disk. **Why:** A single agent accumulating 50 file analyses would hit the context window before the last file. Per-unit agents keep each context small and focused; CLI-owned persistence eliminates tool call JSON overhead (REQ-ARCH-7, REQ-G-8).
 
-### 3.2 Streaming with usage capture for all commands
+### 3.2 Streaming vs non-streaming
 
-All framework commands and chat use `stream=True` with `stream_options: {include_usage: True}`. Token usage (prompt tokens, completion tokens, context %) arrives in the final chunk and is forwarded to the `on_progress` callback. **Why:** Streaming surfaces per-call telemetry across every agent stage — tool-call loops included — not just for chat. This drives context pressure warnings (ctx ≥ 80%) and the live spinner stats for all commands (REQ-UI-10). The `_sync_response()` path is retained for callers that explicitly set `stream=False`.
+Gather and chat use `stream=True` with `stream_options: {include_usage: True}` for live token telemetry and responsive UX. Plan, develop, deploy, and verify use `stream=False` for reliable tool call parsing — vLLM's streaming parser does not reliably separate text from tool calls. Token usage (prompt tokens, completion tokens, context %) is captured from both paths and forwarded to the `on_progress` callback. **Why:** Streaming in gather surfaces per-call telemetry across all four stages. Streaming in chat provides token-by-token display. Non-streaming in automated commands ensures tool call JSON is parsed correctly (REQ-ARCH-4, REQ-UI-10).
 
 ### 3.3 Local agent tools in the CLI
 

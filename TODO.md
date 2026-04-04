@@ -14,7 +14,7 @@ Discrepancies between REQUIREMENTS.md, ARCHITECTURE.md, README.md, CHANGELOG.md 
 
 ## High: Documentation Inconsistencies
 
-- [ ] **5. ARCHITECTURE.md Section 3.2 streaming claim is wrong** — Says "All framework commands and chat use `stream=True`". In reality, plan, develop, deploy, and verify all use `stream=False`. Only gather and chat use streaming. Fix the architecture doc.
+- [x] **5. ARCHITECTURE.md Section 3.2 streaming claim is wrong** — Rewritten to document that gather and chat use `stream=True`, while plan/develop/deploy/verify use `stream=False`. Explains rationale for each.
 
 - [ ] **6. Analysis cache path stale in REQ-CTX-5** — Requirements say cache entries are in `.voidrift/cache/analyses/`. Implementation stores cache as YAML frontmatter in `.voidrift/analysis/<filepath>.md`. Update the requirement text.
 
