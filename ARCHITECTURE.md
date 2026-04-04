@@ -80,7 +80,7 @@ The `tools/` package was split out from `tools.py` to support multiple tool modu
 
 The CLI reads all model definitions from a single file maintained by an external tool (worker-cli). The path is configurable via `models_file` in `config.yml` (default `~/.worker-cli/models.yml`). Each entry is self-contained with its own connection details. **Why:** Voidrift is model-agnostic — it doesn't care how models are provisioned. One file, one source of truth, no merging (REQ-MC-1).
 
-### 3.6 `max_context` in config, not code
+### 3.5 `max_context` in config, not code
 
 Context window sizes live in the models file as `max_context:` fields. No lookup table in the CLI code. **Why:** Hardcoded tables go stale silently. Config files are visible, auditable, and operator-controlled (REQ-MC-3).
 

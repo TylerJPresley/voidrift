@@ -32,7 +32,7 @@ Discrepancies between REQUIREMENTS.md, ARCHITECTURE.md, README.md, CHANGELOG.md 
 
 - [x] **12. ARCHITECTURE.md skills list incomplete** — Updated to note 16 files determined dynamically, listed key skills as examples.
 
-- [ ] **13. ARCHITECTURE.md Section 3.6 duplicate numbering** — Two sections numbered "3.6" (`max_context in config` and `Tool choice modes`). Fix numbering.
+- [x] **13. ARCHITECTURE.md Section 3.6 duplicate numbering** — Renumbered first 3.6 (`max_context`) to 3.5. Sections now 3.1–3.9 with no gaps or duplicates.
 
 - [ ] **14. README "See Appendix C" broken reference** — README says "See Appendix C" for the model table but has no Appendix C. The table is only in REQUIREMENTS.md. Fix or remove the reference.
 
