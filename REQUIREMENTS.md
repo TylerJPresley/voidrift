@@ -187,7 +187,7 @@
   - Given a Stage 5 agent is dispatched for any task, When its system prompt is examined, Then the valid skill list appears after the task outline entry.
   - Given the plan command runs, When Stage 5 agents are dispatched, Then each agent's skill list is resolved at dispatch time from the current skill directories — not from a value computed at command start.
 - **REQ-P-2:** Planner output SHALL be fully hidden from the terminal. Only a spinner and status line SHALL be shown.
-- **REQ-P-3:** WHEN `--overwrite` is specified, THE SYSTEM SHALL remove all plan-produced directories (`tasks/`, `arch/`) and `ARCHITECTURE.md` before planning. Gather-produced artifacts (REQUIREMENTS.md, spec/*.md) SHALL be preserved.
+- **REQ-P-3:** WHEN `--overwrite` is specified, THE SYSTEM SHALL remove all plan-produced directories (`tasks/`, `arch/`) and `ARCHITECTURE.md` before planning. Gather-produced artifacts (REQUIREMENTS.md, analysis/) SHALL be preserved.
   - Given a previous plan created ARCHITECTURE.md and populated arch/ and tasks/, When `voidrift plan <model> --overwrite` is run, Then ARCHITECTURE.md is deleted and the arch/ and tasks/ directories are removed entirely before the planning agent starts.
 - **REQ-P-4:** `auto-commits: false` SHALL be set for the plan command.
 - **REQ-P-5:** *(Replaced by REQ-TM-4. Tasks are individual files in `tasks/active/TASK-{id}.md` with YAML frontmatter. TASKS.md is an intermediate artifact parsed by the CLI into task files.)*
@@ -213,7 +213,7 @@
   - Given a project with `src/api.py` and `src/models.py` already implemented, When the delta agent analyzes, Then the summary identifies requirements covered by those files and requirements with no corresponding source files.
 - **REQ-P-12:** Tasks SHALL NOT target `.voidrift/` paths. The `.voidrift/` directory contains framework artifacts (requirements, architecture, specs, logs) produced by gather and plan — not the develop command. Dot-prefixed project files (`.github/`, `.dockerignore`, `.eslintrc`, etc.) are valid develop targets.
   - *Rationale:* `.voidrift/` contains framework artifacts produced by gather and plan. Develop tasks that target `.voidrift/` paths overwrite planning artifacts or create redundant specs. However, many projects legitimately require dot-prefixed config files (CI workflows, linter configs, Docker ignore files) that the develop command must create.
-  - Given TASKS.md contains a task targeting `.voidrift/spec/backend.md`, When the plan is reviewed, Then the task is invalid — spec files are plan artifacts.
+  - Given TASKS.md contains a task targeting `.voidrift/analysis/backend.md`, When the plan is reviewed, Then the task is invalid — analysis files are gather artifacts.
   - Given TASKS.md contains a task targeting `.github/workflows/ci.yml`, When the plan is reviewed, Then the task is valid — CI config is a project source file.
   - Given TASKS.md contains a task targeting `src/main.py`, When the plan is reviewed, Then the task is valid.
 - **REQ-P-13:** WHEN `voidrift plan <model>` is run, THE SYSTEM SHALL validate that `.voidrift/REQUIREMENTS.md` exists before performing any model calls. IF `.voidrift/REQUIREMENTS.md` does not exist, THE SYSTEM SHALL exit with an error prompting `voidrift gather`.
@@ -742,8 +742,8 @@ Two log roots, two intents:
 │   └── history.log           # Lifecycle event log (append-only)
 ├── arch/                     # Module architecture (produced by Plan)
 │   └── <module>.md
-├── spec/                     # Module requirements (produced by Gather)
-│   └── <module>.md
+├── analysis/                 # Per-file source analysis (produced by Gather)
+│   └── <filepath>.md
 ├── logs/                     # Command run logs
 │   └── <command>-<timestamp>.log
 └── .develop.lock             # Concurrent execution lock

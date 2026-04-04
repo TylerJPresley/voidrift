@@ -469,7 +469,7 @@ LOCAL_TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Path relative to .voidrift/ (e.g. arch/backend.md, spec/frontend.md)"},
+                    "path": {"type": "string", "description": "Path relative to .voidrift/ (e.g. arch/backend.md, analysis/src/main.py.md)"},
                     "offset": {"type": "integer", "description": "Line offset to start reading from (0-based, default 0)"},
                     "limit": {"type": "integer", "description": "Maximum number of lines to return. Omit to use the model's configured max_read_lines."},
                 },

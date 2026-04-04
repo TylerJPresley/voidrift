@@ -80,12 +80,6 @@ def run_plan(
     requirements = (d / "REQUIREMENTS.md").read_text()
     if idea_content:
         requirements += f"\n\n## Idea Context (IDEA-{idea_id})\n\n{idea_content}"
-    specs = []
-    spec_dir = d / "spec"
-    if spec_dir.is_dir():
-        for sf in sorted(spec_dir.glob("*.md")):
-            specs.append(f"### {sf.stem}\n\n{sf.read_text()}")
-    specs_section = "FEATURE SPECS:\n" + "\n\n".join(specs) if specs else ""
 
     skill = find_skill("ARCH-DESIGN") or ""
 
@@ -135,7 +129,6 @@ def run_plan(
     arch_template = prompts.load_template("ARCHITECTURE-TEMPLATE")
     arch_prompt = prompts.load_prompt("plan", "PLAN-ARCH").format(
         requirements=requirements,
-        specs_section=specs_section,
         arch_template=arch_template,
     )
     # Stage 1 gets no global system context — the artifact table in system.md

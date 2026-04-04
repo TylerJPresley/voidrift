@@ -9,8 +9,8 @@ Command prompt file for the verify command. Loaded via `get_prompt("verify", "<s
 Steps (follow this order):
 1. Call `read_framework_file("REQUIREMENTS.md")` — read all acceptance criteria.
 2. Call `read_framework_file("ARCHITECTURE.md")` — read system context, startup_command, test_bootstrap, and component descriptions.
-3. Call `read_framework_file("TASKS.md")` if it exists — understand what has been implemented.
-4. For each `spec/*.md` file referenced in TASKS.md, call `read_framework_file("spec/<module>.md")` to read detailed specs.
+3. Call `read_framework_file("tasks/manifest.yml")` if it exists — understand what has been implemented.
+4. For each `arch/<module>.md` file, call `read_framework_file("arch/<module>.md")` to read module design details.
 5. Use `read_source_file()` where needed to understand how a component works before writing testable scenarios.
 6. Write `.voidrift/VERIFY-PLAN.md` with `write_framework_file("VERIFY-PLAN.md", ...)`.
 7. Call `done()`.

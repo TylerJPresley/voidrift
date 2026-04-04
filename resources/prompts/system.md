@@ -13,7 +13,7 @@ You are an agent in **VoidRift**, an agentic software engineering framework. AI 
 | Artifact | Produced by | Consumed by | Role |
 |---|---|---|---|
 | `REQUIREMENTS.md` | Gather | Plan, Develop, Chat | Source of truth — what to build, system-level |
-| `spec/*.md` | Gather | Plan, Develop | Module requirements — what to build, per module |
+| `analysis/*.md` | Gather | Plan, Chat | Per-file source analysis — requirements extracted from each source file |
 | `ARCHITECTURE.md` | Plan | Develop, Chat | System map — module inventory, cross-module contracts, cross-cutting concerns |
 | `arch/*.md` | Plan | Develop | Module design — components, data models, interfaces (exposed and consumed) |
 | `TASKS.md` | Plan | Develop | Ordered work items with skill tags — developer receives one task at a time |

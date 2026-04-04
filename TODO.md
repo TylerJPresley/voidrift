@@ -8,7 +8,7 @@ Discrepancies between REQUIREMENTS.md, ARCHITECTURE.md, README.md, CHANGELOG.md 
 
 - [x] **2. Plan update mode not implemented (REQ-P-11)** — Implemented. Delta analysis stage runs when ARCHITECTURE.md + manifest.yml exist and `--overwrite` is not set. Agent receives requirements, architecture, and source file listing (filenames only), returns implemented/unimplemented classification. Delta injected into Stage 1 and Stage 3. Fresh plan and `--overwrite` skip delta. Test updated.
 
-- [ ] **3. `spec/*.md` never produced by Gather** — README, ARCHITECTURE.md artifact table, and system.md prompt table all list `spec/*.md` as "Produced by: Gather". Gather actually writes `analysis/<file>.md` and `ANALYSIS.md` — no module-level spec files. Remove `spec/` references from docs or implement spec generation.
+- [x] **3. `spec/*.md` never produced by Gather** — Removed all stale `spec/` references. Gather produces `analysis/<file>.md` — updated REQUIREMENTS.md (REQ-P-3, REQ-P-12 AC, Appendix A), README.md, system.md artifact table, verify.md prompt, plan.md prompt, filesystem.py tool description. Removed dead spec-reading code from plan.py.
 
 - [ ] **4. Gather streaming contradicts REQ-G-12** — Requirements say "All gather agents SHALL use non-streaming mode (`stream=False`)". Implementation uses `stream=True` for triage, context build, source analysis, and consolidation. CHANGELOG documents this intentional change but REQUIREMENTS.md was never updated. Update the requirement to match implementation.
 

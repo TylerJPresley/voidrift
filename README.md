@@ -133,7 +133,7 @@ voidrift gather <model> --idea <id>          # generate requirements from a refi
 voidrift gather <model> --path <path> --overwrite  # remove previous gather artifacts and start fresh
 ```
 
-Produces: `REQUIREMENTS.md`, `ANALYSIS.md` (index), `analysis/<file>.md` (per-file), `spec/<module>.md`
+Produces: `REQUIREMENTS.md`, `ANALYSIS.md` (index), `analysis/<file>.md` (per-file)
 
 `--path` mode reverse-engineers requirements from the codebase using a four-stage pipeline. `--idea` mode reads a refined idea file and uses the same ANALYSIS-REQS skill and REQUIREMENTS-TEMPLATE to generate or update requirements — recording the affected REQ IDs and a diff in the idea file.
 
@@ -276,7 +276,7 @@ your-project/
 │   ├── REQUIREMENTS.md      # System-level requirements         ← Gather
 │   ├── ANALYSIS.md          # Analysis index (categories, links) ← Gather
 │   ├── analysis/<file>.md   # Per-file source analysis          ← Gather
-│   ├── spec/<module>.md     # Per-module requirements           ← Gather
+│   ├── analysis/<file>.md   # Per-file source analysis          ← Gather
 │   ├── ARCHITECTURE.md      # System map, cross-module contracts ← Plan
 │   ├── arch/<module>.md     # Module design, components, interfaces ← Plan
 │   ├── TASKS.md             # Pending and blocked tasks         ← Plan

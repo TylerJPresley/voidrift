@@ -40,7 +40,7 @@ SOURCE FILES:
 
 **Role:** Architect — design the system-level architecture.
 
-Requirements and spec files are provided below. The architecture template is also provided.
+Requirements are provided below. The architecture template is also provided.
 
 Steps:
 1. Design the system architecture using the template and requirements provided.
@@ -71,8 +71,6 @@ ARCHITECTURE TEMPLATE:
 
 REQUIREMENTS:
 {requirements}
-
-{specs_section}
 
 ## PLAN-MODULE
 
