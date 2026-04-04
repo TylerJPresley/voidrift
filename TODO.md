@@ -30,7 +30,7 @@ Discrepancies between REQUIREMENTS.md, ARCHITECTURE.md, README.md, CHANGELOG.md 
 
 - [x] **11. `skills.md` prompt file not in ARCHITECTURE.md** — Fixed in TODO #8. Added `skills.md` to prompt file list.
 
-- [ ] **12. ARCHITECTURE.md skills list incomplete** — Lists 7 skills (SYSTEMS-ENG, QUALITY-QA, etc.). Actual `resources/skills/` has 16 files including BACKEND-ENG, WEB-ENG, WEB-RESEARCH, MOBILE-ENG, ML-ENG, GAME-ENG, EMBEDDED-ENG, DATA-ENG, AI-ETHICS, SECURITY-TRUST, WORKFLOW. Update the list or say "determined dynamically from directory contents".
+- [x] **12. ARCHITECTURE.md skills list incomplete** — Updated to note 16 files determined dynamically, listed key skills as examples.
 
 - [ ] **13. ARCHITECTURE.md Section 3.6 duplicate numbering** — Two sections numbered "3.6" (`max_context in config` and `Tool choice modes`). Fix numbering.
 

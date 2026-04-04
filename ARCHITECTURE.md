@@ -49,7 +49,7 @@ The CLI does **not** manage containers, SSH connections, or gateway processes. E
 ### 2.2 Framework Resources (`resources/`)
 
 Static guidance loaded at command init:
-- `skills/` — methodology guidance (SYSTEMS-ENG, QUALITY-QA, ARCH-DESIGN, RELIABILITY-ENG, PROD-STRATEGY, CLOUD-OPS, ANALYSIS-REQS)
+- `skills/` — methodology guidance (16 files, determined dynamically from directory contents; includes ANALYSIS-REQS, ARCH-DESIGN, BACKEND-ENG, CLOUD-OPS, QUALITY-QA, RELIABILITY-ENG, SECURITY-TRUST, SYSTEMS-ENG, WEB-RESEARCH, WORKFLOW, and others)
 - `templates/` — output structure templates (REQUIREMENTS-TEMPLATE, ARCHITECTURE-TEMPLATE, etc.)
 - `prompts/system.md` — shared framework context (command lifecycle table, artifact ownership); prepended to every agent's system prompt across all commands
 - `prompts/<command>.md` — command-specific stage instructions (gather.md, plan.md, develop.md, chat.md, deploy.md, verify.md, skills.md)
