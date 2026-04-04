@@ -50,6 +50,6 @@ Discrepancies between REQUIREMENTS.md, ARCHITECTURE.md, README.md, CHANGELOG.md 
 
 - [x] **20. ARCHITECTURE.md Section 3.6 typo** — Fixed in TODO #8. "Deployd" → "Automated".
 
-- [ ] **21. CHANGELOG structure** — Multiple `### Added` and `### Changed` sections at the same level under `[Unreleased]`. Some entries reference removed features (MCP, worker-cli, TaskStore). Consider consolidating.
+- [x] **21. CHANGELOG structure** — Consolidated from 40 duplicate section headers to 4 (Added, Changed, Fixed, Removed). Removed stale entries referencing MCP, worker-cli, TaskStore, TASKS-DONE.md, spec/. Cleaned up 0.1.0 release entry.
 
 - [ ] **22. `DESIGN-TEMPLATE.md` appears dead** — Exists in `resources/templates/` but is never referenced in requirements, architecture, or code. Remove or document its purpose.
