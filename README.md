@@ -275,10 +275,8 @@ your-project/
 │   ├── REQUIREMENTS.md      # System-level requirements         ← Gather
 │   ├── ANALYSIS.md          # Analysis index (categories, links) ← Gather
 │   ├── analysis/<file>.md   # Per-file source analysis          ← Gather
-│   ├── analysis/<file>.md   # Per-file source analysis          ← Gather
 │   ├── ARCHITECTURE.md      # System map, cross-module contracts ← Plan
 │   ├── arch/<module>.md     # Module design, components, interfaces ← Plan
-│   ├── TASKS.md             # Pending and blocked tasks         ← Plan
 │   ├── ideas/               # Operator-owned idea backlog       ← Chat
 │   │   ├── IDEA-{id}.md
 │   │   └── archived/        # Completed ideas                  ← CLI

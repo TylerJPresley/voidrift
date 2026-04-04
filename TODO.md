@@ -24,7 +24,7 @@ Discrepancies between REQUIREMENTS.md, ARCHITECTURE.md, README.md, CHANGELOG.md 
 
 - [x] **9. README Develop section stale** — Rewrote description (manifest-based dispatch, task-level concurrency from model config), updated flowchart (removed get_next_task/load arch+spec, added manifest read/dispatch), fixed Verify section references (TASKS.md/spec → arch/*.md/task files).
 
-- [ ] **10. README Project Layout lists `TASKS.md`** — Should reference `tasks/manifest.yml` and `tasks/active/TASK-*.md` instead.
+- [x] **10. README Project Layout lists `TASKS.md`** — Removed `TASKS.md` line (tasks/ section already lists manifest.yml + active/). Also removed duplicate `analysis/<file>.md` line.
 
 ## Medium: Missing or Stale Documentation
 
