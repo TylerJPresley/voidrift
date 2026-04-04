@@ -20,6 +20,11 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 - `qwen35` max_tokens restored to 32768 (was incorrectly 4096).
+- Plan Stage 1 recovery when model writes ARCHITECTURE.md to `arch/` instead of root — CLI detects and moves the file before retry (REQ-P-1).
+- Plan `--overwrite` now removes entire `tasks/` and `arch/` directories instead of selectively globbing `.md` files — manifest.yml, outline intermediates, and non-markdown files are no longer left behind (REQ-P-3).
+- Plan Stage 5 prompt reordered: task outline and module arch appear first, skill list last — fixes hallucinated task content caused by skill descriptions consuming model attention before task-specific context (REQ-P-15).
+- System prompt log truncation increased from 2000 to 8000 chars for debugging prompt content issues (REQ-LOG-1).
+- Plan outline parse results and task ID gaps now logged to command log for post-mortem debugging (REQ-LOG-1).
 
 ### Changed
 - **Idea-to-implementation flow (REQ-IDEA-1 through REQ-IDEA-5):** `/idea` in chat for guided refinement. `gather --idea <id>` generates requirements from ideas using ANALYSIS-REQS skill — records affected REQ IDs and diff in the idea file. `plan --idea <id>` scopes planning to an idea, gates on requirements existing. Tasks trace back to originating idea. Ideas archived when all derived tasks verified.
