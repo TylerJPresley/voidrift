@@ -6,7 +6,7 @@ Discrepancies between REQUIREMENTS.md, ARCHITECTURE.md, README.md, CHANGELOG.md 
 
 - [x] **1. `plan --idea` not implemented (REQ-IDEA-5)** — Implemented. `--idea <id>` option added to plan command. Loads idea content as context, gates on `reqs:` field, injects `idea:` into task frontmatter, records in manifest, auto-archives idea when all tasks verified.
 
-- [x] **2. Plan update mode not implemented (REQ-P-11)** — Docs updated to match current behavior: plan always runs the full 5-stage pipeline, `--overwrite` clears first. Delta-based update mode (read source, produce only unimplemented tasks) remains a future enhancement noted in the requirement rationale. REQ-P-11, REQ-P-13 AC, V-P-5, and README updated.
+- [x] **2. Plan update mode not implemented (REQ-P-11)** — Implemented. Delta analysis stage runs when ARCHITECTURE.md + manifest.yml exist and `--overwrite` is not set. Agent receives requirements, architecture, and source file listing (filenames only), returns implemented/unimplemented classification. Delta injected into Stage 1 and Stage 3. Fresh plan and `--overwrite` skip delta. Test updated.
 
 - [ ] **3. `spec/*.md` never produced by Gather** — README, ARCHITECTURE.md artifact table, and system.md prompt table all list `spec/*.md` as "Produced by: Gather". Gather actually writes `analysis/<file>.md` and `ANALYSIS.md` — no module-level spec files. Remove `spec/` references from docs or implement spec generation.
 

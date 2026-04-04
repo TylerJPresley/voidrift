@@ -1094,7 +1094,7 @@ class TestPlanUpdateMode:
     def test_auto_detects_update_mode(
         self, MockAgent, tmp_project, cloud_model, sample_requirements
     ):
-        """run_plan() updates existing artifacts when they are already present."""
+        """run_plan() runs delta analysis when plan artifacts already exist (REQ-P-11)."""
         vd = tmp_project / ".voidrift"
         # Pre-existing arch artifacts from a previous plan run
         (vd / "ARCHITECTURE.md").write_text("---\nmodules:\n  - backend\n---\n# Architecture\n")
@@ -1105,6 +1105,18 @@ class TestPlanUpdateMode:
         (active / "TASK-1.md").write_text(
             "---\nid: 1\nmodule: backend\nskills: []\ndepends: []\n---\n# Done task\n"
         )
+        # manifest.yml triggers update mode detection
+        import yaml as _yaml
+        tasks_dir = vd / "tasks"
+        (tasks_dir / "manifest.yml").write_text(_yaml.dump(
+            {"tasks": {1: {"status": "implemented", "module": "backend"}},
+             "modules": {"backend": [1]}, "dependencies": {}, "next_id": 2, "next_bug_id": 1},
+            default_flow_style=False,
+        ))
+        # A source file so delta analysis has something to scan
+        src = tmp_project / "src"
+        src.mkdir()
+        (src / "main.py").write_text("print('hello')")
 
         agent_count = 0
 
@@ -1113,16 +1125,19 @@ class TestPlanUpdateMode:
             agent_count += 1
             mock = MagicMock()
             if agent_count == 1:
-                # Stage 1: ARCHITECTURE.md already exists; agent updates it (no-op here)
-                mock.send.return_value = "Updated."
+                # Delta analysis agent (REQ-P-11)
+                mock.send.return_value = "## Implemented\n- REQ-1: main.py exists\n## Unimplemented\n- REQ-2: no files"
             elif agent_count == 2:
-                # Stage 2: arch/backend.md was deleted by Stage 1 cleanup; rewrite it
+                # Stage 1: ARCHITECTURE.md already exists; agent updates it
+                mock.send.return_value = "Updated."
+            elif agent_count == 3:
+                # Stage 2: arch/backend.md
                 def send(msg):
                     (vd / "arch").mkdir(parents=True, exist_ok=True)
                     (vd / "arch" / "backend.md").write_text("# Backend\nUpdated module arch.")
                     return "Module updated."
                 mock.send.side_effect = send
-            elif agent_count == 3:
+            elif agent_count == 4:
                 # Stage 3: write outline
                 def send(msg):
                     outline = vd / "tasks" / "outline"
@@ -1149,6 +1164,8 @@ class TestPlanUpdateMode:
         from voidrift_cli.commands.plan import run_plan
         result = run_plan(cloud_model)
         assert result == 0
+        # Delta agent was called (agent_count >= 2 means delta + at least stage 1)
+        assert agent_count >= 2
 
 
 class TestDevelopRetryEscalation:

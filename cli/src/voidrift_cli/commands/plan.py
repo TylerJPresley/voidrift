@@ -88,9 +88,46 @@ def run_plan(
     specs_section = "FEATURE SPECS:\n" + "\n\n".join(specs) if specs else ""
 
     skill = find_skill("ARCH-DESIGN") or ""
-    # system_context (system.md CONTEXT) is for the chat command — it orients a
-    # conversational agent about the full framework. Plan stage agents each have a
-    # scoped prompt that tells them exactly what to produce; they don't need it.
+
+    # ── Delta analysis (REQ-P-11) — update mode when artifacts exist ─────
+    delta_summary = ""
+    is_update = (
+        not overwrite
+        and (d / "ARCHITECTURE.md").exists()
+        and (d / "tasks" / "manifest.yml").exists()
+    )
+    if is_update:
+        ui.stage("Delta analysis — scanning source tree...")
+        source_files = _source_file_listing(d.parent)
+        if source_files:
+            existing_arch = (d / "ARCHITECTURE.md").read_text()
+            delta_prompt = prompts.load_prompt("plan", "PLAN-DELTA")
+            delta_user = prompts.load_prompt("plan", "DELTA-USER").format(
+                requirements=requirements,
+                architecture=existing_arch,
+                source_files=source_files,
+            )
+            delta_agent = AgentLoop(
+                model=model,
+                system_prompt=delta_prompt,
+                tools=[], tool_handlers={},
+                stream=False,
+                max_tokens=get_max_tokens(model, "analysis"),
+                log_path=log,
+                show_spinner=False,
+            )
+            with ui.spinner(ui.random_label(), "delta analysis") as spin:
+                delta_agent.on_progress = spin.on_progress
+                try:
+                    delta_summary = delta_agent.send(delta_user)
+                    with open(log, "a") as f:
+                        f.write(f"\n[DELTA]\n{delta_summary}\n")
+                    ui.success("Delta analysis complete")
+                except (RuntimeError, OSError, ValueError) as e:
+                    ui.warn(f"Delta analysis failed: {e} — running full plan")
+                    delta_summary = ""
+        else:
+            ui.detail("No source files found — running full plan")
 
     # ── Stage 1: Architecture ────────────────────────────────────────────
     ui.stage("Stage 1/5: Architecture...")
@@ -105,6 +142,8 @@ def run_plan(
     # describes arch/*.md as a Plan output, which causes the model to write them here.
     # Each stage agent only receives context scoped to its job.
     arch_system = "\n\n".join(p for p in [skill, arch_prompt] if p)
+    if delta_summary:
+        arch_system += f"\n\n## Implementation Delta\n\nThe following delta analysis identifies which requirements are already implemented. Focus architecture updates on unimplemented areas.\n\n{delta_summary}"
 
 
     ok = _dispatch_agent(
@@ -183,6 +222,8 @@ def run_plan(
             module_arch=module_arch,
         )
         outline_system = "\n\n".join(p for p in [skill, outline_prompt] if p)
+        if delta_summary:
+            outline_system += f"\n\n## Implementation Delta\n\nOnly create tasks for unimplemented requirements. Skip requirements already satisfied.\n\n{delta_summary}"
         retry_msg = prompts.load_prompt("plan", "OUTLINE-RETRY").format(module=module)
         outline_path = d / "tasks" / "outline" / f"{module}.md"
 
@@ -570,6 +611,34 @@ def _build_task_files(d: Path, requirements: str, architecture: str, idea_id: in
 def _available_skills() -> set[str]:
     """Return set of valid skill names from all layers."""
     return set(_available_skills_with_desc().keys())
+
+
+def _source_file_listing(project_dir: Path) -> str:
+    """Build a newline-separated listing of project source files (REQ-P-11).
+
+    Excludes .voidrift/, .git/, and other dot-prefixed directories.
+    Returns filenames only (not content) to keep context small.
+    """
+    import pathspec
+
+    gitignore = project_dir / ".gitignore"
+    spec = (
+        pathspec.PathSpec.from_lines("gitignore", gitignore.read_text().splitlines())
+        if gitignore.is_file()
+        else pathspec.PathSpec.from_lines("gitignore", [])
+    )
+
+    lines = []
+    for p in sorted(project_dir.rglob("*")):
+        if not p.is_file():
+            continue
+        rel = p.relative_to(project_dir)
+        if any(part.startswith(".") for part in rel.parts):
+            continue
+        if spec.match_file(str(rel)):
+            continue
+        lines.append(str(rel))
+    return "\n".join(lines)
 
 
 def _available_skills_with_desc() -> dict[str, str]:

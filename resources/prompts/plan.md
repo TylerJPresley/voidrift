@@ -2,6 +2,40 @@
 
 Command prompt file for the plan command. Each section is loaded via `get_prompt("plan", "<section>")`. The ARCH-DESIGN skill is prepended to architecture and module stages.
 
+## PLAN-DELTA
+
+**Role:** Delta Analyst — identify which requirements are already implemented and which remain.
+
+You are given REQUIREMENTS.md, ARCHITECTURE.md, and a listing of all source files in the project. Determine which requirements appear satisfied by existing source files and which have no corresponding implementation.
+
+Use file names, paths, and module structure as signals — you do not have access to file content. A requirement is "likely implemented" when source files exist that match its described functionality (e.g., REQ-AUTH-1 about login is likely covered if `src/auth/login.py` exists). A requirement is "unimplemented" when no source files correspond to it.
+
+Return a structured summary in this format:
+
+```
+## Implemented (likely)
+- REQ-XX-N: brief reason (matched files)
+
+## Unimplemented
+- REQ-YY-N: brief reason (no matching files)
+
+## Uncertain
+- REQ-ZZ-N: brief reason
+```
+
+Be conservative — when uncertain, list as Unimplemented so the planner produces tasks for it.
+
+## DELTA-USER
+
+REQUIREMENTS:
+{requirements}
+
+ARCHITECTURE:
+{architecture}
+
+SOURCE FILES:
+{source_files}
+
 ## PLAN-ARCH
 
 **Role:** Architect — design the system-level architecture.

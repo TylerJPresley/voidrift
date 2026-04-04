@@ -9,9 +9,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 - **`plan --idea <id>` (REQ-IDEA-5):** Scopes planning to a single idea. Loads idea file content as context alongside REQUIREMENTS.md, gates on `reqs:` field (requires `gather --idea` first), injects `idea: <id>` into all produced task frontmatter, records idea reference in manifest. When all tasks for an idea reach `verified`, the idea is automatically archived to `ideas/archived/` and appended to history.log.
-
-### Changed
-- **REQ-P-11 updated to match implementation:** Plan always runs the full five-stage pipeline. Without `--overwrite`, existing artifacts are overwritten in place. With `--overwrite`, plan-produced directories are removed first. Delta-based update mode (reading source to produce only unimplemented tasks) is a future enhancement. README and requirements updated to match.
+- **Plan delta-based update mode (REQ-P-11):** When ARCHITECTURE.md and manifest.yml exist and `--overwrite` is not specified, plan runs a pre-pipeline delta analysis stage. A single agent receives REQUIREMENTS.md, ARCHITECTURE.md, and a source file listing (filenames only), and returns a structured summary of implemented vs unimplemented requirements. The delta is injected into Stage 1 (architecture) and Stage 3 (task outlines) so the pipeline focuses on remaining work. Fresh plan and `--overwrite` skip delta analysis.
 
 ### Changed
 - **North-star skills are language-agnostic (REQ-SKL-1):** Generalized `BACKEND-ENG` from VoidRift-specific Python/Click/pytest conventions to universal backend engineering principles. VoidRift-specific content moved to project skill override (`.voidrift/skills/BACKEND-ENG.md`).

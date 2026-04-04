@@ -154,6 +154,13 @@ Preflight:
   CLI: validate REQUIREMENTS.md exists
   CLI: if --idea <id>, load idea file, gate on reqs: field present
 
+Delta analysis (REQ-P-11, update mode only):
+  Triggered when ARCHITECTURE.md + manifest.yml exist and --overwrite is not set.
+  CLI: build source file listing (filenames only, respects .gitignore)
+  Agent: receives REQUIREMENTS.md + ARCHITECTURE.md + file listing
+  Agent: returns structured delta (implemented / unimplemented / uncertain)
+  CLI: injects delta summary into Stage 1 and Stage 3 prompts
+
 Stage 1 — Architecture (PLAN-ARCH, one agent):
   CLI: get_skill(ARCH-DESIGN) + get_prompt(plan, PLAN-ARCH)
   Agent: writes ARCHITECTURE.md (system-level: modules, contracts, constraints)
