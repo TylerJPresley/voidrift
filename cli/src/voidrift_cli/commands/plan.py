@@ -19,6 +19,7 @@ from .. import ui
 def run_plan(
     model: ModelConfig,
     overwrite: bool = False,
+    idea_id: int | None = None,
 ) -> int:
     """Execute the five-stage plan command (REQ-P-1).
 
@@ -34,6 +35,23 @@ def run_plan(
     if not (d / "REQUIREMENTS.md").exists():
         ui.error("REQUIREMENTS.md not found. Run 'voidrift gather <model>' first.")
         return 1
+
+    # Idea-scoped planning (REQ-IDEA-5)
+    idea_content = ""
+    if idea_id is not None:
+        from ..manifest import ManifestManager
+        mm = ManifestManager(project_dir=d.parent)
+        if not mm.exists():
+            ui.error(f"No manifest found. Create an idea first with /idea in chat.")
+            return 1
+        mm.load()
+        idea_content = mm.read_idea(idea_id)
+        if not idea_content:
+            ui.error(f"IDEA-{idea_id} not found in ideas/.")
+            return 1
+        if "reqs:" not in idea_content.lower():
+            ui.error(f"No requirements found for IDEA-{idea_id}. Run 'voidrift gather <model> --idea {idea_id}' first.")
+            return 1
 
     ui.header("VoidRift Plan")
 
@@ -60,6 +78,8 @@ def run_plan(
 
     tools, handlers = build_local_tools(cmd="plan")
     requirements = (d / "REQUIREMENTS.md").read_text()
+    if idea_content:
+        requirements += f"\n\n## Idea Context (IDEA-{idea_id})\n\n{idea_content}"
     specs = []
     spec_dir = d / "spec"
     if spec_dir.is_dir():
@@ -282,7 +302,7 @@ def run_plan(
             return 1
 
     # ── Post-processing ──────────────────────────────────────────────────
-    task_count = _build_task_files(d, requirements, arch_text)
+    task_count = _build_task_files(d, requirements, arch_text, idea_id=idea_id)
     ui.success(f"{task_count} tasks")
 
     # Clean up outline intermediates
@@ -481,7 +501,7 @@ def _format_task_entry(outline_path: Path, task_id: int) -> str:
     return "\n".join(lines)
 
 
-def _build_task_files(d: Path, requirements: str, architecture: str) -> int:
+def _build_task_files(d: Path, requirements: str, architecture: str, idea_id: int | None = None) -> int:
     """Read task files written by the model and build manifest (REQ-TM-1, REQ-TM-4).
 
     Returns the number of tasks registered.
@@ -511,7 +531,13 @@ def _build_task_files(d: Path, requirements: str, architecture: str) -> int:
         if tid is None:
             continue
 
-        mm.add_task(int(tid), module, depends=depends or None)
+        mm.add_task(int(tid), module, depends=depends or None, idea=idea_id)
+
+        # Inject idea: into frontmatter if idea-scoped (REQ-IDEA-5)
+        needs_rewrite = False
+        if idea_id is not None and fm.get("idea") != idea_id:
+            fm["idea"] = idea_id
+            needs_rewrite = True
 
         # Validate skill tags (REQ-P-9)
         valid = _available_skills()
@@ -528,9 +554,12 @@ def _build_task_files(d: Path, requirements: str, architecture: str) -> int:
                     else:
                         ui.warn(f"TASK-{tid}: stripped unknown skill '{bad}' (no match)")
                 fm["skills"] = resolved
-                fm_str = yaml.dump(fm, default_flow_style=False).strip()
-                body = content[end + 3:].lstrip("\n")
-                task_file.write_text(f"---\n{fm_str}\n---\n{body}")
+                needs_rewrite = True
+
+        if needs_rewrite:
+            fm_str = yaml.dump(fm, default_flow_style=False).strip()
+            body = content[end + 3:].lstrip("\n")
+            task_file.write_text(f"---\n{fm_str}\n---\n{body}")
 
         count += 1
 

@@ -205,10 +205,11 @@
   - Given a task file contains `skills: [WEB-ENG, documentation]` and `documentation` shares no words with any valid skill, When validation runs, Then `documentation` is stripped and a warning is logged.
 - **REQ-P-10:** `.voidrift/ARCHITECTURE.md` SHALL follow the structure defined in `ARCHITECTURE-TEMPLATE` (loaded via `get_template("ARCHITECTURE-TEMPLATE")`). The template follows the arc42 documentation standard with C4 model diagrams (Mermaid). The model SHALL populate each section with project-specific content.
   - *Rationale:* arc42 is an industry-standard architecture documentation framework providing a proven section structure. C4 (Context, Container, Component, Code) provides consistent diagram levels. Together they ensure architecture documents are complete, navigable, and familiar to engineers.
-- **REQ-P-11:** WHEN `voidrift plan <model>` is run AND `.voidrift/ARCHITECTURE.md` and `.voidrift/tasks/manifest.yml` already exist AND `--overwrite` is not specified, THE SYSTEM SHALL automatically run in update mode: read REQUIREMENTS.md, ARCHITECTURE.md, and the current source code to determine what is already implemented, then produce revised task files containing only the delta — requirements not yet satisfied by the current implementation. The existing architecture SHALL be treated as a starting point, not regenerated from scratch.
-  - *Rationale:* Source code is ground truth for what's built. Reading the actual source files is definitive and works regardless of how the code was produced.
-  - Given ARCHITECTURE.md and manifest.yml exist and `--overwrite` is not specified, When `voidrift plan <model>` is run, Then update mode runs automatically — the agent reads source files to determine what's implemented and writes tasks only for the unimplemented delta.
-  - Given ARCHITECTURE.md and manifest.yml do not exist, When `voidrift plan <model>` is run, Then fresh-plan mode runs.
+- **REQ-P-11:** WHEN `voidrift plan <model>` is run AND `.voidrift/ARCHITECTURE.md` and `.voidrift/tasks/manifest.yml` already exist AND `--overwrite` is not specified, THE SYSTEM SHALL run the full five-stage pipeline, overwriting existing plan artifacts in place. The existing ARCHITECTURE.md and task files are replaced by the new pipeline output. WHEN `--overwrite` is specified, THE SYSTEM SHALL remove all plan-produced directories (`tasks/`, `arch/`) and `ARCHITECTURE.md` before starting the pipeline.
+  - *Rationale:* The full pipeline produces consistent, complete output from current requirements. Overwriting in place is safe because gather-produced artifacts (REQUIREMENTS.md, analysis/) are preserved. `--overwrite` provides explicit cleanup when the operator wants a guaranteed clean slate. A future enhancement may add delta-based update mode that reads source code to determine what is already implemented and produces only unimplemented tasks.
+  - Given ARCHITECTURE.md and manifest.yml exist and `--overwrite` is not specified, When `voidrift plan <model>` is run, Then the full five-stage pipeline runs and overwrites existing artifacts.
+  - Given ARCHITECTURE.md and manifest.yml do not exist, When `voidrift plan <model>` is run, Then the full five-stage pipeline runs (fresh plan).
+  - Given `--overwrite` is specified, When `voidrift plan <model>` is run, Then existing plan artifacts are removed before the pipeline starts.
 - **REQ-P-12:** Tasks SHALL NOT target `.voidrift/` paths. The `.voidrift/` directory contains framework artifacts (requirements, architecture, specs, logs) produced by gather and plan — not the develop command. Dot-prefixed project files (`.github/`, `.dockerignore`, `.eslintrc`, etc.) are valid develop targets.
   - *Rationale:* `.voidrift/` contains framework artifacts produced by gather and plan. Develop tasks that target `.voidrift/` paths overwrite planning artifacts or create redundant specs. However, many projects legitimately require dot-prefixed config files (CI workflows, linter configs, Docker ignore files) that the develop command must create.
   - Given TASKS.md contains a task targeting `.voidrift/spec/backend.md`, When the plan is reviewed, Then the task is invalid — spec files are plan artifacts.
@@ -217,7 +218,7 @@
 - **REQ-P-13:** WHEN `voidrift plan <model>` is run, THE SYSTEM SHALL validate that `.voidrift/REQUIREMENTS.md` exists before performing any model calls. IF `.voidrift/REQUIREMENTS.md` does not exist, THE SYSTEM SHALL exit with an error prompting `voidrift gather`.
   - Given no `.voidrift/REQUIREMENTS.md` exists, When `voidrift plan <model>` is run, Then the command exits with an error containing "Run 'voidrift gather'" — no model call is made.
   - Given `.voidrift/REQUIREMENTS.md` exists and no plan artifacts exist, When `voidrift plan <model>` runs, Then fresh-plan mode runs.
-  - Given `.voidrift/REQUIREMENTS.md` exists and `.voidrift/ARCHITECTURE.md` and `.voidrift/tasks/manifest.yml` exist, When `voidrift plan <model>` runs without `--overwrite`, Then update mode runs automatically.
+  - Given `.voidrift/REQUIREMENTS.md` exists and `.voidrift/ARCHITECTURE.md` and `.voidrift/tasks/manifest.yml` exist, When `voidrift plan <model>` runs without `--overwrite`, Then the full pipeline runs and overwrites existing artifacts.
 - **REQ-VF-1:** WHEN the Plan command generates ARCHITECTURE.md for a project with a runnable entry point, THE SYSTEM SHALL include a `startup_command:` field.
   - *Rationale:* Verify needs to start the system under test. The startup command must be captured during planning when the project type and entry point are known — not inferred at verify time.
   - Given a web API project, When Plan generates ARCHITECTURE.md, Then `startup_command:` is present with the command to start the server.
@@ -672,7 +673,7 @@ Two log roots, two intents:
 | V-SKL-4 | REQ-SKL-8 | Test | `voidrift skills list` groups output by layer |
 | V-P-3 | REQ-P-6 | Analysis | Code review of generated TASKS.md for file ownership |
 | V-P-4 | REQ-P-9 | Test | `test_commands.py` — invalid tags resolved by word-overlap or stripped; valid skills prompt includes descriptions |
-| V-P-5 | REQ-P-11 | Test | `test_commands.py` — auto-detects update mode when artifacts exist; fresh-plan when absent |
+| V-P-5 | REQ-P-11 | Test | `test_commands.py` — full pipeline runs when artifacts exist without `--overwrite`; `--overwrite` clears artifacts before pipeline |
 | V-G-10 | REQ-G-1 | Test | `test_commands.py` — gather update mode: existing REQUIREMENTS.md provided as context in final pass |
 | V-D-1 | REQ-D-1 | Test | `test_commands.py::TestDevelopPreflightChecks::test_missing_tasks` |
 | V-D-2 | REQ-D-2 | Test | `test_commands.py::TestDevelopPreflightChecks::test_all_tasks_complete` |
@@ -716,6 +717,7 @@ Two log roots, two intents:
 | V-FSZ-2 | REQ-FSZ-2 | Test | `test_tools.py::TestWriteGuard` — write rejected with error when content exceeds max_read_lines; write succeeds when within limit |
 | V-FSZ-3 | REQ-FSZ-3 | Inspection | `resources/prompts/system.md` — contains file size guidance section covering pagination and decomposition |
 | V-CFG-6a | REQ-CFG-6 | Test | `test_config.py::TestModelConfigDefaults` — ModelConfig carries operational limits with correct defaults |
+| V-IDEA-5 | REQ-IDEA-5 | Test | `test_commands.py::TestPlanIdea` — idea content injected into planning context; missing reqs gates; tasks get idea frontmatter; manifest records idea; idea archived when all tasks verified |
 
 ---
 

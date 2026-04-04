@@ -144,14 +144,14 @@ Re-running gather updates requirements in place: the existing `REQUIREMENTS.md` 
 Generates architecture and task breakdown from requirements:
 
 ```bash
-voidrift plan <model>             # auto-detects: update if artifacts exist, fresh plan if not
+voidrift plan <model>             # runs full pipeline; overwrites existing artifacts in place
 voidrift plan <model> --idea <id> # scope planning to a specific idea (requires reqs)
 voidrift plan <model> --overwrite # remove previous plan artifacts and start fresh
 ```
 
 Produces: `ARCHITECTURE.md`, `tasks/manifest.yml`, `tasks/active/TASK-*.md`, `arch/<module>.md`
 
-Re-running plan automatically detects existing artifacts and switches to update mode: plan reads current source files to determine what is already implemented, then writes a fresh task list covering only what remains. Tasks that no longer apply are removed; new tasks are added for unaddressed requirements. `ARCHITECTURE.md` is a lean system map (module inventory, cross-module contracts). `arch/<module>.md` carries the design depth for each module (components, data models, interfaces). Tasks are single atomic file operations with enough context for an agent to implement without cross-referencing requirements.
+Re-running plan runs the full five-stage pipeline and overwrites existing artifacts in place. Gather-produced artifacts (REQUIREMENTS.md, analysis/) are preserved. `--overwrite` removes all plan-produced directories (`tasks/`, `arch/`) and `ARCHITECTURE.md` before starting for a guaranteed clean slate. `ARCHITECTURE.md` is a lean system map (module inventory, cross-module contracts). `arch/<module>.md` carries the design depth for each module (components, data models, interfaces). Tasks are single atomic file operations with enough context for an agent to implement without cross-referencing requirements.
 
 ### Develop
 

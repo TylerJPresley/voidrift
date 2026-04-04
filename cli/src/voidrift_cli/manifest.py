@@ -121,6 +121,12 @@ class ManifestManager:
         elif status in ("implemented", "verified"):
             self._unblock_dependents(task_id)
 
+        # Auto-archive idea when all its tasks are verified (REQ-IDEA-5)
+        if status == "verified":
+            idea_id = tasks[task_id].get("idea")
+            if idea_id is not None:
+                self._check_idea_complete(idea_id)
+
         self.save()
 
     def _block_dependents(self, failed_id: int) -> None:
@@ -150,6 +156,25 @@ class ManifestManager:
             if all(self.get_status(d) in ("implemented", "verified") for d in task_deps):
                 tasks[tid]["status"] = "planned"
 
+    def _check_idea_complete(self, idea_id: int) -> None:
+        """Archive idea when all its tasks are verified (REQ-IDEA-5)."""
+        tasks = self.tasks()
+        idea_tasks = [t for t in tasks.values() if t.get("idea") == idea_id]
+        if not idea_tasks:
+            return
+        if all(t.get("status") == "verified" for t in idea_tasks):
+            self.set_idea_status(idea_id, "done")
+            # Move idea file to archived/
+            src = self.idea_path(idea_id)
+            if src.exists():
+                archived = self._ideas_dir / "archived"
+                archived.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(src), str(archived / src.name))
+            # Append to history log
+            ts = datetime.now().isoformat(timespec="seconds")
+            with open(self._history_path, "a") as f:
+                f.write(f"{ts} IDEA-{idea_id} done\n")
+
     # ── Task File Access ─────────────────────────────────────────────────
 
     def task_path(self, task_id: int) -> Path:
@@ -169,10 +194,13 @@ class ManifestManager:
 
     # ── Registration ─────────────────────────────────────────────────────
 
-    def add_task(self, task_id: int, module: str, depends: list[int] | None = None) -> None:
+    def add_task(self, task_id: int, module: str, depends: list[int] | None = None, idea: int | None = None) -> None:
         """Register a task in the manifest."""
         tasks = self._data.setdefault("tasks", {})
-        tasks[task_id] = {"status": "planned", "module": module}
+        entry: dict = {"status": "planned", "module": module}
+        if idea is not None:
+            entry["idea"] = idea
+        tasks[task_id] = entry
         modules = self._data.setdefault("modules", {})
         modules.setdefault(module, [])
         if task_id not in modules[module]:

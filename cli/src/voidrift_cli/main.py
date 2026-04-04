@@ -209,12 +209,13 @@ def gather(model, path, idea, overwrite) -> None:
 @cli.command()
 @click.argument("model", shell_complete=_complete_model)
 @click.option("--overwrite", is_flag=True, help="Remove previous plan artifacts and start fresh")
-def plan(model, overwrite) -> None:
+@click.option("--idea", type=int, help="Scope planning to a specific idea ID")
+def plan(model, overwrite, idea) -> None:
     """Plan: Generate architecture and task breakdown."""
     _check_setup()
     from .commands.plan import run_plan
     mc = resolve_model(model)
-    sys.exit(run_plan(mc, overwrite=overwrite))
+    sys.exit(run_plan(mc, overwrite=overwrite, idea_id=idea))
 
 
 @cli.command()

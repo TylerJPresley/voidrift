@@ -147,7 +147,13 @@ CLI: record affected REQ IDs (reqs: field) and diff in idea file
 
 Five-stage pipeline. Each stage uses scoped agent instances with clean message history.
 
+Optional `--idea <id>` flag scopes planning to a single idea (REQ-IDEA-5): the idea file content is appended to REQUIREMENTS.md as context for Stage 1, all produced tasks get `idea: <id>` in frontmatter, and the manifest records the idea reference. When all tasks for an idea reach `verified`, the idea is archived automatically.
+
 ```
+Preflight:
+  CLI: validate REQUIREMENTS.md exists
+  CLI: if --idea <id>, load idea file, gate on reqs: field present
+
 Stage 1 — Architecture (PLAN-ARCH, one agent):
   CLI: get_skill(ARCH-DESIGN) + get_prompt(plan, PLAN-ARCH)
   Agent: writes ARCHITECTURE.md (system-level: modules, contracts, constraints)
@@ -176,6 +182,7 @@ Stage 5 — Task files (PLAN-TASK, one agent per task):
 
 Post-processing:
   CLI: read task files → build tasks/manifest.yml (status, modules, dependencies)
+  CLI: if --idea, inject idea: <id> into task frontmatter and manifest entries
   CLI: validate skill tags (word-overlap resolution or strip)
   CLI: remove tasks/outline/ intermediates
 ```
