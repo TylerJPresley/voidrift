@@ -20,7 +20,7 @@ Discrepancies between REQUIREMENTS.md, ARCHITECTURE.md, README.md, CHANGELOG.md 
 
 - [x] **7. `TASKS.md` ghost artifact** — Replaced `TASKS.md` row in system.md artifact table with `tasks/manifest.yml` and `tasks/active/TASK-{id}.md` rows.
 
-- [ ] **8. `automate.md` ghost in ARCHITECTURE.md** — Section 2.2 lists `automate.md` as a command prompt file. No such file exists — the command was renamed to `deploy`. Update the architecture doc.
+- [x] **8. `automate.md` ghost in ARCHITECTURE.md** — Fixed to `deploy.md`. Also added `skills.md` to the list (TODO #11) and fixed "Deployd" typo (TODO #20).
 
 - [ ] **9. README Develop section stale** — Flowchart and description say "Multi-module projects run modules concurrently" and "local models run 1 module at a time, cloud/gateway models run up to 8 concurrently." Implementation dispatches at the task level (REQ-D-10) and concurrency comes from the model's `concurrency` field. Update README.
 
@@ -28,7 +28,7 @@ Discrepancies between REQUIREMENTS.md, ARCHITECTURE.md, README.md, CHANGELOG.md 
 
 ## Medium: Missing or Stale Documentation
 
-- [ ] **11. `skills.md` prompt file not in ARCHITECTURE.md** — `resources/prompts/skills.md` exists and is used by the synthesis pipeline but isn't listed in the prompt file inventory in Section 2.2.
+- [x] **11. `skills.md` prompt file not in ARCHITECTURE.md** — Fixed in TODO #8. Added `skills.md` to prompt file list.
 
 - [ ] **12. ARCHITECTURE.md skills list incomplete** — Lists 7 skills (SYSTEMS-ENG, QUALITY-QA, etc.). Actual `resources/skills/` has 16 files including BACKEND-ENG, WEB-ENG, WEB-RESEARCH, MOBILE-ENG, ML-ENG, GAME-ENG, EMBEDDED-ENG, DATA-ENG, AI-ETHICS, SECURITY-TRUST, WORKFLOW. Update the list or say "determined dynamically from directory contents".
 
@@ -48,7 +48,7 @@ Discrepancies between REQUIREMENTS.md, ARCHITECTURE.md, README.md, CHANGELOG.md 
 
 - [ ] **19. README Repository Layout missing `skills.py`** — Lists `commands/` contents as "gather, plan, develop, deploy, verify" but directory also has `skills.py`.
 
-- [ ] **20. ARCHITECTURE.md Section 3.6 typo** — "Deployd commands" should be "Automated commands".
+- [x] **20. ARCHITECTURE.md Section 3.6 typo** — Fixed in TODO #8. "Deployd" → "Automated".
 
 - [ ] **21. CHANGELOG structure** — Multiple `### Added` and `### Changed` sections at the same level under `[Unreleased]`. Some entries reference removed features (MCP, worker-cli, TaskStore). Consider consolidating.
 

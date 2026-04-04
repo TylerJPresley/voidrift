@@ -52,7 +52,7 @@ Static guidance loaded at command init:
 - `skills/` — methodology guidance (SYSTEMS-ENG, QUALITY-QA, ARCH-DESIGN, RELIABILITY-ENG, PROD-STRATEGY, CLOUD-OPS, ANALYSIS-REQS)
 - `templates/` — output structure templates (REQUIREMENTS-TEMPLATE, ARCHITECTURE-TEMPLATE, etc.)
 - `prompts/system.md` — shared framework context (command lifecycle table, artifact ownership); prepended to every agent's system prompt across all commands
-- `prompts/<command>.md` — command-specific stage instructions (gather.md, plan.md, develop.md, chat.md, automate.md, verify.md)
+- `prompts/<command>.md` — command-specific stage instructions (gather.md, plan.md, develop.md, chat.md, deploy.md, verify.md, skills.md)
 
 Synced to `~/.voidrift/resources/` via `make sync`.
 
@@ -86,7 +86,7 @@ Context window sizes live in the models file as `max_context:` fields. No lookup
 
 ### 3.6 Tool choice modes
 
-Deployd commands: `tool_choice: "required"` + auto-injected `done` tool. Chat: `tool_choice: "auto"`, no `done` injection. **Why:** `required` ensures automated commands call tools rather than narrating. `auto` is necessary for chat — forcing tool calls on every conversational turn causes models to loop or emit malformed tool calls as text (REQ-ARCH-4).
+Automated commands: `tool_choice: "required"` + auto-injected `done` tool. Chat: `tool_choice: "auto"`, no `done` injection. **Why:** `required` ensures automated commands call tools rather than narrating. `auto` is necessary for chat — forcing tool calls on every conversational turn causes models to loop or emit malformed tool calls as text (REQ-ARCH-4).
 
 ### 3.7 Per-command agent tool visibility
 
