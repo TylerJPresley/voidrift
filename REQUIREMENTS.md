@@ -182,13 +182,13 @@
   - Given a three-module project, When Stage 3 completes, Then three outline files exist in `tasks/outline/` — one per module.
   - Given a task outline entry, When a Stage 5 agent produces the task file, Then the task file contains the full implementation brief expanded from the outline entry.
 
-- **REQ-P-15:** WHEN a Stage 5 task file agent is dispatched, THE SYSTEM SHALL inject the valid skill list (name + description per REQ-P-9 format) directly into that agent's system prompt. The skill list SHALL NOT be loaded globally at plan command init for Stage 5 use — it SHALL be resolved and injected at per-agent dispatch time.
+- **REQ-P-15:** WHEN a Stage 5 task file agent is dispatched, THE SYSTEM SHALL inject the valid skill list (name + description per REQ-P-9 format) directly into that agent's system prompt. The skill list SHALL appear after the task outline and module arch context — task-specific content takes priority in the prompt. The skill list SHALL NOT be loaded globally at plan command init for Stage 5 use — it SHALL be resolved and injected at per-agent dispatch time.
   - *Rationale:* Front-loading the skill list into a monolithic prompt places it thousands of tokens from the model's current generation position by task 5+. Per-agent injection ensures the skill constraint is at position 0 of context for every task file agent, eliminating the attention decay that causes local models to invent skill names.
-  - Given a Stage 5 agent is dispatched for any task, When its system prompt is examined, Then the valid skill list appears before the task outline entry.
+  - Given a Stage 5 agent is dispatched for any task, When its system prompt is examined, Then the valid skill list appears after the task outline entry.
   - Given the plan command runs, When Stage 5 agents are dispatched, Then each agent's skill list is resolved at dispatch time from the current skill directories — not from a value computed at command start.
 - **REQ-P-2:** Planner output SHALL be fully hidden from the terminal. Only a spinner and status line SHALL be shown.
-- **REQ-P-3:** WHEN `--overwrite` is specified, THE SYSTEM SHALL remove files from the previous plan run (per STATE.md manifest) before planning. Gather-produced artifacts (REQUIREMENTS.md, spec/*.md) SHALL be preserved.
-  - Given a previous plan created ARCHITECTURE.md, TASKS.md, and arch/*.md, When `voidrift plan <model> --overwrite` is run, Then those files are deleted (per STATE.md manifest) before the planning agent starts.
+- **REQ-P-3:** WHEN `--overwrite` is specified, THE SYSTEM SHALL remove all plan-produced directories (`tasks/`, `arch/`) and `ARCHITECTURE.md` before planning. Gather-produced artifacts (REQUIREMENTS.md, spec/*.md) SHALL be preserved.
+  - Given a previous plan created ARCHITECTURE.md and populated arch/ and tasks/, When `voidrift plan <model> --overwrite` is run, Then ARCHITECTURE.md is deleted and the arch/ and tasks/ directories are removed entirely before the planning agent starts.
 - **REQ-P-4:** `auto-commits: false` SHALL be set for the plan command.
 - **REQ-P-5:** *(Replaced by REQ-TM-4. Tasks are individual files in `tasks/active/TASK-{id}.md` with YAML frontmatter. TASKS.md is an intermediate artifact parsed by the CLI into task files.)*
 - **REQ-P-6:** In multi-module projects, each file path SHALL appear in exactly one module's task group. No file SHALL be created or modified by tasks in more than one module.
