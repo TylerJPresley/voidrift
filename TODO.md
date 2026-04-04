@@ -46,7 +46,7 @@ Discrepancies between REQUIREMENTS.md, ARCHITECTURE.md, README.md, CHANGELOG.md 
 
 - [x] **18. ARCHITECTURE.md prompt file count wrong** — Already fixed in TODO #8. Prompt list now enumerates all 8 files (system + 7 command files).
 
-- [ ] **19. README Repository Layout missing `skills.py`** — Lists `commands/` contents as "gather, plan, develop, deploy, verify" but directory also has `skills.py`.
+- [x] **19. README Repository Layout missing `skills.py`** — Added `skills` to commands/ listing.
 
 - [x] **20. ARCHITECTURE.md Section 3.6 typo** — Fixed in TODO #8. "Deployd" → "Automated".
 

@@ -321,7 +321,7 @@ voidrift/
 │       ├── tools/                # Local agent tools: filesystem, process, HTTP, browser
 │       ├── utils.py              # Utilities: STATE.md, system log, task helpers
 │       ├── config.py             # Config loading, variable expansion
-│       └── commands/             # command implementations: gather, plan, develop, deploy, verify
+│       └── commands/             # command implementations: gather, plan, develop, deploy, verify, skills
 ├── resources/                    # Framework guidance → ~/.voidrift/resources/
 │   ├── prompts/                  # system.md + per-command prompts (6 files)
 │   ├── skills/                   # Domain methodology (16 files)
