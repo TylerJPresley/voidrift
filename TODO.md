@@ -52,4 +52,4 @@ Discrepancies between REQUIREMENTS.md, ARCHITECTURE.md, README.md, CHANGELOG.md 
 
 - [x] **21. CHANGELOG structure** — Consolidated from 40 duplicate section headers to 4 (Added, Changed, Fixed, Removed). Removed stale entries referencing MCP, worker-cli, TaskStore, TASKS-DONE.md, spec/. Cleaned up 0.1.0 release entry.
 
-- [ ] **22. `DESIGN-TEMPLATE.md` appears dead** — Exists in `resources/templates/` but is never referenced in requirements, architecture, or code. Remove or document its purpose.
+- [x] **22. `DESIGN-TEMPLATE.md` appears dead** — Removed. Superseded by arch/<module>.md and task files.
