@@ -145,15 +145,39 @@ CLI: record affected REQ IDs (reqs: field) and diff in idea file
 
 ### 4.2 Plan command
 
+Five-stage pipeline. Each stage uses scoped agent instances with clean message history.
+
 ```
-CLI: create planner agent → get_skill(ARCH-DESIGN)
-                          → get_prompt(plan, PLAN)
-                          → write_framework_file(ARCHITECTURE.md)
-                          → write_framework_file(TASKS.md)
-                          → write_framework_file(arch/<module>.md) × N
-CLI: parse TASKS.md → create task files in tasks/active/TASK-{id}.md
-CLI: build tasks/manifest.yml (status, modules, dependencies)
-CLI: validate skill tags in task files, strip invalid ones
+Stage 1 — Architecture (PLAN-ARCH, one agent):
+  CLI: get_skill(ARCH-DESIGN) + get_prompt(plan, PLAN-ARCH)
+  Agent: writes ARCHITECTURE.md (system-level: modules, contracts, constraints)
+  CLI: extract module list from YAML frontmatter
+  CLI: recover ARCHITECTURE.md if model writes to arch/ path
+  CLI: remove any arch/*.md written prematurely by Stage 1
+
+Stage 2 — Module arch (PLAN-MODULE, one agent per module):
+  CLI: _arch_summary(ARCHITECTURE.md, max_chars=4000) + module name
+  Agent: writes arch/<module>.md (component internals, data models, interfaces)
+
+Stage 3 — Task outline (PLAN-OUTLINE, one agent per module):
+  CLI: ARCHITECTURE.md + arch/<module>.md + id_offset
+  Agent: writes tasks/outline/<module>.md (YAML frontmatter with task list)
+  CLI: parse outline, advance id_offset for next module
+
+Stage 4 — Dependency resolution (PLAN-DEPS, one agent, multi-module only):
+  CLI: concatenate all outline files
+  Agent: writes tasks/outline/deps.yml (cross-module depends)
+  Skipped for single-module projects
+
+Stage 5 — Task files (PLAN-TASK, one agent per task):
+  CLI: task outline entry + arch/<module>.md + valid skill list (names + descriptions)
+  Prompt order: task outline first, module arch second, skill list last
+  Agent: writes tasks/active/TASK-{id}.md
+
+Post-processing:
+  CLI: read task files → build tasks/manifest.yml (status, modules, dependencies)
+  CLI: validate skill tags (word-overlap resolution or strip)
+  CLI: remove tasks/outline/ intermediates
 ```
 
 ### 4.3 Develop command

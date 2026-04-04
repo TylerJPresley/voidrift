@@ -174,7 +174,7 @@
   - Given Stage 1 produces ARCHITECTURE.md, When Stage 2 begins, Then each module arch agent receives only ARCHITECTURE.md and its module name — not other modules' arch files.
   - Given Stage 1 fails to produce ARCHITECTURE.md after one retry, When the failure is detected, Then the command exits with code 1 and no further stages run.
   - Given Stage 3 completes all module outlines, When Stage 4 begins for a multi-module project, Then the dependency agent reads all outline files and writes deps.yml before any task file agents are dispatched.
-  - Given a Stage 5 task agent is dispatched, When its system prompt is constructed, Then it contains the valid skill list at the top of context.
+  - Given a Stage 5 task agent is dispatched, When its system prompt is constructed, Then it contains the task outline and module arch before the valid skill list.
   - Given ARCHITECTURE.md is produced, When reviewed, Then it contains system-level context only and no module-internal component design.
 
 - **REQ-P-14:** Task outline files (`tasks/outline/<module>.md`) SHALL use YAML frontmatter with `module` and a `tasks:` list. Each task entry SHALL contain: `id` (integer), `title` (string), `files` (list of relative paths with create/modify annotation), and `depends` (list of integer task IDs within the same module only). The outline body below the frontmatter SHALL contain a brief (1-3 sentence) description per task of what it builds — no implementation detail, no acceptance criteria, no code examples. Outline files are intermediate artifacts consumed by Stage 4 and Stage 5 — they are not user-facing and SHALL be removed after `tasks/manifest.yml` is built.
