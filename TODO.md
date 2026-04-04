@@ -10,7 +10,7 @@ Discrepancies between REQUIREMENTS.md, ARCHITECTURE.md, README.md, CHANGELOG.md 
 
 - [x] **3. `spec/*.md` never produced by Gather** — Removed all stale `spec/` references. Gather produces `analysis/<file>.md` — updated REQUIREMENTS.md (REQ-P-3, REQ-P-12 AC, Appendix A), README.md, system.md artifact table, verify.md prompt, plan.md prompt, filesystem.py tool description. Removed dead spec-reading code from plan.py.
 
-- [ ] **4. Gather streaming contradicts REQ-G-12** — Requirements say "All gather agents SHALL use non-streaming mode (`stream=False`)". Implementation uses `stream=True` for triage, context build, source analysis, and consolidation. CHANGELOG documents this intentional change but REQUIREMENTS.md was never updated. Update the requirement to match implementation.
+- [x] **4. Gather streaming contradicts REQ-G-12** — Updated REQ-G-12 to `stream=True` with usage capture and think-tag stripping rationale. Updated V-G-3 verification entry.
 
 ## High: Documentation Inconsistencies
 

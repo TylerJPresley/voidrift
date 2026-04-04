@@ -143,8 +143,8 @@
 - **REQ-G-11:** WHEN an API call fails due to context length exceeded, THE SYSTEM SHALL display a clear error identifying the stage, the group name, and a suggestion to use a model with a larger context window. The pipeline SHALL NOT silently truncate content to fit.
   - Given a model API returns an error containing "context length", When the agent loop catches the exception, Then a `RuntimeError` is raised with a message containing the model alias and "larger context window".
   - Given a source tree with 600 files, When `_build_file_tree` is called with the default 500 limit, Then a `RuntimeError` is raised with the actual file count and the limit.
-- **REQ-G-12:** All gather agents SHALL use non-streaming mode (`stream=False`). Source analysis agents use `read_source_file()` tool calls; all other stages return direct response text.
-  - *Rationale:* Non-streaming mode ensures vLLM parses the complete response before returning, which is required for reliable tool call extraction in the source analysis stage.
+- **REQ-G-12:** All gather agents SHALL use streaming mode (`stream=True`) with usage capture for live token telemetry. Source analysis agents use `read_source_file()` tool calls; all other stages return direct response text. Think-tag stripping (REQ-ARCH-8) handles `<think>` blocks in streamed responses.
+  - *Rationale:* Streaming enables per-call token telemetry (prompt tokens, completion tokens, context %) across all gather stages, driving the spinner stats display (REQ-UI-10). Think-tag stripping resolves the original concern about formatting in streamed responses.
 - **REQ-G-13:** WHEN a source file's character count exceeds the model's `max_input_chars` limit, THE SYSTEM SHALL split the file into overlapping chunks of that size (200-character overlap) and analyze each chunk with a separate agent. IF the file produces more than one chunk, THE SYSTEM SHALL run a consolidation agent to merge the partial analyses into a single unified analysis before storing. IF chunking is triggered, the fact and chunk count SHALL be logged.
   - *Rationale:* Truncation loses the portion of the file beyond the limit. Chunking ensures every line is analyzed, at the cost of additional API calls per large file.
   - Given a model with `max_input_chars: 8000` and a source file of 20,000 characters, When source analysis runs, Then the file is split into chunks and each chunk is analyzed separately.
@@ -663,7 +663,7 @@ Two log roots, two intents:
 | V-ARCH-6a | REQ-ARCH-11 | Test | `test_agent.py::TestMaxTokensRecovery` — text truncation triggers continuation; tool truncation logged; exhaustion returns partial |
 | V-G-1 | REQ-G-1 | Test | `test_commands.py::TestGatherPreflightChecks` |
 | V-G-2 | REQ-G-11 | Test | `test_agent.py` — context length error detection |
-| V-G-3 | REQ-G-12 | Inspection | `gather.py` — all gather agents use `stream=False` |
+| V-G-3 | REQ-G-12 | Inspection | `gather.py` — all gather agents use `stream=True` |
 | V-P-1 | REQ-P-1 | Test | `test_commands.py::TestPlanPreflightChecks` — artifact production and retry |
 | V-P-2 | REQ-P-3 | Test | `test_commands.py` — fresh-start deletes existing artifacts |
 | V-SKL-1 | REQ-SKL-2 | Test | `test_skills.py` — project skill overrides domain; domain overrides north-star |
