@@ -192,7 +192,7 @@ class AgentLoop(BaseModel):
         if self.log_path:
             for m in self.messages:
                 if m["role"] == "system":
-                    self._log(f"[SYSTEM] {m['content'][:2000]}")
+                    self._log(f"[SYSTEM] {m['content'][:8000]}")
             self._log(f"[USER] {self.messages[-1]['content'][:2000]}")
 
         while True:

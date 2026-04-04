@@ -120,12 +120,18 @@ OUTLINES:
 
 **Role:** Task author — write one implementation task file.
 
+The task outline and module arch below are your primary context. Write the task file based on them.
+
+TASK OUTLINE:
+{task_outline}
+
+MODULE ARCH:
+{module_arch}
+
 Select the skill whose description best matches this task. Use ONLY names from the list below — do not invent skill names.
 
 Available skills (name: description):
 {valid_skills}
-
-The task outline and module arch are provided at the end of this prompt — use them as your context.
 
 Steps:
 1. Write `tasks/active/TASK-{task_id}.md` via `write_framework_file()` using this format:
@@ -156,12 +162,6 @@ As a [role], I want [feature] so that [benefit].
 ```
 
 2. Call `done()`.
-
-TASK OUTLINE:
-{task_outline}
-
-MODULE ARCH:
-{module_arch}
 
 ## ARCH-RETRY
 
