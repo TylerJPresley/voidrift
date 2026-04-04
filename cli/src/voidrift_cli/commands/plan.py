@@ -39,19 +39,19 @@ def run_plan(
 
     if overwrite:
         from ..utils import undo_command
+        import shutil
         deleted = undo_command("plan")
-        for target in [d / "ARCHITECTURE.md", d / "tasks" / "manifest.yml"]:
+        for target in [d / "ARCHITECTURE.md"]:
             if target.exists() and str(target) not in deleted:
                 target.unlink()
                 deleted.append(str(target))
-        for cleanup_dir in [d / "arch", d / "tasks" / "active", d / "tasks" / "outline"]:
+        for cleanup_dir in [d / "arch", d / "tasks"]:
             if cleanup_dir.is_dir():
-                for af in list(cleanup_dir.iterdir()):
-                    if str(af) not in deleted:
-                        af.unlink()
-                        deleted.append(str(af))
+                count = sum(1 for _ in cleanup_dir.rglob("*") if _.is_file())
+                shutil.rmtree(cleanup_dir)
+                deleted.extend([f"({count} files in {cleanup_dir.name}/"])
         if deleted:
-            ui.info(f"Cleared {len(deleted)} files from previous plan.")
+            ui.info(f"Cleared {len(deleted)} items from previous plan.")
 
     log, _run_id = boot_run("plan")
     ui.detail(f"Log: {log}")
