@@ -96,6 +96,13 @@ def run_plan(
         stage_label="architecture",
     )
     if not ok:
+        # Recovery: model may write to arch/ARCHITECTURE.md instead of ARCHITECTURE.md
+        misplaced = d / "arch" / "ARCHITECTURE.md"
+        if misplaced.exists() and not (d / "ARCHITECTURE.md").exists():
+            misplaced.rename(d / "ARCHITECTURE.md")
+            ui.detail("Recovered ARCHITECTURE.md from arch/ (model used wrong path).")
+            ok = True
+    if not ok:
         return 1
 
     # Enforce stage boundary: remove any arch files written prematurely by Stage 1.

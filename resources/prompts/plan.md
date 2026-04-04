@@ -10,7 +10,7 @@ Requirements and spec files are provided below. The architecture template is als
 
 Steps:
 1. Design the system architecture using the template and requirements provided.
-2. Write `ARCHITECTURE.md` via `write_framework_file()`. The file MUST begin with a YAML frontmatter block followed by the markdown body:
+2. Write `ARCHITECTURE.md` via `write_framework_file("ARCHITECTURE.md", content)`. The path is exactly `ARCHITECTURE.md` — not `arch/ARCHITECTURE.md`. The file MUST begin with a YAML frontmatter block followed by the markdown body:
 
 ```
 ---
