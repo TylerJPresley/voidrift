@@ -4,16 +4,6 @@ Work items and ideas. Grouped by area, ordered by priority within each group.
 
 ---
 
-## Idea System — Unvalidated
-
-- [ ] **`/idea` new flow** — Injects IDEA prompt overlay into agent system prompt, returns message for agent.send(). Handler exists at `_handle_idea()` in main.py. Untested against a real model. Risk: overlay injection mutates `agent.messages[0]["content"]` which may not persist correctly across turns.
-
-- [ ] **`/idea <id>` load flow** — Reads existing idea file, injects content + overlay, asks agent to summarize. Same handler, different branch. Risk: if the idea file is large, injecting it into the system prompt may consume significant context.
-
-- [ ] **`/done` prompt_toolkit conflict** — `_finish_idea()` uses `prompt_toolkit.prompt()` for category selection which may conflict with the existing PromptSession. Needs manual testing.
-
----
-
 ## Future
 
 - [ ] history.log rotation strategy tied to release planning in deploy. Rotate on release boundaries rather than size/date.
