@@ -1,55 +1,50 @@
-# Documentation Audit TODO
+# TODO — Backlog
 
-Discrepancies between REQUIREMENTS.md, ARCHITECTURE.md, README.md, CHANGELOG.md and the actual implementation.
+Work items that need doing. Grouped by area, ordered by priority within each group.
 
-## Critical: Documented but Not Implemented
+---
 
-- [x] **1. `plan --idea` not implemented (REQ-IDEA-5)** — Implemented. `--idea <id>` option added to plan command. Loads idea content as context, gates on `reqs:` field, injects `idea:` into task frontmatter, records in manifest, auto-archives idea when all tasks verified.
+## Idea System — Unvalidated
 
-- [x] **2. Plan update mode not implemented (REQ-P-11)** — Implemented. Delta analysis stage runs when ARCHITECTURE.md + manifest.yml exist and `--overwrite` is not set. Agent receives requirements, architecture, and source file listing (filenames only), returns implemented/unimplemented classification. Delta injected into Stage 1 and Stage 3. Fresh plan and `--overwrite` skip delta. Test updated.
+- [ ] **`/idea` new flow** — Injects IDEA prompt overlay into agent system prompt, returns message for agent.send(). Handler exists at `_handle_idea()` in main.py. Untested against a real model. Risk: overlay injection mutates `agent.messages[0]["content"]` which may not persist correctly across turns.
 
-- [x] **3. `spec/*.md` never produced by Gather** — Removed all stale `spec/` references. Gather produces `analysis/<file>.md` — updated REQUIREMENTS.md (REQ-P-3, REQ-P-12 AC, Appendix A), README.md, system.md artifact table, verify.md prompt, plan.md prompt, filesystem.py tool description. Removed dead spec-reading code from plan.py.
+- [ ] **`/idea <id>` load flow** — Reads existing idea file, injects content + overlay, asks agent to summarize. Same handler, different branch. Risk: if the idea file is large, injecting it into the system prompt may consume significant context.
 
-- [x] **4. Gather streaming contradicts REQ-G-12** — Updated REQ-G-12 to `stream=True` with usage capture and think-tag stripping rationale. Updated V-G-3 verification entry.
+- [ ] **`/done` prompt_toolkit conflict** — `_finish_idea()` uses `prompt_toolkit.prompt()` for category selection which may conflict with the existing PromptSession. Needs manual testing.
 
-## High: Documentation Inconsistencies
+---
 
-- [x] **5. ARCHITECTURE.md Section 3.2 streaming claim is wrong** — Rewritten to document that gather and chat use `stream=True`, while plan/develop/deploy/verify use `stream=False`. Explains rationale for each.
+## Future
 
-- [x] **6. Analysis cache path stale in REQ-CTX-5** — Fixed stale `.voidrift/cache/analyses/` reference in REQ-G-8 Stage 3. Now correctly says frontmatter `hash` in `.voidrift/analysis/<filepath>.md`. REQ-CTX-5 itself was already correct.
+- [ ] history.log rotation strategy tied to release planning in deploy. Rotate on release boundaries rather than size/date.
+- [ ] Kanban-style board view for `voidrift status` — Rich table grouped by status columns (planned, in-progress, implemented, verified, failed/blocked). Data from manifest.yml.
+- [ ] **Progressive skill synthesis (Tier 3)** — When a task requires a skill that doesn't exist at any layer and word-overlap resolution also fails, synthesize a new skill on-the-fly using the `skills install` pipeline and write it to `.voidrift/skills/` (project layer). The synthesized skill accumulates across runs, growing the project skill library automatically. Requires: synthesis_model configured in config.yml, sandboxed synthesis call during plan stage 2, operator-approval gate before the skill becomes active (same pending/ mechanism as domain skills). Reference: Voyager self-growing skill library pattern.
 
-- [x] **7. `TASKS.md` ghost artifact** — Replaced `TASKS.md` row in system.md artifact table with `tasks/manifest.yml` and `tasks/active/TASK-{id}.md` rows.
+---
 
-- [x] **8. `automate.md` ghost in ARCHITECTURE.md** — Fixed to `deploy.md`. Also added `skills.md` to the list (TODO #11) and fixed "Deployd" typo (TODO #20).
+## Documentation Audit (2026-04-04) — Complete
 
-- [x] **9. README Develop section stale** — Rewrote description (manifest-based dispatch, task-level concurrency from model config), updated flowchart (removed get_next_task/load arch+spec, added manifest read/dispatch), fixed Verify section references (TASKS.md/spec → arch/*.md/task files).
+All 22 items resolved. See git history for details.
 
-- [x] **10. README Project Layout lists `TASKS.md`** — Removed `TASKS.md` line (tasks/ section already lists manifest.yml + active/). Also removed duplicate `analysis/<file>.md` line.
-
-## Medium: Missing or Stale Documentation
-
-- [x] **11. `skills.md` prompt file not in ARCHITECTURE.md** — Fixed in TODO #8. Added `skills.md` to prompt file list.
-
-- [x] **12. ARCHITECTURE.md skills list incomplete** — Updated to note 16 files determined dynamically, listed key skills as examples.
-
-- [x] **13. ARCHITECTURE.md Section 3.6 duplicate numbering** — Renumbered first 3.6 (`max_context`) to 3.5. Sections now 3.1–3.9 with no gaps or duplicates.
-
-- [x] **14. README "See Appendix C" broken reference** — Fixed broken anchor link. Table is in REQUIREMENTS.md, not README.
-
-- [x] **15. `plan --idea` traceability chain missing (REQ-IDEA-5)** — Implemented in TODO #1. Tasks get `idea: <id>` in frontmatter, manifest records idea reference, ideas auto-archive when all derived tasks verified.
-
-- [x] **16. No Deploy data flow in ARCHITECTURE.md** — Added Section 4.6 Deploy command data flow. Fixed duplicate 4.5 numbering (Agent prompt → 4.7, Agent loop → 4.8).
-
-- [x] **17. Verify prompt references `TASKS.md`** — Fixed in TODO #3. Updated to `tasks/manifest.yml` and `arch/<module>.md`.
-
-## Low: Minor Issues
-
-- [x] **18. ARCHITECTURE.md prompt file count wrong** — Already fixed in TODO #8. Prompt list now enumerates all 8 files (system + 7 command files).
-
-- [x] **19. README Repository Layout missing `skills.py`** — Added `skills` to commands/ listing.
-
-- [x] **20. ARCHITECTURE.md Section 3.6 typo** — Fixed in TODO #8. "Deployd" → "Automated".
-
-- [x] **21. CHANGELOG structure** — Consolidated from 40 duplicate section headers to 4 (Added, Changed, Fixed, Removed). Removed stale entries referencing MCP, worker-cli, TaskStore, TASKS-DONE.md, spec/. Cleaned up 0.1.0 release entry.
-
-- [x] **22. `DESIGN-TEMPLATE.md` appears dead** — Removed. Superseded by arch/<module>.md and task files.
+- [x] 1. `plan --idea` (REQ-IDEA-5) — implemented
+- [x] 2. Plan update mode (REQ-P-11) — implemented (delta analysis)
+- [x] 3. `spec/*.md` ghost — removed all references
+- [x] 4. REQ-G-12 streaming — updated to match `stream=True`
+- [x] 5. ARCHITECTURE.md streaming claim — fixed
+- [x] 6. Analysis cache path — fixed stale reference
+- [x] 7. `TASKS.md` ghost — replaced in system.md
+- [x] 8. `automate.md` ghost — fixed to `deploy.md`
+- [x] 9. README Develop section — rewritten for task-level dispatch
+- [x] 10. README Project Layout `TASKS.md` — removed
+- [x] 11. `skills.md` missing from ARCHITECTURE.md — added (in #8)
+- [x] 12. Skills list incomplete — updated to 16 files
+- [x] 13. Section 3.6 duplicate — renumbered
+- [x] 14. Appendix C broken link — fixed
+- [x] 15. `plan --idea` traceability — implemented (in #1)
+- [x] 16. Deploy data flow missing — added
+- [x] 17. Verify prompt `TASKS.md` — fixed (in #3)
+- [x] 18. Prompt file count — fixed (in #8)
+- [x] 19. README missing `skills.py` — added
+- [x] 20. "Deployd" typo — fixed (in #8)
+- [x] 21. CHANGELOG structure — consolidated
+- [x] 22. `DESIGN-TEMPLATE.md` dead — removed
