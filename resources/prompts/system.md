@@ -16,7 +16,8 @@ You are an agent in **VoidRift**, an agentic software engineering framework. AI 
 | `analysis/*.md` | Gather | Plan, Chat | Per-file source analysis — requirements extracted from each source file |
 | `ARCHITECTURE.md` | Plan | Develop, Chat | System map — module inventory, cross-module contracts, cross-cutting concerns |
 | `arch/*.md` | Plan | Develop | Module design — components, data models, interfaces (exposed and consumed) |
-| `TASKS.md` | Plan | Develop | Ordered work items with skill tags — developer receives one task at a time |
+| `tasks/manifest.yml` | Plan (CLI) | Develop | Task status, dependencies, module grouping — CLI-owned orchestration state |
+| `tasks/active/TASK-{id}.md` | Plan | Develop | Self-contained task tickets with frontmatter, user story, context, and acceptance criteria |
 | `VERIFY.md` | Verify | Chat | Verification results — test results, lint, requirements coverage, verdict |
 | `STATE.md` | CLI (auto) | Develop, Chat | Command lifecycle log — timestamp, model, outcome, file manifest per run. Written by the CLI after each command completes — agents read it but never write it. |
 | `logs/<command>-<ts>.log` | Each command | (read-only, never load) | Full agent dialog for that run — not a tool-readable artifact |
