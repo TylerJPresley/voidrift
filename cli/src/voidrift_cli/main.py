@@ -112,10 +112,13 @@ def main() -> None:
 def _active_model_alias() -> str | None:
     """Return the alias of the currently running local model, or None (REQ-ARCH-3).
 
-    Reads ~/.worker-cli/.active-container written by worker start.
+    Reads the active container file (configurable via active_container_file in config.yml,
+    default ~/.worker-cli/.active-container) written by worker start.
     Second line of the file is the model alias.
     """
-    p = Path.home() / ".worker-cli" / ".active-container"
+    from .config import load_config
+    cfg = load_config()
+    p = Path(cfg.get("active_container_file", str(Path.home() / ".worker-cli" / ".active-container")))
     if not p.exists():
         return None
     lines = p.read_text().strip().splitlines()
@@ -188,12 +191,27 @@ def _check_setup() -> None:
         )
 
 
+def _make_budget(max_input_tokens: int | None, max_output_tokens: int | None, mc=None):
+    """Create a TokenBudget from CLI flags + model config (REQ-ARCH-13).
+
+    CLI flags override model config values. Returns None if no limits are set.
+    """
+    from .token_budget import TokenBudget
+    inp = max_input_tokens or (mc.max_input_tokens if mc else None)
+    out = max_output_tokens or (mc.max_output_tokens if mc else None)
+    if inp or out:
+        return TokenBudget(max_input_tokens=inp, max_output_tokens=out)
+    return None
+
+
 @cli.command()
 @click.argument("model", shell_complete=_complete_model)
 @click.option("--path", type=click.Path(exists=True), help="Path to codebase directory")
 @click.option("--idea", type=int, help="Idea ID to generate requirements from")
 @click.option("--overwrite", is_flag=True, help="Remove previous gather artifacts and start fresh")
-def gather(model, path, idea, overwrite) -> None:
+@click.option("--max-input-tokens", type=int, help="Max input tokens for this run")
+@click.option("--max-output-tokens", type=int, help="Max output tokens for this run")
+def gather(model, path, idea, overwrite, max_input_tokens, max_output_tokens) -> None:
     """Gather: Reverse-engineer requirements from a codebase or idea."""
     if not path and idea is None:
         click.echo("Error: specify --path <dir> or --idea <id>\n")
@@ -203,7 +221,8 @@ def gather(model, path, idea, overwrite) -> None:
     _check_setup()
     from .commands.gather import run_gather
     mc = resolve_model(model)
-    sys.exit(run_gather(mc, from_path=path, idea_id=idea, overwrite=overwrite))
+    budget = _make_budget(max_input_tokens, max_output_tokens, mc=mc)
+    sys.exit(run_gather(mc, from_path=path, idea_id=idea, overwrite=overwrite, token_budget=budget))
 
 
 @cli.command()
@@ -221,13 +240,16 @@ def plan(model, overwrite, idea) -> None:
 @cli.command()
 @click.argument("model", shell_complete=_complete_model)
 @click.argument("architect", required=False, shell_complete=_complete_model)
-def develop(model, architect) -> None:
+@click.option("--max-input-tokens", type=int, help="Max input tokens for this run")
+@click.option("--max-output-tokens", type=int, help="Max output tokens for this run")
+def develop(model, architect, max_input_tokens, max_output_tokens) -> None:
     """Develop: Execute implementation tasks."""
     _check_setup()
     from .commands.develop import run_develop
     mc = resolve_model(model)
     am = resolve_model(architect) if architect else mc
-    sys.exit(run_develop(mc, architect=am))
+    budget = _make_budget(max_input_tokens, max_output_tokens, mc=mc)
+    sys.exit(run_develop(mc, architect=am, token_budget=budget))
 
 
 @cli.command()
@@ -282,9 +304,11 @@ def _query_max_context(mc) -> int | None:
     return mc.max_context
 
 
-def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None, web_fetch_kwargs=None):
+def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None, web_fetch_kwargs=None, original_skill=None, session=None, style="verbose"):
     """Shared interactive terminal loop (REQ-UI-1, REQ-UI-2, REQ-UI-4)."""
     from .agent import AgentLoop
+
+    _original_skill = original_skill or ""
 
     model_label = f"{mc.alias} ({mc.model_id})"
     ui.header(title)
@@ -400,8 +424,19 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
                 pad=(1, 0, 0, 0),
             ))
 
+    # Tool call tracking for --style (REQ-UI-12)
+    _tool_calls_this_turn: list[str] = []
+
     def on_tool_call(name: str) -> None:
         _got_token[0] = False  # back to thinking state while tool executes
+        _tool_calls_this_turn.append(name)
+        if style == "verbose":
+            live = _live_holder[0]
+            if live is not None:
+                live.update(_RPadding(
+                    _RText(f"  → {name}", style="dim"), pad=(1, 0, 0, 0),
+                ))
+                return
         live = _live_holder[0]
         if live is not None:
             live.update(_thinking())
@@ -457,6 +492,44 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
             **web_fetch_kwargs, confirm_fn=_live_confirm
         )
 
+    # Wire ask_user_question handler with terminal restoration (TASK-FW-011)
+    from .tools import make_ask_user_handler as _make_auh
+
+    def _live_ask(question: str, options: list[str] | None) -> str:
+        live = _live_holder[0]
+        if live is not None:
+            live.transient = True
+            live.stop()
+            live.transient = False
+        _ts = _term_holder[0]
+        if _ts is not None:
+            _tm, _fd, _saved = _ts
+            try:
+                _tm.tcsetattr(_fd, _tm.TCSANOW, _saved)
+            except Exception:
+                pass
+        ui._con.print(f"\n[bold yellow]▸ Agent question:[/bold yellow] {question}")
+        if options:
+            for i, opt in enumerate(options, 1):
+                ui._con.print(f"  [cyan]{i}.[/cyan] {opt}")
+        try:
+            response = input("  > ")
+        except (EOFError, KeyboardInterrupt):
+            response = "[No response]"
+        if _ts is not None:
+            try:
+                _raw = _tm.tcgetattr(_fd)
+                _raw[3] &= ~(_tm.ECHO | _tm.ICANON)
+                _tm.tcsetattr(_fd, _tm.TCSANOW, _raw)
+            except Exception:
+                pass
+        if live is not None:
+            live.start()
+            live.update(_thinking())
+        return response
+
+    agent.tool_handlers["ask_user_question"] = _make_auh(ask_fn=_live_ask)
+
     agent.on_token = on_token
     agent.on_complete = on_complete
     agent.on_tool_call = on_tool_call
@@ -479,27 +552,34 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
         else:
             buf.validate_and_handle()
 
-    session = PromptSession(key_bindings=kb, multiline=True)
+    _prompt_session = PromptSession(key_bindings=kb, multiline=True)
 
     _consecutive_interrupt = 0
     _compact_nudged = False  # inject compact reminder once when context hits 70%
+    _compact_failures = 0  # circuit breaker counter (REQ-U-10)
+    _auto_compact_disabled = False  # set True after 3 consecutive failures
 
-    def _do_compact() -> None:
-        """Summarize history to free context. Called by /compact and auto-compact."""
-        nonlocal _compact_nudged
+    def _do_compact() -> bool:
+        """Summarize history to free context (REQ-U-7, REQ-U-10, REQ-U-11).
+
+        Returns True on success, False on failure.
+        """
+        nonlocal _compact_nudged, _compact_failures, _auto_compact_disabled
         ui._con.print()  # blank line after operator input
         if len(agent.messages) <= 1:
             ui.info("Nothing to compact.")
-            return
+            return True
 
         target = max_ctx // 10 if max_ctx else 8000
-        compact_prompt = (
-            "Summarize this conversation concisely. Capture: key decisions made, "
-            "artifacts discussed or modified, any pending work or open questions. "
-            f"Keep the summary under {target} tokens."
+        from . import prompts as _prompts
+        compact_prompt = _prompts.load_prompt("chat", "COMPACT").format(
+            target_tokens=target,
         )
 
-        # Disable terminal echo and show Thinking... spinner while the model works.
+        # Capture original system prompt and skills for restoration (REQ-U-11).
+        original_system = agent.messages[0]["content"]
+
+        # Disable terminal echo and show spinner while the model works.
         _saved_term = None
         try:
             import termios as _termios
@@ -524,7 +604,11 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
                 summary = resp.choices[0].message.content or ""
         except Exception as e:
             ui.error(f"Compact failed: {e}")
-            return
+            _compact_failures += 1
+            if _compact_failures >= 3:
+                _auto_compact_disabled = True
+                ui.warn("Compaction failing repeatedly — auto-compact disabled. Start a new session.")
+            return False
         finally:
             if _saved_term is not None:
                 try:
@@ -532,14 +616,80 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
                 except Exception:
                     pass
 
-        sys_content = agent.messages[0]["content"] + f"\n\n[Conversation summary]\n{summary}"
+        # Replace history with system prompt + summary.
+        sys_content = original_system + f"\n\n[Conversation summary]\n{summary}"
         agent.messages = [{"role": "system", "content": sys_content}]
+
+        # Check if result exceeds 10% cap.
+        result_tokens = _estimate_tokens(agent.messages)
+        if max_ctx and result_tokens > max_ctx // 10:
+            _compact_failures += 1
+            if _compact_failures >= 3:
+                _auto_compact_disabled = True
+                ui.warn("Compaction failing repeatedly — auto-compact disabled. Start a new session.")
+            ui.warn(f"Compact result still {result_tokens * 100 // max_ctx}% of context.")
+            return False
+
+        # Success — reset failure counter.
+        _compact_failures = 0
+
+        # Post-compact restoration (REQ-U-11): re-inject recent files and skills.
+        from .tools.filesystem import get_read_files as _get_read_files
+        restore_parts: list[str] = []
+        restore_budget = max_ctx // 5 if max_ctx else 50000  # 20% cap
+        restore_used = 0
+
+        # Last 3 unique files, newest first.
+        recent = _get_read_files()
+        seen: set[str] = set()
+        newest_3: list[str] = []
+        for p in reversed(recent):
+            if p not in seen:
+                seen.add(p)
+                newest_3.append(p)
+                if len(newest_3) == 3:
+                    break
+
+        for fpath in newest_3:
+            try:
+                from pathlib import Path as _Path
+                if fpath.startswith(".voidrift/"):
+                    full = _Path.cwd() / fpath
+                else:
+                    full = _Path.cwd() / fpath
+                if not full.exists():
+                    continue
+                content = full.read_text(encoding="utf-8", errors="replace")
+                cost = len(content) // 4  # rough token estimate
+                if restore_used + cost > restore_budget:
+                    break
+                restore_parts.append(f"[File: {fpath}]\n{content}")
+                restore_used += cost
+            except Exception:
+                continue
+
+        # Re-inject skills from original system prompt.
+        # Skills are delimited by their markdown headers in the system prompt.
+        # We stored the skill content at chat init — extract from original_system.
+        if _original_skill and restore_used + len(_original_skill) // 4 <= restore_budget:
+            restore_parts.append(f"[Skills]\n{_original_skill}")
+
+        if restore_parts:
+            agent.messages.append({
+                "role": "system",
+                "content": "[Restored context]\n\n" + "\n\n".join(restore_parts),
+            })
+
         pct = _estimate_tokens(agent.messages) * 100 // max_ctx if max_ctx else 0
         ui.info(f"Compacted to {pct}% of context window.")
         ui._con.print(ui.render_text(summary), style="dim")
         with open(log, "a") as f:
             f.write(f"\n[COMPACT] {summary}\n")
-        _compact_nudged = False  # allow nudge again if context fills back up
+        # Persist compaction to session JSONL (REQ-U-13)
+        if session:
+            session.append_compaction(summary)
+        _compact_nudged = False
+        return True
 
     # ── Idea refinement state (REQ-IDEA-1 through REQ-IDEA-4) ───────
     _idea_state: dict = {}  # {"active": True, "id": N, "mm": ManifestManager}
@@ -628,7 +778,7 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
     try:
         while True:
             try:
-                user_input = session.prompt(_context_prompt()).strip()
+                user_input = _prompt_session.prompt(_context_prompt()).strip()
                 _consecutive_interrupt = 0
             except KeyboardInterrupt:
                 _consecutive_interrupt += 1
@@ -647,6 +797,38 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
             # /compact — summarize history to free context (REQ-U-7)
             if user_input.lower().strip() == "/compact":
                 _do_compact()
+                continue
+
+            # /clear — wipe session and start fresh (REQ-U-13)
+            if user_input.lower().strip() == "/clear":
+                if session:
+                    session.clear()
+                # Reset agent to just system prompt
+                agent.messages = [agent.messages[0]]
+                ui.info("Session cleared.")
+                continue
+
+            # /quick — one-shot side question, no history effect (REQ-U-15)
+            if user_input.lower().startswith("/quick"):
+                _quick_text = user_input[6:].strip()
+                if not _quick_text:
+                    ui.info("Usage: /quick <question>")
+                    continue
+                try:
+                    _quick_client = agent._get_client()
+                    _quick_resp = _quick_client.chat.completions.create(
+                        model=agent._model_name(),
+                        messages=[
+                            {"role": "system", "content": "Answer concisely."},
+                            {"role": "user", "content": _quick_text},
+                        ],
+                        max_tokens=2048,
+                    )
+                    _quick_answer = _quick_resp.choices[0].message.content or ""
+                    ui._con.print()
+                    ui._con.print(ui.render_text(_quick_answer) if style != "raw" else f"  {_quick_answer}")
+                except Exception as _qe:
+                    ui.error(f"Quick answer failed: {_qe}")
                 continue
 
             # /idea — guided idea refinement (REQ-IDEA-1)
@@ -688,11 +870,15 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
             _turn_label[0] = ui.random_label()
             _msg_snapshot = len(agent.messages)
 
-            # Auto-compact at 95%; nudge once at 70% (REQ-UI-6).
+            # Clear active skill restrictions at start of each turn (REQ-SKL-9)
+            from .agent import clear_active_skill
+            clear_active_skill()
+
+            # Auto-compact at 80%; nudge once at 70% (REQ-U-10).
             if max_ctx:
                 pct = min(100, _estimate_tokens(agent.messages) * 100 // max_ctx)
-                if pct >= 95:
-                    ui.info("Context window at 95% — auto-compacting...")
+                if pct >= 80 and not _auto_compact_disabled:
+                    ui.info("Context window at 80% — auto-compacting...")
                     _do_compact()
                     _compact_nudged = True
                     _msg_snapshot = len(agent.messages)
@@ -724,7 +910,24 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
             _error = None
             _interrupted = False
             _live_start[0] = time.time()
-            with Live(_thinking(), console=ui._con, refresh_per_second=12) as _live:
+            if style == "raw":
+                try:
+                    response = agent.send(user_input)
+                    print(f"\n  {response}\n")
+                except KeyboardInterrupt:
+                    _interrupted = True
+                except RuntimeError as e:
+                    _error = str(e)
+                finally:
+                    _term_holder[0] = None
+                    if _saved_term is not None:
+                        try:
+                            _termios.tcsetattr(_fd, _termios.TCSANOW, _saved_term)
+                            _termios.tcflush(_fd, _termios.TCIFLUSH)
+                        except Exception:
+                            pass
+            else:
+              with Live(_thinking(), console=ui._con, refresh_per_second=12) as _live:
                 _live_holder[0] = _live
                 try:
                     response = agent.send(user_input)
@@ -761,6 +964,19 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
             if _stats_parts:
                 ui.stats(_stats_parts)
 
+            # Terse tool call summary (REQ-UI-12)
+            if style == "terse" and _tool_calls_this_turn:
+                from collections import Counter
+                counts = Counter(_tool_calls_this_turn)
+                summary = ", ".join(f"{n}× {t}" for t, n in counts.most_common())
+                ui._con.print(f"  [dim][{len(_tool_calls_this_turn)} tool calls: {summary}][/dim]")
+            _tool_calls_this_turn.clear()
+
+            # Persist to session JSONL (REQ-U-13)
+            if session:
+                session.append_message("user", user_input)
+                session.append_message("assistant", response)
+
             with open(log, "a") as f:
                 f.write(f"\n{response}\n")
             ui._con.print()
@@ -777,8 +993,14 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
 @cli.command()
 @click.argument("model", shell_complete=_complete_model)
 @click.option("--doc", help="Scope conversation to a specific .voidrift/ artifact")
-def chat(model, doc) -> None:
+@click.option("--style", type=click.Choice(["verbose", "terse", "raw"]), default="verbose", help="Output style")
+@click.option("--bare", is_flag=True, default=False, help="Minimal context — no skills, git, or project state injection")
+@click.option("--system-prompt", "system_prompt_path", type=click.Path(exists=True), help="Custom system prompt file (requires --bare)")
+def chat(model, doc, style, bare, system_prompt_path) -> None:
     """Interactive session with CLI-native tools for requirements, planning, and refinement."""
+    if system_prompt_path and not bare:
+        click.echo("Error: --system-prompt requires --bare", err=True)
+        sys.exit(1)
     _check_setup()
     mc = resolve_model(model)
     from .agent import AgentLoop, build_local_tools
@@ -805,21 +1027,35 @@ def chat(model, doc) -> None:
     )
     handlers["web_fetch"] = make_web_fetch_handler(**_web_fetch_kwargs)
 
-    skill = find_skill("ANALYSIS-REQS") or ""
-    system_context = _prompts.load_prompt("system", "CONTEXT")
-    system_prompt = _prompts.load_prompt("chat", "SYSTEM")
-
-    # Load project state for lifecycle awareness (REQ-PS-3)
+    # Build system prompt (REQ-U-17: --bare strips framework context)
     from .utils import voidrift_dir
-    state_file = voidrift_dir() / "STATE.md"
-    project_state = ""
-    if state_file.exists():
-        project_state = f"**Project state:**\n\n{state_file.read_text()}"
+    if system_prompt_path:
+        system = Path(system_prompt_path).read_text()
+        skill = ""
+    elif bare:
+        system = _prompts.load_prompt("system", "CONTEXT")
+        skill = ""
+    else:
+        skill = find_skill("ANALYSIS-REQS") or ""
+        system_context = _prompts.load_prompt("system", "CONTEXT")
+        system_prompt = _prompts.load_prompt("chat", "SYSTEM")
 
-    system = "\n\n".join(p for p in [system_context, skill, system_prompt, project_state] if p)
+        state_file = voidrift_dir() / "STATE.md"
+        project_state = ""
+        if state_file.exists():
+            project_state = f"**Project state:**\n\n{state_file.read_text()}"
+
+        from .git_context import capture_git_snapshot
+        _snap = capture_git_snapshot(str(Path.cwd()))
+        _git_block = _snap.to_prompt_block() if _snap else ""
+
+        # Memory index injection (REQ-MEM-1)
+        from .memory import MemoryManager
+        _mem_block = MemoryManager(str(Path.cwd())).index_prompt_block()
+
+        system = "\n\n".join(p for p in [system_context, skill, system_prompt, project_state, _git_block, _mem_block] if p)
 
     if doc:
-        from .utils import voidrift_dir
         doc_path = voidrift_dir() / doc
         if doc_path.exists():
             doc_section = _prompts.load_prompt("chat", "DOC").format(
@@ -840,8 +1076,51 @@ def chat(model, doc) -> None:
         log_path=log,
     )
 
+    # Skill tool restriction hook — checks module-level state set by get_skill (REQ-SKL-9)
+    from .agent import _active_skill_allowed_tools
+    from .skills import make_skill_tool_guard
+
+    def _skill_guard(name: str, args: str) -> str | None:
+        at = _active_skill_allowed_tools["allowed"]
+        if at is None:
+            return None
+        guard = make_skill_tool_guard(at, _active_skill_allowed_tools["name"])
+        return guard(name, args) if guard else None
+
+    agent.before_tool_call = _skill_guard
+
+    # Session persistence — auto-resume from project-scoped JSONL (REQ-U-13)
+    from .session import ChatSession
+    session = ChatSession.load_or_create(voidrift_dir())
+    if session.has_messages:
+        restored = session.reconstruct_messages()
+        # Restore messages after the system prompt (messages[0])
+        if restored:
+            # Skip any system messages from compaction — they'll be merged with current system
+            for m in restored:
+                if m["role"] == "system":
+                    agent.messages[0]["content"] += f"\n\n[Prior session context]\n{m['content']}"
+                else:
+                    agent.messages.append(m)
+        ts = session.last_timestamp() or ""
+        elapsed = ""
+        if ts:
+            from datetime import datetime, timezone
+            try:
+                last = datetime.fromisoformat(ts)
+                delta = datetime.now(timezone.utc) - last
+                if delta.days > 0:
+                    elapsed = f", last active {delta.days}d ago"
+                elif delta.seconds >= 3600:
+                    elapsed = f", last active {delta.seconds // 3600}h ago"
+                elif delta.seconds >= 60:
+                    elapsed = f", last active {delta.seconds // 60}m ago"
+            except Exception:
+                pass
+        ui.info(f"Resuming session ({session.message_count()} messages{elapsed})")
+
     title = f"VoidRift Chat — {doc}" if doc else "VoidRift Chat"
-    _interactive_loop(agent, mc, log, title, web_fetch_kwargs=_web_fetch_kwargs)
+    _interactive_loop(agent, mc, log, title, web_fetch_kwargs=_web_fetch_kwargs, original_skill=skill, session=session, style=style)
 
 
 @cli.command()
@@ -1038,6 +1317,28 @@ def prune(global_: bool, all_: bool) -> None:
         parts.append(f"{removed_logs} log(s)")
     if stale_lock:
         parts.append("stale lock")
+
+    # Analysis cache pruning (REQ-U-14)
+    from .utils import prune_analysis_cache
+    from .config import get_cache_config
+    cache_cfg = get_cache_config()
+    cache_stats = prune_analysis_cache(
+        d.parent,
+        max_entries=cache_cfg.get("max_entries", 500),
+        ttl_days=cache_cfg.get("ttl_days", 30),
+    )
+    cache_total = cache_stats["stale"] + cache_stats["expired"] + cache_stats["lru"]
+    if cache_total:
+        freed_kb = cache_stats["bytes_freed"] // 1024
+        detail = []
+        if cache_stats["stale"]:
+            detail.append(f"{cache_stats['stale']} stale")
+        if cache_stats["expired"]:
+            detail.append(f"{cache_stats['expired']} expired")
+        if cache_stats["lru"]:
+            detail.append(f"{cache_stats['lru']} LRU")
+        parts.append(f"{cache_total} analysis cache ({', '.join(detail)}, {freed_kb}KB freed)")
+
     ui.success(f"Pruned {', '.join(parts)}" if parts else "Nothing to prune")
 
 
@@ -1074,6 +1375,146 @@ def unlock() -> None:
 
 from .commands.skills import skills_cmd
 cli.add_command(skills_cmd)
+
+
+@cli.command()
+@click.argument("turn", required=False, type=int)
+def rollback(turn) -> None:
+    """Restore working tree to a develop checkpoint."""
+    from .utils import voidrift_dir
+    from .git_checkpoint import GitCheckpointManager, Checkpoint
+
+    cp_path = voidrift_dir() / "checkpoints.jsonl"
+    cps = GitCheckpointManager.load_checkpoints(cp_path)
+    if not cps:
+        ui.error("No checkpoints found. Run 'voidrift develop' first.")
+        sys.exit(1)
+
+    if turn is None:
+        ui.header("Available checkpoints")
+        for cp in cps:
+            ui.info(f"  turn {cp.turn}  {cp.timestamp[:19]}  {cp.task_id or ''}")
+        ui.info("\nUsage: voidrift rollback <turn>")
+        return
+
+    match = [cp for cp in cps if cp.turn == turn]
+    if not match:
+        ui.error(f"No checkpoint for turn {turn}. Available: {', '.join(str(c.turn) for c in cps)}")
+        sys.exit(1)
+
+    cp = match[0]
+    mgr = GitCheckpointManager(str(Path.cwd()))
+    if mgr.restore(cp):
+        ui.success(f"Restored working tree to turn {turn} ({cp.task_id or 'unknown task'})")
+    else:
+        ui.error(f"Failed to restore checkpoint for turn {turn}")
+        sys.exit(1)
+
+
+@cli.command()
+@click.option("--fix", is_flag=True, help="Auto-fix where safe")
+def doctor(fix) -> None:
+    """Run diagnostic checks on VoidRift setup."""
+    from .doctor import run_checks
+
+    ui.header("VoidRift Doctor")
+    checks = run_checks(fix=fix)
+
+    _ICONS = {"pass": "✓", "warn": "⚠", "fail": "✗"}
+    _STYLES = {"pass": "green", "warn": "yellow", "fail": "red bold"}
+
+    for c in checks:
+        icon = _ICONS[c.result]
+        style = _STYLES[c.result]
+        msg = f"  {c.message}" if c.message else ""
+        ui._con.print(f"  [{style}]{icon}[/{style}]  {c.name}{msg}")
+        if c.fix_hint and c.result != "pass":
+            ui._con.print(f"      [dim]{c.fix_hint}[/dim]")
+
+    warns = sum(1 for c in checks if c.result == "warn")
+    fails = sum(1 for c in checks if c.result == "fail")
+    if fails:
+        ui.error(f"{fails} failed, {warns} warnings")
+        sys.exit(1)
+    elif warns:
+        ui.warn(f"{warns} warning(s)")
+    else:
+        ui.success("All checks passed")
+
+
+@cli.group()
+def memory() -> None:
+    """Manage project and global memory entries."""
+
+
+@memory.command("list")
+def memory_list() -> None:
+    """List all memory entries grouped by layer."""
+    from .memory import MemoryManager
+    mm = MemoryManager(str(Path.cwd()))
+    entries = mm.list_entries()
+    if not entries:
+        ui.info("No memory entries.")
+        return
+    project = [e for e in entries if e.scope == "project"]
+    global_ = [e for e in entries if e.scope == "global"]
+    if project:
+        ui._con.print("\n[bold]Project memory[/bold]")
+        for e in project:
+            ui._con.print(f"  {e.name} — {e.description}")
+    if global_:
+        ui._con.print("\n[bold]Global memory[/bold]")
+        for e in global_:
+            ui._con.print(f"  {e.name} — {e.description}")
+
+
+@memory.command("show")
+@click.argument("name")
+def memory_show(name) -> None:
+    """Print full content of a memory entry."""
+    from .memory import MemoryManager
+    mm = MemoryManager(str(Path.cwd()))
+    content = mm.read(name)
+    if content is None:
+        ui.error(f"Memory entry '{name}' not found.")
+        sys.exit(1)
+    click.echo(content)
+
+
+@memory.command("delete")
+@click.argument("name")
+@click.option("--global", "global_", is_flag=True, help="Delete from global memory instead of project")
+def memory_delete(name, global_) -> None:
+    """Remove a memory entry."""
+    from .memory import MemoryManager
+    mm = MemoryManager(str(Path.cwd()))
+    scope = "global" if global_ else "project"
+    if mm.delete(name, scope=scope):
+        ui.success(f"Deleted '{name}' from {scope} memory.")
+    else:
+        ui.error(f"Memory entry '{name}' not found in {scope} memory.")
+        sys.exit(1)
+
+
+@memory.command("export")
+def memory_export() -> None:
+    """Export all memory entries as a single markdown file."""
+    from .memory import MemoryManager
+    mm = MemoryManager(str(Path.cwd()))
+    entries = mm.list_entries()
+    if not entries:
+        ui.info("No memory entries to export.")
+        return
+    for e in entries:
+        content = mm.read(e.name) or ""
+        click.echo(f"## {e.name} ({e.scope})\n")
+        # Strip frontmatter from output
+        if content.startswith("---"):
+            end = content.find("---", 3)
+            if end != -1:
+                content = content[end + 3:].strip()
+        click.echo(content)
+        click.echo()
 
 
 @cli.command("completions")

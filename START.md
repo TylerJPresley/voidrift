@@ -9,6 +9,18 @@ Load these before starting work:
 - `README.md` — Project overview, architecture, and usage
 - `ARCHITECTURE.md` — Component design, data flows, and key decisions
 
+## Documentation IS the Solution
+
+Documentation is not a byproduct of code — it is half the solution. The framework produces three documents that are as important as the source code:
+
+- **REQUIREMENTS.md** is the contract. It defines what the system does and why. Written by gather and plan.
+- **ARCHITECTURE.md** is the blueprint. It guides AI agents and architects building the system. Written by plan.
+- **README.md** is the user manual. If a human operator needs to know about it, it goes here. Written by plan.
+
+**Plan owns all documentation. Develop owns source code.** Develop implements what plan designed — it does not modify documentation. If implementation diverges from the plan, re-run plan to reconcile. This separation is structural: develop agents cannot write to `.voidrift/` (REQ-ARCH-9).
+
+The same standard applies to VoidRift itself: every change to this framework updates REQUIREMENTS.md, ARCHITECTURE.md, and README.md alongside the code. Documentation that falls behind the code is a broken product.
+
 ## CRITICAL: Change Workflow
 
 **ALWAYS follow this workflow for ANY change:**
@@ -30,17 +42,21 @@ Load these before starting work:
 
 5. **Implement to satisfy ACs**
    - Write code that passes the new/modified ACs
-   - Write tests per Testing Standards below
+   - Write tests for every new public function, class, and module — no exceptions
+   - One test per AC at minimum. Complex logic gets edge case tests
+   - Tests go in `cli/tests/` matching the source module name (e.g. `session.py` → `test_session.py`)
 
 6. **Verify against REQUIREMENTS.md**
    - Does this satisfy all related ACs?
    - Does this break any existing ACs?
 
-7. **Update documentation — EVERY change must pass this checklist:**
-   - [ ] REQUIREMENTS.md — Did acceptance criteria change? Are new REQs needed?
-   - [ ] ARCHITECTURE.md — Did components, data flows, or design decisions change?
-   - [ ] README.md — Did user-facing behavior, commands, or configuration change?
-   - [ ] CHANGELOG.md — What changed, added, or fixed?
+7. **Update ALL documentation — no exceptions:**
+   - [ ] REQUIREMENTS.md — the contract. New/modified REQs with EARS notation, BDD acceptance criteria, V-entries. This is the source of truth for what the system does and why.
+   - [ ] ARCHITECTURE.md — the blueprint. New components, data flows, design decisions. This guides AI agents and architects building the system.
+   - [ ] README.md — the user manual. If a human operator needs to know about it to use the application — commands, flags, config keys, slash commands, file formats — it goes here. Read the relevant README section and confirm.
+   - [ ] CHANGELOG.md — entry under Added/Changed/Fixed
+   - [ ] FEATURES.md — mark completed backlog items ✅
+   - [ ] FUTURE-WORK-2.md — mark completed tasks ✅
    - [ ] `make test` passes — work is NOT complete until all tests pass
 
 8. **Build, sync, and commit incrementally**
@@ -49,7 +65,13 @@ Load these before starting work:
    - `make build` — when packaging changes are needed
    - Commit after each logical unit of work with AC references
 
-9. **Summarize changes for operator**
+9. **Self-review before calling it done**
+   - Re-read the requirement and every AC — does the implementation satisfy each one?
+   - Were tests written for every new public function, class, and module?
+   - Open each doc from step 7 and verify the update is present — do not check from memory
+   - Run `make test` one final time
+
+10. **Summarize changes for operator**
    - List all files created, modified, or deleted
    - Reference the ACs satisfied
    - Note any follow-up work or open questions

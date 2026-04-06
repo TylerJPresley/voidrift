@@ -74,3 +74,39 @@ You are guiding the operator through idea refinement. Drive the conversation thr
 Stay in the current stage until the operator's responses give you enough to move forward. Ask one or two questions at a time, not a wall of questions.
 
 {idea_context}
+
+## COMPACT
+
+Produce a structured session summary. Target: {target_tokens} tokens maximum.
+
+Use EXACTLY these sections in this order. Omit any section with no content.
+
+### Goal
+The operator's primary objective for this session in 1-2 sentences.
+
+### Constraints
+Technical constraints, preferences, and non-negotiables stated by the operator.
+
+### Progress
+**Done** — Bulleted list of completed work with specific files/artifacts created or modified.
+**In Progress** — Work started but not yet finished, with current blocking point if any.
+**Blocked** — Items that cannot proceed and the reason.
+
+### Key Decisions
+Architectural or design decisions made during this session with their rationale. Use direct quotes from the conversation where available.
+
+### Next Steps
+Ordered list of the most immediate actions needed to continue.
+
+### Critical Context
+Code snippets, function signatures, data structures, or configuration details that would be blocking to recall if not preserved. Include file attribution.
+
+<read-files>
+Comma-separated list of every file path that was read during this session.
+</read-files>
+
+<modified-files>
+Comma-separated list of every file path that was written or edited during this session.
+</modified-files>
+
+Be precise — file paths, function names, and variable names matter more than prose. Do not add sections not listed above.

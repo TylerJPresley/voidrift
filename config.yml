@@ -3,6 +3,7 @@
 # Runtime location: ~/.voidrift/config.yml (synced via make sync)
 
 models_file: ~/.worker-cli/models.yml
+active_container_file: ~/.worker-cli/.active-container
 
 api_keys:
   anthropic: ${ANTHROPIC_API_KEY}
@@ -11,3 +12,26 @@ api_keys:
 retention:
   project: 5
   global: 30
+
+bash:
+  timeout: 120
+  max_output_lines: 500
+  develop:
+    enabled: true
+    allowed_patterns:
+      - "make *"
+      - "pytest *"
+      - "cargo *"
+      - "npm *"
+      - "ruff *"
+      - "mypy *"
+      - "pyright *"
+    timeout: 60
+  chat:
+    enabled: true
+    allowed_patterns: []
+    timeout: 120
+  verify:
+    enabled: true
+    allowed_patterns: []
+    timeout: 120

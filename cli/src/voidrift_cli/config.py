@@ -136,9 +136,58 @@ def get_max_tokens(mc: "ModelConfig", stage: str) -> int:  # noqa: F821
     return min(stage_default, mc.max_tokens)
 
 
+def get_protected_paths() -> list[str]:
+    """Get protected_paths list from config (TASK-FW-013)."""
+    return load_config().get("protected_paths", [])
+
+
+def get_allowed_commands() -> list[str]:
+    """Get allowed_commands list from config (TASK-FW-020)."""
+    return load_config().get("allowed_commands", [])
+
+
+def get_ssrf_allow_list() -> list[str]:
+    """Get ssrf_allow_list from config (REQ-SEC-3)."""
+    return load_config().get("ssrf_allow_list", [])
+
+
+def get_git_diff_limits() -> dict:
+    """Get git diff safety limits from config (REQ-GIT-4)."""
+    return load_config().get("git", {})
+
+
+def get_cache_config() -> dict:
+    """Get cache section from config (REQ-U-14)."""
+    return load_config().get("cache", {})
+
+
 def get_skills_config() -> dict:
     """Get skills section from config (REQ-SKL-3)."""
     return load_config().get("skills", {})
+
+
+def get_bash_config(command: str) -> "BashConfig":
+    """Get per-command bash configuration (REQ-CFG-9).
+
+    Args:
+        command: Command name (develop, chat, verify).
+
+    Returns:
+        BashConfig with merged global defaults and command-specific overrides.
+    """
+    from .tools.bash import BashConfig
+
+    bash_section = load_config().get("bash", {})
+    timeout = int(bash_section.get("timeout", 120))
+    max_output_lines = int(bash_section.get("max_output_lines", 500))
+
+    cmd_section = bash_section.get(command, {})
+    return BashConfig(
+        enabled=cmd_section.get("enabled", True),
+        allowed_patterns=cmd_section.get("allowed_patterns", []),
+        timeout=int(cmd_section.get("timeout", timeout)),
+        max_output_lines=int(cmd_section.get("max_output_lines", max_output_lines)),
+    )
 
 
 def voidrift_home() -> Path:

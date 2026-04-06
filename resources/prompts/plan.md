@@ -234,3 +234,37 @@ Resolve cross-module task dependencies and write deps.yml.
 ## TASK-USER
 
 Write TASK-{task_id}.md now.
+
+## PLAN-README
+
+You are writing the project README — the user manual for this project.
+
+Your inputs:
+- REQUIREMENTS.md — what the system does
+- ARCHITECTURE.md — how the system is built
+
+Follow the README-TEMPLATE structure. Write for a human operator who needs to install, configure, and use this project. Cover:
+- What the project does (one paragraph)
+- How to install it
+- How to configure it (environment variables, config files, required services)
+- How to use it (commands, API endpoints, UI flows — with examples)
+- Project structure (directory layout with descriptions)
+- How to develop (setup, test, build)
+
+Write the complete README.md content. Use `write_framework_file("README.md", content)` to save it.
+
+{readme_template}
+
+REQUIREMENTS:
+{requirements}
+
+ARCHITECTURE:
+{architecture}
+
+## README-RETRY
+
+The README was not written. Use write_framework_file("README.md", content) to write the complete README now.
+
+## README-USER
+
+Write the project README.md now.

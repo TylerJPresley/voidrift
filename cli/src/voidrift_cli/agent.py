@@ -5,6 +5,7 @@ from __future__ import annotations
 import itertools
 import json
 import os
+import random
 import re
 import sys
 import threading
@@ -20,6 +21,21 @@ from pydantic import BaseModel, Field
 
 from .models import ModelConfig
 
+# Module-level abort flag for signal-based loop stop (REQ-ARCH-14, TASK-FW-007)
+_abort_requested = False
+
+
+def request_abort() -> None:
+    """Set the abort flag — called from signal handlers."""
+    global _abort_requested
+    _abort_requested = True
+
+
+def clear_abort() -> None:
+    """Reset the abort flag — called at command start."""
+    global _abort_requested
+    _abort_requested = False
+
 
 class Message(BaseModel):
     role: str
@@ -27,6 +43,83 @@ class Message(BaseModel):
     tool_calls: list[dict] | None = None
     tool_call_id: str | None = None
     name: str | None = None
+
+
+class LoopState(BaseModel):
+    """Snapshot of agent loop state passed to hook callbacks (REQ-ARCH-14)."""
+    messages: list[dict] = Field(default_factory=list)
+    turn_count: int = 0
+    input_tokens_total: int = 0
+    output_tokens_total: int = 0
+    tools_called_this_turn: list[str] = Field(default_factory=list)
+
+    model_config = {"arbitrary_types_allowed": True}
+
+
+_SNIP_READ_TOOLS = {"read_source_file", "read_framework_file"}
+_SNIP_MIN_CHARS = 500
+
+# Tools safe for concurrent execution within a single turn (TASK-FW-009)
+_CONCURRENT_SAFE_TOOLS = {"read_source_file", "read_framework_file", "list_project_artifacts", "web_fetch"}
+
+
+def snip_old_tool_results(messages: list[dict], max_age_turns: int = 2) -> list[dict]:
+    """Replace old read-tool results with placeholders to free context (TASK-FW-008).
+
+    A tool result is snipped when:
+    - It's from a read tool (read_source_file, read_framework_file)
+    - At least max_age_turns assistant messages have appeared after it
+    - Its content exceeds 500 characters
+
+    Returns a new list — the input is not modified.
+    """
+    if max_age_turns <= 0:
+        return messages
+
+    # Map tool_call_id → function name from assistant messages
+    tc_names: dict[str, str] = {}
+    tc_args: dict[str, str] = {}
+    for m in messages:
+        for tc in m.get("tool_calls") or []:
+            fn = tc.get("function", {})
+            tc_names[tc["id"]] = fn.get("name", "")
+            tc_args[tc["id"]] = fn.get("arguments", "")
+
+    # Count assistant messages (turns) from the end
+    assistant_count = 0
+    turn_index: dict[int, int] = {}  # message index → turns remaining after it
+    for i in range(len(messages) - 1, -1, -1):
+        if messages[i].get("role") == "assistant" and messages[i].get("tool_calls"):
+            turn_index[i] = assistant_count
+            assistant_count += 1
+
+    # Build result — snip eligible tool results
+    result = []
+    for i, m in enumerate(messages):
+        if m.get("role") == "tool":
+            tc_id = m.get("tool_call_id", "")
+            name = tc_names.get(tc_id, "")
+            content = m.get("content", "")
+            # Find the assistant message that contained this tool call
+            age = None
+            for j in range(i - 1, -1, -1):
+                if j in turn_index and any(
+                    tc.get("id") == tc_id for tc in (messages[j].get("tool_calls") or [])
+                ):
+                    age = turn_index[j]
+                    break
+            if (
+                name in _SNIP_READ_TOOLS
+                and age is not None
+                and age >= max_age_turns
+                and len(content) > _SNIP_MIN_CHARS
+            ):
+                lines = content.count("\n") + 1
+                placeholder = f"[result from {name}({tc_args.get(tc_id, '')[:80]}) — {lines} lines snipped]"
+                result.append({**m, "content": placeholder})
+                continue
+        result.append(m)
+    return result
 
 
 class AgentLoop(BaseModel):
@@ -51,6 +144,15 @@ class AgentLoop(BaseModel):
     on_progress: Callable[[dict], None] | None = None
     log_path: Path | None = None
     show_spinner: bool = True  # set False when caller owns the spinner display
+    token_budget: Any | None = None  # Optional TokenBudget instance (REQ-ARCH-13)
+    max_turns: int = 0  # 0 = unlimited; positive = stop after N tool rounds (REQ-ARCH-14)
+    stop_check: Callable[["LoopState"], str | None] | None = None  # returns stop reason or None (REQ-ARCH-14)
+    transform_context: Callable[[list[dict]], list[dict]] | None = None  # filter messages before API call (REQ-ARCH-14)
+    before_tool_call: Callable[[str, str], str | None] | None = None  # (name, args) → result or None (REQ-ARCH-14)
+    after_tool_call: Callable[[str, str], str] | None = None  # (name, result) → result (REQ-ARCH-14)
+    get_steering_messages: Callable[["LoopState"], list[dict]] | None = None  # inject after tool round (REQ-ARCH-14)
+    get_follow_up_messages: Callable[["LoopState"], list[dict]] | None = None  # inject on natural stop (REQ-ARCH-14)
+    on_payload: Callable[[dict], dict] | None = None  # inspect/modify raw API kwargs before send (REQ-ARCH-14)
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -58,6 +160,23 @@ class AgentLoop(BaseModel):
         """Insert system prompt as first message if provided."""
         if self.system_prompt:
             self.messages.insert(0, {"role": "system", "content": self.system_prompt})
+        # Thread-safe message queues (TASK-FW-014)
+        import queue
+        self._steering_queue: queue.SimpleQueue = queue.SimpleQueue()
+        self._followup_queue: queue.SimpleQueue = queue.SimpleQueue()
+        # System prompt hash for cache debugging (TASK-FW-015)
+        if self.system_prompt and self.log_path:
+            import hashlib
+            h = hashlib.sha256(self.system_prompt.encode()).hexdigest()[:16]
+            self._log(f"[PROMPT_HASH {h}]")
+
+    def steer(self, messages: list[dict]) -> None:
+        """Thread-safe: inject messages after the current tool round (TASK-FW-014)."""
+        self._steering_queue.put_nowait(messages)
+
+    def follow_up(self, messages: list[dict], drain: str = "one-at-a-time") -> None:
+        """Thread-safe: queue messages for after natural stop (TASK-FW-014)."""
+        self._followup_queue.put_nowait((messages, drain))
 
     def _get_client(self) -> OpenAI:
         """Create an OpenAI-compatible client configured for the model's API.
@@ -137,6 +256,26 @@ class AgentLoop(BaseModel):
         },
     }
 
+    def _apply_cache_control(self, messages: list[dict]) -> list[dict]:
+        """Add Anthropic cache_control markers to system messages (TASK-FW-015).
+
+        Only applies when the model provider is anthropic. Marks the system
+        message with cache_control so the static prefix is cached across
+        concurrent agents sharing the same system prompt.
+        """
+        if self.model.provider != "anthropic":
+            return messages
+        result = []
+        for m in messages:
+            if m.get("role") == "system" and isinstance(m.get("content"), str):
+                result.append({
+                    "role": "system",
+                    "content": [{"type": "text", "text": m["content"], "cache_control": {"type": "ephemeral"}}],
+                })
+            else:
+                result.append(m)
+        return result
+
     _THINK_RE = re.compile(r"<think>(.*?)</think>\s*", re.DOTALL)
     _THINK_ORPHAN_RE = re.compile(r"^(.*?)</think>\s*", re.DOTALL)
 
@@ -187,6 +326,27 @@ class AgentLoop(BaseModel):
         stall_nudges = 0
         max_tokens_continuations = 0
         accumulated_text = ""
+        turn_count = 0
+        input_tokens_total = 0
+        output_tokens_total = 0
+        tools_called_this_turn: list[str] = []
+
+        def _state() -> LoopState:
+            inp = self.token_budget.input_tokens if self.token_budget else input_tokens_total
+            out = self.token_budget.output_tokens if self.token_budget else output_tokens_total
+            return LoopState(
+                messages=self.messages,
+                turn_count=turn_count,
+                input_tokens_total=inp,
+                output_tokens_total=out,
+                tools_called_this_turn=tools_called_this_turn,
+            )
+
+        def _iter_log(reason: str) -> None:
+            """Log an iteration transition (TASK-FW-016)."""
+            s = _state()
+            tools_str = json.dumps(s.tools_called_this_turn) if s.tools_called_this_turn else "[]"
+            self._log(f"[ITERATION turn={s.turn_count} reason={reason} tools={tools_str}]")
 
         # Log system prompt and latest user message
         if self.log_path:
@@ -196,9 +356,17 @@ class AgentLoop(BaseModel):
             self._log(f"[USER] {self.messages[-1]['content'][:2000]}")
 
         while True:
+            tools_called_this_turn = []
+
+            # Token budget check (REQ-ARCH-13)
+            if self.token_budget:
+                self.token_budget.check()
+
             kwargs: dict[str, Any] = {
                 "model": model_name,
-                "messages": self.messages,
+                "messages": self._apply_cache_control(
+                    self.transform_context(list(self.messages)) if self.transform_context else self.messages
+                ),
                 "max_tokens": self.max_tokens,
             }
             if self.tools:
@@ -210,6 +378,8 @@ class AgentLoop(BaseModel):
                     kwargs["tool_choice"] = "required"
             if self.extra_body:
                 kwargs["extra_body"] = self.extra_body
+            if self.on_payload:
+                kwargs = self.on_payload(kwargs)
 
             try:
                 if self.stream:
@@ -219,6 +389,10 @@ class AgentLoop(BaseModel):
             except Exception as exc:
                 if self._is_context_truncation(exc) and self._trim_messages():
                     self._log("[CONTEXT_TRIM] Tools JSON truncated — trimmed messages, retrying")
+                    _iter_log("context_trim")
+                    continue
+                if self._is_context_length_error(exc) and self._reactive_compact(client):
+                    _iter_log("reactive_compact")
                     continue
                 raise
 
@@ -237,12 +411,35 @@ class AgentLoop(BaseModel):
                     from . import prompts as _prompts
                     resume = _prompts.load_prompt("system", "MAX-TOKENS-RESUME")
                     self.messages.append({"role": "user", "content": resume})
+                    _iter_log("max_tokens_recovery")
                     continue
                 text = self._strip_think(accumulated_text + text)
                 self.messages.append({"role": "assistant", "content": text})
                 if truncated:
                     self._log("[MAX_TOKENS_EXHAUSTED] 2 continuations exhausted, returning partial")
                 self._log(f"[ASSISTANT] {text}")
+
+                # Follow-up — callback hook + queue drain (REQ-ARCH-14, TASK-FW-014)
+                if self.get_follow_up_messages:
+                    follow_ups = self.get_follow_up_messages(_state())
+                    if follow_ups:
+                        self.messages.extend(follow_ups)
+                        _iter_log("follow_up")
+                        continue
+                if not self._followup_queue.empty():
+                    try:
+                        msgs, drain = self._followup_queue.get_nowait()
+                        self.messages.extend(msgs)
+                        if drain == "all":
+                            while not self._followup_queue.empty():
+                                more_msgs, _ = self._followup_queue.get_nowait()
+                                self.messages.extend(more_msgs)
+                        _iter_log("follow_up")
+                        continue
+                    except Exception:
+                        pass
+                s = _state()
+                self._log(f"[LOOP_EXIT reason=natural_stop turns={s.turn_count} total_input={s.input_tokens_total} total_output={s.output_tokens_total}]")
                 return text
 
             # Stall detection — same call signature as last iteration.
@@ -250,7 +447,7 @@ class AgentLoop(BaseModel):
             # rewriting a file with different content is still detected as a stall.
             def _tc_sig(tc: dict) -> str:
                 name = tc["function"]["name"]
-                if name in ("write_framework_file", "write_source_file"):
+                if name in ("write_framework_file", "write_source_file", "edit_source_file"):
                     import json as _json
                     try:
                         args = _json.loads(tc["function"].get("arguments", "{}"))
@@ -264,6 +461,7 @@ class AgentLoop(BaseModel):
                 stall_nudges += 1
                 self._log(f"[STALL] Repeated call ({stall_nudges}): {call_sig}")
                 if stall_nudges >= 2:
+                    self._log("[LOOP_STOP reason=stall_exhausted]")
                     break  # give up after 2 nudges
                 # Inject a nudge instead of stripping tools — the model
                 # is looping on reads and needs to move to writes.
@@ -273,6 +471,7 @@ class AgentLoop(BaseModel):
                     "content": _prompts.load_prompt("system", "STALL-NUDGE"),
                 })
                 last_call_sig = None  # reset so next iteration isn't auto-stall
+                _iter_log(f"stall_nudge_{stall_nudges}")
                 continue
             last_call_sig = call_sig
 
@@ -284,29 +483,90 @@ class AgentLoop(BaseModel):
                 "tool_calls": tool_calls,
             })
 
-            for tc in tool_calls:
-                name = tc["function"]["name"]
-                self._log(f"[TOOL_CALL] {name}({tc['function'].get('arguments', '')})")
-                if name == "done":
-                    result = "OK"
+            # Execute tool calls in batches — concurrent for read tools (TASK-FW-009)
+            batches = self._partition_tool_calls(tool_calls)
+            for batch in batches:
+                has_done = any(tc["function"]["name"] == "done" for tc in batch)
+                # Run serially if: single item, has done tool, or before_tool_call hook set
+                if len(batch) == 1 or has_done or self.before_tool_call:
+                    for tc in batch:
+                        name = tc["function"]["name"]
+                        args = tc["function"].get("arguments", "")
+                        tools_called_this_turn.append(name)
+                        self._log(f"[TOOL_CALL] {name}({args})")
+                        if name == "done":
+                            result = "OK"
+                        else:
+                            intercepted = self.before_tool_call(name, args) if self.before_tool_call else None
+                            if intercepted is not None:
+                                result = intercepted
+                            else:
+                                result = self._handle_tool_call_dict(tc)
+                            if self.after_tool_call:
+                                result = self.after_tool_call(name, result)
+                            if self.on_tool_result:
+                                self.on_tool_result(name, result)
+                        self._log(f"[TOOL_RESULT] {name} -> {result[:2000]}")
+                        self.messages.append({"role": "tool", "tool_call_id": tc["id"], "content": result})
                 else:
-                    result = self._handle_tool_call_dict(tc)
-                    if self.on_tool_result:
-                        self.on_tool_result(name, result)
-                self._log(f"[TOOL_RESULT] {name} -> {result[:2000]}")
-                self.messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc["id"],
-                    "content": result,
-                })
+                    # Concurrent batch — log, execute, then process results
+                    for tc in batch:
+                        self._log(f"[TOOL_CALL] {tc['function']['name']}({tc['function'].get('arguments', '')})")
+                    pairs = self._execute_tool_batch(batch)
+                    for tc, result in pairs:
+                        name = tc["function"]["name"]
+                        tools_called_this_turn.append(name)
+                        if self.after_tool_call:
+                            result = self.after_tool_call(name, result)
+                        if self.on_tool_result:
+                            self.on_tool_result(name, result)
+                        self._log(f"[TOOL_RESULT] {name} -> {result[:2000]}")
+                        self.messages.append({"role": "tool", "tool_call_id": tc["id"], "content": result})
 
             if done:
                 self.tools = []
+                _iter_log("done_tool")
                 continue
+
+            # Steering messages — callback hook + queue drain (REQ-ARCH-14, TASK-FW-014)
+            if self.get_steering_messages:
+                steering = self.get_steering_messages(_state())
+                if steering:
+                    self.messages.extend(steering)
+            while not self._steering_queue.empty():
+                try:
+                    self.messages.extend(self._steering_queue.get_nowait())
+                except Exception:
+                    break
+
+            # Loop control checks after each tool round (REQ-ARCH-14)
+            turn_count += 1
+            _iter_log("tool_call")
+            # Fire on_progress with turn/tool data for dashboard (REQ-UI-11)
+            if self.on_progress and tools_called_this_turn:
+                self.on_progress({
+                    "turn": turn_count,
+                    "last_tool": tools_called_this_turn[-1],
+                })
+            stop_reason: str | None = None
+            if _abort_requested:
+                stop_reason = "operator_abort"
+            elif self.max_turns > 0 and turn_count >= self.max_turns:
+                stop_reason = "max_turns"
+            elif self.token_budget:
+                try:
+                    self.token_budget.check()
+                except Exception:
+                    stop_reason = "budget_exhausted"
+            if not stop_reason and self.stop_check:
+                stop_reason = self.stop_check(_state())
+            if stop_reason:
+                self._log(f"[LOOP_STOP reason={stop_reason}]")
+                break
 
         # Stalled — force final call with only write tools
         self._log("[STALL] Forcing final text call")
-        self.tools = [t for t in self.tools if t["function"]["name"] in ("write_source_file", "write_framework_file", "done")]
+        self.tools = [t for t in self.tools if t["function"]["name"] in ("write_source_file", "edit_source_file", "write_framework_file", "done")]
         if not self.tools:
             self.tools = []
         kwargs = {
@@ -350,12 +610,31 @@ class AgentLoop(BaseModel):
 
         text = self._strip_think(text)
         self._log(f"[ASSISTANT] {text}")
+        s = _state()
+        self._log(f"[LOOP_EXIT reason=forced_stop turns={s.turn_count} total_input={s.input_tokens_total} total_output={s.output_tokens_total}]")
         return text
 
     _RETRY_MAX = 3
     _RETRY_BASE = 1.0
     _RETRY_MULT = 2.0
     _RETRY_CAP = 30.0
+
+    @staticmethod
+    def _jitter(delay: float) -> float:
+        """Apply ±30% random jitter to a delay value (REQ-ARCH-10)."""
+        return delay * (0.7 + random.random() * 0.6)
+
+    @staticmethod
+    def _get_retry_after(exc: Exception) -> float | None:
+        """Extract Retry-After header value from a 429 response (REQ-ARCH-10)."""
+        if isinstance(exc, openai.APIStatusError) and exc.status_code == 429:
+            header = exc.response.headers.get("retry-after")
+            if header:
+                try:
+                    return min(float(header), 30.0)
+                except (ValueError, TypeError):
+                    pass
+        return None
 
     def _is_retryable(self, exc: Exception) -> bool:
         """Return True if the exception warrants a retry (REQ-ARCH-10)."""
@@ -376,6 +655,14 @@ class AgentLoop(BaseModel):
         # Retry on generic connection failures
         if "connection" in msg or "timeout" in msg:
             return True
+        return False
+
+    def _is_availability_error(self, exc: Exception) -> bool:
+        """Return True if the error is a transient availability issue (429/5xx) for fallback (REQ-MC-4)."""
+        if isinstance(exc, openai.RateLimitError):
+            return True
+        if isinstance(exc, openai.APIStatusError):
+            return exc.status_code == 429 or exc.status_code >= 500
         return False
 
     def _is_context_truncation(self, exc: Exception) -> bool:
@@ -421,6 +708,74 @@ class AgentLoop(BaseModel):
 
         return False
 
+    def _is_context_length_error(self, exc: Exception) -> bool:
+        """Return True if the error is a context-length overflow (REQ-ARCH-12)."""
+        msg = str(exc).lower()
+        if "context length" in msg or "maximum context" in msg:
+            return True
+        if "token" in msg and "exceed" in msg:
+            return True
+        if isinstance(exc, openai.APIStatusError) and exc.status_code == 413:
+            return True
+        return False
+
+    _REACTIVE_COMPACT_MAX = 2
+
+    def _reactive_compact(self, client: OpenAI) -> bool:
+        """Summarize old messages to free context (REQ-ARCH-12).
+
+        Returns True if compaction freed messages and a retry should be attempted.
+        """
+        if not hasattr(self, "_reactive_compact_count"):
+            self._reactive_compact_count = 0
+        if self._reactive_compact_count >= self._REACTIVE_COMPACT_MAX:
+            return False
+
+        system_msgs = [m for m in self.messages if m.get("role") == "system"]
+        other_msgs = [m for m in self.messages if m.get("role") != "system"]
+
+        # Keep the most recent 4 non-system messages intact
+        if len(other_msgs) <= 4:
+            return False
+        to_compact = other_msgs[:-4]
+        keep = other_msgs[-4:]
+
+        # Build a compact summary of the old messages
+        summary_parts = []
+        for m in to_compact:
+            role = m.get("role", "?")
+            content = m.get("content") or ""
+            if content:
+                summary_parts.append(f"[{role}] {content[:500]}")
+        summary_input = "\n".join(summary_parts)
+
+        try:
+            resp = client.chat.completions.create(
+                model=self._model_name(),
+                messages=[{
+                    "role": "user",
+                    "content": (
+                        "Summarize this conversation history concisely. "
+                        "Preserve: file paths, decisions, current task state.\n\n"
+                        + summary_input
+                    ),
+                }],
+                max_tokens=1024,
+            )
+            summary = resp.choices[0].message.content or ""
+        except Exception:
+            return False
+
+        freed = len(to_compact)
+        self._reactive_compact_count += 1
+        self.messages = system_msgs + [
+            {"role": "assistant", "content": f"[Context summary]\n{summary}"},
+        ] + keep
+        self._log(
+            f"[REACTIVE_COMPACT attempt={self._reactive_compact_count} freed={freed}]"
+        )
+        return True
+
     def _sync_response(self, client: OpenAI, kwargs: dict) -> tuple[str, list[dict], str | None]:
         """Non-streaming response with exponential backoff retry (REQ-ARCH-10).
 
@@ -442,6 +797,7 @@ class AgentLoop(BaseModel):
         last_exc: Exception | None = None
         response = None
         delay = self._RETRY_BASE
+        _using_fallback = getattr(self, "_using_fallback", False)
         try:
             for attempt in range(1, self._RETRY_MAX + 1):
                 try:
@@ -450,10 +806,34 @@ class AgentLoop(BaseModel):
                 except Exception as exc:
                     last_exc = exc
                     if not self._is_retryable(exc) or attempt == self._RETRY_MAX:
+                        # Fallback on availability error (REQ-MC-4)
+                        if (
+                            attempt == self._RETRY_MAX
+                            and not _using_fallback
+                            and self.model.fallback
+                            and self._is_availability_error(exc)
+                        ):
+                            from .models import resolve_model
+                            try:
+                                fb = resolve_model(self.model.fallback)
+                                self._log(f"[MODEL_FALLBACK primary={self.model.alias} fallback={fb.alias} reason=retries_exhausted]")
+                                self.model = fb
+                                self._using_fallback = True
+                                client = self._get_client()
+                                kwargs["model"] = self._model_name()
+                                response = client.chat.completions.create(**kwargs)
+                                break
+                            except Exception:
+                                pass  # fallback failed — raise original
                         raise
-                    self._log(f"[RETRY] attempt {attempt}/{self._RETRY_MAX} after {delay:.0f}s: {exc}")
-                    time.sleep(delay)
-                    delay = min(delay * self._RETRY_MULT, self._RETRY_CAP)
+                    retry_after = self._get_retry_after(exc)
+                    base = retry_after if retry_after is not None else delay
+                    jittered = self._jitter(base)
+                    ra_info = f" retry-after={retry_after:.0f}s" if retry_after is not None else ""
+                    self._log(f"[RETRY attempt={attempt} delay={jittered:.1f}s reason={type(exc).__name__}{ra_info}]")
+                    time.sleep(jittered)
+                    if retry_after is None:
+                        delay = min(delay * self._RETRY_MULT, self._RETRY_CAP)
         finally:
             _tick_stop.set()
             if _tick_thread:
@@ -500,6 +880,14 @@ class AgentLoop(BaseModel):
                     "tokens_per_sec": round(completion_tokens / elapsed if elapsed > 0 else 0, 1),
                     "ctx_pct": ctx_pct,
                 })
+            # Token budget recording (REQ-ARCH-13)
+            if self.token_budget:
+                self.token_budget.record(prompt_tokens, completion_tokens)
+            # Cache efficiency logging (TASK-FW-015)
+            cache_create = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
+            cache_read = getattr(response.usage, "cache_read_input_tokens", 0) or 0
+            if cache_create or cache_read:
+                self._log(f"[CACHE create={cache_create} read={cache_read}]")
 
         return text, tool_calls, finish_reason
 
@@ -570,9 +958,14 @@ class AgentLoop(BaseModel):
                 _s_last_exc = _s_exc
                 if not self._is_retryable(_s_exc) or _s_attempt == self._RETRY_MAX:
                     raise
-                self._log(f"[RETRY] attempt {_s_attempt}/{self._RETRY_MAX} after {_s_delay:.0f}s: {_s_exc}")
-                time.sleep(_s_delay)
-                _s_delay = min(_s_delay * self._RETRY_MULT, self._RETRY_CAP)
+                retry_after = self._get_retry_after(_s_exc)
+                base = retry_after if retry_after is not None else _s_delay
+                jittered = self._jitter(base)
+                ra_info = f" retry-after={retry_after:.0f}s" if retry_after is not None else ""
+                self._log(f"[RETRY attempt={_s_attempt} delay={jittered:.1f}s reason={type(_s_exc).__name__}{ra_info}]")
+                time.sleep(jittered)
+                if retry_after is None:
+                    _s_delay = min(_s_delay * self._RETRY_MULT, self._RETRY_CAP)
         if _stream_obj is None:
             raise _s_last_exc  # type: ignore[misc]
 
@@ -721,8 +1114,46 @@ class AgentLoop(BaseModel):
                     "tokens_per_sec": round(tps, 1),
                     "ctx_pct": ctx_pct,
                 })
+            # Token budget recording (REQ-ARCH-13)
+            if self.token_budget:
+                self.token_budget.record(prompt_tokens, completion_tokens)
+            # Cache efficiency logging (TASK-FW-015)
+            cache_create = usage_data.get("cache_creation_input_tokens", 0) or 0
+            cache_read = usage_data.get("cache_read_input_tokens", 0) or 0
+            if cache_create or cache_read:
+                self._log(f"[CACHE create={cache_create} read={cache_read}]")
 
         return collected_text, tool_calls_list, finish_reason
+
+    # --- Tool argument normalization (TASK-FW-010) ---
+
+    @staticmethod
+    def _normalize_path(args: dict) -> dict:
+        """Normalize file path arguments — strip leading / and project root."""
+        p = args.get("path", "")
+        if isinstance(p, str):
+            p = p.lstrip("/")
+            # Strip common project root prefixes models hallucinate
+            for prefix in ("home/", "src/../", "./"):
+                if p.startswith(prefix) and prefix == "./":
+                    p = p[2:]
+            args["path"] = p
+        return args
+
+    @staticmethod
+    def _normalize_content_str(args: dict) -> dict:
+        """Ensure content is a string."""
+        c = args.get("content")
+        if isinstance(c, list):
+            args["content"] = "\n".join(str(x) for x in c)
+        return args
+
+    _TOOL_NORMALIZERS: dict[str, list[Callable]] = {
+        "read_source_file": [_normalize_path.__func__],
+        "read_framework_file": [_normalize_path.__func__],
+        "write_source_file": [_normalize_path.__func__, _normalize_content_str.__func__],
+        "edit_source_file": [_normalize_path.__func__],
+    }
 
     def _execute_tool(self, name: str, arguments: str) -> str:
         """Parse arguments and execute a tool handler by name.
@@ -738,6 +1169,16 @@ class AgentLoop(BaseModel):
             args = json.loads(arguments)
         except json.JSONDecodeError:
             return f"Error: Invalid JSON arguments for tool {name}"
+
+        # Normalize arguments (TASK-FW-010)
+        normalizers = self._TOOL_NORMALIZERS.get(name)
+        if normalizers:
+            raw = dict(args)
+            for norm in normalizers:
+                args = norm(args)
+            for k in set(raw) | set(args):
+                if raw.get(k) != args.get(k):
+                    self._log(f"[TOOL_NORMALIZE tool={name} field={k} raw={raw.get(k)!r} normalized={args.get(k)!r}]")
 
         handler = self.tool_handlers.get(name)
         if not handler:
@@ -759,6 +1200,59 @@ class AgentLoop(BaseModel):
         """
         return self._execute_tool(tc["function"]["name"], tc["function"]["arguments"])
 
+    @staticmethod
+    def _partition_tool_calls(tool_calls: list[dict]) -> list[list[dict]]:
+        """Group consecutive concurrent-safe tool calls into batches (TASK-FW-009)."""
+        batches: list[list[dict]] = []
+        current: list[dict] = []
+        for tc in tool_calls:
+            name = tc["function"]["name"]
+            if name in _CONCURRENT_SAFE_TOOLS:
+                current.append(tc)
+            else:
+                if current:
+                    batches.append(current)
+                    current = []
+                batches.append([tc])
+        if current:
+            batches.append(current)
+        return batches
+
+    def _execute_tool_batch(self, batch: list[dict]) -> list[tuple[dict, str]]:
+        """Execute a batch of tool calls, concurrently if safe (TASK-FW-009).
+
+        Returns list of (tool_call, result) tuples in original order.
+        """
+        if len(batch) <= 1:
+            tc = batch[0]
+            return [(tc, self._handle_tool_call_dict(tc))]
+
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        results: dict[str, str] = {}
+        with ThreadPoolExecutor(max_workers=min(len(batch), 10)) as pool:
+            futures = {
+                pool.submit(self._handle_tool_call_dict, tc): tc["id"]
+                for tc in batch
+            }
+            for fut in as_completed(futures):
+                tc_id = futures[fut]
+                try:
+                    results[tc_id] = fut.result()
+                except Exception as e:
+                    results[tc_id] = f"Error: {e}"
+        return [(tc, results[tc["id"]]) for tc in batch]
+
+
+# Module-level state for active skill tool restrictions (REQ-SKL-9).
+# Written by _get_skill_handler in chat; read by _interactive_loop to set before_tool_call.
+_active_skill_allowed_tools: dict[str, list[str] | None] = {"allowed": None, "name": ""}
+
+
+def clear_active_skill() -> None:
+    """Clear active skill restrictions (called at start of each chat turn)."""
+    _active_skill_allowed_tools["allowed"] = None
+    _active_skill_allowed_tools["name"] = ""
+
 
 def build_local_tools(cmd: str = "") -> tuple[list[dict], dict[str, Callable]]:
     """Build OpenAI-format agent tool definitions from CLI-native filesystem tools.
@@ -770,14 +1264,17 @@ def build_local_tools(cmd: str = "") -> tuple[list[dict], dict[str, Callable]]:
         Tuple of (agent_tool_definitions, agent_tool_handlers) for use with AgentLoop.
     """
     _COMMAND_TOOLS: dict[str, set[str]] = {
-        "gather": {"read_source_file", "write_framework_file", "read_framework_file"},
+        "gather": {"read_source_file", "write_framework_file", "read_framework_file", "read_document", "code_analysis"},
         "plan": {"read_framework_file", "write_framework_file"},
-        "develop": {"read_source_file", "write_source_file", "read_framework_file"},
+        "develop": {"read_source_file", "write_source_file", "edit_source_file", "read_framework_file", "run_command"},
         "chat": {
-            "read_source_file", "write_source_file",
+            "read_source_file", "write_source_file", "edit_source_file",
             "read_framework_file", "write_framework_file",
-            "list_project_artifacts", "web_fetch",
+            "list_project_artifacts", "web_fetch", "ask_user_question",
             "get_skill", "list_skills",
+            "read_memory", "write_memory", "list_memory",
+            "search_history", "read_document", "code_analysis",
+            "run_command",
         },
         "verify-plan": {"read_source_file", "read_framework_file", "write_framework_file"},
         "verify-execute": {
@@ -790,6 +1287,7 @@ def build_local_tools(cmd: str = "") -> tuple[list[dict], dict[str, Callable]]:
 
     from .tools import LOCAL_TOOLS, LOCAL_HANDLERS
     from .skills import find_skill as _find_skill, list_skills as _list_skills
+    from .skills import get_skill_allowed_tools as _get_allowed
     from .config import _voidrift_home as _vh
 
     import re as _re
@@ -798,6 +1296,10 @@ def build_local_tools(cmd: str = "") -> tuple[list[dict], dict[str, Callable]]:
         content = _find_skill(name)
         if content is None:
             return f"Skill '{name}' not found."
+        # Record allowed_tools for active skill enforcement (REQ-SKL-9)
+        at = _get_allowed(name)
+        _active_skill_allowed_tools["allowed"] = at
+        _active_skill_allowed_tools["name"] = name
         if not topic:
             return content
         parts = _re.split(r"^## (.+)$", content, flags=_re.MULTILINE)
@@ -881,21 +1383,6 @@ def build_local_tools(cmd: str = "") -> tuple[list[dict], dict[str, Callable]]:
         {
             "type": "function",
             "function": {
-                "name": "run_command",
-                "description": "Run a shell command synchronously and return its stdout, stderr, and exit code.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "cmd": {"type": "string", "description": "Shell command to run"},
-                        "cwd": {"type": "string", "description": "Working directory (default current)"},
-                    },
-                    "required": ["cmd"],
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
                 "name": "browser_navigate",
                 "description": "Navigate the browser to a URL.",
                 "parameters": {
@@ -957,7 +1444,6 @@ def build_local_tools(cmd: str = "") -> tuple[list[dict], dict[str, Callable]]:
     verify_handlers: dict[str, Callable] = {
         "read_process_output": _pm.read_process_output,
         "http_request": _http.http_request,
-        "run_command": _pm.run_command,
         "browser_navigate": _browser.browser_navigate,
         "browser_screenshot": _browser.browser_screenshot,
         "browser_click": _browser.browser_click,
@@ -985,6 +1471,227 @@ def build_local_tools(cmd: str = "") -> tuple[list[dict], dict[str, Callable]]:
         tools.append(tool_def)
         handlers[name] = skill_handlers[name]
 
+    # Memory tools — chat only (REQ-MEM-1)
+    from .memory import MemoryManager as _MemMgr
+    _mem = _MemMgr(str(Path.cwd()))
+
+    def _read_memory_handler(name: str) -> str:
+        content = _mem.read(name)
+        return content if content else f"Memory entry '{name}' not found."
+
+    def _write_memory_handler(name: str, content: str, scope: str = "project", description: str = "") -> str:
+        _mem.write(name, content, scope=scope, description=description)
+        return f"Memory entry '{name}' saved ({scope})."
+
+    def _list_memory_handler() -> str:
+        entries = _mem.list_entries()
+        if not entries:
+            return "No memory entries."
+        return "\n".join(f"- {e.name} ({e.scope}): {e.description}" for e in entries)
+
+    memory_tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "read_memory",
+                "description": "Read a memory entry by name. Searches project memory first, then global.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string", "description": "Memory entry name"},
+                    },
+                    "required": ["name"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "write_memory",
+                "description": "Write or update a memory entry. Use to persist project facts, conventions, and decisions across sessions.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string", "description": "Entry name (lowercase, hyphens)"},
+                        "content": {"type": "string", "description": "Entry content (markdown)"},
+                        "scope": {"type": "string", "description": "project (default) or global", "enum": ["project", "global"]},
+                        "description": {"type": "string", "description": "Short description for the memory index"},
+                    },
+                    "required": ["name", "content"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "list_memory",
+                "description": "List all memory entries across project and global layers.",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        },
+    ]
+    memory_handlers: dict[str, Callable] = {
+        "read_memory": _read_memory_handler,
+        "write_memory": _write_memory_handler,
+        "list_memory": _list_memory_handler,
+    }
+
+    for tool_def in memory_tools:
+        name = tool_def["function"]["name"]
+        if allowed is not None and name not in allowed:
+            handlers[name] = memory_handlers[name]
+            continue
+        tools.append(tool_def)
+        handlers[name] = memory_handlers[name]
+
+    # Search history tool — chat only (REQ-U-18)
+    from .session import ChatSession as _ChatSes
+
+    _session = _ChatSes.load_or_create(Path.cwd() / ".voidrift")
+
+    def _search_history_handler(query: str, limit: int = 5) -> str:
+        if not _session.path.exists():
+            return "No session history available."
+        results = _session.search_entries(query, limit=limit)
+        if not results:
+            return f"No matches found for '{query}'."
+        lines = [f"Found {len(results)} match(es) for '{query}':"]
+        for r in results:
+            lines.append(f"\n[{r['timestamp']}] {r['role']}:\n{r['content']}")
+        return "\n".join(lines)
+
+    _sh_tool = {
+        "type": "function",
+        "function": {
+            "name": "search_history",
+            "description": (
+                "Search conversation history by keyword. Searches all session "
+                "entries including those before compaction. Returns matching "
+                "entries with timestamps and roles."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search term (case-insensitive substring match)"},
+                    "limit": {"type": "integer", "description": "Max results to return (default 5, max 10)"},
+                },
+                "required": ["query"],
+            },
+        },
+    }
+    if allowed is None or "search_history" in allowed:
+        tools.append(_sh_tool)
+    handlers["search_history"] = _search_history_handler
+
+    # Document format tool — chat, gather (REQ-U-19)
+    from .tools.document import read_document as _read_doc
+
+    def _read_document_handler(path: str) -> str:
+        return _read_doc(path, str(Path.cwd()))
+
+    _doc_tool = {
+        "type": "function",
+        "function": {
+            "name": "read_document",
+            "description": (
+                "Extract text from a binary document file (PDF, DOCX, XLSX). "
+                "Returns plaintext or markdown. Requires pymupdf, python-docx, "
+                "or openpyxl depending on format."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "File path relative to project root"},
+                },
+                "required": ["path"],
+            },
+        },
+    }
+    if allowed is None or "read_document" in allowed:
+        tools.append(_doc_tool)
+    handlers["read_document"] = _read_document_handler
+
+    # Code analysis tool — chat, gather (REQ-U-20)
+    from .tools.code_analysis import code_analysis as _code_analysis
+
+    def _code_analysis_handler(path: str) -> str:
+        return _code_analysis(path, str(Path.cwd()))
+
+    _ca_tool = {
+        "type": "function",
+        "function": {
+            "name": "code_analysis",
+            "description": (
+                "Analyze a source file and return structured JSON with language, "
+                "line count, imports, exported symbols, and complexity estimate. "
+                "Requires tree-sitter."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "File path relative to project root"},
+                },
+                "required": ["path"],
+            },
+        },
+    }
+    if allowed is None or "code_analysis" in allowed:
+        tools.append(_ca_tool)
+    handlers["code_analysis"] = _code_analysis_handler
+
+    # Bash tool — develop, chat, verify (REQ-SEC-4, REQ-CFG-9)
+    from .config import get_bash_config as _get_bash_cfg, get_allowed_commands as _get_ac
+    from .tools.bash import create_run_command as _create_rc
+
+    _bash_cmd = cmd.split("-")[0] if cmd else ""  # "verify-execute" -> "verify"
+    if _bash_cmd in ("develop", "chat", "verify"):
+        _bcfg = _get_bash_cfg(_bash_cmd)
+        _rc_handler = _create_rc(_bcfg, global_allowed=_get_ac())
+
+        _bash_descriptions: dict[str, tuple[str, list[str]]] = {
+            "develop": (
+                "Run build, test, and lint commands to validate written code.",
+                [
+                    "Run tests after writing code. Fix failures before moving to the next task.",
+                    "Check exit_code in the result — non-zero means failure.",
+                ],
+            ),
+            "chat": (
+                "Run shell commands to explore, debug, and validate.",
+                [
+                    "Use for build, test, and lint. Not for git operations or file manipulation.",
+                    "Check exit_code in the result — non-zero means failure.",
+                ],
+            ),
+            "verify": (
+                "Run a shell command synchronously and return its stdout, stderr, and exit code.",
+                [],
+            ),
+        }
+        _desc, _guidelines = _bash_descriptions[_bash_cmd]
+
+        _bash_tool_def: dict = {
+            "type": "function",
+            "function": {
+                "name": "run_command",
+                "description": _desc,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "cmd": {"type": "string", "description": "Shell command to run"},
+                        "cwd": {"type": "string", "description": "Working directory (default: project root)"},
+                    },
+                    "required": ["cmd"],
+                },
+            },
+        }
+        if _guidelines:
+            _bash_tool_def["_guidelines"] = _guidelines
+
+        if allowed is None or "run_command" in allowed:
+            tools.append(_bash_tool_def)
+        handlers["run_command"] = _rc_handler
+
     # Include verify execution tools (verify-execute only; never registered for other commands)
     for tool_def in verify_tools:
         name = tool_def["function"]["name"]
@@ -995,3 +1702,21 @@ def build_local_tools(cmd: str = "") -> tuple[list[dict], dict[str, Callable]]:
         handlers[name] = verify_handlers[name]
 
     return tools, handlers
+
+
+def build_tool_guidelines(tools: list[dict]) -> str:
+    """Assemble tool usage guidelines from tool definitions (TASK-FW-012).
+
+    Extracts ``_guidelines`` lists from tool defs and formats them as
+    bullet points. Returns empty string if no tools have guidelines.
+    """
+    lines: list[str] = []
+    for t in tools:
+        guidelines = t.get("_guidelines")
+        if guidelines:
+            name = t.get("function", {}).get("name", "")
+            for g in guidelines:
+                lines.append(f"- {name}: {g}")
+    if not lines:
+        return ""
+    return "## Tool Guidelines\n\n" + "\n".join(lines)

@@ -99,3 +99,14 @@ def kiro_model():
         api_key="test-kiro-key",
         provider="openai",
     )
+
+
+@pytest.fixture
+def faux_provider(request, tmp_path):
+    """FauxProvider fixture — replay by default, record with VCR_MODE=record."""
+    from voidrift_cli.testing.faux_provider import FauxProvider
+    cassette_name = request.node.name.replace("/", "_") + ".jsonl"
+    cassette_path = tmp_path / "cassettes" / cassette_name
+    cassette_path.parent.mkdir(parents=True, exist_ok=True)
+    mode = "record" if os.environ.get("VCR_MODE") == "record" else "replay"
+    return FauxProvider(cassette_path, mode=mode)

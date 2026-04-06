@@ -41,6 +41,9 @@ class ModelConfig(BaseModel):
     max_read_lines: int = 2000
     max_input_chars: int = 0  # 0 = unlimited
     concurrency: int = 1
+    fallback: str | None = None  # alias of fallback model (REQ-MC-4)
+    max_input_tokens: int | None = None  # token budget per run (REQ-ARCH-13)
+    max_output_tokens: int | None = None  # token budget per run (REQ-ARCH-13)
 
 
 def _load_models_file() -> dict:
@@ -104,6 +107,9 @@ def resolve_model(alias: str) -> ModelConfig:
         max_read_lines=int(m.get("max_read_lines", 2000)),
         max_input_chars=int(m.get("max_input_chars", 0)),
         concurrency=int(m.get("concurrency", 1)),
+        fallback=m.get("fallback"),
+        max_input_tokens=int(m["max_input_tokens"]) if m.get("max_input_tokens") else None,
+        max_output_tokens=int(m["max_output_tokens"]) if m.get("max_output_tokens") else None,
     )
 
 

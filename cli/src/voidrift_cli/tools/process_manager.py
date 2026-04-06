@@ -1,8 +1,10 @@
 """Process lifecycle tools for Verify sub-agents (REQ-VF-8 through REQ-VF-11).
 
-Provides start_process, stop_process, wait_for_ready, read_process_output, and
-run_command as agent-callable tool functions. Processes are tracked in a
+Provides start_process, stop_process, wait_for_ready, read_process_output,
+and stop_all as agent-callable tool functions. Processes are tracked in a
 module-level registry so sub-agents can reference them by opaque handle ID.
+
+run_command has been migrated to tools/bash.py (REQ-SEC-4).
 """
 
 from __future__ import annotations
@@ -215,38 +217,6 @@ def read_process_output(handle_id: str) -> str:
     if not lines:
         return "(no output yet)"
     return "\n".join(lines)
-
-
-def run_command(cmd: str, cwd: str = "") -> str:
-    """Run a command synchronously and return its stdout, stderr, and exit code.
-
-    Args:
-        cmd: Shell command to run.
-        cwd: Working directory. Defaults to current directory.
-
-    Returns:
-        JSON with stdout, stderr, and exit_code fields.
-    """
-    import shlex
-
-    args = shlex.split(cmd) if isinstance(cmd, str) else cmd
-    try:
-        result = subprocess.run(
-            args,
-            capture_output=True,
-            text=True,
-            timeout=120,
-            cwd=cwd or None,
-        )
-        return json.dumps({
-            "stdout": result.stdout,
-            "stderr": result.stderr,
-            "exit_code": result.returncode,
-        })
-    except FileNotFoundError:
-        return json.dumps({"error": f"Command not found: {args[0]}", "exit_code": 127})
-    except subprocess.TimeoutExpired:
-        return json.dumps({"error": "Command timed out after 120s", "exit_code": -1})
 
 
 def stop_all() -> None:

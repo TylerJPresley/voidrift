@@ -262,7 +262,7 @@ class TestRetryLogic:
                 mock_client.chat.completions.create.side_effect = [conn_err, success]
                 agent.send("hi")
         log_content = log_file.read_text()
-        assert "[RETRY]" in log_content
+        assert "[RETRY attempt=" in log_content
 
 
 class TestThinkTagStripping:
@@ -485,3 +485,81 @@ class TestMaxTokensRecovery:
         assert mock_client.chat.completions.create.call_count == 1
         log_text = log.read_text()
         assert "MAX_TOKENS" not in log_text
+
+
+class TestModelFallback:
+    """Tests for model fallback on retry exhaustion (REQ-MC-4)."""
+
+    def test_fallback_on_429_exhaustion(self, tmp_path):
+        """Fallback model is used when primary exhausts retries on 429."""
+        from voidrift_cli.models import ModelConfig
+
+        primary = ModelConfig(
+            alias="primary", model_id="p-model", api_base="http://localhost:1/v1",
+            api_key="k", fallback="fallback-model",
+        )
+        agent = AgentLoop(model=primary, system_prompt="test", stream=False, log_path=tmp_path / "test.log")
+
+        call_count = [0]
+        def mock_create(**kw):
+            call_count[0] += 1
+            if call_count[0] <= 3:
+                raise openai.RateLimitError(
+                    message="rate limited", response=MagicMock(status_code=429, headers={}), body=None,
+                )
+            return make_openai_response("fallback response")
+
+        fallback_mc = ModelConfig(
+            alias="fallback-model", model_id="fb-model", api_base="http://localhost:2/v1", api_key="k",
+        )
+
+        with patch.object(agent, "_get_client") as mock_gc:
+            mock_client = MagicMock()
+            mock_client.chat.completions.create = mock_create
+            mock_gc.return_value = mock_client
+            with patch("voidrift_cli.models.resolve_model", return_value=fallback_mc):
+                result = agent.send("test")
+
+        assert result == "fallback response"
+        assert agent.model.alias == "fallback-model"
+
+    def test_no_fallback_without_config(self, cloud_model):
+        """No fallback field → retries exhaust and error is raised."""
+        assert cloud_model.fallback is None
+        agent = AgentLoop(model=cloud_model, system_prompt="test", stream=False)
+
+        def mock_create(**kw):
+            raise openai.RateLimitError(
+                message="rate limited", response=MagicMock(status_code=429, headers={}), body=None,
+            )
+
+        with patch.object(agent, "_get_client") as mock_gc:
+            mock_client = MagicMock()
+            mock_client.chat.completions.create = mock_create
+            mock_gc.return_value = mock_client
+            with pytest.raises(RuntimeError):
+                agent.send("test")
+
+    def test_no_fallback_on_401(self, tmp_path):
+        """Auth errors (401) do not trigger fallback."""
+        from voidrift_cli.models import ModelConfig
+
+        primary = ModelConfig(
+            alias="primary", model_id="p", api_base="http://localhost:1/v1",
+            api_key="k", fallback="fb",
+        )
+        agent = AgentLoop(model=primary, system_prompt="test", stream=False, log_path=tmp_path / "t.log")
+
+        def mock_create(**kw):
+            raise openai.AuthenticationError(
+                message="invalid key", response=MagicMock(status_code=401, headers={}), body=None,
+            )
+
+        with patch.object(agent, "_get_client") as mock_gc:
+            mock_client = MagicMock()
+            mock_client.chat.completions.create = mock_create
+            mock_gc.return_value = mock_client
+            with pytest.raises(RuntimeError):
+                agent.send("test")
+        # Model should NOT have changed
+        assert agent.model.alias == "primary"

@@ -202,7 +202,8 @@ class TestChatWebFetch:
             agent_loop_cls=FakeAgent,
             confirm_fn=lambda url: True,
         )
-        with patch("urllib.request.urlopen", side_effect=urllib.error.URLError("connection refused")):
+        with patch("urllib.request.urlopen", side_effect=urllib.error.URLError("connection refused")), \
+             patch("voidrift_cli.tools.ssrf_guard.check_url"):
             result = handler("https://bad-url.invalid")
 
         assert "web_fetch error" in result

@@ -59,7 +59,7 @@ def run_plan(
         from ..utils import undo_command
         import shutil
         deleted = undo_command("plan")
-        for target in [d / "ARCHITECTURE.md"]:
+        for target in [d / "ARCHITECTURE.md", d / "README.md"]:
             if target.exists() and str(target) not in deleted:
                 target.unlink()
                 deleted.append(str(target))
@@ -124,7 +124,7 @@ def run_plan(
             ui.detail("No source files found — running full plan")
 
     # ── Stage 1: Architecture ────────────────────────────────────────────
-    ui.stage("Stage 1/5: Architecture...")
+    ui.stage("Stage 1/6: Architecture...")
 
     arch_template = prompts.load_template("ARCHITECTURE-TEMPLATE")
     arch_prompt = prompts.load_prompt("plan", "PLAN-ARCH").format(
@@ -177,7 +177,7 @@ def run_plan(
 
     # ── Stage 2: Module arch ─────────────────────────────────────────────
     arch_summary = _arch_summary(arch_text)
-    ui.stage(f"Stage 2/5: Module arch ({len(modules)} modules)...")
+    ui.stage(f"Stage 2/6: Module arch ({len(modules)} modules)...")
     for i, module in enumerate(modules):
 
         module_prompt = prompts.load_prompt("plan", "PLAN-MODULE").format(
@@ -204,7 +204,7 @@ def run_plan(
     # ── Stage 3: Task outlines ───────────────────────────────────────────
     (d / "tasks" / "outline").mkdir(parents=True, exist_ok=True)
     id_offset = 1
-    ui.stage(f"Stage 3/5: Task outlines ({len(modules)} modules)...")
+    ui.stage(f"Stage 3/6: Task outlines ({len(modules)} modules)...")
     for i, module in enumerate(modules):
 
         module_arch = (d / "arch" / f"{module}.md").read_text()
@@ -240,7 +240,7 @@ def run_plan(
 
     # ── Stage 4: Dependency resolution (multi-module only) ────────────────
     if len(modules) > 1:
-        ui.stage("Stage 4/5: Dependency resolution...")
+        ui.stage("Stage 4/6: Dependency resolution...")
 
         outline_parts = []
         for module in modules:
@@ -267,7 +267,7 @@ def run_plan(
 
         ui.success("tasks/outline/deps.yml")
     else:
-        ui.detail("Stage 4/5: Dependency resolution skipped (single module).")
+        ui.detail("Stage 4/6: Dependency resolution skipped (single module).")
 
     # ── Stage 5: Task files ──────────────────────────────────────────────
     skills_with_desc = _available_skills_with_desc()
@@ -305,7 +305,7 @@ def run_plan(
     total_tasks = len(all_tasks)
     (d / "tasks" / "active").mkdir(parents=True, exist_ok=True)
 
-    ui.stage(f"Stage 5/5: Task files ({total_tasks} tasks)...")
+    ui.stage(f"Stage 5/6: Task files ({total_tasks} tasks)...")
     for i, (module, task_entry) in enumerate(all_tasks):
         task_id = task_entry.get("id", i + 1)
 
@@ -339,6 +339,26 @@ def run_plan(
     task_count = _build_task_files(d, requirements, arch_text, idea_id=idea_id)
     ui.success(f"{task_count} tasks")
 
+    # ── Stage 6: README (REQ-P-1) ────────────────────────────────────────
+    ui.stage("Stage 6/6: README...")
+    readme_template = prompts.load_template("README-TEMPLATE")
+    readme_prompt = prompts.load_prompt("plan", "PLAN-README").format(
+        readme_template=readme_template,
+        requirements=requirements,
+        architecture=arch_text,
+    )
+    readme_file = d / "README.md"
+    ok = _dispatch_agent(
+        model=model, tools=tools, handlers=handlers, log=log,
+        system_prompt=readme_prompt,
+        user_message=prompts.load_prompt("plan", "README-USER"),
+        retry_message=prompts.load_prompt("plan", "README-RETRY"),
+        check_fn=lambda: readme_file.exists(),
+        stage_label="README",
+    )
+    if not ok:
+        ui.warn("README generation failed — continuing without README")
+
     # Clean up outline intermediates
     outline_dir = d / "tasks" / "outline"
     if outline_dir.is_dir():
@@ -356,6 +376,8 @@ def run_plan(
     files_created = []
     if (d / "ARCHITECTURE.md").exists():
         files_created.append(".voidrift/ARCHITECTURE.md")
+    if (d / "README.md").exists():
+        files_created.append(".voidrift/README.md")
     arch_dir = d / "arch"
     if arch_dir.is_dir():
         for af in sorted(arch_dir.glob("*.md")):

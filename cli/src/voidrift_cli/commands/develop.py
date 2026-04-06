@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import signal
+import sys
 import threading
 import time
 from datetime import datetime
@@ -26,12 +27,14 @@ MAX_ESCALATIONS = 5
 def run_develop(
     worker: ModelConfig,
     architect: ModelConfig | None = None,
+    token_budget: Any | None = None,
 ) -> int:
     """Execute the develop command — dispatch tasks from manifest (REQ-D-4).
 
     Args:
         worker: Model configuration for the developer role.
         architect: Optional model for escalation consultations.
+        token_budget: Optional TokenBudget shared across all agents (REQ-ARCH-13).
 
     Returns:
         Exit code (0 for success, 1 for failure).
@@ -50,6 +53,32 @@ def run_develop(
         return 1
 
     mm.load()
+
+    # Orphaned task recovery (TASK-FW-017): reset in-progress tasks from crashed sessions
+    orphaned = [tid for tid, t in mm.tasks().items() if t.get("status") == "in-progress"]
+    if orphaned:
+        if sys.stdin.isatty():
+            for tid in orphaned:
+                task_info = mm.get_task(tid)
+                title = task_info.get("title", "") if task_info else ""
+                ui.warn(f"TASK-{tid} \"{title}\" is in-progress but no agent is running it.")
+                ui.info("  [r] Reset to planned  [s] Skip  [x] Mark failed")
+                try:
+                    choice = input("  Choice [r]: ").strip().lower() or "r"
+                except (EOFError, KeyboardInterrupt):
+                    choice = "r"
+                if choice == "x":
+                    mm.set_status(tid, "failed")
+                    ui.info(f"  → TASK-{tid} marked failed")
+                elif choice == "s":
+                    ui.info(f"  → TASK-{tid} skipped")
+                else:
+                    mm.set_status(tid, "planned")
+                    ui.info(f"  → TASK-{tid} reset to planned")
+        else:
+            for tid in orphaned:
+                mm.set_status(tid, "planned")
+            ui.info(f"Auto-reset {len(orphaned)} orphaned task(s) to planned.")
 
     # REQ-D-2: Check for dispatchable work
     if not mm.has_work():
@@ -72,8 +101,10 @@ def run_develop(
 
     from ..tools import reset_session_files, get_session_files
     from ..tools.filesystem import configure as _configure_fs
+    from ..agent import clear_abort
     reset_session_files()
     _configure_fs(max_read_lines=worker.max_read_lines)
+    clear_abort()
 
     _interrupted = False
     _interrupt_count = 0
@@ -82,6 +113,8 @@ def run_develop(
         nonlocal _interrupted, _interrupt_count
         _interrupt_count += 1
         _interrupted = True
+        from ..agent import request_abort
+        request_abort()
         if _interrupt_count >= 2:
             raise KeyboardInterrupt
 
@@ -99,26 +132,77 @@ def run_develop(
     esc_prompt_tpl = prompts.load_prompt("develop", "ESCALATION")
     git_lock = threading.Lock()
 
+    # Git snapshot — captured once, shared across all agents (REQ-D-18)
+    from ..git_context import capture_git_snapshot
+    _snap = capture_git_snapshot(str(Path.cwd()))
+    git_context = _snap.to_prompt_block() if _snap else ""
+
+    # Git checkpoint manager (REQ-D-20)
+    from ..git_checkpoint import GitCheckpointManager
+    checkpoints = GitCheckpointManager(str(Path.cwd())) if _snap else None
+
     result = 0
+    _budget_exhausted = False
+    diff_stats: list[tuple[int, list[dict]]] = []
+    from ..error_tracker import ErrorTracker
+    errors = ErrorTracker()
     try:
-        result = _dispatch_loop(
+        result, diff_stats = _dispatch_loop(
             mm, worker, architect, tools, handlers, log,
             dev_prompt_tpl, esc_prompt_tpl, git_lock,
-            lambda: _interrupted,
+            lambda: _interrupted, token_budget=token_budget,
+            git_context=git_context, errors=errors,
+            checkpoints=checkpoints,
         )
     except KeyboardInterrupt:
         _interrupted = True
         ui.warn("Interrupted — stopping after current task.")
+    except Exception as e:
+        from ..token_budget import BudgetExhaustedError
+        if isinstance(e, BudgetExhaustedError):
+            _budget_exhausted = True
+            ui.warn(f"Token budget exhausted: {e}")
+        else:
+            raise
     finally:
         signal.signal(signal.SIGTERM, prev_sigterm)
         signal.signal(signal.SIGINT, prev_sigint)
         lock.unlink(missing_ok=True)
 
     files_written = get_session_files()
-    summary = "completed" if result == 0 else ("interrupted" if _interrupted else "failed")
-    append_state("develop", worker.alias, summary, files_created=files_written or None)
+    summary = "budget_exhausted" if _budget_exhausted else (
+        "completed" if result == 0 else ("interrupted" if _interrupted else "failed")
+    )
+    if token_budget:
+        ui.info(f"Token budget: {token_budget.summary()}")
 
-    return result
+    # Diff stats summary (TASK-FW-018)
+    if diff_stats:
+        total_added = total_removed = total_files = 0
+        for tid, stats in diff_stats:
+            added = sum(s["lines_added"] for s in stats)
+            removed = sum(s["lines_removed"] for s in stats)
+            total_added += added
+            total_removed += removed
+            total_files += len(stats)
+            ui.info(f"  TASK-{tid}: +{added} -{removed} ({len(stats)} file{'s' if len(stats) != 1 else ''})")
+        ui.info(f"  Total: +{total_added} -{total_removed} ({total_files} file{'s' if total_files != 1 else ''})")
+
+    error_info = ""
+    if errors.has_errors():
+        error_info = f" Errors: {errors.summary_by_category()}"
+    append_state("develop", worker.alias, summary + error_info, files_created=files_written or None)
+
+    # Error summary (REQ-LOG-6)
+    if errors.has_errors():
+        ui._con.print(errors.render_summary_table())
+        errors.write_jsonl(log)
+
+    # Persist checkpoints (REQ-D-20)
+    if checkpoints and checkpoints.checkpoints:
+        checkpoints.save(d / "checkpoints.jsonl")
+
+    return 1 if _budget_exhausted else result
 
 
 def _dispatch_loop(
@@ -132,18 +216,24 @@ def _dispatch_loop(
     esc_prompt_tpl: str,
     git_lock: threading.Lock,
     is_interrupted: callable,
+    token_budget: Any | None = None,
+    git_context: str = "",
+    errors: Any | None = None,
+    checkpoints: Any | None = None,
 ) -> int:
     """Dispatch ready tasks until none remain (REQ-D-4, REQ-D-10)."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
+    from ..token_budget import BudgetExhaustedError
 
     max_w = worker.concurrency
     escalation_count = 0
     total_tasks = sum(mm.summary().values())
+    all_diff_stats: list[tuple[int, list[dict]]] = []
 
     while True:
         if is_interrupted():
             ui.warn("Interrupted — stopping.")
-            return 1
+            return 1, all_diff_stats
 
         mm.load()  # re-read manifest for latest state
         ready = mm.dispatchable()
@@ -152,65 +242,67 @@ def _dispatch_loop(
                 blocked = [tid for tid, t in mm.tasks().items() if t.get("status") == "blocked"]
                 if blocked:
                     ui.warn(f"{len(blocked)} task(s) blocked by failed dependencies.")
-                return 1 if blocked else 0
+                return (1 if blocked else 0), all_diff_stats
             ui.done("All tasks complete.")
-            return 0
+            return 0, all_diff_stats
 
         if max_w <= 1 or len(ready) == 1:
             # Sequential
             for tid in ready:
                 if is_interrupted():
-                    return 1
-                rc = _run_task(
+                    return 1, all_diff_stats
+                rc, _stats = _run_task(
                     mm, tid, worker, architect, tools, handlers, log,
                     dev_prompt_tpl, esc_prompt_tpl, git_lock, total_tasks,
+                    token_budget=token_budget, git_context=git_context,
+                    errors=errors, checkpoints=checkpoints,
                 )
+                if _stats:
+                    all_diff_stats.append((tid, _stats))
                 if rc != 0:
                     escalation_count += 1
                     if escalation_count > MAX_ESCALATIONS:
                         mm.set_status(tid, "failed")
                         ui.warn(f"TASK-{tid} blocked (max escalations reached)")
         else:
-            # Concurrent — dispatch all ready tasks up to concurrency limit
+            # Concurrent — dispatch all ready tasks up to concurrency limit (REQ-UI-11)
             batch = ready[:max_w] if max_w > 0 else ready
             ui.info(f"Dispatching {len(batch)} tasks concurrently")
 
-            with ui.multi_spinner(f"{len(batch)} tasks") as ms:
+            with ui.DevelopDashboard() as dash:
                 with ThreadPoolExecutor(max_workers=len(batch)) as pool:
                     futures = {}
                     for tid in batch:
                         if is_interrupted():
                             break
-                        task_info = mm.get_task(tid)
-                        module = task_info.get("module", "") if task_info else ""
                         label = truncate_task_label(mm.read_task(tid).split("\n")[0] if mm.read_task(tid) else f"TASK-{tid}")
-                        desc = f"TASK-{tid} {label}"
-                        tracker = ms.track(desc, group=module)
-                        ms.set_group_total(module, len([t for t in mm.tasks().values() if t.get("module") == module]))
+                        key = f"TASK-{tid}"
+                        dash.add_task(key, f"TASK-{tid} {label}")
+                        tracker = dash.tracker(key)
 
                         fut = pool.submit(
                             _run_task, mm, tid, worker, architect, tools, handlers,
                             log, dev_prompt_tpl, esc_prompt_tpl, git_lock, total_tasks,
-                            tracker=tracker,
+                            tracker=tracker, token_budget=token_budget,
+                            git_context=git_context, errors=errors,
+                            checkpoints=checkpoints,
                         )
-                        futures[fut] = (tid, desc, module)
+                        futures[fut] = (tid, key)
 
                     for fut in as_completed(futures):
-                        tid, desc, module = futures[fut]
+                        tid, key = futures[fut]
                         try:
-                            rc = fut.result()
-                            elapsed = 0  # TODO: track per-task elapsed
-                            if rc == 0:
-                                ms.done(desc, desc, elapsed, group=module)
-                            else:
-                                ms.done(desc, f"FAILED: {desc}", elapsed, failed=True, group=module)
+                            rc, _stats = fut.result()
+                            if _stats:
+                                all_diff_stats.append((tid, _stats))
+                            dash.mark_done(key, failed=(rc != 0))
                         except Exception as e:
-                            ms.done(desc, f"ERROR: {desc}", 0, failed=True, group=module)
+                            dash.mark_done(key, failed=True)
                             ui.error(f"TASK-{tid}: {e}")
                         if is_interrupted():
                             for f in futures:
                                 f.cancel()
-                            return 1
+                            return 1, all_diff_stats
 
 
 def _run_task(
@@ -226,14 +318,18 @@ def _run_task(
     git_lock: threading.Lock,
     total_tasks: int,
     tracker=None,
+    token_budget=None,
+    git_context: str = "",
+    errors=None,
+    checkpoints=None,
 ) -> int:
     """Execute a single task (REQ-D-4)."""
-    from ..tools import reset_write_count, get_write_count
+    from ..tools import reset_write_count, get_write_count, set_snapshots, clear_snapshots, rollback_snapshots, compute_diff_stats
 
     task_content = mm.read_task(task_id)
     if not task_content:
         ui.error(f"TASK-{task_id}.md not found in active/")
-        return 1
+        return 1, []
 
     task_info = mm.get_task(task_id)
     module = task_info.get("module", "") if task_info else ""
@@ -254,15 +350,42 @@ def _run_task(
             skill_parts.append(f"### Skill: {skill_name}\n\n{content}")
     skill_content = "\n\n".join(skill_parts)
 
+    # Collect allowed_tools from task skills (REQ-SKL-9)
+    from ..skills import get_skill_allowed_tools, make_skill_tool_guard
+    _merged_allowed: list[str] | None = None
+    _skill_names: list[str] = []
+    _has_restriction = False
+    for skill_name in skills:
+        at = get_skill_allowed_tools(skill_name)
+        if at is not None:
+            _has_restriction = True
+            _skill_names.append(skill_name)
+            if _merged_allowed is None:
+                _merged_allowed = list(at)
+            else:
+                _merged_allowed.extend(at)
+    _skill_guard = None
+    if _has_restriction:
+        _skill_guard = make_skill_tool_guard(_merged_allowed, ", ".join(_skill_names))
+    skill_content = "\n\n".join(skill_parts)
+
     # Build system prompt — task content IS the context
     system = dev_prompt_tpl.format(
         task_text=task_content,
         arch_context="",
         skill_content=skill_content,
     )
+    if git_context:
+        system += f"\n\n{git_context}"
 
     mm.set_status(task_id, "in-progress")
     reset_write_count()
+    set_snapshots()
+
+    # Git checkpoint before task (REQ-D-20)
+    if checkpoints:
+        with git_lock:
+            checkpoints.create(turn=task_id, task_id=f"TASK-{task_id}")
 
     agent = AgentLoop(
         model=worker,
@@ -272,6 +395,8 @@ def _run_task(
         stream=False,
         log_path=log,
         show_spinner=False,
+        token_budget=token_budget,
+        before_tool_call=_skill_guard,
     )
 
     start_time = time.time()
@@ -295,7 +420,11 @@ def _run_task(
         with open(log, "a") as f:
             f.write(f"ERROR on TASK-{task_id}: {e}\n")
         ui.error(f"TASK-{task_id} failed: {e}")
-        return 1
+        if errors:
+            cat = "context" if "context length" in str(e).lower() else "api"
+            errors.record(cat, type(e).__name__, str(e)[:200], task=f"TASK-{task_id}", recoverable=False)
+        rollback_snapshots(log_path=log)
+        return 1, []
 
     # Verify writes occurred (REQ-D-5)
     if get_write_count() == 0:
@@ -329,9 +458,11 @@ def _run_task(
                         with open(task_path, "a") as f:
                             f.write(f"\n\n## Architect Fix Plan\n\n{guidance}\n")
                     mm.set_status(task_id, "planned")  # re-queue for next dispatch
-                    return 0  # not a failure — task will be re-dispatched
+                    rollback_snapshots(log_path=log)
+                    return 0, []  # not a failure — task will be re-dispatched
             ui.warn(f"TASK-{task_id}: Still no writes after retry")
-            return 1
+            rollback_snapshots(log_path=log)
+            return 1, []
 
     # Git diff check (REQ-D-5)
     if get_write_count() > 0:
@@ -348,11 +479,13 @@ def _run_task(
             pass
 
     # Mark implemented (REQ-D-9)
+    diff_stats = compute_diff_stats()
     mm.set_status(task_id, "implemented")
+    clear_snapshots()
     if not tracker:
         ui.success(f"TASK-{task_id}: {label} ({elapsed:.1f}s)")
 
-    return 0
+    return 0, diff_stats
 
 
 def _consult_architect(

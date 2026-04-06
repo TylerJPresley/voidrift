@@ -243,3 +243,71 @@ def undo_command(cmd: str) -> list[str]:
             text = text[:last.start()] + text[end:]
             state.write_text(text)
     return deleted
+
+
+# ── Analysis cache pruning (REQ-U-14) ──────────────────────────────────────
+
+
+def prune_analysis_cache(
+    project_dir: Path,
+    max_entries: int = 500,
+    ttl_days: int = 30,
+) -> dict:
+    """Prune .voidrift/analysis/ — stale, expired, then LRU. Returns stats dict."""
+    import time
+
+    analysis_dir = project_dir / ".voidrift" / "analysis"
+    if not analysis_dir.exists():
+        return {"stale": 0, "expired": 0, "lru": 0, "bytes_freed": 0}
+
+    entries = []
+    for p in analysis_dir.rglob("*.md"):
+        if p.name.startswith("context-"):
+            continue
+        source = ""
+        try:
+            head = p.read_text(encoding="utf-8", errors="replace")[:512]
+            if head.startswith("---"):
+                for line in head.splitlines():
+                    if line.strip().startswith("file:"):
+                        source = line.split(":", 1)[1].strip()
+                        break
+        except OSError:
+            pass
+        entries.append({"path": p, "source": source, "mtime": p.stat().st_mtime, "size": p.stat().st_size})
+
+    entries.sort(key=lambda e: e["mtime"])
+    now = time.time()
+    ttl_secs = ttl_days * 86400
+    remove = set()
+    stale = expired = lru = freed = 0
+
+    # Stage 1: stale
+    for e in entries:
+        if e["source"] and not (project_dir / e["source"]).exists():
+            remove.add(id(e))
+            stale += 1
+
+    # Stage 2: expired
+    for e in entries:
+        if id(e) not in remove and (now - e["mtime"]) > ttl_secs:
+            remove.add(id(e))
+            expired += 1
+
+    # Stage 3: LRU
+    remaining = len(entries) - len(remove)
+    if remaining > max_entries:
+        for e in entries:
+            if remaining <= max_entries:
+                break
+            if id(e) not in remove:
+                remove.add(id(e))
+                lru += 1
+                remaining -= 1
+
+    for e in entries:
+        if id(e) in remove:
+            freed += e["size"]
+            e["path"].unlink(missing_ok=True)
+
+    return {"stale": stale, "expired": expired, "lru": lru, "bytes_freed": freed}

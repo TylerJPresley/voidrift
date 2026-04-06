@@ -72,20 +72,23 @@ class TestProcessManager:
 
     def test_run_command_returns_stdout_stderr_exit_code(self):
         """run_command returns stdout, stderr, exit_code JSON (REQ-VF-11)."""
-        from voidrift_cli.tools.process_manager import run_command
+        from voidrift_cli.tools.bash import BashConfig, create_run_command
+        run_command = create_run_command(BashConfig(enabled=True))
         result = json.loads(run_command("echo hello"))
         assert result["stdout"].strip() == "hello"
         assert result["exit_code"] == 0
 
     def test_run_command_captures_failure(self):
         """run_command captures nonzero exit codes (REQ-VF-11)."""
-        from voidrift_cli.tools.process_manager import run_command
+        from voidrift_cli.tools.bash import BashConfig, create_run_command
+        run_command = create_run_command(BashConfig(enabled=True))
         result = json.loads(run_command("false"))
         assert result["exit_code"] != 0
 
     def test_run_command_not_found(self):
         """run_command returns error when executable not found."""
-        from voidrift_cli.tools.process_manager import run_command
+        from voidrift_cli.tools.bash import BashConfig, create_run_command
+        run_command = create_run_command(BashConfig(enabled=True))
         result = json.loads(run_command("this-command-does-not-exist-xyz"))
         assert "error" in result
         assert result["exit_code"] == 127

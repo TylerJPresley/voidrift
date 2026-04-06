@@ -67,6 +67,14 @@ def http_request(
     except json.JSONDecodeError as exc:
         return json.dumps({"error": f"Invalid headers JSON: {exc}"})
 
+    # SSRF check (REQ-SEC-3)
+    from .ssrf_guard import check_url, SSRFError
+    from ..config import get_ssrf_allow_list
+    try:
+        check_url(url, allow_list=get_ssrf_allow_list())
+    except SSRFError as e:
+        return json.dumps({"error": str(e)})
+
     session = _get_session(session_id)
 
     # Persist auth header from this call or inherit from session

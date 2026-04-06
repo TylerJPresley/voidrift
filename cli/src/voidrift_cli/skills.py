@@ -35,6 +35,31 @@ def _strip_frontmatter(content: str) -> str:
     return content
 
 
+def _parse_frontmatter(content: str) -> dict:
+    """Extract YAML frontmatter as dict. Returns {} if absent."""
+    if content.startswith("---\n"):
+        end = content.find("\n---\n", 4)
+        if end != -1:
+            import yaml
+            try:
+                return yaml.safe_load(content[4:end]) or {}
+            except Exception:
+                pass
+    return {}
+
+
+def get_skill_allowed_tools(name: str, project_dir: Path | str | None = None) -> list[str] | None:
+    """Return the allowed_tools list from a skill's frontmatter, or None if absent (REQ-SKL-9)."""
+    project_dir = Path(project_dir) if project_dir else Path.cwd()
+    upper = name.upper()
+    for skills_dir in _skill_dirs(project_dir):
+        candidate = skills_dir / f"{upper}.md"
+        if candidate.is_file():
+            fm = _parse_frontmatter(candidate.read_text(encoding="utf-8"))
+            return fm.get("allowed_tools")
+    return None
+
+
 def find_skill(name: str, project_dir: Path | str | None = None) -> str | None:
     """Find and return skill content using 3-layer resolution (REQ-CTX-1, REQ-SKL-2).
 
@@ -114,3 +139,25 @@ def _first_line(path: Path) -> str:
 def clear_cache() -> None:
     """Clear the in-process skill cache. Useful for tests."""
     _cache.clear()
+
+
+def make_skill_tool_guard(allowed: list[str] | None, skill_name: str = ""):
+    """Return a before_tool_call hook enforcing allowed_tools (REQ-SKL-9).
+
+    Returns None (no restriction) when allowed is None.
+    """
+    if allowed is None:
+        return None
+
+    allowed_set = set(allowed)
+
+    def _guard(name: str, args: str) -> str | None:
+        if name in allowed_set:
+            return None  # allow
+        names = ", ".join(sorted(allowed_set)) if allowed_set else "none"
+        return (
+            f"Tool '{name}' blocked by skill '{skill_name}'. "
+            f"Allowed tools: {names}."
+        )
+
+    return _guard

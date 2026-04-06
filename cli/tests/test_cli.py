@@ -117,13 +117,11 @@ class TestActiveModelAlias:
     def test_active_model_alias_returns_alias(self, tmp_path):
         """_active_model_alias() returns the alias from .active-container."""
         from unittest.mock import patch as _patch
-        worker_home = tmp_path / ".worker-cli"
-        worker_home.mkdir()
-        (worker_home / ".active-container").write_text("container-123\ntest-local-model\n")
+        container_file = tmp_path / ".active-container"
+        container_file.write_text("container-123\ntest-local-model\n")
 
         from voidrift_cli.main import _active_model_alias
-        with _patch("voidrift_cli.main.Path") as MockPath:
-            MockPath.home.return_value = tmp_path
+        with _patch("voidrift_cli.config.load_config", return_value={"active_container_file": str(container_file)}):
             alias = _active_model_alias()
         assert alias == "test-local-model"
 
@@ -131,33 +129,28 @@ class TestActiveModelAlias:
         """_active_model_alias() returns None when .active-container doesn't exist."""
         from unittest.mock import patch as _patch
         from voidrift_cli.main import _active_model_alias
-        with _patch("voidrift_cli.main.Path") as MockPath:
-            MockPath.home.return_value = tmp_path
+        with _patch("voidrift_cli.config.load_config", return_value={"active_container_file": str(tmp_path / "nonexistent")}):
             alias = _active_model_alias()
         assert alias is None
 
     def test_active_model_alias_single_line_file_returns_none(self, tmp_path):
         """_active_model_alias() returns None if file has only one line (no alias)."""
         from unittest.mock import patch as _patch
-        worker_home = tmp_path / ".worker-cli"
-        worker_home.mkdir()
-        (worker_home / ".active-container").write_text("container-only\n")
+        container_file = tmp_path / ".active-container"
+        container_file.write_text("container-only\n")
 
         from voidrift_cli.main import _active_model_alias
-        with _patch("voidrift_cli.main.Path") as MockPath:
-            MockPath.home.return_value = tmp_path
+        with _patch("voidrift_cli.config.load_config", return_value={"active_container_file": str(container_file)}):
             alias = _active_model_alias()
         assert alias is None
 
     def test_interactive_mode_uses_active_model_as_default(self, tmp_path):
         """When .active-container exists, _active_model_alias() provides the default."""
         from unittest.mock import patch as _patch
-        worker_home = tmp_path / ".worker-cli"
-        worker_home.mkdir()
-        (worker_home / ".active-container").write_text("c-abc123\nmy-active-model\n")
+        container_file = tmp_path / ".active-container"
+        container_file.write_text("c-abc123\nmy-active-model\n")
 
         from voidrift_cli.main import _active_model_alias
-        with _patch("voidrift_cli.main.Path") as MockPath:
-            MockPath.home.return_value = tmp_path
+        with _patch("voidrift_cli.config.load_config", return_value={"active_container_file": str(container_file)}):
             alias = _active_model_alias()
         assert alias == "my-active-model"

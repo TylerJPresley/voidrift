@@ -141,6 +141,7 @@ def run_gather(
     from_path: str | None = None,
     idea_id: int | None = None,
     overwrite: bool = False,
+    token_budget: "Any | None" = None,
 ) -> int:
     """Execute the gather command — reverse-engineer requirements (REQ-G-1)."""
     check_disk_space()
@@ -151,7 +152,16 @@ def run_gather(
         return _gather_from_idea(model, target, idea_id, d)
 
     source = Path(from_path)
-    return _gather_from(model, target, source, overwrite)
+    try:
+        return _gather_from(model, target, source, overwrite, token_budget=token_budget)
+    except Exception as e:
+        from ..token_budget import BudgetExhaustedError
+        if isinstance(e, BudgetExhaustedError):
+            ui.warn(f"Token budget exhausted: {e}")
+            if token_budget:
+                ui.info(f"Token budget: {token_budget.summary()}")
+            return 1
+        raise
 
 
 def _gather_from_idea(
@@ -255,6 +265,7 @@ def _gather_from(
     target: Path,
     from_path: Path,
     overwrite: bool,
+    token_budget: "Any | None" = None,
 ) -> int:
     """Reverse engineering mode — four-stage pipeline (REQ-G-8, REQ-ARCH-7).
 
@@ -275,6 +286,9 @@ def _gather_from(
             ui.info(f"Removed {len(deleted)} files from previous gather.")
 
     log, run_id = boot_run("gather")
+
+    from ..error_tracker import ErrorTracker
+    errors = ErrorTracker()
 
     all_tools, all_handlers = build_local_tools(cmd="gather")
 
@@ -330,6 +344,7 @@ def _gather_from(
         log_path=log,
         system_prompt=f"{analyst_role}\n\n{triage_prompt}",
         tools=[], tool_handlers={}, show_spinner=False,
+        token_budget=token_budget,
     )
     try:
         with ui.spinner(ui.random_label(), "triage") as spin:
@@ -371,6 +386,7 @@ def _gather_from(
         log_path=log,
         system_prompt=f"{analyst_role}\n\n{validation_prompt}",
         tools=[], tool_handlers={}, show_spinner=False,
+        token_budget=token_budget,
     )
     try:
         with ui.spinner(ui.random_label(), "validation") as spin:
@@ -426,6 +442,7 @@ def _gather_from(
                 log_path=log,
                 system_prompt=system,
                 tools=[], tool_handlers={}, show_spinner=False,
+                token_budget=token_budget,
             )
             tracker = ms.track(f"{cat} ({len(cat_files)} files)")
             _stats: dict = {"elapsed": 0, "pt": 0, "ct": 0, "ctx": None}
@@ -448,6 +465,7 @@ def _gather_from(
                     f.write(f"Context [{cat}]:\n{summary}\n")
             except (RuntimeError, OSError) as e:
                 ms.done(f"{cat} ({len(cat_files)} files)", f"{cat}", 0, failed=True)
+                errors.record("api", type(e).__name__, str(e)[:200], recoverable=False)
 
     # Build context block to inject into every source analysis agent (REQ-G-17)
     context_block = build_context_block(context_summaries)
@@ -513,6 +531,7 @@ def _gather_from(
                     log_path=log,
                     system_prompt=system,
                     tools=[], tool_handlers={}, show_spinner=False,
+                    token_budget=token_budget,
                 )
                 chunk_agent.on_progress = on_progress
                 chunk_agent.on_token = lambda t: None
@@ -523,6 +542,7 @@ def _gather_from(
                     )
                     partial.append(resp)
                 except (RuntimeError, OSError):
+                    errors.record("api", "ChunkAnalysisError", f"Chunk {i}/{len(chunks)} of {filepath}", recoverable=True)
                     pass
             if partial:
                 if len(partial) == 1:
@@ -533,6 +553,7 @@ def _gather_from(
                         log_path=log,
                         system_prompt=system,
                         tools=[], tool_handlers={}, show_spinner=False,
+                        token_budget=token_budget,
                     )
                     consol_agent.on_progress = on_progress
                     consol_agent.on_token = lambda t: None
@@ -555,6 +576,7 @@ def _gather_from(
             log_path=log,
             system_prompt=system,
             tools=source_tools, tool_handlers=source_handlers, show_spinner=False,
+            token_budget=token_budget,
         )
         agent.on_progress = on_progress
         agent.on_token = lambda t: None
@@ -584,6 +606,7 @@ def _gather_from(
                     label = f"{n}/{len(source_files)} {filepath}"
                     if err:
                         ms.done(filepath, label, elapsed or 0, failed=True)
+                        errors.record("api", "SourceAnalysisError", f"{filepath}: {err[:150]}", recoverable=True)
                     else:
                         source_requirements[filepath] = response
                         ms.done(filepath, label, elapsed or 0, pt, ct, ctx_pct)
@@ -656,6 +679,7 @@ def _gather_from(
             log_path=log,
             system_prompt=final_system,
             tools=[], tool_handlers={}, show_spinner=False,
+            token_budget=token_budget,
         )
         with ui.spinner(ui.random_label(), "consolidation") as spin:
             final_agent.on_progress = spin.on_progress
@@ -685,13 +709,19 @@ def _gather_from(
         files_created.append(str(af.relative_to(Path.cwd())))
     total = len(file_category)
     src_count = len(source_files)
+    error_info = ""
+    if errors.has_errors():
+        error_info = f" Errors: {errors.summary_by_category()}"
     append_state(
         cmd="gather",
         model_alias=model.alias,
-        summary=f"Analyzed {total} files ({src_count} source). Wrote REQUIREMENTS.md.",
+        summary=f"Analyzed {total} files ({src_count} source). Wrote REQUIREMENTS.md.{error_info}",
         files_created=files_created,
         analyzed_files=analyzed,
     )
+    if errors.has_errors():
+        ui._con.print(errors.render_summary_table())
+        errors.write_jsonl(log)
     ui.done(f"Requirements written to {str(target.relative_to(Path.cwd()))}")
     if analysis_log.exists():
         ui.detail(f"Analysis log: {str(analysis_log.relative_to(Path.cwd()))}")
