@@ -130,6 +130,15 @@
   - Given cmd="develop", When `build_local_tools()` is called, Then `write_source_file`, `read_source_file`, and `read_framework_file` are included but `write_framework_file` is not.
   - Given cmd="gather", When `build_local_tools()` is called, Then `read_source_file`, `write_framework_file`, and `read_framework_file` are included but `write_source_file` is not.
   - Given cmd="", When `build_local_tools()` is called, Then all tools are returned.
+  - *OCP contract:* Each command module SHALL declare a module-level `AGENT_TOOLS: frozenset[str]` constant listing the tool names available to that command. Commands with two variants (e.g. verify) SHALL declare `AGENT_TOOLS_PLAN` and `AGENT_TOOLS_EXECUTE`. `build_local_tools()` SHALL resolve the allowed set by dynamically importing the constant from the command module — no hardcoded mapping in `tool_builder.py`. Adding a new command SHALL require declaring `AGENT_TOOLS` in the new module only, with no changes to `tool_builder.py`.
+  - *Rationale for OCP contract:* A hardcoded `_COMMAND_TOOLS` dict in `tool_builder.py` requires editing a shared module every time a new command is added. Dynamic import makes each command module the single authority over its own tool set — tool_builder.py is closed for modification, open for extension.
+  - Given cmd="gather", When `build_local_tools()` is called, Then the tool set is resolved from `commands.gather.AGENT_TOOLS` without any hardcoded mapping in `tool_builder.py`.
+  - Given a new command module declares `AGENT_TOOLS = frozenset({"read_source_file"})`, When `build_local_tools(cmd="new-command")` is called, Then `read_source_file` is in the returned tool set and `tool_builder.py` was not modified.
+
+- **REQ-ARCH-20:** The agent loop's main execution method SHALL delegate to focused helper methods, one per concern: API call dispatch and response parsing, stall detection and recovery, and queue draining. Each helper method SHALL be independently unit-testable with no dependency on the other helpers. No single method SHALL mix concerns from two or more of these three categories.
+  - *Rationale:* A monolithic ~300-line method mixing API calls, stall logic, and queue draining cannot be unit tested at the concern level — every test must construct a full agent and exercise the entire loop. Decomposition enables targeted tests for stall detection that never touch the API path, and queue drain tests that never need a model response.
+  - Given a stall condition occurs, When `_handle_stall()` is called independently, Then the nudge message is injected and the stall counter increments without executing any API call.
+  - Given messages in the follow-up queue, When `_drain_queues()` is called independently, Then the messages are consumed and the follow-up list is populated without touching the steering queue.
 
 ### 4.2 CLI-Native Context Management
 
@@ -187,6 +196,8 @@
   - Given source analysis completes for all files, When the final pass agent is created, Then its user message contains the context summary and all per-file requirements.
   - Given a final pass agent, When its system prompt is examined, Then it contains the REQUIREMENTS-TEMPLATE and the ANALYSIS-REQS skill but no source requirements text.
   - Given the final pass completes, When REQUIREMENTS.md is inspected, Then it contains requirements traceable to source files with context from non-source files where relevant.
+  - *Stage isolation:* Each of the four pipeline stages SHALL be implemented as a named function with clearly defined inputs (data passed in) and outputs (data returned). Each stage function SHALL be independently callable and independently unit-testable without running the full gather pipeline.
+  - *Rationale for stage isolation:* A single monolithic pipeline function cannot be tested stage-by-stage — a test for the context-build stage must run triage first. Named stage functions allow focused tests: a triage test with a controlled file tree, a context-build test with a controlled category dict, a final-pass test with controlled analysis data.
 - **REQ-G-10:** Gather SHALL never auto-commit. `auto-commits: false` and `dirty-commits: false` SHALL be set.
 - **REQ-G-11:** WHEN an API call fails due to context length exceeded, THE SYSTEM SHALL display a clear error identifying the stage, the group name, and a suggestion to use a model with a larger context window. The pipeline SHALL NOT silently truncate content to fit.
   - Given a model API returns an error containing "context length", When the agent loop catches the exception, Then a `RuntimeError` is raised with a message containing the model alias and "larger context window".
@@ -527,6 +538,11 @@ Verify is a two-stage requirements-driven acceptance testing command. Stage 1 pr
   - Given `tree-sitter` is not installed, When `voidrift doctor` runs, Then a warn check appears with `pip install tree-sitter`.
   - Given all optional dependencies are installed, When `voidrift doctor` runs, Then the optional dependencies check passes.
 
+- **REQ-U-21:** The `chat` command's interactive session logic SHALL be structured such that terminal state management, Rich display callbacks (spinner, live rendering), the idea state machine (`/idea`/`/done` flow), and the readline/prompt-toolkit input loop are each implemented as independently testable concerns. No single function or closure SHALL combine more than one of these four concerns.
+  - *Rationale:* A ~750-line `_interactive_loop()` function containing 15+ nested closures is not testable at the concern level — every test must drive the full terminal input loop. Decomposed concerns allow stall-display tests that never start a TTY, idea-state tests that never call the model, and terminal-state tests that never enter the event loop.
+  - Given a TTY session is active, When the idea state machine transitions from Intake to Exploration, Then no terminal state setup or input handling code is involved in the transition.
+  - Given a display callback is invoked, When a tool call is rendered, Then no idea state or terminal setup state is accessed.
+
 ### 4.10 Model Configuration
 
 - **REQ-MC-1:** WHEN a model alias is used, THE SYSTEM SHALL resolve it to `(base_url, api_key, model_id)`. The CLI SHALL read all model definitions from a single models file. The path to this file SHALL be configurable via `models_file` in `config.yml` (default: `~/.worker-cli/models.yml`). Each model entry SHALL be self-contained: `base_url`, `api_key`, `model_id`, and optional `provider` and `max_context`. IF an alias is not found, THE SYSTEM SHALL exit with an error listing all available aliases.
@@ -647,6 +663,12 @@ Two log roots, two intents:
   - Given `--style verbose`, When the model calls `read_source_file`, Then a dim line `→ read_source_file(...)` is displayed.
   - Given `--style raw`, When the model responds, Then no ANSI escape codes appear in the output.
 
+- **REQ-UI-13:** `voidrift status` SHALL display a Rich table with task counts grouped by lifecycle status columns: `planned`, `in-progress`, `implemented`, `verified`, `failed`, `blocked`. Each column SHALL show the count of tasks in that status. Total task count and idea count SHALL appear below the table. Data SHALL be read from `.voidrift/tasks/manifest.yml`. This command SHALL NOT require a model. WHEN no manifest exists, THE SYSTEM SHALL display a message indicating no active project.
+  - *Rationale:* The operator needs a quick project health view without opening files or running a chat session. A column-per-status table gives immediate visibility into how much work is planned vs. in flight vs. done.
+  - Given a manifest with 5 planned, 2 in-progress, 3 implemented tasks, When `voidrift status` runs, Then the table shows those counts in the correct columns.
+  - Given no manifest exists, When `voidrift status` runs, Then a message is displayed and no table is rendered.
+  - Given a manifest with 2 ideas (1 now, 1 next), When `voidrift status` runs, Then the idea count appears below the task table.
+
 ### 4.16 Framework Configuration
 
 - **REQ-CFG-1:** All framework configuration SHALL be read from `~/.voidrift/config.yml`. Config files SHALL support `${VAR}` and `${VAR:-default}` for environment variable expansion, and `${section.key}` for cross-referencing values from config.yml.
@@ -717,6 +739,16 @@ Two log roots, two intents:
   - Given a skill with no `allowed_tools` field is active, When any tool is called, Then no restriction is applied.
   - Given a skill with `allowed_tools: []` is active, When any tool is called, Then the call is blocked.
   - Given a skill is loaded via `get_skill` in chat, When the next user turn starts, Then the restriction is cleared.
+  - *Isolation contract:* Active skill state (allowed tools list and skill name) SHALL be stored on the `AgentLoop` instance as `active_skill_allowed_tools: list[str] | None` and `active_skill_name: str`. No module-level mutable state SHALL be used to communicate skill restrictions between the `get_skill` handler and the `before_tool_call` hook. Two concurrent chat sessions SHALL not share or corrupt each other's active skill state.
+  - *Rationale:* A module-level `_active_skill_allowed_tools` dict is a shared-mutable side-channel — two concurrent sessions writing to it produce non-deterministic skill enforcement. Storing state on the agent instance ensures each session is fully isolated.
+  - Given two concurrent chat sessions each load different skills, When each session's before_tool_call hook executes, Then each session enforces only its own skill's allowed tools.
+
+- **REQ-SKL-10:** WHEN `find_skill(name, project_dir)` returns `None` (no skill found at any layer) AND `synthesis_model` is configured in `config.yml`, THE SYSTEM SHALL synthesize a new skill on-the-fly: invoke the `skills install` pipeline (REQ-SKL-5) with `name`, write the result to `.voidrift/skills/pending/<NAME>.md`, and emit an operator-facing warning that the skill is pending approval via `voidrift skills approve`. The synthesized skill SHALL NOT be injected into the active agent until approved. WHEN `synthesis_model` is not configured, `find_skill` returns `None` and the existing REQ-CTX-2 behavior applies (log warning, continue). `voidrift skills approve <name>` SHALL move the skill from `pending/` to `.voidrift/skills/` (project layer), making it active for future runs.
+  - *Rationale:* Operators working in niche domains often encounter skills that don't exist at any layer. Manual skill authoring interrupts the workflow. On-the-fly synthesis via the existing install pipeline provides a starting point the operator can review and approve. The approval gate ensures the operator sees and accepts synthesized content before it influences agent behavior — synthesis is never silent.
+  - Given `find_skill("FASTAPI", project_dir)` returns None and `synthesis_model` is configured, When a command that requires FASTAPI runs, Then a synthesized `FASTAPI.md` is written to `.voidrift/skills/pending/` and a warning is displayed.
+  - Given a pending skill `FASTAPI.md` exists, When `voidrift skills approve fastapi` is run, Then the skill is moved to `.voidrift/skills/` and becomes available to future `find_skill()` calls.
+  - Given `synthesis_model` is not configured, When `find_skill` returns None, Then no synthesis occurs and the existing warn-and-continue behavior applies.
+  - Given the synthesis API call fails, When synthesis is attempted, Then the error is logged, no pending skill is written, and warn-and-continue behavior applies.
 
 ### 4.18 File Size Standards
 
@@ -760,6 +792,16 @@ Two log roots, two intents:
   - *Rationale:* Co-locating usage guidelines with tool definitions prevents stale documentation in prompt files. When a tool is added or changed, its guidelines travel with it.
   - Given a tool with `_guidelines: ["Do X", "Do Y"]`, When `build_tool_guidelines` is called, Then both bullets appear in the output.
   - Given a tool with no `_guidelines` key, When `build_tool_guidelines` is called, Then the tool contributes nothing.
+
+- **REQ-TOOL-2:** `WriteContext` SHALL NOT be instantiated at module import time. All `WriteContext` instances SHALL be constructed with an explicit `project_dir` argument by the command that owns the file operation. No module-level singleton or global `WriteContext` instance SHALL exist in `tools/filesystem.py`. Module-level facade functions that delegate to a global singleton SHALL NOT exist in production code — callers SHALL construct a `WriteContext` instance directly.
+  - *Rationale:* A module-level `WriteContext()` calls `Path.cwd()` at Python import time — before any command sets the working directory. During test collection this binds the context to the test runner's CWD, not the project root. The `develop` command already constructs its own `WriteContext(project_dir=...)`, making the singleton dead code in production. Removing it eliminates the import-time side effect and the dead-code facade layer.
+  - Given `tools/filesystem.py` is imported, When the module loads, Then no `WriteContext` is constructed and no filesystem path is accessed.
+  - Given a develop command with `project_dir=/tmp/myproject`, When it constructs `WriteContext(project_dir=Path("/tmp/myproject"))`, Then all file operations are rooted at `/tmp/myproject`.
+
+- **REQ-TOOL-3:** Tool schema definitions (`LOCAL_TOOLS` list) and handler dispatch tables (`LOCAL_HANDLERS` dict) SHALL live in a dedicated `tools/registry.py` module, separate from `WriteContext` and the tool implementation functions in `filesystem.py`. `tools/filesystem.py` SHALL contain only `WriteContext` and the functions it implements. `tools/registry.py` SHALL import from `filesystem.py` and other tool modules to build the registry, not the other way around.
+  - *Rationale:* Co-locating OpenAI tool schemas with `WriteContext` creates a 600-line file that mixes three concerns: context management, tool implementation, and schema definitions. Separating the registry makes each file's responsibility clear — `filesystem.py` is "how tools work," `registry.py` is "what tools exist."
+  - Given `tools/filesystem.py` is read, When audited, Then it contains no `LOCAL_TOOLS` list and no `LOCAL_HANDLERS` dict.
+  - Given `tools/registry.py` is imported, When used by `build_local_tools()`, Then it exports `LOCAL_TOOLS` and `LOCAL_HANDLERS`.
 
 ### 4.19b Security
 
@@ -867,6 +909,12 @@ Two log roots, two intents:
   - Given task 5 is `failed` with BUG-1 linked, When develop re-dispatches, Then the architect is consulted with the task ticket + BUG-1.md before the developer agent runs.
   - Given an operator reports a bug not tied to any task, When BUG-2.md is created, Then it exists in `active/` with no task refs in the manifest.
 
+- **REQ-TM-8:** WHEN `voidrift deploy` completes successfully and a git version tag is created, THE SYSTEM SHALL rotate `history.log` to `history-<version>.log` in `.voidrift/tasks/` and create a new empty `history.log`. The rotated archive SHALL be preserved and SHALL NOT be deleted. WHEN the history file does not exist at rotation time, no rotation occurs and no error is raised.
+  - *Rationale:* The deploy command reads `history.log` to classify version bumps. Rotation at release ensures each log cycle corresponds exactly to one release boundary — work done before v1.0 and work done before v1.1 are in separate files. Size- or date-based rotation would split a release cycle across multiple files, making version classification unreliable.
+  - Given deploy completes and tags `v1.2.0`, When history rotation runs, Then `history.log` is renamed to `history-v1.2.0.log` and a new empty `history.log` is created.
+  - Given deploy completes and `history.log` does not exist, When history rotation runs, Then no error is raised and no files are created or renamed.
+  - Given the rotated archive `history-v1.0.0.log` exists, When a subsequent deploy runs, Then the archive is not deleted or modified.
+
 ### 4.20 Idea Refinement
 
 - **REQ-IDEA-1:** WHEN the operator types `/idea` during a chat session, THE SYSTEM SHALL start a guided idea refinement flow. `/idea` with no argument SHALL prompt the operator to create a new idea or load an existing one. `/idea <id>` SHALL load `IDEA-<id>.md` from `.voidrift/ideas/` and resume refinement. The idea flow operates within the existing chat session — all chat tools remain available.
@@ -958,9 +1006,9 @@ Two log roots, two intents:
 | V-U-12 | REQ-U-12 | Test | `test_commands.py::TestAskUser` — non-TTY returns fallback; tool absent from develop; present in chat |
 | V-U-13 | REQ-U-13 | Test | `test_session.py` — append writes JSONL; load restores messages; compaction boundary respected; /clear deletes file; sanitization strips empty and orphaned entries |
 | V-U-14 | REQ-U-14 | Test | `test_commands.py::TestAnalysisPrune` — stale entries removed; expired entries removed; LRU eviction when over max_entries; stats reported |
-| V-U-15 | REQ-U-15 | Test | `test_new_features.py::TestQuickCommand` — /quick with text makes one-shot call; /quick with no text shows hint; messages unchanged after call |
+| V-U-15 | REQ-U-15 | Test | `test_chat.py::TestQuickCommand` — /quick with text makes one-shot call; /quick with no text shows hint; messages unchanged after call |
 | V-U-16 | REQ-U-16 | Test | `test_doctor.py` — valid setup passes; missing log dir fixed; missing config fails; doctor command exists |
-| V-U-17 | REQ-U-17 | Test | `test_new_features.py::TestBareMode` — bare uses CONTEXT only; non-bare uses all layers; --system-prompt replaces entirely; --system-prompt without --bare rejected |
+| V-U-17 | REQ-U-17 | Test | `test_chat.py::TestBareMode` — bare uses CONTEXT only; non-bare uses all layers; --system-prompt replaces entirely; --system-prompt without --bare rejected |
 | V-U-18 | REQ-U-18 | Test | `test_session.py::TestSearchHistory` — substring match returns entries; no matches returns message; no session returns message; content truncated at 2000 chars; limit respected; tool absent from develop |
 | V-U-19 | REQ-U-19 | Test | `test_document.py::TestReadDocument` — PDF extraction; DOCX with headings and tables; XLSX as markdown tables; missing library returns install hint; unsupported extension returns error; path sandboxed; tool in chat and gather, absent from develop |
 | V-U-20 | REQ-U-20 | Test | `test_code_analysis.py::TestCodeAnalysis` — Python extraction returns JSON with imports/symbols/complexity; missing tree-sitter returns install hint; missing grammar returns install hint; unsupported extension returns error; tool in chat and gather, absent from develop |
@@ -975,17 +1023,17 @@ Two log roots, two intents:
 | V-CFG-9 | REQ-CFG-9 | Test | `test_bash.py::TestBashConfig` — defaults when absent; per-command override; enabled flag respected |
 | V-D-16 | REQ-D-16 | Test | `test_commands.py::TestOrphanRecovery` — in-progress reset to planned in non-TTY; interactive prompt |
 | V-D-17 | REQ-D-17 | Test | `test_tools.py::TestDiffStats` — created file counts lines; modified file counts +/-; summary displayed |
-| V-D-18 | REQ-D-18 | Test | `test_git_context.py` — snapshot captures branch/commits/changed files; non-git returns None; git unavailable returns None; changed files capped at 20; develop and chat inject block into system prompt |
+| V-D-18 | REQ-D-18 | Test | `test_git.py::TestGitSnapshot` — snapshot captures branch/commits/changed files; non-git returns None; git unavailable returns None; changed files capped at 20; develop and chat inject block into system prompt |
 | V-D-19 | REQ-D-19 | Test | `test_tools.py::TestMtimeGuard` — external mod returns warning; no mod proceeds; force_write overrides; first write no check; cleared between tasks |
 | V-D-20 | REQ-D-20 | Test | `test_git_checkpoint.py` — dirty tree creates checkpoint; clean tree returns None; restore applies stash; checkpoints persisted to JSONL |
-| V-GIT-4 | REQ-GIT-4 | Test | `test_git_utils.py` — total lines truncated at limit; files capped at limit; binary excluded; per-file limit applied; truncated=False when within bounds |
+| V-GIT-4 | REQ-GIT-4 | Test | `test_git.py::TestBoundedDiff` — total lines truncated at limit; files capped at limit; binary excluded; per-file limit applied; truncated=False when within bounds |
 | V-LOG-6 | REQ-LOG-6 | Test | `test_error_tracker.py` — summary_by_category counts; to_state_dict structure; render_summary_table renders; errors.jsonl valid; no errors = no table |
 | V-G-3 | REQ-G-12 | Inspection | `gather.py` — all gather agents use `stream=True` |
 | V-P-1 | REQ-P-1 | Test | `test_commands.py::TestPlanPreflightChecks` — artifact production and retry |
 | V-P-2 | REQ-P-3 | Test | `test_commands.py` — fresh-start deletes existing artifacts |
-| V-SKL-1 | REQ-SKL-2 | Test | `test_skills.py` — project skill overrides domain; domain overrides north-star |
-| V-SKL-2 | REQ-SKL-2 | Test | `test_skills.py` — missing skill returns None |
-| V-CTX-1 | REQ-CTX-1 | Test | `test_skills.py` — find_skill 3-layer resolution, YAML frontmatter stripped |
+| V-SKL-1 | REQ-SKL-2 | Test | `test_skills.py::TestSkillResolution` — project skill overrides domain; domain overrides north-star |
+| V-SKL-2 | REQ-SKL-2 | Test | `test_skills.py::TestSkillResolution` — missing skill returns None |
+| V-CTX-1 | REQ-CTX-1 | Test | `test_skills.py::TestSkillResolution` — find_skill 3-layer resolution, YAML frontmatter stripped |
 | V-CTX-2 | REQ-CTX-5 | Test | `test_gather.py` — cached analysis used on hash match; re-analyzed on hash mismatch |
 | V-SKL-3 | REQ-SKL-5 | Inspection | `voidrift skills install` writes to pending, not active domain-skills |
 | V-SKL-4 | REQ-SKL-8 | Test | `voidrift skills list` groups output by layer |
@@ -994,6 +1042,10 @@ Two log roots, two intents:
 | V-P-4 | REQ-P-9 | Test | `test_commands.py` — invalid tags resolved by word-overlap or stripped; valid skills prompt includes descriptions |
 | V-P-5 | REQ-P-11 | Test | `test_commands.py` — delta analysis runs when artifacts exist without `--overwrite`; fresh plan when absent; `--overwrite` clears artifacts before pipeline |
 | V-G-10 | REQ-G-1 | Test | `test_commands.py` — gather update mode: existing REQUIREMENTS.md provided as context in final pass |
+| V-DPL-1 | REQ-DPL-1 | Test | `test_commands.py::TestDeployPipeline` — version bump patch classification; version bump minor classification; invalid response defaults to minor |
+| V-DPL-2 | REQ-DPL-2 | Test | `test_commands.py::TestDeployPipeline` — CHANGELOG.md created with version entry after deploy |
+| V-DPL-3 | REQ-DPL-3 | Test | `test_commands.py::TestDeployPipeline` — git tag subprocess called during deploy |
+| V-DPL-4 | REQ-DPL-4 | Test | `test_commands.py::TestDeployPipeline` — IaC stage skipped when no infra keywords; IaC agent invoked when infra keywords present |
 | V-D-1 | REQ-D-1 | Test | `test_commands.py::TestDevelopPreflightChecks::test_missing_tasks` |
 | V-D-2 | REQ-D-2 | Test | `test_commands.py::TestDevelopPreflightChecks::test_all_tasks_complete` |
 | V-D-3 | REQ-D-3 | Test | `test_commands.py::TestDevelopPreflightChecks::test_lock_file_stale` |
@@ -1031,8 +1083,8 @@ Two log roots, two intents:
 | V-UI-1 | REQ-UI-4 | Test | `test_commands.py` — chat tools available on every turn |
 | V-UI-2 | REQ-UI-5 | Test | `test_commands.py` — session log contains operator input and model responses |
 | V-UI-3 | REQ-UI-10 | Inspection | `ui.py::stats_str` — all fields present when usage data available; no gating |
-| V-UI-11 | REQ-UI-11 | Test | `test_ui.py::TestDevelopDashboard` — 3 rows rendered for 3 tasks; done status shows final stats; sequential mode uses spinner; on_progress includes turn and last_tool |
-| V-UI-12 | REQ-UI-12 | Test | `test_new_features.py::TestChatStyles` — verbose shows tool calls; terse shows summary; raw has no ANSI |
+| V-UI-11 | REQ-UI-11 | Test | `test_ui_dashboard.py::TestDevelopDashboard` — 3 rows rendered for 3 tasks; done status shows final stats; sequential mode uses spinner; on_progress includes turn and last_tool |
+| V-UI-12 | REQ-UI-12 | Test | `test_chat.py::TestChatStyles` — verbose shows tool calls; terse shows summary; raw has no ANSI |
 | V-MC-1 | REQ-MC-1 | Test | `test_models.py::TestResolveModel` — alias resolution from config |
 | V-MC-2 | REQ-MC-2 | Test | `test_models.py::TestResolveModel::test_cloud_models` |
 | V-U-8 | REQ-U-8 | Test | `test_commands.py::TestChatWebFetch` — cache hit skips HTTP, HTTP error returns message, summary cached after fetch, tool absent from non-chat commands |
@@ -1046,6 +1098,15 @@ Two log roots, two intents:
 | V-U-7 | REQ-U-7 | Test | `test_commands.py::TestChatCompact` — compact replaces history with summary ≤10% of context; empty history prints "Nothing to compact"; prompt loaded from chat.md COMPACT section |
 | V-U-10 | REQ-U-10 | Test | `test_commands.py::TestChatAutoCompact` — auto-compact at 80%; nudge at 70%; circuit breaker after 3 failures disables auto-compact |
 | V-U-11 | REQ-U-11 | Test | `test_commands.py::TestChatCompactRestore` — restoration injects last 3 files and skills as system message; cap at 20% of context; no model call |
+| V-ARCH-9a | REQ-ARCH-9 | Test | `test_tool_builder.py::TestAgentToolsConstants` — each command module declares AGENT_TOOLS frozenset; build_local_tools resolves via dynamic import; no _COMMAND_TOOLS dict in tool_builder |
+| V-ARCH-20 | REQ-ARCH-20 | Test | `test_agent.py::TestLoopDecomposition` — _handle_stall injectable without API call; _drain_queues drains without model response; each method independently testable |
+| V-TOOL-2 | REQ-TOOL-2 | Test | `test_filesystem.py::TestWriteContextInit` — module import does not construct WriteContext; explicit project_dir used in all callers; no module-level singleton |
+| V-TOOL-3 | REQ-TOOL-3 | Inspection | `tools/registry.py` — LOCAL_TOOLS and LOCAL_HANDLERS present; filesystem.py contains neither |
+| V-SKL-10 | REQ-SKL-10 | Test | `test_skills.py::TestProgressiveSynthesis` — synthesis triggered when skill missing and synthesis_model configured; pending skill written; approve moves to project layer; no synthesis when synthesis_model absent; synthesis failure logs and continues |
+| V-TM-8 | REQ-TM-8 | Test | `test_manifest.py::TestHistoryRotation` — successful deploy renames history.log to history-<version>.log; new empty log created; missing log raises no error; prior archives untouched |
+| V-UI-13 | REQ-UI-13 | Test | `test_commands.py::TestStatusKanban` — task counts per status column; no manifest shows message; idea count displayed |
+| V-U-21 | REQ-U-21 | Inspection | `commands/chat.py` — terminal state, display callbacks, idea state machine, and input loop in separate functions; no single closure mixes two concerns |
+| V-SKL-10a | REQ-SKL-10 | Test | `test_skills.py::TestApproveSkill` — approve moves pending skill to project layer; missing pending skill returns error |
 
 ---
 

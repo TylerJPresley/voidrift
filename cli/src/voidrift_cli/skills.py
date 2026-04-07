@@ -136,6 +136,163 @@ def _first_line(path: Path) -> str:
     return ""
 
 
+def _is_draft(project_dir: Path, name: str) -> bool:
+    """Return True if the project-layer skill exists and has status: draft frontmatter."""
+    candidate = project_dir / ".voidrift" / "skills" / f"{name.upper()}.md"
+    if not candidate.is_file():
+        return False
+    fm = _parse_frontmatter(candidate.read_text(encoding="utf-8"))
+    return str(fm.get("status", "")).lower() == "draft"
+
+
+def _synthesize_skill(name: str, project_dir: Path, model: object) -> str:
+    """Invoke an AgentLoop to generate skill content for ``name``.
+
+    Writes the result as a draft to the project skill directory and returns
+    the stripped content (frontmatter removed).
+
+    Args:
+        name: Skill name (upper case preferred).
+        project_dir: Project root.
+        model: A :class:`~voidrift_cli.models.ModelConfig` instance.
+
+    Returns:
+        The synthesized skill body (frontmatter stripped).
+    """
+    from . import prompts as _prompts
+    from .agent import AgentLoop
+
+    upper = name.upper()
+    system_prompt_raw = _prompts.load_prompt("skills", "SYNTHESIS-DIRECT") or (
+        f"You are synthesizing a VoidRift skill named {upper}. "
+        "Write a concise, actionable skill guide in markdown. "
+        "Include a YAML frontmatter block with: name, description, status: draft."
+    )
+    system = system_prompt_raw.format(name=upper) if "{name}" in system_prompt_raw else system_prompt_raw
+    user_msg = (
+        f"Synthesize a VoidRift skill for: {upper}\n\n"
+        "Include practical implementation guidance."
+    )
+
+    agent = AgentLoop(
+        model=model,
+        system_prompt=system,
+        tools=[],
+        tool_handlers={},
+        stream=False,
+        show_spinner=False,
+    )
+    result = agent.send(user_msg)
+
+    # Ensure frontmatter is present with status: draft
+    if not result.strip().startswith("---"):
+        result = (
+            f"---\nname: {upper}\n"
+            f"description: Synthesized skill for {name.lower()}\n"
+            f"status: draft\n---\n\n{result}"
+        )
+    else:
+        # Inject status: draft if not already present
+        fm = _parse_frontmatter(result)
+        if "status" not in fm:
+            result = result.replace("---\n", "---\n", 1)
+            # Insert after first ---
+            end = result.find("\n---\n", 4)
+            if end != -1:
+                result = result[: end] + "\nstatus: draft" + result[end:]
+
+    # Write to project skill directory
+    skill_dir = project_dir / ".voidrift" / "skills"
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    skill_path = skill_dir / f"{upper}.md"
+    skill_path.write_text(result, encoding="utf-8")
+
+    # Invalidate cache entry so caller gets fresh content
+    cache_key = (upper, str(project_dir))
+    _cache.pop(cache_key, None)
+
+    return _strip_frontmatter(result)
+
+
+def find_or_synthesize_skill(
+    name: str,
+    project_dir: Path | str | None = None,
+    model: object = None,
+) -> str | None:
+    """Return skill content, synthesizing a draft if no approved skill is found (REQ-SKL-5).
+
+    Resolution order:
+      1. If a non-draft skill exists at any layer → return it (no synthesis).
+      2. If a draft skill exists in the project layer → return it as-is.
+      3. Otherwise, synthesize a new draft via ``model`` if provided and write
+         it to ``.voidrift/skills/{NAME}.md`` with ``status: draft``.
+
+    Args:
+        name: Skill name (case-insensitive).
+        project_dir: Project root directory. Defaults to cwd.
+        model: A :class:`~voidrift_cli.models.ModelConfig` used for synthesis.
+               If None, synthesis is skipped.
+
+    Returns:
+        Skill body (frontmatter stripped) or None if no skill exists and synthesis
+        is unavailable.
+    """
+    project_dir = Path(project_dir) if project_dir else Path.cwd()
+
+    # Try normal resolution first (non-draft skills win)
+    existing = find_skill(name, project_dir)
+    if existing is not None and not _is_draft(project_dir, name):
+        return existing
+
+    # Return draft if it exists
+    if _is_draft(project_dir, name):
+        return existing  # content already stripped by find_skill
+
+    # Synthesize if a model is available
+    if model is None:
+        return None
+
+    return _synthesize_skill(name, project_dir, model)
+
+
+def approve_draft_skill(name: str, project_dir: Path | str | None = None) -> bool:
+    """Promote a draft project-layer skill to approved status (REQ-SKL-5).
+
+    Updates the ``status`` frontmatter field from ``draft`` to ``approved``
+    in place. Invalidates the skill cache.
+
+    Args:
+        name: Skill name (case-insensitive).
+        project_dir: Project root directory. Defaults to cwd.
+
+    Returns:
+        True if the skill was found and promoted, False otherwise.
+    """
+    project_dir = Path(project_dir) if project_dir else Path.cwd()
+    upper = name.upper()
+    skill_path = project_dir / ".voidrift" / "skills" / f"{upper}.md"
+    if not skill_path.is_file():
+        return False
+
+    content = skill_path.read_text(encoding="utf-8")
+    fm = _parse_frontmatter(content)
+    if str(fm.get("status", "")).lower() != "draft":
+        return False  # already approved or not a draft
+
+    # Replace status: draft with status: approved
+    import re
+    updated = re.sub(
+        r"^(status:\s*)draft\s*$",
+        r"\1approved",
+        content,
+        flags=re.MULTILINE,
+    )
+    skill_path.write_text(updated, encoding="utf-8")
+    # Invalidate cache
+    _cache.pop((upper, str(project_dir)), None)
+    return True
+
+
 def clear_cache() -> None:
     """Clear the in-process skill cache. Useful for tests."""
     _cache.clear()

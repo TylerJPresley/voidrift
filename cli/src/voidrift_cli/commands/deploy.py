@@ -204,6 +204,13 @@ def run_deploy(worker: ModelConfig, architect: ModelConfig | None = None) -> int
         ui.error(f"Git tag failed: {e.stderr}")
         return 1
 
+    # ── History log rotation (REQ-DPL-3) ────────────────────────────────
+    from ..manifest import ManifestManager
+    mm = ManifestManager(project_dir=d.parent)
+    archived = mm.rotate_history_log(new_version)
+    if archived:
+        ui.detail(f"History archived: {archived.relative_to(Path.cwd())}")
+
     # ── Conditional IaC (REQ-DPL-4) ─────────────────────────────────────
     arch_text = (d / "ARCHITECTURE.md").read_text()
     has_infra = any(s in arch_text.lower() for s in ["infrastructure", "deployment", "iac", "terraform", "docker"])

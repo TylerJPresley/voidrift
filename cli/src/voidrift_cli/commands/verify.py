@@ -2,6 +2,26 @@
 
 from __future__ import annotations
 
+# Tools available to verify-plan agents (consumed by tool_builder.build_local_tools).
+AGENT_TOOLS_PLAN: frozenset[str] = frozenset({
+    "read_source_file",
+    "read_framework_file",
+    "write_framework_file",
+})
+
+# Tools available to verify-execute agents (consumed by tool_builder.build_local_tools).
+AGENT_TOOLS_EXECUTE: frozenset[str] = frozenset({
+    "read_framework_file",
+    "write_framework_file",
+    "read_process_output",
+    "http_request",
+    "run_command",
+    "browser_navigate",
+    "browser_screenshot",
+    "browser_click",
+    "browser_get_text",
+})
+
 import json
 import re
 import signal
@@ -101,7 +121,9 @@ def _run_sub_agent(
     context_prefix = "\n".join(context_lines)
 
     system_prompt = _build_execute_prompt()
-    tools, handlers = build_local_tools("verify-execute")
+    from ..tools.filesystem import WriteContext as _WriteContext
+    _exec_ctx = _WriteContext(project_dir=voidrift_dir().parent, max_read_lines=worker.max_read_lines)
+    tools, handlers = build_local_tools("verify-execute", project_dir=voidrift_dir().parent, ctx=_exec_ctx)
 
     agent = AgentLoop(
         model=worker,
@@ -348,10 +370,9 @@ def run_verify(worker: ModelConfig) -> int:
     try:
         # ── Stage 1: Plan agent ──────────────────────────────────────────
         ui.stage("Stage 1 — Planning test cases...")
-        plan_tools, plan_handlers = build_local_tools("verify-plan")
-
-        from ..tools.filesystem import configure as _configure_fs
-        _configure_fs(max_read_lines=worker.max_read_lines)
+        from ..tools.filesystem import WriteContext as _WriteContext
+        _fs_ctx = _WriteContext(project_dir=d.parent, max_read_lines=worker.max_read_lines)
+        plan_tools, plan_handlers = build_local_tools("verify-plan", project_dir=d.parent, ctx=_fs_ctx)
         plan_agent = AgentLoop(
             model=worker,
             system_prompt=_build_plan_prompt(),

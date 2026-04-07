@@ -17,7 +17,7 @@ logging.getLogger("openai").setLevel(logging.WARNING)
 import click
 from rich.prompt import Prompt, IntPrompt
 
-from .models import resolve_model, list_models
+from .models import resolve_model, list_models, shell_complete_model as _complete_model
 from . import ui
 
 HELP_TEXT = """The Agentic Software Engineering Framework.
@@ -75,13 +75,6 @@ def cli(ctx) -> None:
     if ctx.invoked_subcommand is None:
         _interactive_mode()
 
-
-def _complete_model(ctx, param, incomplete):
-    """Shell completion for model aliases."""
-    try:
-        return [a for a in list_models() if a.startswith(incomplete)]
-    except Exception:
-        return []
 
 
 def main() -> None:
@@ -274,859 +267,69 @@ def verify(model) -> None:
     sys.exit(run_verify(mc))
 
 
-# ---------------------------------------------------------------------------
-# Utility commands
-# ---------------------------------------------------------------------------
-
-
-def _query_max_context(mc) -> int | None:
-    """Query max_model_len from the model's /v1/models endpoint (REQ-MC-3).
-
-    Falls back to mc.max_context (from models.yml) for models that don't
-    expose max_model_len on their endpoint.
-    """
-    try:
-        from openai import OpenAI
-        kwargs: dict = {"timeout": 5}
-        if mc.api_base:
-            kwargs["base_url"] = mc.api_base
-        if mc.api_key:
-            kwargs["api_key"] = mc.api_key
-        else:
-            kwargs["api_key"] = "no-key"
-        client = OpenAI(**kwargs)
-        models = client.models.list()
-        for m in models.data:
-            if hasattr(m, "max_model_len"):
-                return m.max_model_len
-    except Exception:
-        pass
-    return mc.max_context
-
-
-def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None, web_fetch_kwargs=None, original_skill=None, session=None, style="verbose"):
-    """Shared interactive terminal loop (REQ-UI-1, REQ-UI-2, REQ-UI-4)."""
-    from .agent import AgentLoop
-
-    _original_skill = original_skill or ""
-
-    model_label = f"{mc.alias} ({mc.model_id})"
-    ui.header(title)
-    if extra_header:
-        for line in extra_header:
-            ui.detail(line)
-    ui.detail(f"Log: {log}")
-    ui.detail(f"Model: {model_label}")
-
-    # Query context window size from model API (REQ-UI-6)
-    max_ctx = _query_max_context(mc)
-
-    def _estimate_tokens(messages):
-        """Rough token estimate: chars / 4."""
-        return sum(len(m.get("content") or "") for m in messages) // 4
-
-    def _context_prompt():
-        """Build colored context percentage prompt (REQ-UI-6)."""
-        from prompt_toolkit import ANSI
-        mode = ""
-        if _idea_state.get("active"):
-            idea_id = _idea_state.get("id")
-            mode = f" idea:{idea_id}" if idea_id else " idea"
-        if not max_ctx:
-            if mode:
-                return ANSI(f"\n\033[36m[{mode.strip()}]\033[0m > ")
-            return ANSI("\n> ")
-        pct = min(100, _estimate_tokens(agent.messages) * 100 // max_ctx)
-        if pct > 80:
-            color = "\033[31m"  # red
-        elif pct > 60:
-            color = "\033[33m"  # yellow
-        else:
-            color = "\033[37m"  # white
-        if mode:
-            return ANSI(f"\n{color}[{pct}%\033[36m{mode}{color}]\033[0m > ")
-        return ANSI(f"\n{color}[{pct}%]\033[0m > ")
-
-    from rich.console import Group as _RGroup
-    from rich.live import Live
-    from rich.padding import Padding as _RPadding
-    from rich.spinner import Spinner as _RSpinner
-    from rich.text import Text as _RText
-
-    # Shared state for Live-based streaming display.
-    # Uses a list so closures can mutate without nonlocal declarations.
-    _live_holder: list = [None]   # current Live instance
-    _live_start: list[float] = [0.0]  # turn start time for elapsed display
-    _turn_label: list[str] = [""]     # label fixed per turn so updates stay consistent
-    _got_token: list[bool] = [False]  # True once streaming tokens arrive
-    _stream_buf: list[str] = []       # accumulated token buffer
-    _term_holder: list = [None]       # (termios_module, fd, saved_attr) while raw mode active
-
-    def _thinking_text(elapsed: float = 0.0, tokens_in: int = 0, ctx_pct: int | None = None) -> str:
-        """Build thinking spinner text with optional telemetry."""
-        parts = [ui.elapsed_str(elapsed)] if elapsed >= 1 else []
-        if tokens_in:
-            parts.append(f"↓ {ui.token_str(tokens_in)} tokens")
-        if ctx_pct is not None:
-            parts.append(f"ctx {ctx_pct}%")
-        if parts:
-            parts.append("thinking")
-            return f"  {_turn_label[0]} ({' · '.join(parts)})"
-        return f"  {_turn_label[0]}"
-
-    def _thinking() -> _RPadding:
-        return _RPadding(_RSpinner("dots", text=_thinking_text(), style="dim"), pad=(1, 0, 0, 0))
-
-    def on_token(token: str) -> None:
-        _got_token[0] = True
-        _stream_buf.append(token)
-        live = _live_holder[0]
-        if live is not None:
-            # Show a tail window during streaming — keeps display compact and
-            # avoids rendering broken partial markdown. Final Rich render
-            # (with tables, headers, etc.) happens once the stream ends.
-            text = "".join(_stream_buf)
-            lines = text.splitlines()
-            tail = "\n".join(lines[-5:]) if len(lines) > 5 else text
-            live.update(_RPadding(_RText("  " + tail, style="dim"), pad=(1, 0, 0, 0)))
-
-    _stats_parts = []
-
-    def on_complete(stats: dict) -> None:
-        nonlocal _stats_parts
-        _stats_parts = []
-        elapsed = stats.get("elapsed", 0)
-        completion_tokens = stats.get("completion_tokens", 0)
-        prompt_tokens = stats.get("prompt_tokens", 0)
-        ctx_pct = stats.get("ctx_pct")
-        if completion_tokens:
-            _stats_parts.append(f"↑ {ui.token_str(completion_tokens)} tokens")
-        if prompt_tokens:
-            _stats_parts.append(f"↓ {ui.token_str(prompt_tokens)} tokens")
-        if stats.get("tokens_per_sec"):
-            _stats_parts.append(f"{stats['tokens_per_sec']} tok/s")
-        if elapsed:
-            _stats_parts.append(f"{elapsed}s")
-        if ctx_pct is not None:
-            _stats_parts.append(f"ctx {ctx_pct}%")
-
-    def on_progress(data: dict) -> None:
-        """Update Live thinking spinner with elapsed time while waiting."""
-        if _got_token[0]:
-            return  # streaming tail is already showing — don't overwrite
-        live = _live_holder[0]
-        if live is not None and data.get("state") == "thinking":
-            elapsed = time.time() - _live_start[0]
-            tokens_in = data.get("prompt_tokens", 0)
-            ctx_pct = data.get("ctx_pct")
-            live.update(_RPadding(
-                _RSpinner("dots", text=_thinking_text(elapsed, tokens_in, ctx_pct), style="dim"),
-                pad=(1, 0, 0, 0),
-            ))
-
-    # Tool call tracking for --style (REQ-UI-12)
-    _tool_calls_this_turn: list[str] = []
-
-    def on_tool_call(name: str) -> None:
-        _got_token[0] = False  # back to thinking state while tool executes
-        _tool_calls_this_turn.append(name)
-        if style == "verbose":
-            live = _live_holder[0]
-            if live is not None:
-                live.update(_RPadding(
-                    _RText(f"  → {name}", style="dim"), pad=(1, 0, 0, 0),
-                ))
-                return
-        live = _live_holder[0]
-        if live is not None:
-            live.update(_thinking())
-
-    def on_tool_result(name: str, result: str) -> None:
-        _got_token[0] = False  # thinking again while model processes tool result
-        live = _live_holder[0]
-        if live is not None:
-            live.update(_thinking())
-
-    # Rebuild web_fetch handler with a confirm_fn that pauses for the permission
-    # prompt, so it renders cleanly within the Live context (REQ-U-8).
-    if web_fetch_kwargs:
-        import click as _click
-        from .tools import make_web_fetch_handler as _make_wf
-
-        def _live_confirm(url: str) -> bool:
-            # Stop Live entirely so Click can own the terminal (REQ-UI-9).
-            # transient=True on stop clears the Thinking... from the screen;
-            # reset to False before restart so the final response persists.
-            live = _live_holder[0]
-            if live is not None:
-                live.transient = True
-                live.stop()
-                live.transient = False
-            # Restore terminal input mode so the prompt is visible and typeable.
-            _ts = _term_holder[0]
-            if _ts is not None:
-                _tm, _fd, _saved = _ts
-                try:
-                    _tm.tcsetattr(_fd, _tm.TCSANOW, _saved)
-                except Exception:
-                    pass
-            ui._con.print(f"\n[dim]web_fetch →[/dim] [cyan]{url}[/cyan]")
-            try:
-                allowed = _click.confirm("  Allow fetch?", default=False)
-            except _click.Abort:
-                allowed = False
-            # Re-disable echo and restart Live.
-            if _ts is not None:
-                try:
-                    _raw = _tm.tcgetattr(_fd)
-                    _raw[3] &= ~(_tm.ECHO | _tm.ICANON)
-                    _tm.tcsetattr(_fd, _tm.TCSANOW, _raw)
-                except Exception:
-                    pass
-            if live is not None:
-                live.start()
-                live.update(_thinking())
-            return allowed
-
-        agent.tool_handlers["web_fetch"] = _make_wf(
-            **web_fetch_kwargs, confirm_fn=_live_confirm
-        )
-
-    # Wire ask_user_question handler with terminal restoration (TASK-FW-011)
-    from .tools import make_ask_user_handler as _make_auh
-
-    def _live_ask(question: str, options: list[str] | None) -> str:
-        live = _live_holder[0]
-        if live is not None:
-            live.transient = True
-            live.stop()
-            live.transient = False
-        _ts = _term_holder[0]
-        if _ts is not None:
-            _tm, _fd, _saved = _ts
-            try:
-                _tm.tcsetattr(_fd, _tm.TCSANOW, _saved)
-            except Exception:
-                pass
-        ui._con.print(f"\n[bold yellow]▸ Agent question:[/bold yellow] {question}")
-        if options:
-            for i, opt in enumerate(options, 1):
-                ui._con.print(f"  [cyan]{i}.[/cyan] {opt}")
-        try:
-            response = input("  > ")
-        except (EOFError, KeyboardInterrupt):
-            response = "[No response]"
-        if _ts is not None:
-            try:
-                _raw = _tm.tcgetattr(_fd)
-                _raw[3] &= ~(_tm.ECHO | _tm.ICANON)
-                _tm.tcsetattr(_fd, _tm.TCSANOW, _raw)
-            except Exception:
-                pass
-        if live is not None:
-            live.start()
-            live.update(_thinking())
-        return response
-
-    agent.tool_handlers["ask_user_question"] = _make_auh(ask_fn=_live_ask)
-
-    agent.on_token = on_token
-    agent.on_complete = on_complete
-    agent.on_tool_call = on_tool_call
-    agent.on_tool_result = on_tool_result
-    agent.on_progress = on_progress
-
-    from prompt_toolkit import PromptSession
-    from prompt_toolkit.key_binding import KeyBindings
-
-    kb = KeyBindings()
-
-    @kb.add("enter")
-    def _submit(event):
-        buf = event.current_buffer
-        # If the current line ends with \, strip it and insert a real newline
-        # (matches Claude CLI's universal multiline convention).
-        if buf.document.current_line.endswith("\\"):
-            buf.delete_before_cursor()  # remove the backslash
-            buf.insert_text("\n")
-        else:
-            buf.validate_and_handle()
-
-    _prompt_session = PromptSession(key_bindings=kb, multiline=True)
-
-    _consecutive_interrupt = 0
-    _compact_nudged = False  # inject compact reminder once when context hits 70%
-    _compact_failures = 0  # circuit breaker counter (REQ-U-10)
-    _auto_compact_disabled = False  # set True after 3 consecutive failures
-
-    def _do_compact() -> bool:
-        """Summarize history to free context (REQ-U-7, REQ-U-10, REQ-U-11).
-
-        Returns True on success, False on failure.
-        """
-        nonlocal _compact_nudged, _compact_failures, _auto_compact_disabled
-        ui._con.print()  # blank line after operator input
-        if len(agent.messages) <= 1:
-            ui.info("Nothing to compact.")
-            return True
-
-        target = max_ctx // 10 if max_ctx else 8000
-        from . import prompts as _prompts
-        compact_prompt = _prompts.load_prompt("chat", "COMPACT").format(
-            target_tokens=target,
-        )
-
-        # Capture original system prompt and skills for restoration (REQ-U-11).
-        original_system = agent.messages[0]["content"]
-
-        # Disable terminal echo and show spinner while the model works.
-        _saved_term = None
-        try:
-            import termios as _termios
-            _fd = sys.stdin.fileno()
-            _saved_term = _termios.tcgetattr(_fd)
-            _raw = _termios.tcgetattr(_fd)
-            _raw[3] &= ~(_termios.ECHO | _termios.ICANON)
-            _termios.tcsetattr(_fd, _termios.TCSANOW, _raw)
-        except Exception:
-            pass
-
-        summary = ""
-        try:
-            _compact_spinner = _RSpinner("dots", text=f"  {ui.random_label()}", style="dim")
-            with Live(_compact_spinner, console=ui._con, refresh_per_second=12, transient=True):
-                client = agent._get_client()
-                resp = client.chat.completions.create(
-                    model=agent._model_name(),
-                    messages=agent.messages + [{"role": "user", "content": compact_prompt}],
-                    max_tokens=target,
-                )
-                summary = resp.choices[0].message.content or ""
-        except Exception as e:
-            ui.error(f"Compact failed: {e}")
-            _compact_failures += 1
-            if _compact_failures >= 3:
-                _auto_compact_disabled = True
-                ui.warn("Compaction failing repeatedly — auto-compact disabled. Start a new session.")
-            return False
-        finally:
-            if _saved_term is not None:
-                try:
-                    _termios.tcsetattr(_fd, _termios.TCSANOW, _saved_term)
-                except Exception:
-                    pass
-
-        # Replace history with system prompt + summary.
-        sys_content = original_system + f"\n\n[Conversation summary]\n{summary}"
-        agent.messages = [{"role": "system", "content": sys_content}]
-
-        # Check if result exceeds 10% cap.
-        result_tokens = _estimate_tokens(agent.messages)
-        if max_ctx and result_tokens > max_ctx // 10:
-            _compact_failures += 1
-            if _compact_failures >= 3:
-                _auto_compact_disabled = True
-                ui.warn("Compaction failing repeatedly — auto-compact disabled. Start a new session.")
-            ui.warn(f"Compact result still {result_tokens * 100 // max_ctx}% of context.")
-            return False
-
-        # Success — reset failure counter.
-        _compact_failures = 0
-
-        # Post-compact restoration (REQ-U-11): re-inject recent files and skills.
-        from .tools.filesystem import get_read_files as _get_read_files
-        restore_parts: list[str] = []
-        restore_budget = max_ctx // 5 if max_ctx else 50000  # 20% cap
-        restore_used = 0
-
-        # Last 3 unique files, newest first.
-        recent = _get_read_files()
-        seen: set[str] = set()
-        newest_3: list[str] = []
-        for p in reversed(recent):
-            if p not in seen:
-                seen.add(p)
-                newest_3.append(p)
-                if len(newest_3) == 3:
-                    break
-
-        for fpath in newest_3:
-            try:
-                from pathlib import Path as _Path
-                if fpath.startswith(".voidrift/"):
-                    full = _Path.cwd() / fpath
-                else:
-                    full = _Path.cwd() / fpath
-                if not full.exists():
-                    continue
-                content = full.read_text(encoding="utf-8", errors="replace")
-                cost = len(content) // 4  # rough token estimate
-                if restore_used + cost > restore_budget:
-                    break
-                restore_parts.append(f"[File: {fpath}]\n{content}")
-                restore_used += cost
-            except Exception:
-                continue
-
-        # Re-inject skills from original system prompt.
-        # Skills are delimited by their markdown headers in the system prompt.
-        # We stored the skill content at chat init — extract from original_system.
-        if _original_skill and restore_used + len(_original_skill) // 4 <= restore_budget:
-            restore_parts.append(f"[Skills]\n{_original_skill}")
-
-        if restore_parts:
-            agent.messages.append({
-                "role": "system",
-                "content": "[Restored context]\n\n" + "\n\n".join(restore_parts),
-            })
-
-        pct = _estimate_tokens(agent.messages) * 100 // max_ctx if max_ctx else 0
-        ui.info(f"Compacted to {pct}% of context window.")
-        ui._con.print(ui.render_text(summary), style="dim")
-        with open(log, "a") as f:
-            f.write(f"\n[COMPACT] {summary}\n")
-        # Persist compaction to session JSONL (REQ-U-13)
-        if session:
-            session.append_compaction(summary)
-        _compact_nudged = False
-        return True
-
-    # ── Idea refinement state (REQ-IDEA-1 through REQ-IDEA-4) ───────
-    _idea_state: dict = {}  # {"active": True, "id": N, "mm": ManifestManager}
-
-    def _handle_idea(agent, log, user_input: str) -> str:
-        """Start or resume an idea refinement flow. Returns message to send to agent."""
-        from .manifest import ManifestManager
-        from . import prompts as _prompts
-
-        arg = user_input.strip()[5:].strip()  # strip "/idea"
-
-        if arg:
-            # Load existing idea
-            try:
-                idea_id = int(arg)
-            except ValueError:
-                ui.error(f"Invalid idea ID: {arg}")
-                return ""
-            mm = ManifestManager()
-            if mm.exists():
-                mm.load()
-            content = mm.read_idea(idea_id)
-            if not content:
-                ui.error(f"IDEA-{idea_id} not found.")
-                return ""
-            idea_context = f"Existing idea:\n\n{content}"
-            overlay = _prompts.load_prompt("chat", "IDEA").format(idea_context=idea_context)
-            agent.messages[0]["content"] += f"\n\n{overlay}"
-            _idea_state.update(active=True, id=idea_id, mm=mm)
-            ui.info(f"Loaded IDEA-{idea_id}. Type /done when finished.")
-            return f"I've loaded IDEA-{idea_id}. Summarize where we left off and ask what I'd like to refine."
-        else:
-            # New idea — no ID until /done
-            idea_context = "This is a new idea. Start with Stage 1 — Intake."
-            overlay = _prompts.load_prompt("chat", "IDEA").format(idea_context=idea_context)
-            agent.messages[0]["content"] += f"\n\n{overlay}"
-            _idea_state.update(active=True, id=None)
-            ui.info("Starting idea refinement. Type /done when finished.")
-            return "I want to develop a new idea."
-
-    def _finish_idea(agent, log) -> str:
-        """Save the idea and return to normal chat. Returns message to send to agent."""
-        from .manifest import ManifestManager
-
-        mm = ManifestManager()
-        if mm.exists():
-            mm.load()
-        mm.ensure_dirs()
-
-        idea_id = _idea_state.get("id")
-        is_new = idea_id is None
-        if is_new:
-            idea_id = mm.next_idea_id
-
-        # Ask operator for category
-        ui.info("Categorize this idea:")
-        ui._con.print("  [bold]now[/bold] — high priority, work on it soon")
-        ui._con.print("  [bold]next[/bold] — upcoming, after current work")
-        ui._con.print("  [bold]later[/bold] — parked for future consideration")
-
-        from prompt_toolkit import prompt as _pt_prompt
-        while True:
-            cat = _pt_prompt("\nCategory (now/next/later): ").strip().lower()
-            if cat in ("now", "next", "later"):
-                break
-            ui.warn("Choose: now, next, or later")
-
-        if is_new:
-            mm.add_idea(idea_id, status=cat)
-        else:
-            mm.set_idea_status(idea_id, cat)
-
-        ui.info(f"IDEA-{idea_id} saved as {cat}.")
-        with open(log, "a") as f:
-            f.write(f"\n[IDEA] IDEA-{idea_id} saved as {cat}\n")
-
-        msg = (
-            f"Write the final structured idea to "
-            f"ideas/IDEA-{idea_id}.md using write_framework_file. "
-            f"Include: title, user story, context, acceptance criteria, "
-            f"affected modules, and affected files (if modifying existing behavior)."
-        )
-        _idea_state.clear()
-        return msg
-
-    try:
-        while True:
-            try:
-                user_input = _prompt_session.prompt(_context_prompt()).strip()
-                _consecutive_interrupt = 0
-            except KeyboardInterrupt:
-                _consecutive_interrupt += 1
-                if _consecutive_interrupt >= 2:
-                    raise
-                ui.info("Press Ctrl+C again to exit.")
-                continue
-            except EOFError:
-                break
-            if user_input.lower() in ("quit", "exit", "/quit"):
-                break
-            if not user_input:
-                continue  # ignore accidental Enter pressed during model processing
-            _consecutive_interrupt = 0
-
-            # /compact — summarize history to free context (REQ-U-7)
-            if user_input.lower().strip() == "/compact":
-                _do_compact()
-                continue
-
-            # /clear — wipe session and start fresh (REQ-U-13)
-            if user_input.lower().strip() == "/clear":
-                if session:
-                    session.clear()
-                # Reset agent to just system prompt
-                agent.messages = [agent.messages[0]]
-                ui.info("Session cleared.")
-                continue
-
-            # /quick — one-shot side question, no history effect (REQ-U-15)
-            if user_input.lower().startswith("/quick"):
-                _quick_text = user_input[6:].strip()
-                if not _quick_text:
-                    ui.info("Usage: /quick <question>")
-                    continue
-                try:
-                    _quick_client = agent._get_client()
-                    _quick_resp = _quick_client.chat.completions.create(
-                        model=agent._model_name(),
-                        messages=[
-                            {"role": "system", "content": "Answer concisely."},
-                            {"role": "user", "content": _quick_text},
-                        ],
-                        max_tokens=2048,
-                    )
-                    _quick_answer = _quick_resp.choices[0].message.content or ""
-                    ui._con.print()
-                    ui._con.print(ui.render_text(_quick_answer) if style != "raw" else f"  {_quick_answer}")
-                except Exception as _qe:
-                    ui.error(f"Quick answer failed: {_qe}")
-                continue
-
-            # /idea — guided idea refinement (REQ-IDEA-1)
-            low = user_input.lower().strip()
-            if low == "/idea" or low.startswith("/idea "):
-                user_input = _handle_idea(agent, log, user_input)
-                if not user_input:
-                    continue
-
-            # /done — save idea and return to normal chat (REQ-IDEA-3)
-            if low == "/done" and _idea_state.get("active"):
-                user_input = _finish_idea(agent, log)
-                if not user_input:
-                    continue
-
-            # /write enables tools for this turn (REQ-UI-3)
-            if write_tools is not None:
-                low = user_input.lower().strip()
-                is_write = low.startswith("/write") or low in {
-                    "write", "write it", "go ahead and write",
-                    "please write the file now", "please write the file",
-                    "write the file", "write the file now",
-                }
-                if is_write:
-                    agent.tools = write_tools
-                    # qwen3 ignores enable_thinking:false with tools — drop it
-                    agent.extra_body = None
-                    if low.startswith("/write"):
-                        user_input = user_input[6:].strip() or "Please write the file now."
-                else:
-                    agent.tools = []
-                    agent.extra_body = {"chat_template_kwargs": {"enable_thinking": False}}
-
-            with open(log, "a") as f:
-                f.write(f"\n> {user_input}\n")
-
-            _stream_buf.clear()
-            _got_token[0] = False
-            _turn_label[0] = ui.random_label()
-            _msg_snapshot = len(agent.messages)
-
-            # Clear active skill restrictions at start of each turn (REQ-SKL-9)
-            from .agent import clear_active_skill
-            clear_active_skill()
-
-            # Auto-compact at 80%; nudge once at 70% (REQ-U-10).
-            if max_ctx:
-                pct = min(100, _estimate_tokens(agent.messages) * 100 // max_ctx)
-                if pct >= 80 and not _auto_compact_disabled:
-                    ui.info("Context window at 80% — auto-compacting...")
-                    _do_compact()
-                    _compact_nudged = True
-                    _msg_snapshot = len(agent.messages)
-                elif pct >= 70 and not _compact_nudged:
-                    agent.messages.append({
-                        "role": "system",
-                        "content": (
-                            "Context window is over 70% full. "
-                            "Remind the operator to run /compact to free space before continuing."
-                        ),
-                    })
-                    _compact_nudged = True
-                    _msg_snapshot = len(agent.messages)
-
-            # Disable terminal echo while the model is processing so keystrokes
-            # don't appear alongside the Live display output (REQ-UI-9).
-            _saved_term = None
-            try:
-                import termios as _termios
-                _fd = sys.stdin.fileno()
-                _saved_term = _termios.tcgetattr(_fd)
-                _raw = _termios.tcgetattr(_fd)
-                _raw[3] &= ~(_termios.ECHO | _termios.ICANON)
-                _termios.tcsetattr(_fd, _termios.TCSANOW, _raw)
-                _term_holder[0] = (_termios, _fd, _saved_term)
-            except Exception:
-                pass
-
-            _error = None
-            _interrupted = False
-            _live_start[0] = time.time()
-            if style == "raw":
-                try:
-                    response = agent.send(user_input)
-                    print(f"\n  {response}\n")
-                except KeyboardInterrupt:
-                    _interrupted = True
-                except RuntimeError as e:
-                    _error = str(e)
-                finally:
-                    _term_holder[0] = None
-                    if _saved_term is not None:
-                        try:
-                            _termios.tcsetattr(_fd, _termios.TCSANOW, _saved_term)
-                            _termios.tcflush(_fd, _termios.TCIFLUSH)
-                        except Exception:
-                            pass
-            else:
-              with Live(_thinking(), console=ui._con, refresh_per_second=12) as _live:
-                _live_holder[0] = _live
-                try:
-                    response = agent.send(user_input)
-                    _live.update(ui.render_text(response))
-                except KeyboardInterrupt:
-                    _interrupted = True
-                    _live.transient = True  # erase thinking/streaming from screen
-                except RuntimeError as e:
-                    _error = str(e)
-                finally:
-                    _live_holder[0] = None
-                    _term_holder[0] = None
-                    if _saved_term is not None:
-                        try:
-                            _termios.tcsetattr(_fd, _termios.TCSANOW, _saved_term)
-                            _termios.tcflush(_fd, _termios.TCIFLUSH)
-                        except Exception:
-                            pass
-
-            if _interrupted:
-                # Restore history to pre-send state — interrupt may leave orphaned
-                # tool calls, tool results, or partial assistant messages behind.
-                agent.messages = agent.messages[:_msg_snapshot]
-                ui._con.print()
-                ui.info("Interrupted.")
-                ui._con.print()
-                ui.operator_rule()
-                continue
-
-            if _error:
-                ui.error(_error)
-                continue
-
-            if _stats_parts:
-                ui.stats(_stats_parts)
-
-            # Terse tool call summary (REQ-UI-12)
-            if style == "terse" and _tool_calls_this_turn:
-                from collections import Counter
-                counts = Counter(_tool_calls_this_turn)
-                summary = ", ".join(f"{n}× {t}" for t, n in counts.most_common())
-                ui._con.print(f"  [dim][{len(_tool_calls_this_turn)} tool calls: {summary}][/dim]")
-            _tool_calls_this_turn.clear()
-
-            # Persist to session JSONL (REQ-U-13)
-            if session:
-                session.append_message("user", user_input)
-                session.append_message("assistant", response)
-
-            with open(log, "a") as f:
-                f.write(f"\n{response}\n")
-            ui._con.print()
-            ui.operator_rule()
-    except KeyboardInterrupt:
-        ui.info("Session ended.")
-    finally:
-        agent.on_token = None
-        agent.on_complete = None
-        agent.on_tool_call = None
-        agent.on_tool_result = None
-
-
-@cli.command()
-@click.argument("model", shell_complete=_complete_model)
-@click.option("--doc", help="Scope conversation to a specific .voidrift/ artifact")
-@click.option("--style", type=click.Choice(["verbose", "terse", "raw"]), default="verbose", help="Output style")
-@click.option("--bare", is_flag=True, default=False, help="Minimal context — no skills, git, or project state injection")
-@click.option("--system-prompt", "system_prompt_path", type=click.Path(exists=True), help="Custom system prompt file (requires --bare)")
-def chat(model, doc, style, bare, system_prompt_path) -> None:
-    """Interactive session with CLI-native tools for requirements, planning, and refinement."""
-    if system_prompt_path and not bare:
-        click.echo("Error: --system-prompt requires --bare", err=True)
-        sys.exit(1)
-    _check_setup()
-    mc = resolve_model(model)
-    from .agent import AgentLoop, build_local_tools
-    from .utils import boot_run
-    from . import prompts as _prompts
-    from .skills import find_skill
-
-    log, run_id = boot_run("chat")
-
-    tools, handlers = build_local_tools(cmd="chat")
-
-    from .tools.filesystem import configure as _configure_fs
-    _configure_fs(max_read_lines=mc.max_read_lines)
-
-    # Override web_fetch placeholder with real implementation (REQ-U-8).
-    # confirm_fn is injected by _interactive_loop after spinner functions are defined
-    # so that the spinner stops cleanly before the permission prompt appears.
-    from .tools import make_web_fetch_handler
-    _web_cache: dict = {}
-    _web_fetch_kwargs = dict(
-        mc=mc,
-        log=log,
-        web_cache=_web_cache,
-    )
-    handlers["web_fetch"] = make_web_fetch_handler(**_web_fetch_kwargs)
-
-    # Build system prompt (REQ-U-17: --bare strips framework context)
-    from .utils import voidrift_dir
-    if system_prompt_path:
-        system = Path(system_prompt_path).read_text()
-        skill = ""
-    elif bare:
-        system = _prompts.load_prompt("system", "CONTEXT")
-        skill = ""
-    else:
-        skill = find_skill("ANALYSIS-REQS") or ""
-        system_context = _prompts.load_prompt("system", "CONTEXT")
-        system_prompt = _prompts.load_prompt("chat", "SYSTEM")
-
-        state_file = voidrift_dir() / "STATE.md"
-        project_state = ""
-        if state_file.exists():
-            project_state = f"**Project state:**\n\n{state_file.read_text()}"
-
-        from .git_context import capture_git_snapshot
-        _snap = capture_git_snapshot(str(Path.cwd()))
-        _git_block = _snap.to_prompt_block() if _snap else ""
-
-        # Memory index injection (REQ-MEM-1)
-        from .memory import MemoryManager
-        _mem_block = MemoryManager(str(Path.cwd())).index_prompt_block()
-
-        system = "\n\n".join(p for p in [system_context, skill, system_prompt, project_state, _git_block, _mem_block] if p)
-
-    if doc:
-        doc_path = voidrift_dir() / doc
-        if doc_path.exists():
-            doc_section = _prompts.load_prompt("chat", "DOC").format(
-                doc_name=doc, doc_content=doc_path.read_text()
-            )
-            system += f"\n\n{doc_section}"
-        else:
-            ui.warn(f"{doc} not found — starting fresh")
-            system += f"\n\n{_prompts.load_prompt('chat', 'DOC-NEW').format(doc_name=doc)}"
-
-    agent = AgentLoop(
-        model=mc,
-        system_prompt=system,
-        tools=tools,
-        tool_handlers=handlers,
-        stream=True,
-        tool_choice="auto",
-        log_path=log,
-    )
-
-    # Skill tool restriction hook — checks module-level state set by get_skill (REQ-SKL-9)
-    from .agent import _active_skill_allowed_tools
-    from .skills import make_skill_tool_guard
-
-    def _skill_guard(name: str, args: str) -> str | None:
-        at = _active_skill_allowed_tools["allowed"]
-        if at is None:
-            return None
-        guard = make_skill_tool_guard(at, _active_skill_allowed_tools["name"])
-        return guard(name, args) if guard else None
-
-    agent.before_tool_call = _skill_guard
-
-    # Session persistence — auto-resume from project-scoped JSONL (REQ-U-13)
-    from .session import ChatSession
-    session = ChatSession.load_or_create(voidrift_dir())
-    if session.has_messages:
-        restored = session.reconstruct_messages()
-        # Restore messages after the system prompt (messages[0])
-        if restored:
-            # Skip any system messages from compaction — they'll be merged with current system
-            for m in restored:
-                if m["role"] == "system":
-                    agent.messages[0]["content"] += f"\n\n[Prior session context]\n{m['content']}"
-                else:
-                    agent.messages.append(m)
-        ts = session.last_timestamp() or ""
-        elapsed = ""
-        if ts:
-            from datetime import datetime, timezone
-            try:
-                last = datetime.fromisoformat(ts)
-                delta = datetime.now(timezone.utc) - last
-                if delta.days > 0:
-                    elapsed = f", last active {delta.days}d ago"
-                elif delta.seconds >= 3600:
-                    elapsed = f", last active {delta.seconds // 3600}h ago"
-                elif delta.seconds >= 60:
-                    elapsed = f", last active {delta.seconds // 60}m ago"
-            except Exception:
-                pass
-        ui.info(f"Resuming session ({session.message_count()} messages{elapsed})")
-
-    title = f"VoidRift Chat — {doc}" if doc else "VoidRift Chat"
-    _interactive_loop(agent, mc, log, title, web_fetch_kwargs=_web_fetch_kwargs, original_skill=skill, session=session, style=style)
+from .commands.chat import chat
+cli.add_command(chat)
 
 
 @cli.command()
 def status() -> None:
     """Show project command status."""
     _status()
+
+
+def render_kanban_board(mm: "ManifestManager") -> "Table":
+    """Build a Rich Table Kanban board from a loaded ManifestManager (REQ-TM-1).
+
+    Columns: Planned | In Progress | Implemented | Verified | Blocked/Failed
+    Each cell lists TASK-N identifiers grouped by module.
+
+    Args:
+        mm: A loaded ManifestManager instance.
+
+    Returns:
+        A :class:`rich.table.Table` ready to be printed.
+    """
+    from rich.table import Table
+    from rich.text import Text
+
+    STATUS_COLS = [
+        ("planned",     "Planned",     "cyan"),
+        ("in_progress", "In Progress", "yellow"),
+        ("implemented", "Implemented", "blue"),
+        ("verified",    "Verified",    "green"),
+        ("blocked",     "Blocked",     "red"),
+    ]
+
+    table = Table(
+        title="Task Board",
+        show_lines=True,
+        expand=False,
+    )
+    for _, label, color in STATUS_COLS:
+        table.add_column(label, style=color, no_wrap=False, min_width=12)
+
+    # Group tasks by status, then by module within each status column
+    buckets: dict[str, dict[str, list[str]]] = {s: {} for s, _, _ in STATUS_COLS}
+    tasks = mm.tasks()
+    for tid, task in tasks.items():
+        raw_status = task.get("status", "planned")
+        # Normalise failed → blocked for display
+        col_key = "blocked" if raw_status == "failed" else raw_status
+        if col_key not in buckets:
+            col_key = "planned"
+        mod = task.get("module") or "—"
+        buckets[col_key].setdefault(mod, []).append(f"TASK-{tid}")
+
+    cells: list[Text] = []
+    for col_key, _, color in STATUS_COLS:
+        lines: list[str] = []
+        for mod in sorted(buckets[col_key]):
+            ids = ", ".join(sorted(buckets[col_key][mod]))
+            lines.append(f"[{mod}]\n{ids}")
+        cells.append(Text("\n\n".join(lines) if lines else "—"))
+
+    table.add_row(*cells)
+    return table
 
 
 def _status():
@@ -1175,6 +378,10 @@ def _status():
             if blocked: parts.append(f"{blocked} blocked")
             if failed: parts.append(f"{failed} failed")
             ui._con.print(f"  🔄 Develop: {', '.join(parts)} ({total} total)")
+        # Kanban board
+        if total > 0:
+            ui._con.print()
+            ui._con.print(render_kanban_board(mm))
     else:
         ui._con.print("  ⬜ Develop: No tasks")
 

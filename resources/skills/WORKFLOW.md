@@ -1,21 +1,48 @@
 ---
 name: WORKFLOW
-description: Atomic commits, worktree isolation, verifiable units of work, and clean branching for development workflow.
+description: Agent loop patterns, tool dispatch sequencing, pipeline stage design, and task execution for VoidRift automated commands.
 ---
 
-# Domain: Collaboration Workflow (WORKFLOW)
+# Domain: Agent Workflow (WORKFLOW)
 
-## Core Philosophy
-- **Isolation through Worktrees:** Use git worktrees to maintain separate environments for features and tasks; avoid branch-switching and stashing.
-- **Atomic Progress:** Every task must be an independent, verifiable unit of work.
-- **Parallel Development:** Enable concurrent task execution by workers across isolated worktrees.
+## Tool Dispatch Sequencing
 
-## Implementation Rules
-- **Worktree Management:** Utilize `.worktrees/` directory with standardized naming; remove worktrees after successful merge.
-- **Commit Standards:** Use Conventional Commits (feat, fix, docs, refactor) to ensure a high-quality history.
-- **Syncing:** Regularly sync with the base branch to minimize merge conflicts.
-- **Conflict Resolution:** Resolve conflicts within the local worktree; escalate to Architect for design-critical conflicts.
+Read files before writing them. Inspect the current state of a file before overwriting
+or editing it. Never assume file contents.
 
-## Workflow Integration
-- **State Continuity:** Ensure `STATE.md` and module-specific state files are synchronized across worktrees.
-- **Task Isolation:** Never modify files outside the scope of the assigned task in a worktree.
+Use `read_source_file` with explicit `offset`/`limit` for files over 300 lines — read
+the relevant section, not the whole file.
+
+Use `edit_source_file` for targeted changes to existing files; use `write_source_file`
+only for new files or complete rewrites. `edit_source_file` requires a unique
+`old_string` — include enough surrounding context lines to make it unambiguous.
+
+Run tests or build commands via `run_command` after every write to validate the change
+before calling `done()`.
+
+## `done()` Call
+
+Call `done()` only after writes are validated (tests pass, or the command output
+confirms success).
+
+The `done()` summary must state: what files were created or modified, which AC was
+addressed, and whether tests pass. One paragraph, no bullet lists.
+
+Never call `done()` after a read-only turn. If the task required no writes, call
+`done()` with an explanation of why no changes were needed.
+
+## Stall Recovery
+
+If you find yourself reading the same file twice without writing between reads, you
+are stalling. Make a decision based on what you've already read and write.
+
+If a tool call fails, diagnose the error message before retrying. A retry with
+identical arguments will produce the same failure.
+
+## Context Budget
+
+Prefer smaller, focused reads over reading entire large files. The context window is
+shared between the system prompt, task, and all tool results — protect it.
+
+If a file exceeds `max_read_lines`, paginate with `offset`/`limit`. Read what you
+need; stop when you have enough to act.

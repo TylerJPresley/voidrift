@@ -31,7 +31,8 @@ voidrift CLI  ──reads──►  ~/.voidrift/ (config, resources)
 **Entry point:** `voidrift_cli.main:cli`
 
 The CLI is the orchestration layer. It owns:
-- Framework command execution (Gather → Plan → Develop → Deploy → Verify)
+- Framework command execution (Gather → Plan → Develop → Deploy → Verify → Chat)
+- Command implementations in `commands/` sub-package: `gather.py`, `plan.py`, `develop.py`, `deploy.py`, `verify.py`, `chat.py`, `skills.py`
 - Agent loop (message routing, tool dispatch, hooks, stall detection, think-tag stripping, retry with jitter, model fallback)
 - Token budget tracking (`token_budget.py`) — shared across agents per command run
 - Model alias resolution (models file at configured path)

@@ -2,6 +2,15 @@
 
 from __future__ import annotations
 
+# Tools available to gather agents (consumed by tool_builder.build_local_tools).
+AGENT_TOOLS: frozenset[str] = frozenset({
+    "read_source_file",
+    "write_framework_file",
+    "read_framework_file",
+    "read_document",
+    "code_analysis",
+})
+
 import hashlib
 import json
 import time as _time_mod
@@ -15,6 +24,7 @@ from ..utils import (
     ensure_voidrift_dir, boot_run, check_disk_space,
 )
 from .. import ui
+from ..token_budget import TokenBudget
 
 # Predefined categories (REQ-G-8 stage 1)
 CATEGORIES = ("source", "tests", "config", "infrastructure", "documentation", "assets")
@@ -141,7 +151,7 @@ def run_gather(
     from_path: str | None = None,
     idea_id: int | None = None,
     overwrite: bool = False,
-    token_budget: "Any | None" = None,
+    token_budget: TokenBudget | None = None,
 ) -> int:
     """Execute the gather command — reverse-engineer requirements (REQ-G-1)."""
     check_disk_space()
@@ -260,20 +270,429 @@ def _gather_from_idea(
     return 0
 
 
+def _run_triage(
+    model: ModelConfig,
+    log: Path,
+    analyst_role: str,
+    file_tree: str,
+    token_budget: "TokenBudget | None",
+    extra: object,
+) -> "dict[str, list[str]]":
+    """Stage 1: Categorize files via triage agent (REQ-G-8 stage 1).
+
+    Returns a categories dict mapping category name → list of file paths.
+    Raises RuntimeError on fatal failure.
+    """
+    import json as _json
+    import re as _re
+
+    triage_prompt = prompts.load_prompt("gather", "TRIAGE")
+    triage = AgentLoop(
+        model=model, stream=True, extra_body=extra, max_tokens=4096,
+        log_path=log,
+        system_prompt=f"{analyst_role}\n\n{triage_prompt}",
+        tools=[], tool_handlers={}, show_spinner=False,
+        token_budget=token_budget,
+    )
+    with ui.spinner(ui.random_label(), "triage") as spin:
+        triage.on_progress = spin.on_progress
+        triage.on_token = lambda t: None
+        triage_response = triage.send(
+            prompts.load_prompt("gather", "TRIAGE-USER").format(file_tree=file_tree)
+        )
+
+    try:
+        triage_data = _json.loads(triage_response.strip())
+    except _json.JSONDecodeError:
+        m = _re.search(r"\{.*\}", triage_response, _re.DOTALL)
+        if m:
+            triage_data = _json.loads(m.group())
+        else:
+            with open(log, "a") as _f:
+                _f.write(f"Triage response:\n{triage_response}\n")
+            raise RuntimeError("Triage did not return valid JSON.")
+
+    categories: dict[str, list[str]] = {}
+    for cat in CATEGORIES:
+        files = triage_data.get(cat, [])
+        if isinstance(files, list):
+            categories[cat] = files
+        elif isinstance(files, dict):
+            categories[cat] = [f for fs in files.values() for f in fs]
+        else:
+            categories[cat] = []
+
+    # Validation pass — model reviews its own triage output (best-effort)
+    all_files = [f for fs in categories.values() for f in fs]
+    validation_prompt = prompts.load_prompt("gather", "TRIAGE-VALIDATION")
+    validator = AgentLoop(
+        model=model, stream=True, extra_body=extra, max_tokens=4096,
+        log_path=log,
+        system_prompt=f"{analyst_role}\n\n{validation_prompt}",
+        tools=[], tool_handlers={}, show_spinner=False,
+        token_budget=token_budget,
+    )
+    try:
+        with ui.spinner(ui.random_label(), "validation") as spin:
+            validator.on_progress = spin.on_progress
+            validator.on_token = lambda t: None
+            val_response = validator.send(
+                prompts.load_prompt("gather", "VALIDATION-USER").format(
+                    files_json=_json.dumps(all_files)
+                )
+            )
+        val_data = _json.loads(val_response.strip())
+        if isinstance(val_data, dict):
+            val_data = next(iter(val_data.values()), [])
+        keep = set(val_data)
+        categories = {c: [f for f in fs if f in keep] for c, fs in categories.items()}
+    except (RuntimeError, ValueError, TypeError, KeyError, _json.JSONDecodeError):
+        pass  # validation is best-effort
+
+    return categories
+
+
+def _run_context_build(
+    model: ModelConfig,
+    categories: "dict[str, list[str]]",
+    read_fn: "callable",
+    log: Path,
+    analyst_role: str,
+    token_budget: "TokenBudget | None",
+    extra: object,
+    input_limit: "int | None",
+    errors: object,
+) -> "dict[str, str]":
+    """Stage 2: Summarize non-source categories for context injection (REQ-G-17).
+
+    Returns a dict mapping category name → summary text.
+    Errors are recorded via ``errors.record()`` but never fatal.
+    """
+    from ..config import get_max_tokens as _get_max_tokens
+
+    context_summaries: dict[str, str] = {}
+    ctx_build_prompt_tpl = prompts.load_prompt("gather", "CONTEXT-BUILD")
+    cats_with_files = [cat for cat in _NON_SOURCE if categories.get(cat)]
+
+    with ui.multi_spinner(f"{len(cats_with_files)} categories") as ms:
+        for cat in cats_with_files:
+            cat_files = categories[cat]
+            parts: list[str] = []
+            total_chars = 0
+            for fp in sorted(cat_files):
+                text = read_fn(fp)
+                entry = f"### {fp}\n\n{text}"
+                if input_limit and total_chars + len(entry) > input_limit:
+                    parts.append(f"### {fp}\n\n[omitted — context limit reached]")
+                    break
+                parts.append(entry)
+                total_chars += len(entry)
+            content_block = "\n\n---\n\n".join(parts)
+
+            lens = _ANALYSIS_LENS.get(cat, "")
+            system = ctx_build_prompt_tpl.format(category=cat, context_lens=lens)
+            ctx_agent = AgentLoop(
+                model=model, stream=True, extra_body=extra,
+                max_tokens=_get_max_tokens(model, "analysis"),
+                log_path=log,
+                system_prompt=system,
+                tools=[], tool_handlers={}, show_spinner=False,
+                token_budget=token_budget,
+            )
+            tracker = ms.track(f"{cat} ({len(cat_files)} files)")
+            _stats: dict = {"elapsed": 0, "pt": 0, "ct": 0, "ctx": None}
+
+            def _on_ctx_complete(data: dict, s: dict = _stats) -> None:
+                s["pt"] = max(s["pt"], data.get("prompt_tokens", 0))
+                s["ct"] += data.get("completion_tokens", 0)
+                if data.get("ctx_pct") is not None:
+                    s["ctx"] = data["ctx_pct"]
+
+            try:
+                import time as _t2
+                ctx_agent.on_progress = tracker
+                ctx_agent.on_token = lambda t: None
+                ctx_agent.on_complete = _on_ctx_complete
+                _s2 = _t2.time()
+                summary = ctx_agent.send(
+                    prompts.load_prompt("gather", "CONTEXT-USER").format(
+                        content_block=content_block
+                    )
+                )
+                _e2 = _t2.time() - _s2
+                context_summaries[cat] = summary
+                ms.done(
+                    f"{cat} ({len(cat_files)} files)",
+                    f"{cat}: {len(cat_files)} file(s)",
+                    _e2, _stats["pt"], _stats["ct"], _stats["ctx"],
+                )
+                with open(log, "a") as _f:
+                    _f.write(f"Context [{cat}]:\n{summary}\n")
+            except (RuntimeError, OSError) as e:
+                ms.done(f"{cat} ({len(cat_files)} files)", f"{cat}", 0, failed=True)
+                errors.record("api", type(e).__name__, str(e)[:200], recoverable=False)
+
+    return context_summaries
+
+
+def _run_source_analysis(
+    model: ModelConfig,
+    source_files: "list[str]",
+    from_path: Path,
+    log: Path,
+    source_tools: list,
+    source_handlers: dict,
+    context_block: str,
+    target: Path,
+    token_budget: "TokenBudget | None",
+    extra: object,
+    concurrency: int,
+    errors: object,
+) -> "dict[str, str]":
+    """Stage 3: Analyze each source file in parallel (REQ-G-8 stage 3).
+
+    Returns a dict mapping filepath → analysis text.
+    Per-file errors are recorded via ``errors.record()``; the stage never
+    raises so the pipeline always reaches Stage 4.
+    """
+    import time as _time
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    from ..config import get_max_tokens as _get_max_tokens
+
+    source_requirements: dict[str, str] = {}
+    if not source_files:
+        return source_requirements
+
+    analysis_prompt_tpl = prompts.load_prompt("gather", "ANALYSIS")
+    max_workers = len(source_files) if concurrency == 0 else concurrency
+    _counter = {"done": 0}
+    _lock = __import__("threading").Lock()
+
+    def _analyze_one(
+        filepath: str,
+        on_progress: object = None,
+    ) -> "tuple[str, float | None, str | None, str, int, int, int | None]":
+        lens = _ANALYSIS_LENS["source"]
+        system = analysis_prompt_tpl.format(analysis_lens=lens)
+        if context_block:
+            system = system + "\n\n" + context_block
+        max_tok = _get_max_tokens(model, "analysis")
+        _pt: list[int] = [0]
+        _ct: list[int] = [0]
+        _ctx_pct: list[int | None] = [None]
+
+        def _on_complete(data: dict) -> None:
+            _pt[0] = max(_pt[0], data.get("prompt_tokens", 0))
+            _ct[0] += data.get("completion_tokens", 0)
+            if data.get("ctx_pct") is not None:
+                _ctx_pct[0] = data["ctx_pct"]
+
+        full_path = (from_path / filepath).resolve()
+        raw_content: str | None = None
+        file_hash: str | None = None
+        if full_path.exists():
+            raw_content = full_path.read_text(encoding="utf-8", errors="replace")
+            file_hash = hashlib.sha256(
+                raw_content.encode("utf-8", errors="replace")
+            ).hexdigest()
+
+        # Cache lookup (REQ-CTX-5)
+        if file_hash is not None:
+            cached = _load_cached_analysis(
+                _analysis_path(target.parent, filepath), file_hash
+            )
+            if cached is not None:
+                with open(log, "a") as _f:
+                    _f.write(f"[CACHE HIT] {filepath} (hash {file_hash[:8]})\n")
+                return filepath, 0.0, None, cached, 0, 0, None
+
+        start = _time.time()
+        input_limit = model.max_input_chars
+
+        # Chunked flow for large files (REQ-G-13)
+        if input_limit and raw_content is not None and len(raw_content) > input_limit:
+            chunks = _make_chunks(raw_content, input_limit)
+            with open(log, "a") as _f:
+                _f.write(
+                    f"[CHUNKED] {filepath} ({len(raw_content)} chars"
+                    f" → {len(chunks)} chunks)\n"
+                )
+            partial: list[str] = []
+            for i, chunk in enumerate(chunks, 1):
+                chunk_agent = AgentLoop(
+                    model=model, stream=True, extra_body=extra, max_tokens=max_tok,
+                    log_path=log, system_prompt=system,
+                    tools=[], tool_handlers={}, show_spinner=False,
+                    token_budget=token_budget,
+                )
+                chunk_agent.on_progress = on_progress
+                chunk_agent.on_token = lambda t: None
+                chunk_agent.on_complete = _on_complete
+                try:
+                    resp = chunk_agent.send(
+                        f"Analyze portion {i}/{len(chunks)} of {filepath}:\n\n{chunk}"
+                    )
+                    partial.append(resp)
+                except (RuntimeError, OSError):
+                    errors.record(
+                        "api", "ChunkAnalysisError",
+                        f"Chunk {i}/{len(chunks)} of {filepath}", recoverable=True,
+                    )
+            if partial:
+                if len(partial) == 1:
+                    combined = partial[0]
+                else:
+                    consol_agent = AgentLoop(
+                        model=model, stream=True, extra_body=extra, max_tokens=max_tok,
+                        log_path=log, system_prompt=system,
+                        tools=[], tool_handlers={}, show_spinner=False,
+                        token_budget=token_budget,
+                    )
+                    consol_agent.on_progress = on_progress
+                    consol_agent.on_token = lambda t: None
+                    consol_agent.on_complete = _on_complete
+                    parts_text = "\n\n---\n\n".join(
+                        f"[Chunk {j + 1}/{len(partial)}]\n{p}"
+                        for j, p in enumerate(partial)
+                    )
+                    combined = consol_agent.send(
+                        f"Partial analyses of {filepath}:\n\n{parts_text}\n\n"
+                        "Write one unified, non-redundant analysis of the whole file."
+                    )
+                if file_hash and combined:
+                    _write_analysis(
+                        _analysis_path(target.parent, filepath), filepath, file_hash, combined
+                    )
+                return filepath, _time.time() - start, None, combined, _pt[0], _ct[0], _ctx_pct[0]
+
+        # Normal flow
+        agent = AgentLoop(
+            model=model, stream=True, extra_body=extra, max_tokens=max_tok,
+            log_path=log, system_prompt=system,
+            tools=source_tools, tool_handlers=source_handlers, show_spinner=False,
+            token_budget=token_budget,
+        )
+        agent.on_progress = on_progress
+        agent.on_token = lambda t: None
+        agent.on_complete = _on_complete
+        try:
+            response = agent.send(
+                prompts.load_prompt("gather", "ANALYSIS-USER").format(filepath=filepath)
+            )
+            if file_hash and response:
+                _write_analysis(
+                    _analysis_path(target.parent, filepath), filepath, file_hash, response
+                )
+            return filepath, _time.time() - start, None, response, _pt[0], _ct[0], _ctx_pct[0]
+        except (RuntimeError, OSError) as e:
+            return filepath, None, str(e), "", 0, 0, None
+
+    with ui.multi_spinner(f"{ui.random_label()} ({len(source_files)} source files)") as ms:
+        with ThreadPoolExecutor(max_workers=max(1, max_workers)) as pool:
+            futures = {
+                pool.submit(_analyze_one, fp, ms.track(fp)): fp
+                for fp in source_files
+            }
+            for future in as_completed(futures):
+                filepath, elapsed, err, response, pt, ct, ctx_pct = future.result()
+                with _lock:
+                    _counter["done"] += 1
+                    n = _counter["done"]
+                label = f"{n}/{len(source_files)} {filepath}"
+                if err:
+                    ms.done(filepath, label, elapsed or 0, failed=True)
+                    errors.record(
+                        "api", "SourceAnalysisError",
+                        f"{filepath}: {err[:150]}", recoverable=True,
+                    )
+                else:
+                    source_requirements[filepath] = response
+                    ms.done(filepath, label, elapsed or 0, pt, ct, ctx_pct)
+                with open(log, "a") as _f:
+                    _f.write(f"Analyzed: {filepath}\n")
+
+    return source_requirements
+
+
+def _run_final_pass(
+    model: ModelConfig,
+    source_requirements: "dict[str, str]",
+    context_summaries: "dict[str, str]",
+    existing_requirements: "str | None",
+    log: Path,
+    token_budget: "TokenBudget | None",
+    extra: object,
+) -> str:
+    """Stage 4: Consolidate analyses into REQUIREMENTS.md text (REQ-G-8 stage 4).
+
+    Returns the final markdown string.
+    Raises RuntimeError on model failure, KeyboardInterrupt on user interrupt.
+    """
+    from ..config import get_max_tokens as _get_max_tokens
+
+    requirements_template = prompts.load_template("REQUIREMENTS-TEMPLATE")
+
+    source_reqs_text = "\n\n---\n\n".join(
+        f"### {fp}\n\n{req.strip()}"
+        for fp, req in sorted(source_requirements.items())
+        if req.strip()
+    )
+
+    if context_summaries:
+        ctx_text = "\n\n".join(
+            f"**{cat.capitalize()}:**\n{summary.strip()}"
+            for cat, summary in context_summaries.items()
+        )
+        final_msg = (
+            f"Source Requirements:\n\n{source_reqs_text}"
+            f"\n\n---\n\nProject Context:\n\n{ctx_text}"
+        )
+    else:
+        final_msg = f"Source Requirements:\n\n{source_reqs_text}"
+
+    if existing_requirements:
+        final_msg += (
+            f"\n\n---\n\nExisting REQUIREMENTS.md (update, don't replace):"
+            f"\n\n{existing_requirements}"
+        )
+
+    final_prompt = prompts.load_prompt("gather", "CONSOLIDATION")
+    final_system = (
+        final_prompt + f"\n\n## Output Template\n\n{requirements_template}"
+        if requirements_template
+        else final_prompt
+    )
+
+    final_agent = AgentLoop(
+        model=model, stream=True, extra_body=extra,
+        max_tokens=_get_max_tokens(model, "consolidation"),
+        log_path=log,
+        system_prompt=final_system,
+        tools=[], tool_handlers={}, show_spinner=False,
+        token_budget=token_budget,
+    )
+    with ui.spinner(ui.random_label(), "consolidation") as spin:
+        final_agent.on_progress = spin.on_progress
+        final_agent.on_token = lambda t: None
+        final_response = final_agent.send(final_msg)
+
+    with open(log, "a") as _f:
+        _f.write(f"Final pass response ({len(final_response)} chars)\n")
+    return final_response
+
+
 def _gather_from(
     model: ModelConfig,
     target: Path,
     from_path: Path,
     overwrite: bool,
-    token_budget: "Any | None" = None,
+    token_budget: TokenBudget | None = None,
 ) -> int:
     """Reverse engineering mode — four-stage pipeline (REQ-G-8, REQ-ARCH-7).
 
-    Stages:
-      1. Triage — categorize files into source vs context categories
-      2. Context Build — one agent per non-source category, direct response
-      3. Source Analysis — one agent per source file, context injected, direct response
-      4. Final Pass — CLI pre-fetches template, model returns markdown, CLI writes file
+    Delegates each stage to a named helper function:
+      _run_triage, _run_context_build, _run_source_analysis, _run_final_pass
     """
     existing_requirements = target.read_text() if (target.exists() and not overwrite) else None
     if not from_path.is_dir():
@@ -290,12 +709,11 @@ def _gather_from(
     from ..error_tracker import ErrorTracker
     errors = ErrorTracker()
 
-    all_tools, all_handlers = build_local_tools(cmd="gather")
+    from ..tools.filesystem import WriteContext as _WriteContext
+    _gather_project_dir = target.parent.parent  # target is .voidrift/REQUIREMENTS.md
+    _fs_ctx = _WriteContext(project_dir=_gather_project_dir, max_read_lines=model.max_read_lines)
+    all_tools, all_handlers = build_local_tools(cmd="gather", project_dir=_gather_project_dir, ctx=_fs_ctx)
 
-    from ..tools.filesystem import configure as _configure_fs
-    _configure_fs(max_read_lines=model.max_read_lines)
-
-    from ..config import get_max_tokens as _get_max_tokens
     _input_limit = model.max_input_chars
 
     def read_from_source(path: str) -> str:
@@ -333,297 +751,46 @@ def _gather_from(
     analyst_role = find_skill("ANALYSIS-REQS") or ""
 
     import json as _json
-    import re as _re
-    import time as _time
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-    # --- Stage 1: Triage — categorize files ---
+
+    # --- Stage 1: Triage ---
     ui.stage("Stage 1: Triaging files...")
-    triage_prompt = prompts.load_prompt("gather", "TRIAGE")
-    triage = AgentLoop(
-        model=model, stream=True, extra_body=extra, max_tokens=4096,
-        log_path=log,
-        system_prompt=f"{analyst_role}\n\n{triage_prompt}",
-        tools=[], tool_handlers={}, show_spinner=False,
-        token_budget=token_budget,
-    )
     try:
-        with ui.spinner(ui.random_label(), "triage") as spin:
-            triage.on_progress = spin.on_progress
-            triage.on_token = lambda t: None
-            triage_response = triage.send(prompts.load_prompt("gather", "TRIAGE-USER").format(file_tree=file_tree))
+        categories = _run_triage(model, log, analyst_role, file_tree, token_budget, extra)
     except (RuntimeError, OSError) as e:
         ui.error(f"Triage failed: {e}")
         return 1
 
-    try:
-        triage_data = _json.loads(triage_response.strip())
-    except _json.JSONDecodeError:
-        m = _re.search(r"\{.*\}", triage_response, _re.DOTALL)
-        if m:
-            triage_data = _json.loads(m.group())
-        else:
-            ui.error("Triage did not return valid JSON.")
-            with open(log, "a") as f:
-                f.write(f"Triage response:\n{triage_response}\n")
-            return 1
-
-    # Normalize into categories dict
-    categories: dict[str, list[str]] = {}
-    for cat in CATEGORIES:
-        files = triage_data.get(cat, [])
-        if isinstance(files, list):
-            categories[cat] = files
-        elif isinstance(files, dict):
-            categories[cat] = [f for fs in files.values() for f in fs]
-        else:
-            categories[cat] = []
-
-    # Validation pass — model reviews its own triage output
-    all_files = [f for fs in categories.values() for f in fs]
-    validation_prompt = prompts.load_prompt("gather","TRIAGE-VALIDATION")
-    validator = AgentLoop(
-        model=model, stream=True, extra_body=extra, max_tokens=4096,
-        log_path=log,
-        system_prompt=f"{analyst_role}\n\n{validation_prompt}",
-        tools=[], tool_handlers={}, show_spinner=False,
-        token_budget=token_budget,
-    )
-    try:
-        with ui.spinner(ui.random_label(), "validation") as spin:
-            validator.on_progress = spin.on_progress
-            validator.on_token = lambda t: None
-            val_response = validator.send(prompts.load_prompt("gather", "VALIDATION-USER").format(files_json=_json.dumps(all_files)))
-        val_data = _json.loads(val_response.strip())
-        if isinstance(val_data, dict):
-            val_data = next(iter(val_data.values()), [])
-        keep = set(val_data)
-        categories = {c: [f for f in fs if f in keep] for c, fs in categories.items()}
-    except Exception:
-        pass  # validation is best-effort
-
-    file_category: dict[str, str] = {}
-    for cat, files in categories.items():
-        for f in files:
-            file_category[f] = cat
-
+    file_category: dict[str, str] = {
+        f: cat for cat, files in categories.items() for f in files
+    }
     source_files = categories.get("source", [])
     cat_counts = {c: len(fs) for c, fs in categories.items() if fs}
     ui.info(f"{len(file_category)} files: {', '.join(f'{c}({n})' for c, n in cat_counts.items())}")
     with open(log, "a") as f:
         f.write(f"Triage: {_json.dumps(categories)}\n")
 
-    # --- Stage 2: Context Build — one agent per non-source category (REQ-G-17) ---
+    # --- Stage 2: Context Build ---
     ui.stage("Stage 2: Building context from non-source files...")
-    context_summaries: dict[str, str] = {}
-    ctx_build_prompt_tpl = prompts.load_prompt("gather","CONTEXT-BUILD")
-
-    cats_with_files = [cat for cat in _NON_SOURCE if categories.get(cat)]
-    with ui.multi_spinner(f"{len(cats_with_files)} categories") as ms:
-        for cat in cats_with_files:
-            cat_files = categories[cat]
-            # Concatenate all files in this category
-            parts = []
-            total_chars = 0
-            for fp in sorted(cat_files):
-                text = read_from_source(fp)
-                entry = f"### {fp}\n\n{text}"
-                if _input_limit and total_chars + len(entry) > _input_limit:
-                    parts.append(f"### {fp}\n\n[omitted — context limit reached]")
-                    break
-                parts.append(entry)
-                total_chars += len(entry)
-            content_block = "\n\n---\n\n".join(parts)
-
-            lens = _ANALYSIS_LENS.get(cat, "")
-            system = ctx_build_prompt_tpl.format(category=cat, context_lens=lens)
-            ctx_agent = AgentLoop(
-                model=model, stream=True, extra_body=extra,
-                max_tokens=_get_max_tokens(model, "analysis"),
-                log_path=log,
-                system_prompt=system,
-                tools=[], tool_handlers={}, show_spinner=False,
-                token_budget=token_budget,
-            )
-            tracker = ms.track(f"{cat} ({len(cat_files)} files)")
-            _stats: dict = {"elapsed": 0, "pt": 0, "ct": 0, "ctx": None}
-            def _on_ctx_complete(data: dict, s=_stats) -> None:
-                s["pt"] = max(s["pt"], data.get("prompt_tokens", 0))
-                s["ct"] += data.get("completion_tokens", 0)
-                if data.get("ctx_pct") is not None:
-                    s["ctx"] = data["ctx_pct"]
-            try:
-                ctx_agent.on_progress = tracker
-                ctx_agent.on_token = lambda t: None
-                ctx_agent.on_complete = _on_ctx_complete
-                import time as _t2
-                _s2 = _t2.time()
-                summary = ctx_agent.send(prompts.load_prompt("gather", "CONTEXT-USER").format(content_block=content_block))
-                _e2 = _t2.time() - _s2
-                context_summaries[cat] = summary
-                ms.done(f"{cat} ({len(cat_files)} files)", f"{cat}: {len(cat_files)} file(s)", _e2, _stats["pt"], _stats["ct"], _stats["ctx"])
-                with open(log, "a") as f:
-                    f.write(f"Context [{cat}]:\n{summary}\n")
-            except (RuntimeError, OSError) as e:
-                ms.done(f"{cat} ({len(cat_files)} files)", f"{cat}", 0, failed=True)
-                errors.record("api", type(e).__name__, str(e)[:200], recoverable=False)
-
-    # Build context block to inject into every source analysis agent (REQ-G-17)
+    context_summaries = _run_context_build(
+        model, categories, read_from_source, log,
+        analyst_role, token_budget, extra, _input_limit, errors,
+    )
     context_block = build_context_block(context_summaries)
 
-    # --- Stage 3: Source Analysis — one agent per source file, direct response ---
+    # --- Stage 3: Source Analysis ---
     ui.stage(f"Stage 3: Analyzing {len(source_files)} source files...")
-
     source_tools, source_handlers = _pick_tools({"read_source_file"})
-    analysis_prompt_tpl = prompts.load_prompt("gather","ANALYSIS")
-    source_requirements: dict[str, str] = {}
+    source_requirements = _run_source_analysis(
+        model, source_files, from_path, log,
+        source_tools, source_handlers, context_block,
+        target, token_budget, extra, model.concurrency, errors,
+    )
 
-    concurrency = model.concurrency
-    max_workers = len(source_files) if concurrency == 0 else concurrency
-    _counter = {"done": 0}
-    _lock = __import__("threading").Lock()
-
-    def _analyze_source(
-        filepath: str,
-        on_progress=None,
-    ) -> tuple[str, float | None, str | None, str, int, int, int | None]:
-        lens = _ANALYSIS_LENS["source"]
-        system = analysis_prompt_tpl.format(analysis_lens=lens)
-        if context_block:
-            system = system + "\n\n" + context_block
-        max_tok = _get_max_tokens(model, "analysis")
-        _pt: list[int] = [0]
-        _ct: list[int] = [0]
-        _ctx: list[int | None] = [None]
-
-        def _on_complete(data: dict) -> None:
-            _pt[0] = max(_pt[0], data.get("prompt_tokens", 0))
-            _ct[0] += data.get("completion_tokens", 0)
-            if data.get("ctx_pct") is not None:
-                _ctx[0] = data["ctx_pct"]
-
-        # Read file content once — used for cache hash and chunking (REQ-CTX-5, REQ-G-13)
-        full_path = (from_path / filepath).resolve()
-        raw_content: str | None = None
-        file_hash: str | None = None
-        if full_path.exists():
-            raw_content = full_path.read_text(encoding="utf-8", errors="replace")
-            file_hash = hashlib.sha256(raw_content.encode("utf-8", errors="replace")).hexdigest()
-
-        # Cache lookup — skip model inference if unchanged (REQ-CTX-5)
-        if file_hash is not None:
-            cached = _load_cached_analysis(_analysis_path(target.parent, filepath), file_hash)
-            if cached is not None:
-                with open(log, "a") as _f:
-                    _f.write(f"[CACHE HIT] {filepath} (hash {file_hash[:8]})\n")
-                return filepath, 0.0, None, cached, 0, 0, None
-
-        start = _time.time()
-
-        # REQ-G-13: chunk large source files instead of truncating
-        if _input_limit and raw_content is not None and len(raw_content) > _input_limit:
-            chunks = _make_chunks(raw_content, _input_limit)
-            with open(log, "a") as _f:
-                _f.write(f"[CHUNKED] {filepath} ({len(raw_content)} chars → {len(chunks)} chunks)\n")
-            partial: list[str] = []
-            for i, chunk in enumerate(chunks, 1):
-                chunk_agent = AgentLoop(
-                    model=model, stream=True, extra_body=extra, max_tokens=max_tok,
-                    log_path=log,
-                    system_prompt=system,
-                    tools=[], tool_handlers={}, show_spinner=False,
-                    token_budget=token_budget,
-                )
-                chunk_agent.on_progress = on_progress
-                chunk_agent.on_token = lambda t: None
-                chunk_agent.on_complete = _on_complete
-                try:
-                    resp = chunk_agent.send(
-                        f"Analyze portion {i}/{len(chunks)} of {filepath}:\n\n{chunk}"
-                    )
-                    partial.append(resp)
-                except (RuntimeError, OSError):
-                    errors.record("api", "ChunkAnalysisError", f"Chunk {i}/{len(chunks)} of {filepath}", recoverable=True)
-                    pass
-            if partial:
-                if len(partial) == 1:
-                    combined = partial[0]
-                else:
-                    consol_agent = AgentLoop(
-                        model=model, stream=True, extra_body=extra, max_tokens=max_tok,
-                        log_path=log,
-                        system_prompt=system,
-                        tools=[], tool_handlers={}, show_spinner=False,
-                        token_budget=token_budget,
-                    )
-                    consol_agent.on_progress = on_progress
-                    consol_agent.on_token = lambda t: None
-                    consol_agent.on_complete = _on_complete
-                    parts_text = "\n\n---\n\n".join(
-                        f"[Chunk {j+1}/{len(partial)}]\n{p}"
-                        for j, p in enumerate(partial)
-                    )
-                    combined = consol_agent.send(
-                        f"Partial analyses of {filepath}:\n\n{parts_text}\n\n"
-                        "Write one unified, non-redundant analysis of the whole file."
-                    )
-                if file_hash and combined:
-                    _write_analysis(_analysis_path(target.parent, filepath), filepath, file_hash, combined)
-                return filepath, _time.time() - start, None, combined, _pt[0], _ct[0], _ctx[0]
-
-        # Normal flow: agent calls read_source_file(), returns analysis as direct text
-        agent = AgentLoop(
-            model=model, stream=True, extra_body=extra, max_tokens=max_tok,
-            log_path=log,
-            system_prompt=system,
-            tools=source_tools, tool_handlers=source_handlers, show_spinner=False,
-            token_budget=token_budget,
-        )
-        agent.on_progress = on_progress
-        agent.on_token = lambda t: None
-        agent.on_complete = _on_complete
-        try:
-            response = agent.send(prompts.load_prompt("gather", "ANALYSIS-USER").format(filepath=filepath))
-            if file_hash and response:
-                _write_analysis(_analysis_path(target.parent, filepath), filepath, file_hash, response)
-            return filepath, _time.time() - start, None, response, _pt[0], _ct[0], _ctx[0]
-        except (RuntimeError, OSError) as e:
-            return filepath, None, str(e), "", 0, 0, None
-
-    if source_files:
-        from rich.markup import escape as _esc
-
-        with ui.multi_spinner(f"{ui.random_label()} ({len(source_files)} source files)") as ms:
-            with ThreadPoolExecutor(max_workers=max(1, max_workers)) as pool:
-                futures = {
-                    pool.submit(_analyze_source, fp, ms.track(fp)): fp
-                    for fp in source_files
-                }
-                for future in as_completed(futures):
-                    filepath, elapsed, err, response, pt, ct, ctx_pct = future.result()
-                    with _lock:
-                        _counter["done"] += 1
-                        n = _counter["done"]
-                    label = f"{n}/{len(source_files)} {filepath}"
-                    if err:
-                        ms.done(filepath, label, elapsed or 0, failed=True)
-                        errors.record("api", "SourceAnalysisError", f"{filepath}: {err[:150]}", recoverable=True)
-                    else:
-                        source_requirements[filepath] = response
-                        ms.done(filepath, label, elapsed or 0, pt, ct, ctx_pct)
-                    with open(log, "a") as f:
-                        f.write(f"Analyzed: {filepath}\n")
-
-    # Write operator-readable analysis output — ANALYSIS.md index + per-file detail files
-    voidrift_dir = target.parent
-    analysis_dir = voidrift_dir / "analysis"
+    # Write analysis index
+    output_dir = target.parent
+    analysis_dir = output_dir / "analysis"
     analysis_dir.mkdir(exist_ok=True)
-
-    for fp in sorted(source_requirements):
-        analysis_text = source_requirements[fp]
-        if not analysis_text:
-            continue
-
-    analysis_log = voidrift_dir / "ANALYSIS.md"
+    analysis_log = output_dir / "ANALYSIS.md"
     with open(analysis_log, "w", encoding="utf-8") as _af:
         _af.write(f"# Gather Analysis\n\nSource: `{from_path}`\n\n")
         _af.write(f"{len(source_requirements)} source files analyzed.\n\n")
@@ -636,57 +803,13 @@ def _gather_from(
             for cat, summary in context_summaries.items():
                 _af.write(f"### {cat.capitalize()}\n\n{summary.strip()}\n\n")
 
-    # --- Stage 4: Final Pass — CLI owns all persistence, model returns markdown directly ---
+    # --- Stage 4: Final Pass ---
     ui.stage("Stage 4: Final pass — consolidating requirements...")
-
-    # Pre-fetch template (CLI calls directly, no model tool call)
-    requirements_template = prompts.load_template("REQUIREMENTS-TEMPLATE")
-
-    # Build source requirements text
-    source_reqs_text = "\n\n---\n\n".join(
-        f"### {fp}\n\n{req.strip()}"
-        for fp, req in sorted(source_requirements.items())
-        if req.strip()
-    )
-
-    # Build context text for final pass
-    if context_summaries:
-        ctx_text = "\n\n".join(
-            f"**{cat.capitalize()}:**\n{summary.strip()}"
-            for cat, summary in context_summaries.items()
-        )
-        final_msg = (
-            f"Source Requirements:\n\n{source_reqs_text}"
-            f"\n\n---\n\nProject Context:\n\n{ctx_text}"
-        )
-    else:
-        final_msg = f"Source Requirements:\n\n{source_reqs_text}"
-
-    if existing_requirements:
-        final_msg += f"\n\n---\n\nExisting REQUIREMENTS.md (update, don't replace):\n\n{existing_requirements}"
-
-    # System prompt: consolidation instructions + template
-    final_prompt = prompts.load_prompt("gather", "CONSOLIDATION")
-    if requirements_template:
-        final_system = final_prompt + f"\n\n## Output Template\n\n{requirements_template}"
-    else:
-        final_system = final_prompt
-
     try:
-        final_agent = AgentLoop(
-            model=model, stream=True, extra_body=extra,
-            max_tokens=_get_max_tokens(model, "consolidation"),
-            log_path=log,
-            system_prompt=final_system,
-            tools=[], tool_handlers={}, show_spinner=False,
-            token_budget=token_budget,
+        final_response = _run_final_pass(
+            model, source_requirements, context_summaries,
+            existing_requirements, log, token_budget, extra,
         )
-        with ui.spinner(ui.random_label(), "consolidation") as spin:
-            final_agent.on_progress = spin.on_progress
-            final_agent.on_token = lambda t: None
-            final_response = final_agent.send(final_msg)
-        with open(log, "a") as f:
-            f.write(f"Final pass response ({len(final_response)} chars)\n")
     except (RuntimeError, OSError) as e:
         ui.error(f"Final pass failed: {e}")
         return 1
@@ -694,9 +817,7 @@ def _gather_from(
         ui.info("Interrupted.")
         return 1
 
-    # Strip any preamble — find first `#` header
     final_content = strip_preamble(final_response)
-
     target.write_text(final_content, encoding="utf-8")
 
     # Write state entry (REQ-PS-3)

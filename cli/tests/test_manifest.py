@@ -253,3 +253,41 @@ class TestIdeas:
         mm.add_idea(1)
         mm.add_idea(5)
         assert mm.next_idea_id == 6
+
+
+class TestRotateHistoryLog:
+    """REQ-DPL-3: history.log is archived and reset after a release tag."""
+
+    def test_rotate_archives_history(self, mm):
+        """rotate_history_log copies history.log to history-v{version}.log."""
+        mm.load()
+        mm.ensure_dirs()
+        mm._history_path.write_text("2026-04-01T10:00:00 TASK-1 verified module=core assigned=x\n")
+        archived = mm.rotate_history_log("1.2.3")
+        assert archived is not None
+        assert archived.name == "history-v1.2.3.log"
+        assert archived.exists()
+        assert "TASK-1" in archived.read_text()
+
+    def test_rotate_resets_history_log(self, mm):
+        """After rotation the live history.log is empty."""
+        mm.load()
+        mm.ensure_dirs()
+        mm._history_path.write_text("some content\n")
+        mm.rotate_history_log("2.0.0")
+        assert mm._history_path.read_text() == ""
+
+    def test_rotate_returns_none_when_no_history(self, mm):
+        """Returns None if history.log does not exist yet."""
+        mm.load()
+        mm.ensure_dirs()
+        result = mm.rotate_history_log("0.1.0")
+        assert result is None
+
+    def test_rotate_archive_name_uses_version(self, mm):
+        """Archived file name embeds the exact version string."""
+        mm.load()
+        mm.ensure_dirs()
+        mm._history_path.write_text("entry\n")
+        archived = mm.rotate_history_log("10.20.30")
+        assert archived.name == "history-v10.20.30.log"

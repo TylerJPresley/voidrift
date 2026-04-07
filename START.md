@@ -55,8 +55,6 @@ The same standard applies to VoidRift itself: every change to this framework upd
    - [ ] ARCHITECTURE.md — the blueprint. New components, data flows, design decisions. This guides AI agents and architects building the system.
    - [ ] README.md — the user manual. If a human operator needs to know about it to use the application — commands, flags, config keys, slash commands, file formats — it goes here. Read the relevant README section and confirm.
    - [ ] CHANGELOG.md — entry under Added/Changed/Fixed
-   - [ ] FEATURES.md — mark completed backlog items ✅
-   - [ ] FUTURE-WORK-2.md — mark completed tasks ✅
    - [ ] `make test` passes — work is NOT complete until all tests pass
 
 8. **Build, sync, and commit incrementally**

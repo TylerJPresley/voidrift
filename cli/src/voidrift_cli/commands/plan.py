@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+# Tools available to plan agents (consumed by tool_builder.build_local_tools).
+AGENT_TOOLS: frozenset[str] = frozenset({
+    "read_framework_file",
+    "write_framework_file",
+})
+
 import re
 from datetime import datetime
 from pathlib import Path

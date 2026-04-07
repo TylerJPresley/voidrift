@@ -154,3 +154,194 @@ class TestActiveModelAlias:
         with _patch("voidrift_cli.config.load_config", return_value={"active_container_file": str(container_file)}):
             alias = _active_model_alias()
         assert alias == "my-active-model"
+
+
+
+class TestCLICommands:
+    def test_status_command(self, tmp_project):
+        from click.testing import CliRunner
+        from voidrift_cli.main import cli
+        runner = CliRunner()
+        result = runner.invoke(cli, ["status"])
+        assert result.exit_code == 0
+        assert "Gather" in result.output
+        assert "Verify" in result.output
+
+    def test_status_with_requirements(self, tmp_project, sample_requirements):
+        from click.testing import CliRunner
+        from voidrift_cli.main import cli
+        runner = CliRunner()
+        result = runner.invoke(cli, ["status"])
+        assert "✅" in result.output
+
+    def test_unlock_no_lock(self, tmp_project):
+        from click.testing import CliRunner
+        from voidrift_cli.main import cli
+        runner = CliRunner()
+        result = runner.invoke(cli, ["unlock"])
+        assert result.exit_code == 0
+        assert "No lock file" in result.output
+
+    def test_log_no_files(self, tmp_project):
+        from click.testing import CliRunner
+        from voidrift_cli.main import cli
+        runner = CliRunner()
+        result = runner.invoke(cli, ["log", "gather"])
+        assert result.exit_code == 1
+
+    def test_log_prune(self, tmp_project, voidrift_dir):
+        log_dir = voidrift_dir / "logs"
+        log_dir.mkdir(exist_ok=True)
+        (log_dir / "gather-20260101-000000.log").write_text("log content")
+        (log_dir / "plan-20260101-000000.log").write_text("log content")
+        from click.testing import CliRunner
+        from voidrift_cli.main import cli
+        runner = CliRunner()
+        result = runner.invoke(cli, ["log", "--prune"])
+        assert "Deleted 2" in result.output
+
+    def test_log_view(self, tmp_project, voidrift_dir):
+        log_dir = voidrift_dir / "logs"
+        log_dir.mkdir(exist_ok=True)
+        (log_dir / "gather-20260101-000000.log").write_text("line1\nline2\nline3")
+        from click.testing import CliRunner
+        from voidrift_cli.main import cli
+        runner = CliRunner()
+        result = runner.invoke(cli, ["log", "gather"])
+        assert result.exit_code == 0
+        assert "line1" in result.output
+
+    def test_help(self):
+        from click.testing import CliRunner
+        from voidrift_cli.main import cli
+        runner = CliRunner()
+        result = runner.invoke(cli, ["--help"])
+        assert result.exit_code == 0
+        assert "gather" in result.output
+        assert "develop" in result.output
+
+    def test_gather_help(self):
+        from click.testing import CliRunner
+        from voidrift_cli.main import cli
+        runner = CliRunner()
+        result = runner.invoke(cli, ["gather", "--help"])
+        assert "--path" in result.output
+        assert "--idea" in result.output
+        assert "--overwrite" in result.output
+
+    def test_develop_help(self):
+        from click.testing import CliRunner
+        from voidrift_cli.main import cli
+        runner = CliRunner()
+        result = runner.invoke(cli, ["develop", "--help"])
+        assert "Execute implementation tasks" in result.output
+
+    def test_skills_subcommand_registered(self):
+        """V-ARCH-1: 'skills' subcommand is registered in the CLI."""
+        from voidrift_cli.main import cli
+        assert "skills" in cli.commands
+
+    def test_skills_help(self):
+        """V-ARCH-1: 'voidrift skills --help' lists subcommands."""
+        from click.testing import CliRunner
+        from voidrift_cli.main import cli
+        runner = CliRunner()
+        result = runner.invoke(cli, ["skills", "--help"])
+        assert result.exit_code == 0
+        assert "list" in result.output
+
+
+class TestSkillsList:
+    """V-SKL-4: 'voidrift skills list' groups output by layer."""
+
+    def test_skills_list_shows_layer_column(self, tmp_project):
+        """skills list output includes a layer label (north-star, domain, or project)."""
+        from click.testing import CliRunner
+        from voidrift_cli.main import cli
+        runner = CliRunner()
+        result = runner.invoke(cli, ["skills", "list"])
+        # Either skills found with layer labels, or "No skills found."
+        assert result.exit_code == 0
+        if "No skills found." not in result.output:
+            # At least one layer should be labeled
+            has_layer = any(lbl in result.output for lbl in ("north-star", "domain", "project"))
+            assert has_layer, f"No layer labels found in output: {result.output!r}"
+
+    def test_skills_list_layer_filter(self, tmp_project):
+        """skills list --layer=project shows only project skills."""
+        from click.testing import CliRunner
+        from voidrift_cli.main import cli
+        runner = CliRunner()
+        result = runner.invoke(cli, ["skills", "list", "--layer", "project"])
+        assert result.exit_code == 0
+        if "No skills found." not in result.output:
+            assert "domain" not in result.output
+            assert "north-star" not in result.output
+
+
+class TestKanbanBoard:
+    """REQ-TM-1: Kanban board renders task statuses as Rich table columns."""
+
+    def _make_mm(self, tmp_path):
+        from voidrift_cli.manifest import ManifestManager
+        mm = ManifestManager(project_dir=tmp_path)
+        mm.ensure_dirs()
+        mm.load()
+        return mm
+
+    def test_returns_rich_table(self, tmp_path):
+        """render_kanban_board returns a Rich Table instance."""
+        from rich.table import Table
+        from voidrift_cli.main import render_kanban_board
+        mm = self._make_mm(tmp_path)
+        table = render_kanban_board(mm)
+        assert isinstance(table, Table)
+
+    def test_table_has_status_columns(self, tmp_path):
+        """Board has Planned, In Progress, Implemented, Verified, Blocked columns."""
+        from voidrift_cli.main import render_kanban_board
+        mm = self._make_mm(tmp_path)
+        table = render_kanban_board(mm)
+        col_names = [c.header for c in table.columns]
+        assert "Planned" in col_names
+        assert "Verified" in col_names
+        assert "Blocked" in col_names
+
+    def test_planned_task_appears_in_planned_column(self, tmp_path):
+        """A planned task is listed under the Planned column."""
+        from voidrift_cli.main import render_kanban_board
+        from rich.console import Console
+        from io import StringIO
+        mm = self._make_mm(tmp_path)
+        mm.add_task(1, module="core")  # default status is planned
+        table = render_kanban_board(mm)
+        # Render to string and verify TASK-1 appears in output
+        buf = StringIO()
+        con = Console(file=buf, highlight=False, markup=False, width=200)
+        con.print(table)
+        output = buf.getvalue()
+        assert "TASK-1" in output
+
+    def test_verified_task_does_not_appear_in_planned(self, tmp_path):
+        """A verified task is shown only under Verified, not Planned."""
+        from voidrift_cli.main import render_kanban_board
+        from rich.console import Console
+        from io import StringIO
+        mm = self._make_mm(tmp_path)
+        mm.add_task(2, module="backend")
+        mm.set_status(2, "verified")
+        table = render_kanban_board(mm)
+        buf = StringIO()
+        con = Console(file=buf, highlight=False, markup=False, width=200)
+        con.print(table)
+        output = buf.getvalue()
+        assert "TASK-2" in output
+
+    def test_empty_manifest_renders_without_error(self, tmp_path):
+        """Board renders cleanly when no tasks exist."""
+        from voidrift_cli.main import render_kanban_board
+        mm = self._make_mm(tmp_path)
+        # Should not raise
+        table = render_kanban_board(mm)
+        assert table is not None
+

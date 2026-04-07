@@ -303,6 +303,22 @@ class ManifestManager:
         p = self.idea_path(idea_id)
         return p.read_text() if p.exists() else ""
 
+    # ── History log rotation ─────────────────────────────────────────────
+
+    def rotate_history_log(self, version: str) -> Path | None:
+        """Archive history.log as history-v{version}.log and reset it (REQ-DPL-3).
+
+        Called after a successful git tag so the next release cycle starts
+        with an empty history. Returns the archived log path, or None if
+        history.log did not exist.
+        """
+        if not self._history_path.exists():
+            return None
+        archive = self._history_path.parent / f"history-v{version}.log"
+        shutil.copy2(self._history_path, archive)
+        self._history_path.write_text("", encoding="utf-8")
+        return archive
+
     # ── Summary ──────────────────────────────────────────────────────────
 
     def summary(self) -> dict[str, int]:

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import logging
 import yaml
 from pydantic import BaseModel
 
@@ -120,3 +121,14 @@ def list_models() -> list[str]:
         Sorted list of alias strings.
     """
     return sorted(_load_models().keys())
+
+
+def shell_complete_model(ctx: object, param: object, incomplete: str) -> list[str]:
+    """Shell completion callback for model alias arguments."""
+    try:
+        return [a for a in list_models() if a.startswith(incomplete)]
+    except Exception as exc:
+        logging.getLogger(__name__).debug(
+            "shell_complete_model: failed to load models: %s", exc
+        )
+        return []

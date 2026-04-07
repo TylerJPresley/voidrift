@@ -13,6 +13,33 @@ retention:
   project: 5
   global: 30
 
+# Paths that file tools are blocked from reading or writing in addition to
+# path sandboxing. Supports glob patterns. Relative to project root.
+protected_paths:
+  - .env
+  - .secrets
+  - "**/*.pem"
+  - "**/*.key"
+
+# Hostnames or CIDR blocks that the SSRF guard permits for http_client
+# and web_fetch tools. Use when your project needs to reach internal services.
+# Examples: "internal.corp.example.com", "10.0.0.0/8"
+ssrf_allow_list: []
+
+# Skills system configuration.
+skills:
+  # Model alias to use for skill synthesis (voidrift skills install --synthesize).
+  # Leave empty to disable synthesis and fall back to direct copy.
+  synthesis_model: ""
+  # External skill repositories. Each entry is a raw-content URL to a
+  # skills-manifest.yml file (e.g. GitHub raw content URL).
+  repos: []
+
+# Analysis cache settings (voidrift prune controls manual cleanup).
+cache:
+  max_entries: 500
+  ttl_days: 30
+
 bash:
   timeout: 120
   max_output_lines: 500

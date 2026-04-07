@@ -126,6 +126,8 @@ bash:
 | `retention.global` | Days of global framework logs to keep (default 30) |
 | `cache.max_entries` | Max analysis cache entries before LRU eviction (default 500) |
 | `cache.ttl_days` | Analysis entries older than this are pruned (default 30) |
+| `skills.synthesis_model` | Model alias for skill synthesis via `voidrift skills install --synthesize`; empty disables synthesis (default empty) |
+| `skills.repos` | List of manifest URLs searched by `voidrift skills search` (default empty) |
 | `bash.timeout` | Default timeout for `run_command` across all commands (default 120s) |
 | `bash.max_output_lines` | Truncate stdout/stderr beyond this many lines (default 500) |
 | `bash.<command>.enabled` | Enable/disable `run_command` for a specific command (default true) |

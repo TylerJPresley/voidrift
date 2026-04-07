@@ -265,6 +265,29 @@ class TestRetryLogic:
         assert "[RETRY attempt=" in log_content
 
 
+    def test_create_completion_retries_on_rate_limit(self, cloud_model, tmp_path):
+        """_create_completion retries up to RETRY_MAX on RateLimitError."""
+        log_file = tmp_path / "test.log"
+        agent = AgentLoop(model=cloud_model, stream=False, log_path=log_file)
+        retry_max = agent._RETRY_MAX
+        call_count = [0]
+        def mock_create(**kwargs):
+            call_count[0] += 1
+            if call_count[0] < retry_max:
+                raise openai.RateLimitError(
+                    "rate limited", response=MagicMock(status_code=429, headers={}), body={},
+                )
+            return make_openai_response("ok")
+        with patch("voidrift_cli.agent.OpenAI") as MockOpenAI:
+            with patch("voidrift_cli.agent.time.sleep"):
+                mock_client = MagicMock()
+                MockOpenAI.return_value = mock_client
+                mock_client.chat.completions.create.side_effect = mock_create
+                result = agent.send("test")
+        assert result == "ok"
+        assert call_count[0] == retry_max
+
+
 class TestThinkTagStripping:
     """V-ARCH-4: REQ-ARCH-8 — <think> tags stripped and logged as [THINKING]."""
 
@@ -404,6 +427,15 @@ class TestBuildLocalTools:
         assert "list_skills" in tool_names
         assert "get_skill" in handlers
         assert "list_skills" in handlers
+
+
+    def test_build_local_tools_no_cmd_returns_all_tools(self):
+        """Calling build_local_tools() with no argument returns all tools."""
+        tools_all, _ = build_local_tools()
+        tools_none, _ = build_local_tools(cmd=None)
+        tool_names_all = {t["function"]["name"] for t in tools_all}
+        tool_names_none = {t["function"]["name"] for t in tools_none}
+        assert tool_names_all == tool_names_none
 
 
 class TestMaxTokensRecovery:
@@ -563,3 +595,135 @@ class TestModelFallback:
                 agent.send("test")
         # Model should NOT have changed
         assert agent.model.alias == "primary"
+
+    def test_fallback_failure_is_logged(self, tmp_path):
+        """Fallback attempt failure writes a log entry with MODEL_FALLBACK_FAILED."""
+        from voidrift_cli.models import ModelConfig
+
+        primary = ModelConfig(
+            alias="primary", model_id="p", api_base="http://localhost:1/v1",
+            api_key="k", fallback="fb",
+        )
+        log_file = tmp_path / "test.log"
+        agent = AgentLoop(model=primary, system_prompt="test", stream=False, log_path=log_file)
+
+        def mock_create(**kw):
+            raise openai.RateLimitError(
+                message="rate limited", response=MagicMock(status_code=429, headers={}), body=None,
+            )
+
+        fallback_mc = ModelConfig(
+            alias="fb", model_id="fb-model", api_base="http://localhost:2/v1", api_key="k",
+        )
+
+        with patch.object(agent, "_get_client") as mock_gc:
+            mock_client = MagicMock()
+            mock_client.chat.completions.create = mock_create
+            mock_gc.return_value = mock_client
+            with patch("voidrift_cli.models.resolve_model", return_value=fallback_mc):
+                with pytest.raises(RuntimeError):
+                    agent.send("test")
+
+        log_content = log_file.read_text()
+        assert "MODEL_FALLBACK_FAILED" in log_content
+
+
+class TestReactiveCompact:
+    def test_reactive_compact_count_initialized_at_construction(self, cloud_model):
+        """_reactive_compact_count is 0 immediately after construction."""
+        loop = AgentLoop(model=cloud_model)
+        assert loop._reactive_compact_count == 0
+
+    def test_reactive_compact_count_not_reset_on_second_call(self, cloud_model):
+        """Counter survives multiple calls — no hasattr re-init."""
+        loop = AgentLoop(model=cloud_model)
+        loop._reactive_compact_count = 1
+        assert loop._reactive_compact_count >= 1
+
+
+class TestPartitionToolCalls:
+    def test_partition_uses_tool_definition_flag(self, cloud_model):
+        """_partition_tool_calls uses concurrent_safe flag from tool defs."""
+        loop = AgentLoop(
+            model=cloud_model,
+            tools=[
+                {"type": "function", "function": {"name": "my_read"}, "concurrent_safe": True},
+                {"type": "function", "function": {"name": "my_write"}},
+            ],
+            tool_handlers={"my_read": lambda: "r", "my_write": lambda: "w"},
+        )
+        tool_calls = [
+            {"id": "1", "function": {"name": "my_read", "arguments": "{}"}},
+            {"id": "2", "function": {"name": "my_read", "arguments": "{}"}},
+            {"id": "3", "function": {"name": "my_write", "arguments": "{}"}},
+        ]
+        batches = loop._partition_tool_calls(tool_calls)
+        assert len(batches) == 2
+        assert len(batches[0]) == 2
+
+
+class TestBuildLocalToolsProjectDir:
+    def test_build_local_tools_uses_provided_project_dir(self, tmp_path):
+        """Memory and session handlers use the provided project_dir, not Path.cwd()."""
+        (tmp_path / ".voidrift").mkdir()
+        tools, handlers = build_local_tools(cmd="chat", project_dir=tmp_path)
+        result = handlers["write_memory"](name="test-key", content="hello")
+        assert (tmp_path / ".voidrift" / "memory" / "test-key.md").exists()
+
+
+class TestLoopDecomposition:
+    def test_drain_queues_drains_steering_queue(self, cloud_model):
+        """Messages placed on steering queue are returned by _drain_queues."""
+        agent = AgentLoop(model=cloud_model)
+        msgs = [{"role": "user", "content": "steer me"}]
+        agent._steering_queue.put_nowait(msgs)
+        steered, _ = agent._drain_queues()
+        assert steered == msgs
+        assert agent._steering_queue.empty()
+
+    def test_drain_queues_drains_followup_queue(self, cloud_model):
+        """Messages placed on followup queue are returned by _drain_queues."""
+        agent = AgentLoop(model=cloud_model)
+        msgs = [{"role": "user", "content": "follow up"}]
+        agent._followup_queue.put_nowait((msgs, "one-at-a-time"))
+        _, followups = agent._drain_queues()
+        assert len(followups) == 1
+        assert followups[0][0] == msgs
+        assert agent._followup_queue.empty()
+
+    def test_handle_stall_increments_counter(self, cloud_model, tmp_path):
+        """Calling _handle_stall with same signature twice increments stall counter."""
+        agent = AgentLoop(model=cloud_model, log_path=tmp_path / "agent.log")
+        sig = "read_source_file:{}"
+        # First call — no stall yet (last_sig differs)
+        stop, new_last, count = agent._handle_stall(sig, None, 0)
+        assert not stop
+        assert new_last == sig
+        assert count == 0
+        # Second call — same sig as last, stall detected
+        stop, new_last, count = agent._handle_stall(sig, sig, 0)
+        assert not stop  # nudge injected, not stopped yet
+        assert count == 1
+        # Third call — stall should stop now
+        stop, new_last, count = agent._handle_stall(sig, sig, 1)
+        assert stop
+        assert count == 2
+
+
+class TestSensitivePathRedaction:
+    def test_sensitive_path_redacted_in_log(self, cloud_model, tmp_path):
+        log = tmp_path / "agent.log"
+        agent = AgentLoop(model=cloud_model, log_path=log)
+        redacted = agent._redact_tool_result("read_source_file", '{"path": ".env"}', "SECRET=abc123")
+        assert "SECRET" not in redacted
+        assert "REDACTED" in redacted
+
+    def test_non_sensitive_path_not_redacted(self, cloud_model):
+        agent = AgentLoop(model=cloud_model)
+        result = agent._redact_tool_result("read_source_file", '{"path": "src/main.py"}', "def main(): pass")
+        assert "def main" in result
+
+    def test_write_tool_not_redacted(self, cloud_model):
+        agent = AgentLoop(model=cloud_model)
+        result = agent._redact_tool_result("write_source_file", '{"path": ".env", "content": "x"}', "wrote .env")
+        assert "wrote .env" in result

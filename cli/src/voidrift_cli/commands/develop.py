@@ -2,6 +2,23 @@
 
 from __future__ import annotations
 
+# Tools available to develop agents (consumed by tool_builder.build_local_tools).
+AGENT_TOOLS: frozenset[str] = frozenset({
+    "read_source_file",
+    "write_source_file",
+    "edit_source_file",
+    "read_framework_file",
+    "run_command",
+})
+
+BASH_DESCRIPTION: tuple[str, list[str]] = (
+    "Run build, test, and lint commands to validate written code.",
+    [
+        "Run tests after writing code. Fix failures before moving to the next task.",
+        "Check exit_code in the result — non-zero means failure.",
+    ],
+)
+
 import os
 import signal
 import sys
@@ -20,6 +37,11 @@ from ..utils import (
     check_requirements_exist, truncate_task_label, append_state,
 )
 from .. import ui
+from ..ui_dashboard import DevelopDashboard
+
+from ..token_budget import TokenBudget
+from ..error_tracker import ErrorTracker
+from ..git_checkpoint import GitCheckpointManager
 
 MAX_ESCALATIONS = 5
 
@@ -27,7 +49,7 @@ MAX_ESCALATIONS = 5
 def run_develop(
     worker: ModelConfig,
     architect: ModelConfig | None = None,
-    token_budget: Any | None = None,
+    token_budget: TokenBudget | None = None,
 ) -> int:
     """Execute the develop command — dispatch tasks from manifest (REQ-D-4).
 
@@ -99,11 +121,10 @@ def run_develop(
 
     lock.write_text(f"{os.getpid()}\n{datetime.now().isoformat()}")
 
-    from ..tools import reset_session_files, get_session_files
-    from ..tools.filesystem import configure as _configure_fs
+    from ..tools.filesystem import WriteContext as _WriteContext
     from ..agent import clear_abort
-    reset_session_files()
-    _configure_fs(max_read_lines=worker.max_read_lines)
+    _fs_ctx = _WriteContext(project_dir=d.parent, max_read_lines=worker.max_read_lines)
+    _fs_ctx.reset_session_files()
     clear_abort()
 
     _interrupted = False
@@ -127,7 +148,7 @@ def run_develop(
     with open(log, "a") as f:
         f.write(f"\n=== Develop session: {datetime.now().isoformat()} ===\n")
 
-    tools, handlers = build_local_tools(cmd="develop")
+    tools, handlers = build_local_tools(cmd="develop", project_dir=d.parent, ctx=_fs_ctx)
     dev_prompt_tpl = prompts.load_prompt("develop", "TASK")
     esc_prompt_tpl = prompts.load_prompt("develop", "ESCALATION")
     git_lock = threading.Lock()
@@ -152,7 +173,7 @@ def run_develop(
             dev_prompt_tpl, esc_prompt_tpl, git_lock,
             lambda: _interrupted, token_budget=token_budget,
             git_context=git_context, errors=errors,
-            checkpoints=checkpoints,
+            checkpoints=checkpoints, ctx=_fs_ctx,
         )
     except KeyboardInterrupt:
         _interrupted = True
@@ -169,7 +190,7 @@ def run_develop(
         signal.signal(signal.SIGINT, prev_sigint)
         lock.unlink(missing_ok=True)
 
-    files_written = get_session_files()
+    files_written = _fs_ctx.get_session_files()
     summary = "budget_exhausted" if _budget_exhausted else (
         "completed" if result == 0 else ("interrupted" if _interrupted else "failed")
     )
@@ -216,10 +237,11 @@ def _dispatch_loop(
     esc_prompt_tpl: str,
     git_lock: threading.Lock,
     is_interrupted: callable,
-    token_budget: Any | None = None,
+    token_budget: TokenBudget | None = None,
     git_context: str = "",
-    errors: Any | None = None,
-    checkpoints: Any | None = None,
+    errors: ErrorTracker | None = None,
+    checkpoints: GitCheckpointManager | None = None,
+    ctx=None,
 ) -> int:
     """Dispatch ready tasks until none remain (REQ-D-4, REQ-D-10)."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -255,7 +277,7 @@ def _dispatch_loop(
                     mm, tid, worker, architect, tools, handlers, log,
                     dev_prompt_tpl, esc_prompt_tpl, git_lock, total_tasks,
                     token_budget=token_budget, git_context=git_context,
-                    errors=errors, checkpoints=checkpoints,
+                    errors=errors, checkpoints=checkpoints, ctx=ctx,
                 )
                 if _stats:
                     all_diff_stats.append((tid, _stats))
@@ -269,7 +291,7 @@ def _dispatch_loop(
             batch = ready[:max_w] if max_w > 0 else ready
             ui.info(f"Dispatching {len(batch)} tasks concurrently")
 
-            with ui.DevelopDashboard() as dash:
+            with DevelopDashboard() as dash:
                 with ThreadPoolExecutor(max_workers=len(batch)) as pool:
                     futures = {}
                     for tid in batch:
@@ -285,7 +307,7 @@ def _dispatch_loop(
                             log, dev_prompt_tpl, esc_prompt_tpl, git_lock, total_tasks,
                             tracker=tracker, token_budget=token_budget,
                             git_context=git_context, errors=errors,
-                            checkpoints=checkpoints,
+                            checkpoints=checkpoints, ctx=ctx,
                         )
                         futures[fut] = (tid, key)
 
@@ -322,9 +344,10 @@ def _run_task(
     git_context: str = "",
     errors=None,
     checkpoints=None,
+    ctx=None,
 ) -> int:
     """Execute a single task (REQ-D-4)."""
-    from ..tools import reset_write_count, get_write_count, set_snapshots, clear_snapshots, rollback_snapshots, compute_diff_stats
+    from ..tools import set_snapshots, clear_snapshots, rollback_snapshots, compute_diff_stats
 
     task_content = mm.read_task(task_id)
     if not task_content:
@@ -379,7 +402,8 @@ def _run_task(
         system += f"\n\n{git_context}"
 
     mm.set_status(task_id, "in-progress")
-    reset_write_count()
+    if ctx is not None:
+        ctx.reset_write_count()
     set_snapshots()
 
     # Git checkpoint before task (REQ-D-20)
@@ -427,9 +451,10 @@ def _run_task(
         return 1, []
 
     # Verify writes occurred (REQ-D-5)
-    if get_write_count() == 0:
+    if ctx is None or ctx.get_write_count() == 0:
         ui.warn(f"TASK-{task_id}: No files written — retrying...")
-        reset_write_count()
+        if ctx is not None:
+            ctx.reset_write_count()
         try:
             agent2 = AgentLoop(
                 model=worker, system_prompt=system,
@@ -444,7 +469,7 @@ def _run_task(
         except (RuntimeError, OSError, ValueError) as e:
             ui.error(f"TASK-{task_id} retry failed: {e}")
 
-        if get_write_count() == 0:
+        if ctx is None or ctx.get_write_count() == 0:
             if architect:
                 ui.warn(f"TASK-{task_id}: No writes after retry — consulting architect")
                 guidance = _consult_architect(
@@ -465,7 +490,7 @@ def _run_task(
             return 1, []
 
     # Git diff check (REQ-D-5)
-    if get_write_count() > 0:
+    if ctx is not None and ctx.get_write_count() > 0:
         try:
             import subprocess
             with git_lock:

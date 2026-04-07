@@ -197,3 +197,37 @@ class TestDuplicateWriteGuard:
         """First write to any path is always allowed."""
         result = ctx.write_source_file("src/new.py", "content")
         assert "Wrote" in result
+
+
+class TestWriteContextHandlers:
+    def test_get_handlers_includes_edit_source_file(self, tmp_path):
+        ctx = WriteContext(project_dir=tmp_path)
+        handlers = ctx.get_handlers()
+        assert "edit_source_file" in handlers
+        assert callable(handlers["edit_source_file"])
+
+
+class TestStripHtml:
+    def test_strip_html_logs_parse_error(self, caplog):
+        """HTML parse error is logged at DEBUG, partial content returned."""
+        import logging
+        from voidrift_cli.tools import _strip_html
+
+        with patch("html.parser.HTMLParser.feed", side_effect=Exception("bad html")):
+            with caplog.at_level(logging.DEBUG, logger="voidrift_cli.tools.web"):
+                result = _strip_html("<div>hello</div>")
+        assert isinstance(result, str)
+        assert "HTML parse error" in caplog.text
+
+
+class TestSnapshotImport:
+    def test_snapshot_importable_from_new_location(self):
+        from voidrift_cli.tools.snapshot import set_snapshots, rollback_snapshots
+        assert callable(set_snapshots)
+        assert callable(rollback_snapshots)
+
+
+class TestWebImport:
+    def test_make_web_fetch_handler_importable_from_web(self):
+        from voidrift_cli.tools.web import make_web_fetch_handler
+        assert callable(make_web_fetch_handler)

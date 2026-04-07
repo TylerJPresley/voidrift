@@ -408,19 +408,38 @@ def skills_remove(name, layer):
 @skills_cmd.command("approve")
 @click.argument("name")
 def skills_approve(name):
-    """Promote a pending domain skill to the active domain layer."""
+    """Promote a pending or draft skill to approved status.
+
+    For domain/pending skills: moves the file from pending/ to the active
+    domain layer.
+
+    For project-layer draft skills (created by find_or_synthesize_skill):
+    updates the frontmatter status from 'draft' to 'approved' in place.
+    """
     upper = name.upper()
+
+    # Path 1: pending → domain (original behaviour)
     src = _pending_dir() / f"{upper}.md"
-    if not src.is_file():
-        ui.error(f"No pending skill '{name}' found.")
+    if src.is_file():
+        dest_dir = _domain_dir()
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = dest_dir / f"{upper}.md"
+        if dest.exists():
+            ui.warn(f"Domain skill '{name}' already exists — overwriting.")
+        shutil.move(str(src), dest)
+        ui.success(f"Approved '{name.lower()}' — moved to domain layer.")
         return
 
-    dest_dir = _domain_dir()
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    dest = dest_dir / f"{upper}.md"
+    # Path 2: project-layer draft → approved
+    from ..skills import approve_draft_skill
+    project_root = _project_dir().parent.parent  # .voidrift/skills/../.. = project root
+    promoted = approve_draft_skill(name, project_dir=project_root)
+    if promoted:
+        ui.success(f"Approved draft skill '{name.lower()}' — status set to approved.")
+        return
 
-    if dest.exists():
-        ui.warn(f"Domain skill '{name}' already exists — overwriting.")
-
-    shutil.move(str(src), dest)
-    ui.success(f"Approved '{name.lower()}' — moved to domain layer.")
+    ui.error(
+        f"No pending or draft skill '{name}' found. "
+        "Use 'voidrift skills install' to add a pending skill, or "
+        "'voidrift skills review' to see pending skills."
+    )
