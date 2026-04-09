@@ -112,7 +112,7 @@ def run_plan(
                 system_prompt=delta_prompt,
                 tools=[], tool_handlers={},
                 stream=False,
-                max_tokens=get_max_tokens(model, "analysis"),
+                max_tokens=get_max_tokens(model, "plan.delta"),
                 log_path=log,
                 show_spinner=False,
             )
@@ -152,6 +152,7 @@ def run_plan(
         retry_message=prompts.load_prompt("plan", "ARCH-RETRY"),
         check_fn=lambda: (d / "ARCHITECTURE.md").exists(),
         stage_label="architecture",
+        stage_key="plan.architecture",
     )
     if not ok:
         # Recovery: model may write to arch/ARCHITECTURE.md instead of ARCHITECTURE.md
@@ -201,6 +202,7 @@ def run_plan(
             retry_message=retry_msg,
             check_fn=lambda f=arch_file: f.exists(),
             stage_label=module,
+            stage_key="plan.module-arch",
         )
         if not ok:
             return 1
@@ -233,6 +235,7 @@ def run_plan(
             retry_message=retry_msg,
             check_fn=lambda p=outline_path: p.exists(),
             stage_label=module,
+            stage_key="plan.outline",
         )
         if not ok:
             return 1
@@ -267,6 +270,7 @@ def run_plan(
             retry_message=prompts.load_prompt("plan", "DEPS-RETRY"),
             check_fn=lambda: deps_path.exists(),
             stage_label="dependencies",
+            stage_key="plan.deps",
         )
         if not ok:
             return 1
@@ -337,6 +341,7 @@ def run_plan(
             retry_message=retry_msg,
             check_fn=lambda f=task_file: f.exists(),
             stage_label=f"TASK-{task_id}",
+            stage_key="plan.task",
         )
         if not ok:
             return 1
@@ -361,6 +366,7 @@ def run_plan(
         retry_message=prompts.load_prompt("plan", "README-RETRY"),
         check_fn=lambda: readme_file.exists(),
         stage_label="README",
+        stage_key="plan.readme",
     )
     if not ok:
         ui.warn("README generation failed — continuing without README")
@@ -410,6 +416,7 @@ def _dispatch_agent(
     retry_message: str | None,
     check_fn: Callable[[], bool],
     stage_label: str,
+    stage_key: str = "plan.architecture",
 ) -> bool:
     """Dispatch one agent, verify artifact, retry once on failure. Returns True on success."""
     agent = AgentLoop(
@@ -418,7 +425,7 @@ def _dispatch_agent(
         tools=tools,
         tool_handlers=handlers,
         stream=False,
-        max_tokens=get_max_tokens(model, "plan"),
+        max_tokens=get_max_tokens(model, stage_key),
         log_path=log,
         show_spinner=False,
     )

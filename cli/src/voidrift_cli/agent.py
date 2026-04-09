@@ -20,7 +20,8 @@ import openai
 from openai import OpenAI
 from pydantic import BaseModel, Field
 
-from .models import ModelConfig
+from .models import ModelConfig, ModelInterface
+from .token_budget import BudgetExhaustedError
 
 # Module-level abort flag for signal-based loop stop (REQ-ARCH-14, TASK-FW-007)
 _abort_requested = False
@@ -80,7 +81,7 @@ class AgentLoop(BaseModel):
     Supports OpenAI-compatible APIs (local, kiro) and native cloud APIs (Anthropic, Gemini).
     """
 
-    model: ModelConfig
+    model: ModelInterface
     system_prompt: str = ""
     tools: list[dict] = Field(default_factory=list)
     tool_handlers: dict[str, Callable] = Field(default_factory=dict)
@@ -134,31 +135,9 @@ class AgentLoop(BaseModel):
         """Thread-safe: queue messages for after natural stop (TASK-FW-014)."""
         self._followup_queue.put_nowait((messages, drain))
 
-    def _get_client(self) -> OpenAI:
-        """Create an OpenAI-compatible client configured for the model's API.
-
-        Returns:
-            Configured OpenAI client instance.
-        """
-        from .config import get_api_key
-
-        kwargs: dict[str, Any] = {}
-        if self.model.api_base:
-            kwargs["base_url"] = self.model.api_base
-        if self.model.api_key:
-            kwargs["api_key"] = self.model.api_key
-        elif self.model.provider == "anthropic":
-            kwargs["api_key"] = get_api_key("anthropic") or ""
-            kwargs["base_url"] = "https://api.anthropic.com/v1/"
-        elif self.model.provider == "gemini":
-            kwargs["api_key"] = get_api_key("gemini") or ""
-            kwargs["base_url"] = "https://generativelanguage.googleapis.com/v1beta/openai/"
-        else:
-            kwargs["api_key"] = "no-key"
-        return OpenAI(
-            timeout=httpx.Timeout(connect=30.0, read=600.0, write=60.0, pool=30.0),
-            **kwargs,
-        )
+    def _get_client(self):
+        """Create the protocol client for the model's API."""
+        return self.model.adapter.get_client(self.model.config)
 
     def _model_name(self) -> str:
         """Get the model name to pass to the API, stripping provider prefixes.
@@ -211,26 +190,6 @@ class AgentLoop(BaseModel):
             "parameters": {"type": "object", "properties": {}},
         },
     }
-
-    def _apply_cache_control(self, messages: list[dict]) -> list[dict]:
-        """Add Anthropic cache_control markers to system messages (TASK-FW-015).
-
-        Only applies when the model provider is anthropic. Marks the system
-        message with cache_control so the static prefix is cached across
-        concurrent agents sharing the same system prompt.
-        """
-        if self.model.provider != "anthropic":
-            return messages
-        result = []
-        for m in messages:
-            if m.get("role") == "system" and isinstance(m.get("content"), str):
-                result.append({
-                    "role": "system",
-                    "content": [{"type": "text", "text": m["content"], "cache_control": {"type": "ephemeral"}}],
-                })
-            else:
-                result.append(m)
-        return result
 
     _THINK_RE = re.compile(r"<think>(.*?)</think>\s*", re.DOTALL)
     _THINK_ORPHAN_RE = re.compile(r"^(.*?)</think>\s*", re.DOTALL)
@@ -289,19 +248,22 @@ class AgentLoop(BaseModel):
             Final assistant response text.
         """
         client = self._get_client()
+        self._active_client = client  # track for cleanup (REQ-ARCH-21)
         model_name = self._model_name()
-        last_call_sig: str | None = None
+        last_call_sig: frozenset[str] | None = None
         stall_nudges = 0
         max_tokens_continuations = 0
         accumulated_text = ""
         turn_count = 0
-        input_tokens_total = 0
-        output_tokens_total = 0
+        # Per-session token accumulators (REQ-ARCH-13, REQ-ARCH-18). Updated by
+        # _sync_response/_stream_response via self._input_tokens and self._output_tokens.
+        self._input_tokens: int = 0
+        self._output_tokens: int = 0
         tools_called_this_turn: list[str] = []
 
         def _state() -> LoopState:
-            inp = self.token_budget.input_tokens if self.token_budget else input_tokens_total
-            out = self.token_budget.output_tokens if self.token_budget else output_tokens_total
+            inp = self.token_budget.input_tokens if self.token_budget else self._input_tokens
+            out = self.token_budget.output_tokens if self.token_budget else self._output_tokens
             return LoopState(
                 messages=self.messages,
                 turn_count=turn_count,
@@ -323,308 +285,333 @@ class AgentLoop(BaseModel):
                     self._log(f"[SYSTEM] {m['content'][:8000]}")
             self._log(f"[USER] {self.messages[-1]['content'][:2000]}")
 
-        while True:
-            tools_called_this_turn = []
+        try:
+            while True:
+                tools_called_this_turn = []
 
-            # Token budget check (REQ-ARCH-13)
-            if self.token_budget:
-                self.token_budget.check()
+                # Token budget check (REQ-ARCH-13)
+                if self.token_budget:
+                    self.token_budget.check()
 
-            kwargs: dict[str, Any] = {
-                "model": model_name,
-                "messages": self._apply_cache_control(
-                    self.transform_context(list(self.messages)) if self.transform_context else self.messages
-                ),
-                "max_tokens": self.max_tokens,
-            }
-            if self.tools:
-                if self.tool_choice == "auto":
-                    kwargs["tools"] = self.tools
-                    kwargs["tool_choice"] = "auto"
-                else:
-                    kwargs["tools"] = self.tools + [self._DONE_TOOL]
-                    kwargs["tool_choice"] = "required"
-            if self.extra_body:
-                kwargs["extra_body"] = self.extra_body
-            if self.on_payload:
-                kwargs = self.on_payload(kwargs)
+                kwargs: dict[str, Any] = {
+                    "model": model_name,
+                    "messages": (
+                        self.transform_context(list(self.messages)) if self.transform_context else self.messages
+                    ),
+                    "max_tokens": self.max_tokens,
+                }
+                if self.tools:
+                    if self.tool_choice == "auto":
+                        kwargs["tools"] = self.tools
+                        kwargs["tool_choice"] = "auto"
+                    else:
+                        kwargs["tools"] = self.tools + [self._DONE_TOOL]
+                        kwargs["tool_choice"] = "required"
+                if self.extra_body:
+                    kwargs["extra_body"] = self.extra_body
+                if self.on_payload:
+                    kwargs = self.on_payload(kwargs)
 
-            try:
-                if self.stream:
-                    text, tool_calls, finish_reason = self._stream_response(client, kwargs)
-                else:
-                    text, tool_calls, finish_reason = self._sync_response(client, kwargs)
-            except Exception as exc:
-                if self._is_context_truncation(exc) and self._trim_messages():
-                    self._log("[CONTEXT_TRIM] Tools JSON truncated — trimmed messages, retrying")
-                    _iter_log("context_trim")
-                    continue
-                if self._is_context_length_error(exc) and self._reactive_compact(client):
-                    _iter_log("reactive_compact")
-                    continue
-                raise
+                try:
+                    if self.stream:
+                        text, tool_calls, finish_reason = self._stream_response(client, kwargs)
+                    else:
+                        text, tool_calls, finish_reason = self._sync_response(client, kwargs)
+                except Exception as exc:
+                    if self.model.adapter.is_context_truncation(exc) and self._trim_messages():
+                        self._log("[CONTEXT_TRIM] Tools JSON truncated — trimmed messages, retrying")
+                        _iter_log("context_trim")
+                        continue
+                    if self.model.adapter.is_context_length_error(exc) and self._reactive_compact(client):
+                        _iter_log("reactive_compact")
+                        continue
+                    raise
 
-            # Max-tokens recovery (REQ-ARCH-11)
-            truncated = finish_reason == "length"
-            if truncated and tool_calls:
-                self._log("[MAX_TOKENS_TOOL_TRUNCATION] Response truncated with tool calls present")
-
-            if not tool_calls:
-                # Handle text truncation via continuation (REQ-ARCH-11)
-                if truncated and max_tokens_continuations < 2:
-                    max_tokens_continuations += 1
-                    accumulated_text += text
-                    self._log(f"[MAX_TOKENS_RECOVERY] attempt {max_tokens_continuations}/2")
-                    self.messages.append({"role": "assistant", "content": text})
+                # Max-tokens recovery (REQ-ARCH-11)
+                truncated = finish_reason == "length"
+                if truncated and tool_calls:
+                    n = len(tool_calls)
+                    self._log(f"[MAX_TOKENS_TOOL_DISCARD] Discarded {n} truncated tool calls, requesting re-emit")
+                    self.messages.append({"role": "assistant", "content": text or None})
                     from . import prompts as _prompts
-                    resume = _prompts.load_prompt("system", "MAX-TOKENS-RESUME")
+                    resume = _prompts.load_prompt("system", "MAX-TOKENS-TOOL-RESUME")
                     self.messages.append({"role": "user", "content": resume})
                     _iter_log("max_tokens_recovery")
                     continue
-                text = self._strip_think(accumulated_text + text)
-                self.messages.append({"role": "assistant", "content": text})
-                if truncated:
-                    self._log("[MAX_TOKENS_EXHAUSTED] 2 continuations exhausted, returning partial")
-                self._log(f"[ASSISTANT] {text}")
 
-                # Follow-up — callback hook + queue drain (REQ-ARCH-14, TASK-FW-014)
-                if self.get_follow_up_messages:
-                    follow_ups = self.get_follow_up_messages(_state())
-                    if follow_ups:
-                        self.messages.extend(follow_ups)
-                        _iter_log("follow_up")
+                if not tool_calls:
+                    # Handle text truncation via continuation (REQ-ARCH-11)
+                    if truncated and max_tokens_continuations < 2:
+                        max_tokens_continuations += 1
+                        accumulated_text += text
+                        self._log(f"[MAX_TOKENS_RECOVERY] attempt {max_tokens_continuations}/2")
+                        self.messages.append({"role": "assistant", "content": text})
+                        from . import prompts as _prompts
+                        resume = _prompts.load_prompt("system", "MAX-TOKENS-RESUME")
+                        self.messages.append({"role": "user", "content": resume})
+                        _iter_log("max_tokens_recovery")
                         continue
-                if not self._followup_queue.empty():
-                    try:
-                        msgs, drain = self._followup_queue.get_nowait()
+                    text = self._strip_think(accumulated_text + text)
+                    self.messages.append({"role": "assistant", "content": text})
+                    if truncated:
+                        self._log("[MAX_TOKENS_EXHAUSTED] 2 continuations exhausted, returning partial")
+                    self._log(f"[ASSISTANT] {text}")
+
+                    # Follow-up — callback hook + queue drain (REQ-ARCH-14, TASK-FW-014)
+                    if self.get_follow_up_messages:
+                        follow_ups = self.get_follow_up_messages(_state())
+                        if follow_ups:
+                            self.messages.extend(follow_ups)
+                            _iter_log("follow_up")
+                            continue
+                    item = self._drain_one_followup()
+                    if item:
+                        msgs, drain = item
                         self.messages.extend(msgs)
                         if drain == "all":
-                            while not self._followup_queue.empty():
-                                more_msgs, _ = self._followup_queue.get_nowait()
-                                self.messages.extend(more_msgs)
+                            while (more := self._drain_one_followup()):
+                                self.messages.extend(more[0])
                         _iter_log("follow_up")
                         continue
-                    except queue.Empty:
-                        pass
-                s = _state()
-                self._log(f"[LOOP_EXIT reason=natural_stop turns={s.turn_count} total_input={s.input_tokens_total} total_output={s.output_tokens_total}]")
-                return text
+                    s = _state()
+                    self._log(f"[LOOP_EXIT reason=natural_stop turns={s.turn_count} total_input={s.input_tokens_total} total_output={s.output_tokens_total}]")
+                    return text
 
-            # Stall detection — same call signature as last iteration.
-            # For write tools, signature is path-only (not content) so that
-            # rewriting a file with different content is still detected as a stall.
-            def _tc_sig(tc: dict) -> str:
-                name = tc["function"]["name"]
-                if name in ("write_framework_file", "write_source_file", "edit_source_file"):
-                    import json as _json
-                    try:
-                        args = _json.loads(tc["function"].get("arguments", "{}"))
-                        return f"{name}:{args.get('path', '')}"
-                    except (ValueError, KeyError):
-                        return name
-                return f"{name}:{tc['function'].get('arguments', '')}"
+                # Stall detection — same call signature as last iteration.
+                # For write tools, signature is path-only (not content) so that
+                # rewriting a file with different content is still detected as a stall.
+                def _tc_sig(tc: dict) -> str:
+                    name = tc["function"]["name"]
+                    if name in ("write_framework_file", "write_source_file", "edit_source_file"):
+                        import json as _json
+                        try:
+                            args = _json.loads(tc["function"].get("arguments", "{}"))
+                            return f"{name}:{args.get('path', '')}"
+                        except (ValueError, KeyError):
+                            return name
+                    return f"{name}:{tc['function'].get('arguments', '')}"
 
-            call_sig = "|".join(_tc_sig(tc) for tc in tool_calls)
-            should_stop, last_call_sig, stall_nudges = self._handle_stall(
-                call_sig, last_call_sig, stall_nudges
-            )
-            if should_stop:
-                break
-            if stall_nudges > 0 and last_call_sig is None:
-                # Nudge was injected — skip the rest and retry
-                _iter_log(f"stall_nudge_{stall_nudges}")
-                continue
+                call_sig = frozenset(_tc_sig(tc) for tc in tool_calls)
+                should_stop, last_call_sig, stall_nudges = self._handle_stall(
+                    call_sig, last_call_sig, stall_nudges
+                )
+                if should_stop:
+                    break
+                if stall_nudges > 0 and last_call_sig is None:
+                    # Nudge was injected — skip the rest and retry
+                    _iter_log(f"stall_nudge_{stall_nudges}")
+                    continue
 
-            done = any(tc["function"]["name"] == "done" for tc in tool_calls)
+                # Deduplicate identical tool calls (REQ-ARCH-16)
+                unique_calls, dedup_map = self._deduplicate_tool_calls(tool_calls)
 
-            self.messages.append({
-                "role": "assistant",
-                "content": text or None,
-                "tool_calls": tool_calls,
-            })
+                done = any(tc["function"]["name"] == "done" for tc in unique_calls)
 
-            # Execute tool calls in batches — concurrent for read tools (TASK-FW-009)
-            batches = self._partition_tool_calls(tool_calls)
-            for batch in batches:
-                has_done = any(tc["function"]["name"] == "done" for tc in batch)
-                # Run serially if: single item, has done tool, or before_tool_call hook set
-                if len(batch) == 1 or has_done or self.before_tool_call:
-                    for tc in batch:
-                        name = tc["function"]["name"]
-                        args = tc["function"].get("arguments", "")
-                        tools_called_this_turn.append(name)
-                        self._log(f"[TOOL_CALL] {name}({args})")
-                        if name == "done":
-                            result = "OK"
-                        else:
-                            intercepted = self.before_tool_call(name, args) if self.before_tool_call else None
-                            if intercepted is not None:
-                                result = intercepted
+                self.messages.append({
+                    "role": "assistant",
+                    "content": text or None,
+                    "tool_calls": tool_calls,
+                })
+
+                # Execute unique tool calls in batches — concurrent for read tools (TASK-FW-009)
+                batches = self._partition_tool_calls(unique_calls)
+                for batch in batches:
+                    has_done = any(tc["function"]["name"] == "done" for tc in batch)
+                    # Run serially if: single item, has done tool, or before_tool_call hook set
+                    if len(batch) == 1 or has_done or self.before_tool_call:
+                        for tc in batch:
+                            name = tc["function"]["name"]
+                            args = tc["function"].get("arguments", "")
+                            tools_called_this_turn.append(name)
+                            self._log(f"[TOOL_CALL] {name}({args})")
+                            if name == "done":
+                                result = "OK"
                             else:
-                                result = self._handle_tool_call_dict(tc)
+                                intercepted = self.before_tool_call(name, args) if self.before_tool_call else None
+                                if intercepted is not None:
+                                    result = intercepted
+                                else:
+                                    result = self._handle_tool_call_dict(tc)
+                                if self.after_tool_call:
+                                    result = self.after_tool_call(name, result)
+                                if self.on_tool_result:
+                                    self.on_tool_result(name, result)
+                            self._log(f"[TOOL_RESULT] {name} -> {self._redact_tool_result(name, tc['function'].get('arguments', ''), result)[:2000]}")
+                            self.messages.append({"role": "tool", "tool_call_id": tc["id"], "content": result})
+                            # Map result to deduplicated siblings (REQ-ARCH-16)
+                            for dup_id in dedup_map.get(tc["id"], []):
+                                self.messages.append({"role": "tool", "tool_call_id": dup_id, "content": result})
+                    else:
+                        # Concurrent batch — log, execute, then process results
+                        for tc in batch:
+                            self._log(f"[TOOL_CALL] {tc['function']['name']}({tc['function'].get('arguments', '')})")
+                        pairs = self._execute_tool_batch(batch)
+                        for tc, result in pairs:
+                            name = tc["function"]["name"]
+                            tools_called_this_turn.append(name)
                             if self.after_tool_call:
                                 result = self.after_tool_call(name, result)
                             if self.on_tool_result:
                                 self.on_tool_result(name, result)
-                        self._log(f"[TOOL_RESULT] {name} -> {self._redact_tool_result(name, tc['function'].get('arguments', ''), result)[:2000]}")
-                        self.messages.append({"role": "tool", "tool_call_id": tc["id"], "content": result})
-                else:
-                    # Concurrent batch — log, execute, then process results
-                    for tc in batch:
-                        self._log(f"[TOOL_CALL] {tc['function']['name']}({tc['function'].get('arguments', '')})")
-                    pairs = self._execute_tool_batch(batch)
-                    for tc, result in pairs:
-                        name = tc["function"]["name"]
-                        tools_called_this_turn.append(name)
-                        if self.after_tool_call:
-                            result = self.after_tool_call(name, result)
-                        if self.on_tool_result:
-                            self.on_tool_result(name, result)
-                        self._log(f"[TOOL_RESULT] {name} -> {self._redact_tool_result(name, tc['function'].get('arguments', ''), result)[:2000]}")
-                        self.messages.append({"role": "tool", "tool_call_id": tc["id"], "content": result})
+                            self._log(f"[TOOL_RESULT] {name} -> {self._redact_tool_result(name, tc['function'].get('arguments', ''), result)[:2000]}")
+                            self.messages.append({"role": "tool", "tool_call_id": tc["id"], "content": result})
+                            # Map result to deduplicated siblings (REQ-ARCH-16)
+                            for dup_id in dedup_map.get(tc["id"], []):
+                                self.messages.append({"role": "tool", "tool_call_id": dup_id, "content": result})
 
-            if done:
-                self.tools = []
-                _iter_log("done_tool")
-                continue
+                if done:
+                    self.tools = []
+                    _iter_log("done_tool")
+                    continue
 
-            # Steering messages — callback hook + queue drain (REQ-ARCH-14, TASK-FW-014)
-            if self.get_steering_messages:
-                steering = self.get_steering_messages(_state())
+                # Steering messages — callback hook + queue drain (REQ-ARCH-14, TASK-FW-014)
+                if self.get_steering_messages:
+                    steering = self.get_steering_messages(_state())
+                    if steering:
+                        self.messages.extend(steering)
+                steering = self._drain_steering()
                 if steering:
                     self.messages.extend(steering)
-            while not self._steering_queue.empty():
-                try:
-                    self.messages.extend(self._steering_queue.get_nowait())
-                except queue.Empty:
+
+                # Loop control checks after each tool round (REQ-ARCH-14)
+                turn_count += 1
+                _iter_log("tool_call")
+                # Fire on_progress with turn/tool data for dashboard (REQ-UI-11)
+                if self.on_progress and tools_called_this_turn:
+                    self.on_progress({
+                        "turn": turn_count,
+                        "last_tool": tools_called_this_turn[-1],
+                    })
+                stop_reason: str | None = None
+                if _abort_requested:
+                    stop_reason = "operator_abort"
+                elif self.max_turns > 0 and turn_count >= self.max_turns:
+                    stop_reason = "max_turns"
+                elif self.token_budget:
+                    try:
+                        self.token_budget.check()
+                    except BudgetExhaustedError:
+                        stop_reason = "budget_exhausted"
+                if not stop_reason and self.stop_check:
+                    stop_reason = self.stop_check(_state())
+                if stop_reason:
+                    self._log(f"[LOOP_STOP reason={stop_reason}]")
                     break
 
-            # Loop control checks after each tool round (REQ-ARCH-14)
-            turn_count += 1
-            _iter_log("tool_call")
-            # Fire on_progress with turn/tool data for dashboard (REQ-UI-11)
-            if self.on_progress and tools_called_this_turn:
-                self.on_progress({
-                    "turn": turn_count,
-                    "last_tool": tools_called_this_turn[-1],
-                })
-            stop_reason: str | None = None
-            if _abort_requested:
-                stop_reason = "operator_abort"
-            elif self.max_turns > 0 and turn_count >= self.max_turns:
-                stop_reason = "max_turns"
-            elif self.token_budget:
-                try:
-                    self.token_budget.check()
-                except Exception:
-                    stop_reason = "budget_exhausted"
-            if not stop_reason and self.stop_check:
-                stop_reason = self.stop_check(_state())
-            if stop_reason:
-                self._log(f"[LOOP_STOP reason={stop_reason}]")
-                break
+            # Stalled — force final call with only write tools
+            self._log("[STALL] Forcing final text call")
+            self.tools = [t for t in self.tools if t["function"]["name"] in ("write_source_file", "edit_source_file", "write_framework_file", "done")]
+            if not self.tools:
+                self.tools = []
+            kwargs = {
+                "model": model_name,
+                "messages": self.messages,
+                "max_tokens": self.max_tokens,
+            }
+            if self.tools:
+                kwargs["tools"] = self.tools + [self._DONE_TOOL]
+                kwargs["tool_choice"] = "required"
+            if self.extra_body:
+                kwargs["extra_body"] = self.extra_body
+            if self.stream:
+                text, tool_calls, _fr = self._stream_response(client, kwargs)
+            else:
+                text, tool_calls, _fr = self._sync_response(client, kwargs)
 
-        # Stalled — force final call with only write tools
-        self._log("[STALL] Forcing final text call")
-        self.tools = [t for t in self.tools if t["function"]["name"] in ("write_source_file", "edit_source_file", "write_framework_file", "done")]
-        if not self.tools:
-            self.tools = []
-        kwargs = {
-            "model": model_name,
-            "messages": self.messages,
-            "max_tokens": self.max_tokens,
-        }
-        if self.tools:
-            kwargs["tools"] = self.tools + [self._DONE_TOOL]
-            kwargs["tool_choice"] = "required"
-        if self.extra_body:
-            kwargs["extra_body"] = self.extra_body
-        if self.stream:
-            text, tool_calls, _fr = self._stream_response(client, kwargs)
-        else:
-            text, tool_calls, _fr = self._sync_response(client, kwargs)
-
-        # Process any write_file/done calls from the final attempt
-        if tool_calls:
-            self.messages.append({
-                "role": "assistant",
-                "content": text or None,
-                "tool_calls": tool_calls,
-            })
-            for tc in tool_calls:
-                name = tc["function"]["name"]
-                self._log(f"[TOOL_CALL] {name}({tc['function'].get('arguments', '')})")
-                if name == "done":
-                    result = "OK"
-                else:
-                    result = self._handle_tool_call_dict(tc)
-                    if self.on_tool_result:
-                        self.on_tool_result(name, result)
-                self._log(f"[TOOL_RESULT] {name} -> {self._redact_tool_result(name, tc['function'].get('arguments', ''), result)[:2000]}")
+            # Process any write_file/done calls from the final attempt
+            if tool_calls:
                 self.messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc["id"],
-                    "content": result,
+                    "role": "assistant",
+                    "content": text or None,
+                    "tool_calls": tool_calls,
                 })
-            text = ""
+                for tc in tool_calls:
+                    name = tc["function"]["name"]
+                    self._log(f"[TOOL_CALL] {name}({tc['function'].get('arguments', '')})")
+                    if name == "done":
+                        result = "OK"
+                    else:
+                        result = self._handle_tool_call_dict(tc)
+                        if self.on_tool_result:
+                            self.on_tool_result(name, result)
+                    self._log(f"[TOOL_RESULT] {name} -> {self._redact_tool_result(name, tc['function'].get('arguments', ''), result)[:2000]}")
+                    self.messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc["id"],
+                        "content": result,
+                    })
+                text = ""
 
-        text = self._strip_think(text)
-        self._log(f"[ASSISTANT] {text}")
-        s = _state()
-        self._log(f"[LOOP_EXIT reason=forced_stop turns={s.turn_count} total_input={s.input_tokens_total} total_output={s.output_tokens_total}]")
-        return text
+            text = self._strip_think(text)
+            self._log(f"[ASSISTANT] {text}")
+            s = _state()
+            self._log(f"[LOOP_EXIT reason=forced_stop turns={s.turn_count} total_input={s.input_tokens_total} total_output={s.output_tokens_total}]")
+            return text
+        finally:
+            self._active_client.close()
 
     # ------------------------------------------------------------------
     # _run_loop helpers — extracted for testability (TODO-05)
     # ------------------------------------------------------------------
 
-    def _drain_queues(self) -> tuple[list[dict], list[tuple[list[dict], str]]]:
-        """Drain steering and follow-up queues without blocking.
+    def _drain_steering(self) -> list[dict]:
+        """Drain the steering queue without blocking. Returns all pending messages.
 
         Returns:
-            Tuple of (steering_msgs, followup_items) where followup_items is
-            a list of (messages, drain_mode) tuples.
+            Flat list of all message dicts currently in the steering queue.
         """
-        steering_msgs: list[dict] = []
+        msgs: list[dict] = []
         while not self._steering_queue.empty():
             try:
-                steering_msgs.extend(self._steering_queue.get_nowait())
+                msgs.extend(self._steering_queue.get_nowait())
             except queue.Empty:
                 break
-        followup_items: list[tuple[list[dict], str]] = []
-        while not self._followup_queue.empty():
-            try:
-                followup_items.append(self._followup_queue.get_nowait())
-            except queue.Empty:
-                break
-        return steering_msgs, followup_items
+        return msgs
+
+    def _drain_one_followup(self) -> tuple[list[dict], str] | None:
+        """Drain one item from the follow-up queue without blocking.
+
+        Returns:
+            (messages, drain_mode) tuple, or None if the queue is empty.
+        """
+        if self._followup_queue.empty():
+            return None
+        try:
+            return self._followup_queue.get_nowait()
+        except queue.Empty:
+            return None
 
     def _handle_stall(
         self,
-        tool_signature: str,
-        last_sig: str | None,
+        tool_signatures: frozenset[str],
+        last_sigs: frozenset[str] | None,
         stall_count: int,
-    ) -> tuple[bool, str | None, int]:
+    ) -> tuple[bool, frozenset[str] | None, int]:
         """Handle stall detection and nudge injection.
 
+        Compares individual call signatures as sets. If any signature from the
+        current turn appeared in the previous turn, it's a stall — regardless
+        of how many times each call appears (REQ-ARCH-4).
+
         Args:
-            tool_signature: Signature string for the current tool calls.
-            last_sig: The signature from the previous iteration (or None).
+            tool_signatures: Set of signatures for the current tool calls.
+            last_sigs: The signature set from the previous iteration (or None).
             stall_count: Current stall nudge counter.
 
         Returns:
-            Tuple of (should_stop, new_last_sig, new_stall_count). If
+            Tuple of (should_stop, new_last_sigs, new_stall_count). If
             should_stop is True the caller should break out of the loop.
-            new_last_sig is the updated last_call_sig for the next iteration.
+            new_last_sigs is the updated signature set for the next iteration.
         """
-        if tool_signature != last_sig:
-            return False, tool_signature, stall_count
+        if last_sigs is None or not tool_signatures & last_sigs:
+            return False, tool_signatures, stall_count
 
         new_count = stall_count + 1
-        self._log(f"[STALL] Repeated call ({new_count}): {tool_signature}")
+        overlap = tool_signatures & last_sigs
+        self._log(f"[STALL] Repeated call ({new_count}): {sorted(overlap)}")
         if new_count >= 2:
             self._log("[LOOP_STOP reason=stall_exhausted]")
-            return True, last_sig, new_count
+            return True, last_sigs, new_count
 
         from . import prompts as _prompts
         self.messages.append({
@@ -644,60 +631,6 @@ class AgentLoop(BaseModel):
         """Apply ±30% random jitter to a delay value (REQ-ARCH-10)."""
         return delay * (0.7 + random.random() * 0.6)
 
-    @staticmethod
-    def _get_retry_after(exc: Exception) -> float | None:
-        """Extract Retry-After header value from a 429 response (REQ-ARCH-10)."""
-        if isinstance(exc, openai.APIStatusError) and exc.status_code == 429:
-            header = exc.response.headers.get("retry-after")
-            if header:
-                try:
-                    return min(float(header), 30.0)
-                except (ValueError, TypeError):
-                    pass
-        return None
-
-    def _is_retryable(self, exc: Exception) -> bool:
-        """Return True if the exception warrants a retry (REQ-ARCH-10)."""
-        msg = str(exc).lower()
-        # Never retry context length or auth errors
-        if "context length" in msg or "maximum context" in msg:
-            return False
-        if ("token" in msg and "exceed" in msg):
-            return False
-        if isinstance(exc, openai.AuthenticationError):
-            return False
-        # Retry on connection errors and rate limits
-        if isinstance(exc, (openai.APIConnectionError, openai.RateLimitError)):
-            return True
-        # Retry on 5xx and 429
-        if isinstance(exc, openai.APIStatusError):
-            return exc.status_code == 429 or exc.status_code >= 500
-        # Retry on generic connection failures
-        if "connection" in msg or "timeout" in msg:
-            return True
-        return False
-
-    def _is_availability_error(self, exc: Exception) -> bool:
-        """Return True if the error is a transient availability issue (429/5xx) for fallback (REQ-MC-4)."""
-        if isinstance(exc, openai.RateLimitError):
-            return True
-        if isinstance(exc, openai.APIStatusError):
-            return exc.status_code == 429 or exc.status_code >= 500
-        return False
-
-    def _is_context_truncation(self, exc: Exception) -> bool:
-        """Return True if the error is a 400 caused by the request body being truncated.
-
-        Local model servers (llama.cpp, vllm, etc.) truncate the request when the
-        context is full, producing malformed JSON for the tools parameter.
-        """
-        msg = str(exc)
-        return (
-            "json_invalid" in msg
-            or ("EOF while parsing" in msg and ("list" in msg or "object" in msg))
-            or ("validation error" in msg and "EOF" in msg)
-        )
-
     def _trim_messages(self) -> bool:
         """Drop the oldest tool call / tool result block to reduce context size."""
         new_msgs, did_trim = _trim_messages_fn(self.messages)
@@ -707,21 +640,13 @@ class AgentLoop(BaseModel):
             self._log(f"[TRIM] Removed {removed} messages (tool call+results) to reduce context")
         return did_trim
 
-    def _is_context_length_error(self, exc: Exception) -> bool:
-        """Return True if the error is a context-length overflow (REQ-ARCH-12)."""
-        msg = str(exc).lower()
-        if "context length" in msg or "maximum context" in msg:
-            return True
-        if "token" in msg and "exceed" in msg:
-            return True
-        if isinstance(exc, openai.APIStatusError) and exc.status_code == 413:
-            return True
-        return False
-
-    def _reactive_compact(self, client: OpenAI) -> bool:
+    def _reactive_compact(self, client: Any) -> bool:
         """Summarize old messages to free context (REQ-ARCH-12)."""
+        def compact_fn(content: str) -> str:
+            return self.model.adapter.compact_call(client, content, self._model_name())
+
         new_msgs, new_count, did_compact = _reactive_compact_fn(
-            self.messages, client, self._model_name(), self._reactive_compact_count,
+            self.messages, compact_fn, self._reactive_compact_count,
         )
         if did_compact:
             freed = len(self.messages) - len(new_msgs)
@@ -732,21 +657,20 @@ class AgentLoop(BaseModel):
             )
         return did_compact
 
-    def _create_completion(self, client: OpenAI, kwargs: dict) -> Any:
-        """Call client.chat.completions.create with exponential backoff retry (REQ-ARCH-10).
-
-        Does NOT handle model fallback — callers that need fallback wrap this method.
-        """
+    def _create_with_retry(self, client: Any, wire_request: dict, streaming: bool = False) -> Any:
+        """Unified retry wrapper for sync and streaming API calls (REQ-ARCH-10)."""
         delay = self._RETRY_BASE
         last_exc: Exception | None = None
         for attempt in range(1, self._RETRY_MAX + 1):
             try:
-                return client.chat.completions.create(**kwargs)
+                if streaming:
+                    return self.model.adapter.create_raw_stream(client, wire_request)
+                return self.model.adapter.create_raw(client, wire_request)
             except Exception as exc:
                 last_exc = exc
-                if not self._is_retryable(exc) or attempt == self._RETRY_MAX:
+                if not self.model.adapter.is_retryable(exc) or attempt == self._RETRY_MAX:
                     raise
-                retry_after = self._get_retry_after(exc)
+                retry_after = self.model.adapter.get_retry_after(exc)
                 base = retry_after if retry_after is not None else delay
                 jittered = self._jitter(base)
                 ra_info = f" retry-after={retry_after:.0f}s" if retry_after is not None else ""
@@ -759,7 +683,17 @@ class AgentLoop(BaseModel):
                     delay = min(delay * self._RETRY_MULT, self._RETRY_CAP)
         raise last_exc  # type: ignore[misc]
 
-    def _sync_response(self, client: OpenAI, kwargs: dict) -> tuple[str, list[dict], str | None]:
+    def _create_completion(self, client: Any, openai_kwargs: dict) -> Any:
+        """Execute a sync API call via the protocol adapter with retry (REQ-ARCH-10).
+
+        Does NOT handle model fallback — callers that need fallback wrap this method.
+        """
+        wire_request = self.model.adapter.build_request(
+            openai_kwargs, provider=self.model.config.provider or ""
+        )
+        return self._create_with_retry(client, wire_request, streaming=False)
+
+    def _sync_response(self, client: Any, kwargs: dict) -> tuple[str, list[dict], str | None]:
         """Non-streaming response with exponential backoff retry (REQ-ARCH-10).
 
         Returns:
@@ -778,18 +712,18 @@ class AgentLoop(BaseModel):
             _tick_thread.start()
 
         last_exc: Exception | None = None
-        response = None
+        raw = None
         _using_fallback = getattr(self, "_using_fallback", False)
         try:
             try:
-                response = self._create_completion(client, kwargs)
+                raw = self._create_completion(client, kwargs)
             except Exception as exc:
                 last_exc = exc
                 # Fallback on availability error after retries exhausted (REQ-MC-4)
                 if (
                     not _using_fallback
                     and self.model.fallback
-                    and self._is_availability_error(exc)
+                    and self.model.adapter.is_availability_error(exc)
                 ):
                     from .models import resolve_model
                     try:
@@ -800,9 +734,11 @@ class AgentLoop(BaseModel):
                         )
                         self.model = fb
                         self._using_fallback = True
+                        client.close()  # close old client before fallback (REQ-ARCH-21)
                         client = self._get_client()
+                        self._active_client = client  # track for cleanup (REQ-ARCH-21)
                         kwargs["model"] = self._model_name()
-                        response = self._create_completion(client, kwargs)
+                        raw = self._create_completion(client, kwargs)
                         last_exc = None
                     except Exception as _fb_exc:
                         self._log(
@@ -817,29 +753,28 @@ class AgentLoop(BaseModel):
             if _tick_thread:
                 _tick_thread.join(timeout=0.5)
 
-        if response is None:
+        if raw is None:
             raise RuntimeError("No response received")  # type: ignore[misc]
-        choice = response.choices[0]
-        msg = choice.message
-        finish_reason = getattr(choice, "finish_reason", None)
-        text = msg.content or ""
-        tool_calls = []
-        if msg.tool_calls:
-            for tc in msg.tool_calls:
-                tool_calls.append({
-                    "id": tc.id,
-                    "type": "function",
-                    "function": {"name": tc.function.name, "arguments": tc.function.arguments},
-                })
 
-        # Emit token telemetry from usage data
-        if response.usage:
-            prompt_tokens = response.usage.prompt_tokens or 0
-            completion_tokens = response.usage.completion_tokens or 0
-            total_tokens = response.usage.total_tokens or 0
+        text, tool_calls, finish_reason, usage = self.model.adapter.parse_response(
+            raw, log_fn=self._log
+        )
+
+        # Token accumulation — unconditional so LOOP_EXIT totals are always accurate
+        # and budget enforcement is never silently skipped (REQ-ARCH-13, REQ-ARCH-18).
+        prompt_tokens = usage.get("prompt_tokens", 0)
+        completion_tokens = usage.get("completion_tokens", 0)
+        total_tokens = usage.get("total_tokens", 0)
+        self._input_tokens += prompt_tokens
+        self._output_tokens += completion_tokens
+        if self.token_budget:
+            self.token_budget.record(prompt_tokens, completion_tokens)
+
+        # UI telemetry — only when the provider returned useful counts
+        if prompt_tokens or completion_tokens:
             ctx_pct: int | None = None
-            if self.model.max_context and prompt_tokens:
-                ctx_pct = min(100, round(prompt_tokens * 100 / self.model.max_context))
+            if self.model.config.max_context and prompt_tokens:
+                ctx_pct = min(100, round(prompt_tokens * 100 / self.model.config.max_context))
             elapsed = time.time() - _call_start
             if self.on_progress:
                 self.on_progress({
@@ -858,34 +793,25 @@ class AgentLoop(BaseModel):
                     "tokens_per_sec": round(completion_tokens / elapsed if elapsed > 0 else 0, 1),
                     "ctx_pct": ctx_pct,
                 })
-            # Token budget recording (REQ-ARCH-13)
-            if self.token_budget:
-                self.token_budget.record(prompt_tokens, completion_tokens)
-            # Cache efficiency logging (TASK-FW-015)
-            cache_create = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
-            cache_read = getattr(response.usage, "cache_read_input_tokens", 0) or 0
-            if cache_create or cache_read:
-                self._log(f"[CACHE create={cache_create} read={cache_read}]")
+
+        # Cache efficiency logging (TASK-FW-015)
+        cache_create = usage.get("cache_creation_input_tokens", 0) or 0
+        cache_read = usage.get("cache_read_input_tokens", 0) or 0
+        if cache_create or cache_read:
+            self._log(f"[CACHE create={cache_create} read={cache_read}]")
 
         return text, tool_calls, finish_reason
 
-    def _stream_response(self, client: OpenAI, kwargs: dict) -> tuple[str, list[dict], str | None]:
+    def _stream_response(self, client: Any, kwargs: dict) -> tuple[str, list[dict], str | None]:
         """Stream a response, printing tokens as they arrive.
 
         Args:
-            client: OpenAI client instance.
-            kwargs: Arguments for the chat completions API call.
+            client: Protocol client instance (OpenAI or Anthropic).
+            kwargs: OpenAI-format arguments for the API call.
 
         Returns:
-            Tuple of (collected_text, tool_calls_list).
+            Tuple of (collected_text, tool_calls_list, finish_reason).
         """
-        kwargs["stream"] = True
-        kwargs["stream_options"] = {"include_usage": True}
-        collected_text = ""
-        collected_tool_calls: dict[int, dict] = {}
-        token_count = 0
-        usage_data: dict = {}
-        finish_reason: str | None = None
         stream_start = time.time()
 
         # Background on_progress timer — fires every 250ms while waiting for first token.
@@ -920,120 +846,27 @@ class AgentLoop(BaseModel):
             spinner = threading.Thread(target=_spin, daemon=True)
             spinner.start()
 
-        in_think = False
-        think_buf = ""
-        pending = ""
+        # Build wire request once; get stream with retry (REQ-ARCH-10)
+        wire_request = self.model.adapter.build_request(
+            kwargs, provider=self.model.config.provider or ""
+        )
+        _stream_obj = self._create_with_retry(client, wire_request, streaming=True)
 
-        # Retry wrapper for the stream creation (REQ-ARCH-10)
-        _stream_obj = self._create_completion(client, kwargs)
+        # emit_token wrapper: stops spinner/ticker on first visible token
+        def _emit(text: str) -> None:
+            if not stop_spinner.is_set():
+                stop_spinner.set()
+                if spinner:
+                    spinner.join()
+            if not _prog_stop.is_set():
+                _prog_stop.set()
+            self._emit_token(text)
 
         try:
-            stream = _stream_obj
-            # Stateful filter for <think> tags in streaming.
-            # Only enter think mode when an explicit <think> tag is seen.
-            # Starting in think mode caused short responses from non-thinking
-            # models (e.g. Claude via Kiro) to be silently discarded when they
-            # fell under the flush threshold.
-            in_think = False
-            think_buf = ""
-
-            for chunk in stream:
-                if not chunk.choices:
-                    if hasattr(chunk, "usage") and chunk.usage:
-                        usage_data = {
-                            "prompt_tokens": chunk.usage.prompt_tokens or 0,
-                            "completion_tokens": chunk.usage.completion_tokens or 0,
-                            "total_tokens": chunk.usage.total_tokens or 0,
-                        }
-                    continue
-                delta = chunk.choices[0].delta
-                if chunk.choices[0].finish_reason:
-                    finish_reason = chunk.choices[0].finish_reason
-
-                # Accumulate text
-                if delta.content:
-                    if not stop_spinner.is_set():
-                        stop_spinner.set()
-                        if spinner:
-                            spinner.join()
-                    if not _prog_stop.is_set():
-                        _prog_stop.set()
-                    collected_text += delta.content
-                    token_count += 1
-
-                    # Filter think tags from streamed output
-                    pending += delta.content
-                    while pending:
-                        if in_think:
-                            end_idx = pending.find("</think>")
-                            if end_idx != -1:
-                                think_buf += pending[:end_idx]
-                                if think_buf.strip():
-                                    self._log(f"[THINKING] {think_buf.strip()}")
-                                think_buf = ""
-                                in_think = False
-                                pending = pending[end_idx + 8:].lstrip()
-                            else:
-                                think_buf += pending
-                                pending = ""
-                        else:
-                            start_idx = pending.find("<think>")
-                            if start_idx != -1:
-                                # Emit text before the tag, then enter think mode
-                                before = pending[:start_idx]
-                                if before:
-                                    self._emit_token(before)
-                                in_think = True
-                                pending = pending[start_idx + 7:]
-                            elif "<" in pending and not pending.endswith(">"):
-                                # Might be a partial <think> tag — hold it
-                                last_lt = pending.rfind("<")
-                                partial = pending[last_lt:]
-                                if "<think>"[:len(partial)] == partial:
-                                    before = pending[:last_lt]
-                                    if before:
-                                        self._emit_token(before)
-                                    pending = partial
-                                    break
-                                else:
-                                    self._emit_token(pending)
-                                    pending = ""
-                            else:
-                                self._emit_token(pending)
-                                pending = ""
-
-                # Accumulate tool calls
-                if delta.tool_calls:
-                    if not stop_spinner.is_set():
-                        stop_spinner.set()
-                        if spinner:
-                            spinner.join()
-                    if not _prog_stop.is_set():
-                        _prog_stop.set()
-                    for tc_delta in delta.tool_calls:
-                        idx = tc_delta.index
-                        if idx not in collected_tool_calls:
-                            collected_tool_calls[idx] = {
-                                "id": tc_delta.id or "",
-                                "type": "function",
-                                "function": {"name": "", "arguments": ""},
-                            }
-                        tc = collected_tool_calls[idx]
-                        if tc_delta.id:
-                            tc["id"] = tc_delta.id
-                        if tc_delta.function:
-                            if tc_delta.function.name:
-                                tc["function"]["name"] = tc_delta.function.name
-                                if self.on_tool_call:
-                                    self.on_tool_call(tc_delta.function.name)
-                            if tc_delta.function.arguments:
-                                tc["function"]["arguments"] += tc_delta.function.arguments
+            text, tool_calls, finish_reason, usage = self.model.adapter.iter_stream(
+                _stream_obj, emit_token=_emit, log_fn=self._log
+            )
         finally:
-            # Flush any remaining pending text (e.g. partial tag that never completed)
-            if pending and not in_think:
-                self._emit_token(pending)
-            if in_think and think_buf.strip():
-                self._log(f"[THINKING] {think_buf.strip()}")
             if not stop_spinner.is_set():
                 stop_spinner.set()
             if spinner:
@@ -1043,19 +876,35 @@ class AgentLoop(BaseModel):
             if _prog_thread:
                 _prog_thread.join(timeout=0.5)
 
-        tool_calls_list = [collected_tool_calls[i] for i in sorted(collected_tool_calls)]
+        # Fire on_tool_call for each tool call discovered during the stream
+        if tool_calls and self.on_tool_call:
+            for tc in tool_calls:
+                self.on_tool_call(tc["function"]["name"])
+
+        # Token accumulation — unconditional so LOOP_EXIT totals are always accurate
+        # and budget enforcement is never silently skipped (REQ-ARCH-13, REQ-ARCH-18).
+        prompt_tokens = usage.get("prompt_tokens", 0)
+        completion_tokens = usage.get("completion_tokens", 0)
+        self._input_tokens += prompt_tokens
+        self._output_tokens += completion_tokens
+        if self.token_budget:
+            self.token_budget.record(prompt_tokens, completion_tokens)
+
+        # Cache efficiency logging (TASK-FW-015) — unconditional
+        cache_create = usage.get("cache_creation_input_tokens", 0) or 0
+        cache_read = usage.get("cache_read_input_tokens", 0) or 0
+        if cache_create or cache_read:
+            self._log(f"[CACHE create={cache_create} read={cache_read}]")
 
         # Emit stats on final text response (no tool calls)
-        if not tool_calls_list:
-            if collected_text and not self.on_token:
+        if not tool_calls:
+            if text and not self.on_token:
                 sys.stdout.write("\n")
                 sys.stdout.flush()
             elapsed = time.time() - stream_start
-            prompt_tokens = usage_data.get("prompt_tokens", 0)
-            completion_tokens = usage_data.get("completion_tokens", token_count)
             ctx_pct: int | None = None
-            if self.model.max_context and prompt_tokens:
-                ctx_pct = min(100, round(prompt_tokens * 100 / self.model.max_context))
+            if self.model.config.max_context and prompt_tokens:
+                ctx_pct = min(100, round(prompt_tokens * 100 / self.model.config.max_context))
             if self.on_progress:
                 self.on_progress({
                     "elapsed": elapsed,
@@ -1067,21 +916,13 @@ class AgentLoop(BaseModel):
             if self.on_complete:
                 tps = completion_tokens / elapsed if elapsed > 0 else 0
                 self.on_complete({
-                    **usage_data,
+                    **usage,
                     "elapsed": round(elapsed, 1),
                     "tokens_per_sec": round(tps, 1),
                     "ctx_pct": ctx_pct,
                 })
-            # Token budget recording (REQ-ARCH-13)
-            if self.token_budget:
-                self.token_budget.record(prompt_tokens, completion_tokens)
-            # Cache efficiency logging (TASK-FW-015)
-            cache_create = usage_data.get("cache_creation_input_tokens", 0) or 0
-            cache_read = usage_data.get("cache_read_input_tokens", 0) or 0
-            if cache_create or cache_read:
-                self._log(f"[CACHE create={cache_create} read={cache_read}]")
 
-        return collected_text, tool_calls_list, finish_reason
+        return text, tool_calls, finish_reason
 
     # --- Tool argument normalization (TASK-FW-010) ---
 
@@ -1157,6 +998,40 @@ class AgentLoop(BaseModel):
             Tool result string.
         """
         return self._execute_tool(tc["function"]["name"], tc["function"]["arguments"])
+
+    def _deduplicate_tool_calls(
+        self, tool_calls: list[dict]
+    ) -> tuple[list[dict], dict[str, list[str]]]:
+        """Deduplicate identical tool calls before execution (REQ-ARCH-16).
+
+        Calls with the same function name and arguments are executed once.
+        The result is mapped to every tool_call ID sharing that signature.
+
+        Args:
+            tool_calls: Raw tool calls from the model response.
+
+        Returns:
+            Tuple of (unique_calls, dedup_map) where dedup_map maps a
+            representative call ID to a list of duplicate call IDs.
+        """
+        seen: dict[str, str] = {}  # sig -> representative call ID
+        dedup_map: dict[str, list[str]] = {}  # representative ID -> [dup IDs]
+        unique: list[dict] = []
+        for tc in tool_calls:
+            sig = f"{tc['function']['name']}:{tc['function'].get('arguments', '')}"
+            rep_id = seen.get(sig)
+            if rep_id is None:
+                seen[sig] = tc["id"]
+                unique.append(tc)
+            else:
+                dedup_map.setdefault(rep_id, []).append(tc["id"])
+        # Log deduplication events
+        for rep_id, dup_ids in dedup_map.items():
+            rep_tc = next(tc for tc in unique if tc["id"] == rep_id)
+            name = rep_tc["function"]["name"]
+            total = len(dup_ids) + 1
+            self._log(f"[DEDUP] {total} identical calls to {name} reduced to 1")
+        return unique, dedup_map
 
     def _partition_tool_calls(self, tool_calls: list[dict]) -> list[list[dict]]:
         """Group consecutive concurrent-safe tool calls into batches (TASK-FW-009)."""

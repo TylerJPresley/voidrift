@@ -131,7 +131,7 @@ def _run_sub_agent(
         tools=tools,
         tool_handlers=handlers,
         stream=False,
-        max_tokens=get_max_tokens(worker, "verify-execute"),
+        max_tokens=get_max_tokens(worker, "verify.execute"),
         log_path=log,
         show_spinner=False,
     )
@@ -379,7 +379,7 @@ def run_verify(worker: ModelConfig) -> int:
             tools=plan_tools,
             tool_handlers=plan_handlers,
             stream=False,
-            max_tokens=get_max_tokens(worker, "verify-plan"),
+            max_tokens=get_max_tokens(worker, "verify.plan"),
             log_path=log,
             show_spinner=False,
         )

@@ -29,8 +29,10 @@ def _expand_env(value: str) -> str:
         var = m.group(1)
         if ":-" in var:
             name, default = var.split(":-", 1)
-            return os.environ.get(name, default)
-        return os.environ.get(var, "")
+            value = os.environ.get(name, default)
+        else:
+            value = os.environ.get(var, "")
+        return value.replace("\n", "").replace("\r", "")
 
     return re.sub(r"\$\{([^}]+)}", _replace, value)
 
@@ -114,26 +116,36 @@ def get_retention(scope: str) -> int:
 
 # Per-stage default max_tokens (REQ-CFG-7)
 _STAGE_MAX_TOKENS: dict[str, int] = {
-    "triage":           4096,
-    "analysis":         2000,
-    "synthesis":        2000,
-    "consolidation":    8192,
-    "task":             4000,
-    "plan":             32768,
-    "verify-plan":      32768,
-    "verify-execute":   8192,
+    "gather.triage":        8192,
+    "gather.analysis":      8192,
+    "gather.consolidation": 8192,
+    "plan.delta":           8192,
+    "plan.architecture":    32768,
+    "plan.module-arch":     8192,
+    "plan.outline":         8192,
+    "plan.deps":            4096,
+    "plan.task":            4000,
+    "plan.readme":          8192,
+    "develop.task":         16384,
+    "develop.escalation":   8192,
+    "verify.plan":          32768,
+    "verify.execute":       8192,
+    "chat.session":         16384,
+    "chat.quick":           2048,
+    "deploy.version":       4096,
+    "deploy.iac":           8192,
 }
 
 
 def get_max_tokens(mc: "ModelConfig", stage: str) -> int:  # noqa: F821
     """Return max_tokens for an agent: min(stage_default, model.max_tokens) (REQ-CFG-7).
 
-    Args:
-        mc: Resolved ModelConfig with max_tokens field.
-        stage: Stage key (e.g. "analysis", "task", "plan").
+    Reads from config.yml stage_max_tokens.<stage>, falls back to
+    _STAGE_MAX_TOKENS built-in, then 4096 for unknown stages.
     """
-    stage_default = _STAGE_MAX_TOKENS.get(stage, 4096)
-    return min(stage_default, mc.max_tokens)
+    config_values = load_config().get("stage_max_tokens") or {}
+    stage_default = config_values.get(stage, _STAGE_MAX_TOKENS.get(stage, 4096))
+    return min(int(stage_default), mc.max_tokens)
 
 
 def get_protected_paths() -> list[str]:

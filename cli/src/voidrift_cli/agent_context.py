@@ -7,10 +7,7 @@ modifying the agent's core send/receive logic.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from openai import OpenAI
+from typing import Callable
 
 _SNIP_READ_TOOLS = {"read_source_file", "read_framework_file"}
 _SNIP_MIN_CHARS = 500
@@ -102,11 +99,13 @@ def trim_messages(messages: list[dict]) -> tuple[list[dict], bool]:
 
 def reactive_compact(
     messages: list[dict],
-    client: "OpenAI",
-    model_name: str,
+    compact_fn: Callable[[str], str],
     compact_count: int,
 ) -> tuple[list[dict], int, bool]:
     """Summarize old messages to free context (REQ-ARCH-12).
+
+    compact_fn receives the full message content (instruction + conversation text)
+    and returns the summary string.
 
     Returns (new_messages, new_compact_count, did_compact).
     """
@@ -129,20 +128,14 @@ def reactive_compact(
             summary_parts.append(f"[{role}] {content[:500]}")
     summary_input = "\n".join(summary_parts)
 
+    full_content = (
+        "Summarize this conversation history concisely. "
+        "Preserve: file paths, decisions, current task state.\n\n"
+        + summary_input
+    )
+
     try:
-        resp = client.chat.completions.create(
-            model=model_name,
-            messages=[{
-                "role": "user",
-                "content": (
-                    "Summarize this conversation history concisely. "
-                    "Preserve: file paths, decisions, current task state.\n\n"
-                    + summary_input
-                ),
-            }],
-            max_tokens=1024,
-        )
-        summary = resp.choices[0].message.content or ""
+        summary = compact_fn(full_content)
     except Exception as exc:
         logging.getLogger(__name__).debug(
             "reactive_compact: summarization call failed — skipping compaction: %s", exc

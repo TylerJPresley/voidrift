@@ -59,9 +59,10 @@ def sample_requirements(voidrift_dir):
 
 @pytest.fixture
 def cloud_model():
-    """A cloud ModelConfig that needs no infrastructure."""
-    from voidrift_cli.models import ModelConfig
-    return ModelConfig(
+    """A cloud ModelInterface that needs no infrastructure."""
+    from voidrift_cli.models import ModelConfig, ModelInterface
+    from voidrift_cli.agent_protocol import get_adapter
+    config = ModelConfig(
         alias="test-cloud",
         model_id="test-model",
         model_type="cloud",
@@ -69,13 +70,15 @@ def cloud_model():
         api_base="http://localhost:19999/v1",
         api_key="test-key",
     )
+    return ModelInterface(config, get_adapter(config.protocol))
 
 
 @pytest.fixture
 def local_model():
-    """A local ModelConfig with conservative limits."""
-    from voidrift_cli.models import ModelConfig
-    return ModelConfig(
+    """A local ModelInterface with conservative limits."""
+    from voidrift_cli.models import ModelConfig, ModelInterface
+    from voidrift_cli.agent_protocol import get_adapter
+    config = ModelConfig(
         alias="test-local",
         model_id="openai/test-local",
         model_type="local",
@@ -85,13 +88,15 @@ def local_model():
         max_input_chars=8000,
         concurrency=1,
     )
+    return ModelInterface(config, get_adapter(config.protocol))
 
 
 @pytest.fixture
 def kiro_model():
-    """A kiro gateway ModelConfig."""
-    from voidrift_cli.models import ModelConfig
-    return ModelConfig(
+    """A kiro gateway ModelInterface."""
+    from voidrift_cli.models import ModelConfig, ModelInterface
+    from voidrift_cli.agent_protocol import get_adapter
+    config = ModelConfig(
         alias="kiro-sonnet",
         model_id="openai/claude-sonnet-4-5",
         model_type="gateway",
@@ -99,6 +104,24 @@ def kiro_model():
         api_key="test-kiro-key",
         provider="openai",
     )
+    return ModelInterface(config, get_adapter(config.protocol))
+
+
+@pytest.fixture
+def anthropic_model():
+    """A native-Anthropic-protocol ModelInterface."""
+    from voidrift_cli.models import ModelConfig, ModelInterface
+    from voidrift_cli.agent_protocol import get_adapter
+    config = ModelConfig(
+        alias="test-anthropic",
+        model_id="claude-sonnet-4-6",
+        model_type="cloud",
+        provider="anthropic",
+        protocol="anthropic",
+        api_base="https://api.z.ai/api/anthropic",
+        api_key="test-key",
+    )
+    return ModelInterface(config, get_adapter(config.protocol))
 
 
 @pytest.fixture

@@ -106,6 +106,9 @@ class OpenAIAdapter(ProtocolAdapter):
             **kwargs,
         )
 
+    # Providers known to support stream_options={"include_usage": true} (REQ-ARCH-20)
+    _STREAM_USAGE_PROVIDERS = frozenset({"openai", "anthropic", "gemini"})
+
     def build_request(self, openai_kwargs: dict, provider: str = "") -> dict:
         result = dict(openai_kwargs)
         result.pop("stream", None)
@@ -122,13 +125,17 @@ class OpenAIAdapter(ProtocolAdapter):
                 else:
                     updated.append(m)
             result["messages"] = updated
+        # Only request streaming usage from providers known to support it (REQ-ARCH-20)
+        if provider in self._STREAM_USAGE_PROVIDERS:
+            result["stream_options"] = {"include_usage": True}
         return result
 
     def create_raw(self, client: Any, wire_request: dict) -> Any:
         return client.chat.completions.create(**wire_request)
 
     def create_raw_stream(self, client: Any, wire_request: dict) -> Any:
-        return client.chat.completions.create(**wire_request, stream=True, stream_options={"include_usage": True})
+        # stream_options already injected by build_request for supported providers (REQ-ARCH-20)
+        return client.chat.completions.create(**wire_request, stream=True)
 
     def parse_response(self, raw: Any, log_fn: Callable[[str], None] | None = None) -> ParseResult:
         choice = raw.choices[0]

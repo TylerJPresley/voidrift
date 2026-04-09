@@ -3,7 +3,7 @@
 Re-exports from sub-modules:
   filesystem  — WriteContext
   web         — _strip_html, make_web_fetch_handler
-  interaction — web_fetch, ask_user_question, make_ask_user_handler
+  interaction — make_ask_user_handler
   snapshot    — set_snapshots, get_snapshots, clear_snapshots,
                 rollback_snapshots, compute_diff_stats
   registry    — LOCAL_TOOLS, make_local_handlers
@@ -19,14 +19,13 @@ from __future__ import annotations
 
 from .filesystem import WriteContext
 from .web import _strip_html, make_web_fetch_handler
-from .interaction import web_fetch, ask_user_question, make_ask_user_handler
+from .interaction import make_ask_user_handler
 from .snapshot import set_snapshots, get_snapshots, clear_snapshots, rollback_snapshots, compute_diff_stats
 from .registry import LOCAL_TOOLS, make_local_handlers
 
 __all__ = [
     "WriteContext",
     "_strip_html",
-    "ask_user_question",
     "clear_snapshots",
     "compute_diff_stats",
     "get_snapshots",
@@ -36,5 +35,4 @@ __all__ = [
     "make_web_fetch_handler",
     "rollback_snapshots",
     "set_snapshots",
-    "web_fetch",
 ]

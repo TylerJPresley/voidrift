@@ -1,6 +1,6 @@
 """Tests for agent_context module — snipping, trimming, compaction."""
 
-from voidrift_cli.agent_context import snip_old_tool_results, trim_messages
+from voidrift_cli.agent_context import reactive_compact, snip_old_tool_results, trim_messages
 
 
 class TestTrimMessages:
@@ -75,3 +75,72 @@ class TestSnipOldToolResults:
         msgs = self._make_messages()
         result = snip_old_tool_results(msgs, max_age_turns=0)
         assert result is msgs
+
+
+class TestReactiveCompact:
+    def _make_messages(self, n_pairs: int = 4) -> list[dict]:
+        """Build a message list with n_pairs of (user, assistant) exchanges."""
+        msgs = [{"role": "system", "content": "sys"}]
+        for i in range(n_pairs):
+            msgs.append({"role": "user", "content": f"message {i}"})
+            msgs.append({"role": "assistant", "content": f"reply {i}"})
+        return msgs
+
+    def test_compacts_old_messages(self):
+        msgs = self._make_messages(4)
+        summary_calls = []
+
+        def compact_fn(content: str) -> str:
+            summary_calls.append(content)
+            return "summary of old messages"
+
+        new_msgs, new_count, did_compact = reactive_compact(msgs, compact_fn, 0)
+
+        assert did_compact is True
+        assert new_count == 1
+        assert len(summary_calls) == 1
+        # Summary message should be present
+        assert any("summary of old messages" in m.get("content", "") for m in new_msgs)
+        # System messages preserved
+        assert any(m["role"] == "system" for m in new_msgs)
+
+    def test_keeps_recent_messages(self):
+        msgs = self._make_messages(4)
+
+        def compact_fn(content: str) -> str:
+            return "compact"
+
+        new_msgs, _, did_compact = reactive_compact(msgs, compact_fn, 0)
+
+        assert did_compact is True
+        # Last 4 non-system messages must be kept
+        non_sys = [m for m in new_msgs if m["role"] != "system"]
+        # Summary + last 4 messages
+        assert len(non_sys) >= 4
+
+    def test_no_compact_when_count_exhausted(self):
+        from voidrift_cli.agent_context import _REACTIVE_COMPACT_MAX
+        msgs = self._make_messages(4)
+        _, _, did_compact = reactive_compact(msgs, lambda c: "x", _REACTIVE_COMPACT_MAX)
+        assert did_compact is False
+
+    def test_no_compact_when_too_few_messages(self):
+        msgs = [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": "hello"},
+        ]
+        _, _, did_compact = reactive_compact(msgs, lambda c: "x", 0)
+        assert did_compact is False
+
+    def test_compact_fn_exception_skips_compaction(self):
+        msgs = self._make_messages(4)
+
+        def failing_fn(content: str) -> str:
+            raise RuntimeError("API down")
+
+        new_msgs, new_count, did_compact = reactive_compact(msgs, failing_fn, 0)
+
+        assert did_compact is False
+        assert new_count == 0
+        assert new_msgs is msgs  # unchanged

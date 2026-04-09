@@ -41,7 +41,8 @@ The CLI is the orchestration layer. It owns:
 - System log (`~/.voidrift/logs/voidrift.log`)
 
 Agent tools live in `cli/src/voidrift_cli/tools/`:
-- `filesystem.py` — file tools (`write_source_file`, `read_source_file`, `edit_source_file`, `write_framework_file`, `read_framework_file`, `web_fetch`, `ask_user_question`), `WriteContext` with path sandboxing, protected paths, snapshots, diff stats, line pagination (REQ-FSZ-1), byte guard (REQ-FSZ-5)
+- `filesystem.py` — `WriteContext` with path sandboxing, protected paths, snapshots, diff stats, line pagination (REQ-FSZ-1), byte guard (REQ-FSZ-5). Implements file tool handlers (`write_source_file`, `read_source_file`, `edit_source_file`, `write_framework_file`, `read_framework_file`)
+- `registry.py` — ALL tool schemas in OpenAI format, organized as named group lists (`FILESYSTEM_TOOLS`, `SKILL_TOOLS`, `MEMORY_TOOLS`, `SESSION_TOOLS`, `DOCUMENT_TOOLS`, `CODE_ANALYSIS_TOOLS`, `BASH_TOOL`, `VERIFY_TOOLS`). `ALL_TOOLS` concatenates every group. `tool_builder.py` imports schemas from here — it contains zero inline schema dicts (REQ-TOOL-3). `tool_builder.py` is decomposed into four focused functions: `build_handlers(cmd, project_dir, ctx, web_fetch_kwargs, ask_fn, source_read_ctx)` creates all handler callables (including the real `web_fetch` handler when kwargs are provided, the real `ask_user_question` handler when `ask_fn` is provided (REQ-TOOL-5), and a source-directory-rooted `read_source_file` handler when `source_read_ctx` is provided (REQ-G-18)), `filter_tools(all_tools, allowed_names)` selects schemas by command, `validate_schema_handler_contract(tools, handlers)` verifies each handler accepts its schema-defined parameters at build time (REQ-TOOL-4), and `build_local_tools` is a thin orchestrator that composes them
 - `bash.py` — `BashConfig` dataclass and `create_run_command` factory for per-command `run_command` handlers (REQ-SEC-4). Develop agents get a narrow allowlist (build, test, lint); chat agents get broader access; verify agents get full scope. Two-layer security: per-command `allowed_patterns` checked first, then global `classify_command`
 - `process_manager.py` — subprocess lifecycle (`start_process`, `stop_process`, `wait_for_ready`, `read_process_output`, `stop_all`) for verify sub-agents
 - `security.py` — `classify_command()` for shell command risk assessment (safe/warn/block)
@@ -72,7 +73,9 @@ Each agent (gather source analysis, plan, develop task) starts with a clean mess
 
 ### 3.2 Streaming vs non-streaming
 
-Gather and chat use `stream=True` with `stream_options: {include_usage: True}` for live token telemetry and responsive UX. Plan, develop, deploy, and verify use `stream=False` for reliable tool call parsing — vLLM's streaming parser does not reliably separate text from tool calls. Token usage (prompt tokens, completion tokens, context %) is captured from both paths and forwarded to the `on_progress` callback. **Why:** Streaming in gather surfaces per-call telemetry across all four stages. Streaming in chat provides token-by-token display. Non-streaming in automated commands ensures tool call JSON is parsed correctly (REQ-ARCH-4, REQ-UI-10).
+Gather and chat use `stream=True` for live token telemetry and responsive UX. Plan, develop, deploy, and verify use `stream=False` for reliable tool call parsing — vLLM's streaming parser does not reliably separate text from tool calls. Token usage (prompt tokens, completion tokens, context %) is captured from both paths and forwarded to the `on_progress` callback. **Why:** Streaming in gather surfaces per-call telemetry across all four stages. Streaming in chat provides token-by-token display. Non-streaming in automated commands ensures tool call JSON is parsed correctly (REQ-ARCH-4, REQ-UI-10).
+
+`stream_options: {include_usage: true}` is only included for providers known to support it (`openai`, `anthropic`, `gemini`). Generic OpenAI-compatible endpoints (local vLLM, third-party APIs) silently ignore this option and return no usage data. The decision is made in `OpenAIAdapter.build_request()` based on the `provider` field, not hardcoded in the transport layer. When a provider returns no usage data, token accumulators receive 0 — `[LOOP_EXIT]` still logs correct (zero) totals (REQ-ARCH-20).
 
 ### 3.3 Local agent tools in the CLI
 
@@ -105,6 +108,7 @@ VoidRift reads two files maintained by an external tool (worker-cli). Both paths
 | `fallback` | No | — | Alias of fallback model on 429/5xx retry exhaustion (REQ-MC-4) |
 | `max_input_tokens` | No | — | Token budget: max input tokens per command run (REQ-ARCH-13) |
 | `max_output_tokens` | No | — | Token budget: max output tokens per command run (REQ-ARCH-13) |
+| `protocol` | No | `openai` | Wire protocol: `openai` (default, all OpenAI-compatible endpoints) or `anthropic` (native Anthropic Messages API via `AnthropicAdapter`) |
 
 The `defaults:` section provides fallback values for all optional fields. Each model entry inherits defaults and can override any field.
 
@@ -196,7 +200,91 @@ Before each develop task, `GitCheckpointManager` creates a `git stash create` sn
 
 **Why:** Prompt-based analysis requires the model to spend tokens parsing file structure. Tree-sitter provides machine-parsed facts (imports, symbols, complexity) directly, improving accuracy for large files and reducing context consumption (REQ-U-20).
 
-### 3.21 FauxProvider for test fixtures
+### 3.21 ProtocolAdapter pattern (REQ-ARCH-22)
+
+`agent_protocol.py` defines `ProtocolAdapter` — an ABC with two concrete implementations:
+
+| Class | Protocol | Client | Notes |
+|---|---|---|---|
+| `OpenAIAdapter` | `openai` (default) | `openai.OpenAI` | All OpenAI-compatible endpoints — local vLLM, Kiro Gateway, Anthropic OpenAI-compat, Gemini |
+| `AnthropicAdapter` | `anthropic` | `anthropic.Anthropic` | Native Anthropic Messages API — system extraction, `input_schema` tools, tool_result batching |
+
+`ModelInterface` wraps `ModelConfig + ProtocolAdapter`. `resolve_model(alias)` returns a `ModelInterface`; nothing in the framework holds a naked `ModelConfig` after resolution.
+
+**Agent loop contract:** The loop stores history in OpenAI format. On every API call:
+1. `adapter.build_request(openai_kwargs, provider)` → wire format dict
+2. `_create_with_retry(client, wire_request, streaming)` → raw response
+3. `adapter.parse_response(raw)` or `adapter.iter_stream(stream, ...)` → `(text, tool_calls, finish_reason, usage)`
+
+All protocol differences are in the adapter — no `if protocol == "anthropic"` branches in `agent.py`.
+
+**AnthropicAdapter specifics:**
+- Extracts `role: system` messages as top-level `system=` parameter
+- Converts tool `parameters` → `input_schema`; maps `tool_choice: "required"` → `{"type": "any"}`
+- Batches consecutive `role: tool` messages into a single `role: user` message with `tool_result` blocks
+- Maps `stop_reason: end_turn/tool_use/max_tokens` → canonical `stop/tool_calls/length`
+- Thinking content blocks logged as `[THINKING]`, excluded from returned text
+
+**Why:** Scattering `if protocol == "anthropic"` throughout `agent.py` ties format concerns to loop logic. The adapter pattern keeps each protocol's translation in one class. Adding a third protocol requires a new adapter and a `get_adapter()` entry — zero changes to `agent.py` (REQ-ARCH-22).
+
+### 3.22 Session-scoped permission gate for chat (REQ-U-22)
+
+Chat agents can read, write, and run — all necessary for legitimate operator-directed work. But smaller models infer intent from context and take unsolicited write actions (e.g. creating REQUIREMENTS.md after an operator says "let's gather"). The permission gate adds a mandatory human-in-the-loop confirmation layer that no model can bypass.
+
+**Three independently grantable categories:**
+
+| Category | Triggers on | Default |
+|---|---|---|
+| `writes` | `write_source_file`, `edit_source_file`, `write_framework_file` | deny |
+| `runs` | `run_command` | deny |
+| `reads_outside` | `read_source_file` / `read_framework_file` targeting a path outside `project_dir` | deny |
+
+Reads within the project root are free — no prompt needed.
+
+**Prompt:** "Allow once / Always allow this session / Deny". Allow-once grants for that one call. Always-allow sets a session flag (`PermissionGate.writes/runs/reads_outside = True`) so subsequent calls in the same session are free. Deny returns an error string to the agent as the tool result.
+
+**Implementation pattern:**
+
+```
+_chat_display.py
+  PermissionGate          # dataclass — three bool flags (writes, runs, reads_outside)
+  _handle_permission_prompt(category, description, gate, console, input_fn) → bool
+    # zero I/O, independently testable — all deps injected
+
+tool_builder.py
+  _make_write_guard(name, handler, gate, confirm_holder) → guarded_handler
+  _make_run_guard(handler, gate, confirm_holder) → guarded_handler
+  _make_read_outside_guard(name, handler, project_dir, gate, confirm_holder, ctx) → guarded_handler
+  build_handlers(... permission_gate=None, permission_confirm_holder=None)
+    # wraps handlers at build time; gate=None → guards not applied (automated commands)
+
+chat.py / _interactive_loop
+  _perm_gate = PermissionGate()         # created in run_chat
+  _perm_holder: list = [None]           # mutable holder — same pattern as web_fetch confirm
+  _live_perm_confirm(category, desc)    # Live-aware closure: stops Live, prompts, restarts Live
+    # set as _perm_holder[0] inside _interactive_loop (after Live is created)
+```
+
+**Automated commands unaffected:** `build_handlers` and `build_local_tools` default `permission_gate=None`. Only `run_chat` passes the gate — gather/plan/develop/verify/deploy never do. Non-TTY sessions set `_perm_holder[0] = None`, causing guards to auto-deny.
+
+**Why two mechanisms (prompt + gate):** The `## CHAT-ROLE` section in `system.md` instructs the model not to infer write intent. This catches well-behaved models. The gate at the handler level is a hard stop that cannot be overridden by model behavior — defense in depth for smaller or less instruction-following models.
+
+### 3.23 Chat command module decomposition (REQ-U-21)
+
+`commands/chat.py` (593 lines) is the orchestrator — it wires together four extracted modules and drives the interactive loop. Each extracted module has direct unit tests that don't require `_interactive_loop` to run:
+
+| File | Contents | Independently testable |
+|------|----------|----------------------|
+| `_chat_idea.py` | `IdeaState` enum, `IdeaSession` dataclass, `_handle_idea_command()` | Yes — no I/O |
+| `_chat_compact.py` | `ContextCompactor` class — failures, nudged, disabled state; `compact()`, `should_auto_compact()`, `should_nudge()` | Yes — all deps injected |
+| `_chat_display.py` | `_query_max_context`, terminal helpers, `_build_key_bindings`, confirm/ask handlers, `_make_display_callbacks`, `ChatDisplay` class | Yes — console injected |
+| `chat.py` | `_query_max_context` call, `_interactive_loop`, `chat` Click command | Integration only |
+
+**Dependency injection pattern:** `ContextCompactor` receives `agent`, `log`, `max_ctx`, `ui`, `session`, `original_skill`, `fs_ctx`, `estimate_tokens`, `setup_terminal`, `restore_terminal` as constructor arguments. `ChatDisplay` receives `console`. This makes every compaction and display unit independently testable with mocks.
+
+**Why:** The original 1060-line `_interactive_loop` mixed 15+ nested closures — idea state, compaction, key bindings, confirm dialogs, Live display — none testable without a TTY. The decomposition separates each concern into its own testable unit (REQ-U-21).
+
+### 3.23 FauxProvider for test fixtures
 
 `FauxProvider` in `testing/faux_provider.py` is a drop-in replacement for the OpenAI client that replays recorded API responses from JSONL cassette files. Implements `client.chat.completions.create(**kwargs)`. Three modes: `replay` (default — return recorded, fail on miss), `record` (call real API, save, return), `passthrough` (forward without recording). Request matching uses SHA-256 of the canonical request excluding `api_key`, `timestamp`, `x-request-id`. Cassettes live in `cli/tests/cassettes/`. `VCR_MODE=record` enables recording.
 
@@ -210,26 +298,44 @@ Before each develop task, `GitCheckpointManager` creates a `git stash create` sn
 
 Two modes: `--path <path>` (reverse-engineer from codebase) and `--idea <id>` (generate from idea).
 
+**Module layout:**
+
+| File | Contents |
+|------|----------|
+| `commands/gather.py` | `run_gather`, `_gather_from`, `_gather_from_idea`, `_build_file_tree`, public helpers |
+| `commands/_gather_pipeline.py` | Stage functions + shared constants and cache helpers |
+
+Each of the four stage functions is independently callable and unit-testable without running the full pipeline (REQ-G-8 stage isolation):
+
+| Function | Stage | Returns |
+|----------|-------|---------|
+| `_run_triage()` | 1 — categorise files | `dict[str, list[str]]` (category → file list) |
+| `_run_context_build()` | 2 — summarise non-source categories | `dict[str, str]` (category → summary) |
+| `_run_source_analysis()` | 3 — parallel source analysis | `dict[str, str]` (filepath → analysis) |
+| `_run_consolidation()` | 4 — consolidate into REQUIREMENTS.md | `str` (final markdown) |
+
+`_gather_from()` is a pure orchestrator: it calls these four functions in sequence and handles all persistence (ANALYSIS.md index, analysis cache, STATE.md entry). No stage logic lives in `_gather_from()`.
+
 **--path mode** (four-stage pipeline):
 ```
-CLI: build file tree → triage agent (categorize) → validation pass (prune bad entries)
+CLI: build file tree → _run_triage (categorize) → validation pass (prune bad entries)
 
-Stage 2 — Context Build (non-source categories: tests, config, infrastructure, docs, assets):
+Stage 2 — _run_context_build (non-source categories: tests, config, infrastructure, docs, assets):
   for each non-source category with files:
     CLI: concatenate all files in category → context agent → direct response text (≤10 bullets)
     CLI: store in context_summaries[cat]
   CLI: build "Project Context" block from context_summaries
 
-Stage 3 — Source Analysis (concurrent):
+Stage 3 — _run_source_analysis (concurrent):
   for each source file:
     if file > input_limit → split into overlapping chunks → analyze each chunk separately (direct response)
                          → consolidate chunk analyses (if >1 chunk)
-    else → agent reads via read_source_file() → returns requirements as direct response text
+    else → file content injected directly into user message (zero tools) → returns requirements as direct response text
   CLI: store in source_requirements[filepath]
 
 CLI: write .voidrift/ANALYSIS.md (index) + .voidrift/analysis/<file>.md (per-file) ← operator review
 
-Stage 4 — Final Pass:
+Stage 4 — _run_consolidation:
   CLI: pre-fetch REQUIREMENTS-TEMPLATE (Python call, no model tool)
   CLI: send source_requirements + context_summaries in user message to final agent (no tools)
   model: returns complete REQUIREMENTS.md content as direct response text
@@ -420,9 +526,11 @@ send(user_message)
       [on_payload hook — REQ-ARCH-14]
       _stream_response() / _sync_response()  [with retry + jitter, REQ-ARCH-10]
         ↓ context_length_error? → reactive_compact [REQ-ARCH-12]
-        ↓ truncated? → max_tokens_recovery [REQ-ARCH-11]
+        ↓ truncated text? → max_tokens_recovery [REQ-ARCH-11]
+        ↓ truncated tool_calls? → discard + re-emit prompt [REQ-ARCH-11]
         ↓ no tool_calls? → follow_up hooks/queue → return text
       [stall detection — nudge or break]
+      deduplicate identical tool calls [REQ-ARCH-16]
       partition tool calls into batches [REQ-ARCH-16]
         concurrent batch: ThreadPoolExecutor for read tools
         serial batch: one at a time for write tools
@@ -437,16 +545,18 @@ send(user_message)
     [LOOP_EXIT log — REQ-ARCH-18]
     force final text call (stall/stop recovery)
     return text
+  finally: client.close() [REQ-ARCH-21]
 ```
 
 Key agent loop features:
 - **Hook callbacks** (REQ-ARCH-14): `transform_context`, `before_tool_call`, `after_tool_call`, `get_steering_messages`, `get_follow_up_messages`, `stop_check`, `on_payload`. All optional, default None.
 - **Thread-safe queues**: `steer(messages)` and `follow_up(messages, drain)` for external injection.
 - **LoopState**: `messages`, `turn_count`, `input_tokens_total`, `output_tokens_total`, `tools_called_this_turn` — passed to state-aware hooks.
-- **Concurrent tool execution** (REQ-ARCH-16): Consecutive read-tool calls batched via ThreadPoolExecutor.
+- **Concurrent tool execution** (REQ-ARCH-16): Identical tool calls deduplicated before execution — same name and arguments executed once, result mapped to all IDs. Consecutive read-tool calls batched via ThreadPoolExecutor.
 - **Argument normalization** (REQ-ARCH-17): Path stripping, content list→string, logged as `[TOOL_NORMALIZE]`.
 - **Prompt caching** (REQ-ARCH-19): Anthropic system messages get `cache_control` markers. Cache hits logged.
-- **Transition logging** (REQ-ARCH-18): `[ITERATION]` at every continue, `[LOOP_EXIT]` at every return.
+- **Provider-aware streaming usage** (REQ-ARCH-20): `stream_options: {include_usage: true}` injected in `build_request()` only for `openai`, `anthropic`, `gemini`. Generic endpoints receive a clean wire request.
+- **Transition logging** (REQ-ARCH-18): `[ITERATION]` at every continue, `[LOOP_EXIT]` with accurate cumulative `total_input`/`total_output` at every return.
 - **Security**: Command classification (REQ-SEC-2) in `run_command`. Path sandboxing (REQ-SEC-1) in all file tools.
 
 ---

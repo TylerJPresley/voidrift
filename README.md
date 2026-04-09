@@ -126,6 +126,7 @@ bash:
 | `retention.global` | Days of global framework logs to keep (default 30) |
 | `cache.max_entries` | Max analysis cache entries before LRU eviction (default 500) |
 | `cache.ttl_days` | Analysis entries older than this are pruned (default 30) |
+| `stage_max_tokens.<stage>` | Max output tokens per agent stage. Capped by the model's `max_tokens`. Stages: `triage`, `analysis`, `synthesis`, `consolidation`, `task`, `plan`, `verify-plan`, `verify-execute` |
 | `skills.synthesis_model` | Model alias for skill synthesis via `voidrift skills install --synthesize`; empty disables synthesis (default empty) |
 | `skills.repos` | List of manifest URLs searched by `voidrift skills search` (default empty) |
 | `bash.timeout` | Default timeout for `run_command` across all commands (default 120s) |
@@ -166,12 +167,14 @@ models:
   claude:
     base_url: https://api.anthropic.com
     api_key: ${ANTHROPIC_API_KEY}
-    model_id: anthropic/claude-opus-4-6
-    provider: anthropic
+    model_id: claude-opus-4-6
+    protocol: anthropic
     fallback: haiku
 ```
 
 Each model needs `base_url`, `api_key`, and `model_id`. Optional fields control operational limits (`max_tokens`, `max_context`, `concurrency`, `max_read_lines`) and token budgets (`max_input_tokens`, `max_output_tokens`). See [ARCHITECTURE.md](ARCHITECTURE.md) for the full model entry field reference.
+
+**Native Anthropic protocol:** Set `protocol: anthropic` to use the native Anthropic Messages API instead of the OpenAI-compatible endpoint. The agent loop is protocol-agnostic — all wire format differences are handled by the adapter (`AnthropicAdapter`). Omitting `protocol` (or setting it to `openai`) preserves all existing behavior.
 
 **Token budgets:** Set `max_input_tokens` and `max_output_tokens` per model to cap total token consumption for a command run. Useful for expensive cloud models — a develop session with 20 tasks can accumulate significant cost. CLI flags (`--max-input-tokens`, `--max-output-tokens` on gather and develop) override model config values per run. When a limit is exceeded, the run stops with a budget summary.
 
@@ -198,6 +201,8 @@ voidrift chat <model> --bare --system-prompt p.md  # fully custom system prompt
 
 Interactive session with full tool access — the central command for iterating on any `.voidrift/` artifact. Review requirements before running plan, refine architecture after plan, debug issues, explore ideas.
 
+**Multi-line input:** Enter submits. `\` + Enter or Ctrl+J inserts a newline for multi-line messages.
+
 **Session persistence:** Sessions are automatically saved to `.voidrift/chat-session.jsonl` and restored on next `voidrift chat`. Close the terminal, come back later — your context is preserved. Type `/clear` to start a fresh session.
 
 **Context management:**
@@ -217,6 +222,15 @@ Interactive session with full tool access — the central command for iterating 
 On session start, the memory index (names and descriptions) is injected into the system prompt. The agent loads full entries on demand via `read_memory`. Project entries override global entries with the same name.
 
 **Idea refinement:** Type `/idea` to start a guided idea flow — the agent walks you through intake, exploration, shaping, and summary. Ideas are stored as `IDEA-{id}.md` in `.voidrift/ideas/` and categorized as `now`, `next`, or `later`. Type `/idea 3` to resume an existing idea. Type `/done` to save and return to normal chat.
+
+**Permission prompts:** Before the agent takes a consequential action, it pauses and asks for your approval:
+
+```
+▸ Permission required: write_framework_file('REQUIREMENTS.md')
+  [1] Allow once  [2] Always allow this session  [3] Deny
+```
+
+Three categories are gated independently: **writes** (any file write or edit), **runs** (`run_command`), and **reads outside the project root**. Reads within the current project directory are always free. Choose `1` to allow once, `2` to allow that category for the rest of the session without further prompts, or `3` to deny (the agent receives an error as the tool result and can try a different approach). The permission state is session-scoped — it resets when you exit chat.
 
 **Bare mode:** `--bare` strips all automatic context injection — no skills, git snapshot, project state, or memory. Just you and the model with full session mechanics. Combine with `--system-prompt <path>` to replace the system prompt entirely.
 
@@ -496,7 +510,7 @@ voidrift/
 │       ├── git_context.py        # Git status snapshot for agent context injection
 │       ├── git_utils.py          # Git diff with safety limits
 │       ├── git_checkpoint.py     # Git stash checkpoints for develop rollback
-│       ├── tools/                # Local agent tools: filesystem, process, HTTP, browser, security
+│       ├── tools/                # Local agent tools: registry (all schemas), filesystem, process, HTTP, browser, security
 │       ├── utils.py              # Utilities: STATE.md, system log, task helpers
 │       ├── config.py             # Config loading, variable expansion
 │       ├── session.py            # Chat session persistence (JSONL)

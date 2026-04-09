@@ -346,10 +346,21 @@ class _MultiSpinner:
             self._thread.join(timeout=0.5)
         if self._live:
             try:
-                self._live.update(self._render())
+                # Clear the live block so its last rendered frame doesn't stay
+                # on screen — completed rows are printed once below (REQ-UI-2).
+                self._live.transient = True
             except Exception:
                 pass
             self._live.__exit__(exc_type, exc_val, exc_tb)
+        # Print all completed rows exactly once (REQ-UI-2).
+        with self._lock:
+            all_completed = [
+                row
+                for g in self._groups.values()
+                for row in g["completed"]
+            ]
+        for row in all_completed:
+            _con.print(row)
 
 
 def multi_spinner(header: str) -> _MultiSpinner:

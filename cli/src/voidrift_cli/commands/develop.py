@@ -28,6 +28,7 @@ from datetime import datetime
 from pathlib import Path
 
 from ..agent import AgentLoop, build_local_tools
+from ..config import get_max_tokens
 from .. import prompts
 from ..skills import find_skill
 from ..manifest import ManifestManager
@@ -417,6 +418,7 @@ def _run_task(
         tools=tools,
         tool_handlers=handlers,
         stream=False,
+        max_tokens=get_max_tokens(worker, "develop.task"),
         log_path=log,
         show_spinner=False,
         token_budget=token_budget,
@@ -459,7 +461,8 @@ def _run_task(
             agent2 = AgentLoop(
                 model=worker, system_prompt=system,
                 tools=tools, tool_handlers=handlers,
-                stream=False, log_path=log, show_spinner=False,
+                stream=False, max_tokens=get_max_tokens(worker, "develop.task"),
+                log_path=log, show_spinner=False,
             )
             if tracker:
                 agent2.on_progress = tracker
@@ -538,7 +541,8 @@ def _consult_architect(
         model=architect,
         system_prompt=system,
         tools=[], tool_handlers={},
-        stream=False, log_path=log,
+        stream=False, max_tokens=get_max_tokens(architect, "develop.escalation"),
+        log_path=log,
     )
 
     try:

@@ -5,7 +5,8 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from voidrift_cli.models import ModelConfig
+from voidrift_cli.models import ModelConfig, ModelInterface
+from voidrift_cli.agent_protocol import get_adapter
 from helpers import make_openai_response
 
 
@@ -141,7 +142,7 @@ class TestQueryMaxContext:
         from voidrift_cli.commands.chat import _query_max_context
         with patch("openai.OpenAI") as mock_client:
             mock_client.return_value.models.list.side_effect = ConnectionError("refused")
-            with caplog.at_level(logging.DEBUG, logger="voidrift_cli.commands.chat"):
+            with caplog.at_level(logging.DEBUG, logger="voidrift_cli.commands._chat_display"):
                 result = _query_max_context(cloud_model)
         assert result == cloud_model.max_context
         assert "max_context query failed" in caplog.text
@@ -204,7 +205,7 @@ class TestChatSession:
         assert "Build a thing." in captured.get("system_prompt", ""), \
             "Doc content should appear in system prompt when --doc is specified"
 
-    @patch("voidrift_cli.agent.OpenAI")
+    @patch("voidrift_cli.agent_protocol.OpenAI")
     def test_ui1_tools_present_on_every_api_call(self, MockOpenAI, cloud_model, tmp_path):
         """V-UI-1: In auto mode, tools are passed to the API on every call."""
         from voidrift_cli.agent import AgentLoop
@@ -236,7 +237,7 @@ class TestChatSession:
             assert "tools" in kwargs, "tools must be present in every API call for chat (auto) mode"
             assert kwargs.get("tool_choice") == "auto"
 
-    @patch("voidrift_cli.agent.OpenAI")
+    @patch("voidrift_cli.agent_protocol.OpenAI")
     def test_ui2_log_contains_user_and_assistant(self, MockOpenAI, cloud_model, tmp_path):
         """V-UI-2: session log contains [USER] input and [ASSISTANT] response."""
         from voidrift_cli.agent import AgentLoop
@@ -261,7 +262,7 @@ class TestChatSession:
         assert "[ASSISTANT]" in log_content
         assert "Chat reply." in log_content
 
-    @patch("voidrift_cli.agent.OpenAI")
+    @patch("voidrift_cli.agent_protocol.OpenAI")
     def test_ui2_log_contains_system_prompt(self, MockOpenAI, cloud_model, tmp_path):
         """V-UI-2: session log records the system prompt."""
         from voidrift_cli.agent import AgentLoop
@@ -330,7 +331,8 @@ class TestQuickCommand:
     """Tests for /quick side question (REQ-U-15)."""
 
     def test_quick_does_not_modify_messages(self):
-        mc = ModelConfig(alias="t", model_id="m", api_base="http://x/v1", api_key="k")
+        _mc = ModelConfig(alias="t", model_id="m", api_base="http://x/v1", api_key="k")
+        mc = ModelInterface(_mc, get_adapter(_mc.protocol))
         agent = AgentLoop(model=mc, system_prompt="test", stream=False)
         before = len(agent.messages)
         mock_resp = MagicMock()
@@ -353,7 +355,8 @@ class TestQuickCommand:
         assert len(agent.messages) == before
 
     def test_quick_uses_no_tools(self):
-        mc = ModelConfig(alias="t", model_id="m", api_base="http://x/v1", api_key="k")
+        _mc = ModelConfig(alias="t", model_id="m", api_base="http://x/v1", api_key="k")
+        mc = ModelInterface(_mc, get_adapter(_mc.protocol))
         agent = AgentLoop(model=mc, system_prompt="test", stream=False)
         mock_resp = MagicMock()
         mock_resp.choices = [MagicMock()]
@@ -414,6 +417,29 @@ class TestBareMode:
 
 
 class TestInteractiveLoopConcerns:
+    def test_ctrl_j_inserts_newline(self):
+        """V-UI-3: Ctrl+J inserts a newline into the input buffer without submitting."""
+        from prompt_toolkit.key_binding import KeyBindings
+        from prompt_toolkit.buffer import Buffer
+        from prompt_toolkit.document import Document
+        from unittest.mock import MagicMock
+
+        kb = KeyBindings()
+
+        @kb.add("c-j")
+        def _newline(event):
+            event.current_buffer.insert_text("\n")
+
+        buf = Buffer()
+        buf.set_document(Document("hello"), bypass_readonly=True)
+
+        event = MagicMock()
+        event.current_buffer = buf
+
+        _newline(event)
+
+        assert buf.text == "hello\n"
+
     def test_make_display_callbacks_returns_callable_hooks(self, cloud_model):
         """_make_display_callbacks returns a dict of callable hooks."""
         from voidrift_cli.commands.chat import _make_display_callbacks
@@ -457,3 +483,532 @@ class TestInteractiveLoopConcerns:
         assert saved is None
         # Restore with None args should be a no-op
         _restore_terminal(None, None, None)  # must not raise
+
+
+class TestIdeaSession:
+    """V-U-21: REQ-U-21 — IdeaSession state machine independently testable."""
+
+    def test_start_transitions_to_collecting(self):
+        from voidrift_cli.commands._chat_idea import IdeaSession, IdeaState
+        session = IdeaSession()
+        session.start()
+        assert session.state == IdeaState.COLLECTING
+
+    def test_add_line_in_collecting(self):
+        from voidrift_cli.commands._chat_idea import IdeaSession
+        session = IdeaSession()
+        session.start()
+        session.add_line("first")
+        session.add_line("second")
+        assert session.lines == ["first", "second"]
+
+    def test_add_line_in_idle_raises(self):
+        from voidrift_cli.commands._chat_idea import IdeaSession
+        session = IdeaSession()
+        with pytest.raises(ValueError):
+            session.add_line("oops")
+
+    def test_confirm_returns_text_and_resets_to_idle(self):
+        from voidrift_cli.commands._chat_idea import IdeaSession, IdeaState
+        session = IdeaSession()
+        session.start()
+        session.add_line("line one")
+        session.add_line("line two")
+        text = session.confirm()
+        assert text == "line one\nline two"
+        assert session.state == IdeaState.IDLE
+        assert session.lines == []
+
+    def test_cancel_resets_to_idle(self):
+        from voidrift_cli.commands._chat_idea import IdeaSession, IdeaState
+        session = IdeaSession()
+        session.start()
+        session.idea_id = 42
+        session.cancel()
+        assert session.state == IdeaState.IDLE
+        assert session.idea_id is None
+
+    def test_is_active_reflects_state(self):
+        from voidrift_cli.commands._chat_idea import IdeaSession
+        session = IdeaSession()
+        assert not session.is_active()
+        session.start()
+        assert session.is_active()
+        session.cancel()
+        assert not session.is_active()
+
+
+class TestContextCompactor:
+    """V-U-21: REQ-U-21 — ContextCompactor independently testable without TTY or live model."""
+
+    def _make_compactor(self, messages=None, max_ctx=None, session=None):
+        from unittest.mock import MagicMock
+        from voidrift_cli.commands._chat_compact import ContextCompactor
+
+        agent = MagicMock()
+        agent.messages = messages if messages is not None else [{"role": "system", "content": "sys"}]
+        ui = MagicMock()
+        ui._con = MagicMock()
+        ui.random_label.return_value = "thinking"
+        ui.render_text.return_value = "summary text"
+
+        estimate_tokens = lambda msgs: sum(len(m.get("content") or "") for m in msgs) // 4
+        setup_terminal = MagicMock(return_value=(None, None))
+        restore_terminal = MagicMock()
+
+        return ContextCompactor(
+            agent=agent,
+            log="/tmp/test.log",
+            max_ctx=max_ctx,
+            ui=ui,
+            session=session,
+            original_skill="",
+            fs_ctx=None,
+            estimate_tokens=estimate_tokens,
+            setup_terminal=setup_terminal,
+            restore_terminal=restore_terminal,
+        )
+
+    def test_should_auto_compact_at_80(self):
+        compactor = self._make_compactor()
+        assert compactor.should_auto_compact(80)
+        assert compactor.should_auto_compact(99)
+        assert not compactor.should_auto_compact(79)
+
+    def test_should_auto_compact_disabled(self):
+        compactor = self._make_compactor()
+        compactor.disabled = True
+        assert not compactor.should_auto_compact(80)
+
+    def test_should_nudge_at_70(self):
+        compactor = self._make_compactor()
+        assert compactor.should_nudge(70)
+        assert not compactor.should_nudge(69)
+
+    def test_should_nudge_already_nudged(self):
+        compactor = self._make_compactor()
+        compactor.nudged = True
+        assert not compactor.should_nudge(90)
+
+    def test_compact_nothing_to_compact(self):
+        compactor = self._make_compactor(messages=[{"role": "system", "content": "sys"}])
+        result = compactor.compact()
+        assert result is True
+        compactor._ui.info.assert_called_once_with("Nothing to compact.")
+
+    def test_compact_calls_model_and_returns_shorter_messages(self):
+        from unittest.mock import MagicMock, patch
+        from voidrift_cli.commands._chat_compact import ContextCompactor
+
+        agent = MagicMock()
+        agent.messages = [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "hello"},
+            {"role": "assistant", "content": "hi there"},
+        ]
+        agent._get_client.return_value.chat.completions.create.return_value.choices[
+            0
+        ].message.content = "summary"
+
+        ui = MagicMock()
+        ui._con = MagicMock()
+        ui.random_label.return_value = "thinking"
+        ui.render_text.return_value = "rendered"
+
+        estimate_tokens = lambda msgs: sum(len(m.get("content") or "") for m in msgs) // 4
+        setup_terminal = MagicMock(return_value=(None, None))
+        restore_terminal = MagicMock()
+
+        compactor = ContextCompactor(
+            agent=agent,
+            log="/tmp/test_compact.log",
+            max_ctx=10000,
+            ui=ui,
+            session=None,
+            original_skill="",
+            fs_ctx=None,
+            estimate_tokens=estimate_tokens,
+            setup_terminal=setup_terminal,
+            restore_terminal=restore_terminal,
+        )
+
+        with patch("rich.live.Live.__enter__", return_value=None), \
+             patch("rich.live.Live.__exit__", return_value=False):
+            result = compactor.compact()
+
+        assert result is True
+        assert len(agent.messages) == 1
+        assert "summary" in agent.messages[0]["content"]
+
+
+class TestKeyBindings:
+    """V-U-21: Phase 3 — _build_key_bindings independently testable."""
+
+    def test_returns_key_bindings_object(self):
+        from voidrift_cli.commands._chat_display import _build_key_bindings
+        from prompt_toolkit.key_binding import KeyBindings
+        kb = _build_key_bindings()
+        assert isinstance(kb, KeyBindings)
+
+    def test_enter_binding_registered(self):
+        from voidrift_cli.commands._chat_display import _build_key_bindings
+        from prompt_toolkit.keys import Keys
+        kb = _build_key_bindings()
+        bound_keys = [b.keys for b in kb.bindings]
+        # prompt_toolkit maps "enter" → ControlM internally
+        assert (Keys.ControlM,) in bound_keys
+
+    def test_ctrl_j_binding_registered(self):
+        from voidrift_cli.commands._chat_display import _build_key_bindings
+        kb = _build_key_bindings()
+        bound_keys = [b.keys for b in kb.bindings]
+        assert ("c-j",) in bound_keys
+
+
+class TestConfirmHandlers:
+    """V-U-21: Phase 4 — _handle_web_fetch_confirm and _handle_ask_user independently testable."""
+
+    def test_web_fetch_confirm_true(self):
+        from unittest.mock import MagicMock
+        from voidrift_cli.commands._chat_display import _handle_web_fetch_confirm
+        console = MagicMock()
+        result = _handle_web_fetch_confirm("https://example.com", console, lambda: True)
+        assert result is True
+        console.print.assert_called_once()
+
+    def test_web_fetch_confirm_false(self):
+        from unittest.mock import MagicMock
+        from voidrift_cli.commands._chat_display import _handle_web_fetch_confirm
+        console = MagicMock()
+        result = _handle_web_fetch_confirm("https://example.com", console, lambda: False)
+        assert result is False
+
+    def test_ask_user_with_options_prints_all(self):
+        from unittest.mock import MagicMock, call
+        from voidrift_cli.commands._chat_display import _handle_ask_user
+        console = MagicMock()
+        _handle_ask_user("Pick one?", ["a", "b"], console, lambda: "a")
+        calls = [str(c) for c in console.print.call_args_list]
+        assert any("a" in c for c in calls)
+        assert any("b" in c for c in calls)
+
+    def test_ask_user_without_options(self):
+        from unittest.mock import MagicMock
+        from voidrift_cli.commands._chat_display import _handle_ask_user
+        console = MagicMock()
+        result = _handle_ask_user("What?", None, console, lambda: "answer")
+        assert result == "answer"
+        assert console.print.call_count == 1
+
+
+class TestChatDisplay:
+    """V-U-21: Phase 5 — ChatDisplay lifecycle independently testable."""
+
+    def test_context_manager_enters_and_exits(self):
+        from unittest.mock import MagicMock, patch
+        from voidrift_cli.commands._chat_display import ChatDisplay
+        console = MagicMock()
+        with patch("rich.live.Live.__enter__", return_value=None), \
+             patch("rich.live.Live.__exit__", return_value=False):
+            with ChatDisplay(console) as display:
+                assert display is not None
+
+    def test_print_assistant_delegates_to_console(self):
+        from unittest.mock import MagicMock
+        from voidrift_cli.commands._chat_display import ChatDisplay
+        console = MagicMock()
+        display = ChatDisplay(console)
+        display.print_assistant("hello")
+        console.print.assert_called_once_with("hello")
+
+    def test_print_tool_call_delegates_to_console(self):
+        from unittest.mock import MagicMock
+        from voidrift_cli.commands._chat_display import ChatDisplay
+        console = MagicMock()
+        display = ChatDisplay(console)
+        display.print_tool_call("read_file", {"path": "x.py"})
+        assert console.print.called
+
+
+class TestPermissionGate:
+    """V-U-22: REQ-U-22 — session-scoped permission gate for chat write/run/read-outside."""
+
+    def test_gate_defaults_all_false(self):
+        """PermissionGate starts with all categories denied."""
+        from voidrift_cli.commands._chat_display import PermissionGate
+        gate = PermissionGate()
+        assert gate.writes is False
+        assert gate.runs is False
+        assert gate.reads_outside is False
+
+    def test_permission_prompt_allow_once(self):
+        """Selecting '1' allows the action without updating the gate."""
+        from voidrift_cli.commands._chat_display import PermissionGate, _handle_permission_prompt
+        from unittest.mock import MagicMock
+        gate = PermissionGate()
+        console = MagicMock()
+        result = _handle_permission_prompt("writes", "write_source_file('src/main.py')", gate, console, lambda: "1")
+        assert result is True
+        assert gate.writes is False  # allow-once does not update gate
+
+    def test_permission_prompt_always_allow_sets_gate(self):
+        """Selecting '2' allows the action and sets the gate category to True."""
+        from voidrift_cli.commands._chat_display import PermissionGate, _handle_permission_prompt
+        from unittest.mock import MagicMock
+        gate = PermissionGate()
+        console = MagicMock()
+        result = _handle_permission_prompt("writes", "write_source_file('src/main.py')", gate, console, lambda: "2")
+        assert result is True
+        assert gate.writes is True
+
+    def test_permission_prompt_deny(self):
+        """Selecting '3' denies the action and does not update the gate."""
+        from voidrift_cli.commands._chat_display import PermissionGate, _handle_permission_prompt
+        from unittest.mock import MagicMock
+        gate = PermissionGate()
+        console = MagicMock()
+        result = _handle_permission_prompt("writes", "write_source_file('src/main.py')", gate, console, lambda: "3")
+        assert result is False
+        assert gate.writes is False
+
+    def test_permission_prompt_eof_denies(self):
+        """EOFError from input_fn is treated as deny."""
+        from voidrift_cli.commands._chat_display import PermissionGate, _handle_permission_prompt
+        from unittest.mock import MagicMock
+        gate = PermissionGate()
+        console = MagicMock()
+        def _raise(): raise EOFError
+        result = _handle_permission_prompt("runs", "run_command('npm install')", gate, console, _raise)
+        assert result is False
+
+    def test_write_guard_prompts_without_session_grant(self, tmp_path):
+        """write_source_file prompts when gate.writes is False."""
+        from voidrift_cli.tool_builder import build_handlers
+        from voidrift_cli.commands._chat_display import PermissionGate
+        from voidrift_cli.tools.filesystem import WriteContext
+
+        gate = PermissionGate()
+        calls = []
+        holder = [lambda cat, desc: calls.append((cat, desc)) or True]  # allow once
+
+        ctx = WriteContext(project_dir=tmp_path)
+        handlers = build_handlers(
+            cmd="chat",
+            project_dir=tmp_path,
+            ctx=ctx,
+            permission_gate=gate,
+            permission_confirm_holder=holder,
+        )
+        result = handlers["write_source_file"]("src/main.py", "print('hello')")
+        assert len(calls) == 1
+        assert calls[0][0] == "writes"
+        assert "src/main.py" in calls[0][1]
+        assert "Wrote" in result
+
+    def test_write_guard_skips_prompt_with_session_grant(self, tmp_path):
+        """write_source_file skips prompt when gate.writes is True."""
+        from voidrift_cli.tool_builder import build_handlers
+        from voidrift_cli.commands._chat_display import PermissionGate
+        from voidrift_cli.tools.filesystem import WriteContext
+
+        gate = PermissionGate(writes=True)
+        calls = []
+        holder = [lambda cat, desc: calls.append((cat, desc)) or True]
+
+        ctx = WriteContext(project_dir=tmp_path)
+        handlers = build_handlers(
+            cmd="chat",
+            project_dir=tmp_path,
+            ctx=ctx,
+            permission_gate=gate,
+            permission_confirm_holder=holder,
+        )
+        handlers["write_source_file"]("src/main.py", "print('hello')")
+        assert len(calls) == 0  # no prompt
+
+    def test_write_guard_deny_returns_message_no_write(self, tmp_path):
+        """Operator denying write returns denial message and does not write the file."""
+        from voidrift_cli.tool_builder import build_handlers
+        from voidrift_cli.commands._chat_display import PermissionGate
+        from voidrift_cli.tools.filesystem import WriteContext
+
+        gate = PermissionGate()
+        holder = [lambda cat, desc: False]  # always deny
+
+        ctx = WriteContext(project_dir=tmp_path)
+        handlers = build_handlers(
+            cmd="chat",
+            project_dir=tmp_path,
+            ctx=ctx,
+            permission_gate=gate,
+            permission_confirm_holder=holder,
+        )
+        result = handlers["write_source_file"]("src/main.py", "print('hello')")
+        assert "denied" in result.lower()
+        assert not (tmp_path / "src" / "main.py").exists()
+
+    def test_run_guard_prompts_and_denies(self, tmp_path):
+        """run_command in chat prompts and returns denial JSON when denied."""
+        import json
+        from voidrift_cli.tool_builder import build_handlers
+        from voidrift_cli.commands._chat_display import PermissionGate
+        from voidrift_cli.tools.filesystem import WriteContext
+
+        gate = PermissionGate()
+        holder = [lambda cat, desc: False]  # deny
+
+        ctx = WriteContext(project_dir=tmp_path)
+        handlers = build_handlers(
+            cmd="chat",
+            project_dir=tmp_path,
+            ctx=ctx,
+            permission_gate=gate,
+            permission_confirm_holder=holder,
+        )
+        result = handlers["run_command"]("echo hello")
+        parsed = json.loads(result)
+        assert "denied" in parsed["error"].lower()
+        assert parsed["exit_code"] == -1
+
+    def test_run_guard_skips_prompt_with_session_grant(self, tmp_path):
+        """run_command skips prompt when gate.runs is True."""
+        from voidrift_cli.tool_builder import build_handlers
+        from voidrift_cli.commands._chat_display import PermissionGate
+        from voidrift_cli.tools.filesystem import WriteContext
+
+        gate = PermissionGate(runs=True)
+        calls = []
+        holder = [lambda cat, desc: calls.append((cat, desc)) or True]
+
+        ctx = WriteContext(project_dir=tmp_path)
+        handlers = build_handlers(
+            cmd="chat",
+            project_dir=tmp_path,
+            ctx=ctx,
+            permission_gate=gate,
+            permission_confirm_holder=holder,
+        )
+        handlers["run_command"]("echo hello")
+        assert len(calls) == 0
+
+    def test_read_inside_project_no_prompt(self, tmp_path):
+        """read_source_file within project dir proceeds without any prompt."""
+        from voidrift_cli.tool_builder import build_handlers
+        from voidrift_cli.commands._chat_display import PermissionGate
+        from voidrift_cli.tools.filesystem import WriteContext
+
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "main.py").write_text("print('hello')")
+
+        gate = PermissionGate()
+        calls = []
+        holder = [lambda cat, desc: calls.append((cat, desc)) or True]
+
+        ctx = WriteContext(project_dir=tmp_path)
+        handlers = build_handlers(
+            cmd="chat",
+            project_dir=tmp_path,
+            ctx=ctx,
+            permission_gate=gate,
+            permission_confirm_holder=holder,
+        )
+        result = handlers["read_source_file"]("src/main.py")
+        assert "print" in result
+        assert len(calls) == 0  # no prompt
+
+    def test_read_outside_project_prompts(self, tmp_path):
+        """read_source_file outside project dir triggers the reads_outside gate."""
+        from voidrift_cli.tool_builder import build_handlers
+        from voidrift_cli.commands._chat_display import PermissionGate
+        from voidrift_cli.tools.filesystem import WriteContext
+        import tempfile, os
+
+        # Create a file outside tmp_path
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
+            f.write("outside = True\n")
+            outside_path = f.name
+
+        try:
+            gate = PermissionGate()
+            calls = []
+            holder = [lambda cat, desc: calls.append((cat, desc)) or True]  # allow
+
+            ctx = WriteContext(project_dir=tmp_path)
+            handlers = build_handlers(
+                cmd="chat",
+                project_dir=tmp_path,
+                ctx=ctx,
+                permission_gate=gate,
+                permission_confirm_holder=holder,
+            )
+            result = handlers["read_source_file"](outside_path)
+            assert len(calls) == 1
+            assert calls[0][0] == "reads_outside"
+            assert "outside" in result
+        finally:
+            os.unlink(outside_path)
+
+    def test_read_outside_denied_returns_message(self, tmp_path):
+        """Denying an outside-project read returns a denial message."""
+        from voidrift_cli.tool_builder import build_handlers
+        from voidrift_cli.commands._chat_display import PermissionGate
+        from voidrift_cli.tools.filesystem import WriteContext
+        import tempfile, os
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
+            f.write("outside = True\n")
+            outside_path = f.name
+
+        try:
+            gate = PermissionGate()
+            holder = [lambda cat, desc: False]  # deny
+
+            ctx = WriteContext(project_dir=tmp_path)
+            handlers = build_handlers(
+                cmd="chat",
+                project_dir=tmp_path,
+                ctx=ctx,
+                permission_gate=gate,
+                permission_confirm_holder=holder,
+            )
+            result = handlers["read_source_file"](outside_path)
+            assert "denied" in result.lower()
+        finally:
+            os.unlink(outside_path)
+
+    def test_non_tty_auto_denies_write(self, tmp_path):
+        """When confirm_holder is [None] (no TTY), writes are auto-denied."""
+        from voidrift_cli.tool_builder import build_handlers
+        from voidrift_cli.commands._chat_display import PermissionGate
+        from voidrift_cli.tools.filesystem import WriteContext
+
+        gate = PermissionGate()
+        holder = [None]  # simulates non-TTY — no confirm fn
+
+        ctx = WriteContext(project_dir=tmp_path)
+        handlers = build_handlers(
+            cmd="chat",
+            project_dir=tmp_path,
+            ctx=ctx,
+            permission_gate=gate,
+            permission_confirm_holder=holder,
+        )
+        result = handlers["write_source_file"]("src/main.py", "print('hello')")
+        assert "denied" in result.lower()
+        assert not (tmp_path / "src" / "main.py").exists()
+
+    def test_develop_cmd_writes_without_gate(self, tmp_path):
+        """develop command does not apply the permission gate — writes proceed freely."""
+        from voidrift_cli.tool_builder import build_handlers
+        from voidrift_cli.tools.filesystem import WriteContext
+
+        ctx = WriteContext(project_dir=tmp_path)
+        # No permission_gate passed — automated command
+        handlers = build_handlers(
+            cmd="develop",
+            project_dir=tmp_path,
+            ctx=ctx,
+        )
+        result = handlers["write_source_file"]("src/main.py", "print('hello')")
+        assert "Wrote" in result
+        assert (tmp_path / "src" / "main.py").exists()

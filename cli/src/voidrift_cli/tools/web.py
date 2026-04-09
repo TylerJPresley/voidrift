@@ -75,7 +75,7 @@ def make_web_fetch_handler(
         from ..agent import AgentLoop
         agent_loop_cls = AgentLoop
 
-    _confirm = confirm_fn or _default_web_confirm
+    _state = {"confirm": confirm_fn or _default_web_confirm}
 
     def handler(url: str) -> str:
         # Return cached summary if available — no prompt needed for cached results
@@ -91,7 +91,7 @@ def make_web_fetch_handler(
             return f"web_fetch blocked: {e}"
 
         # Show URL and ask operator permission before making any HTTP connection
-        if not _confirm(url):
+        if not _state["confirm"](url):
             return f"Operator declined to fetch {url}."
 
         # Fetch the URL
@@ -133,4 +133,9 @@ def make_web_fetch_handler(
 
         return summary
 
+    def set_confirm(fn: Callable[[str], bool]) -> None:
+        """Replace the confirm callback (e.g. for Live-aware prompts)."""
+        _state["confirm"] = fn
+
+    handler.set_confirm = set_confirm  # type: ignore[attr-defined]
     return handler

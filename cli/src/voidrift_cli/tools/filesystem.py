@@ -391,4 +391,4 @@ from .snapshot import (
 )
 
 # Interaction tools — moved to tools/interaction.py; re-exported for back-compat
-from .interaction import web_fetch, ask_user_question, make_ask_user_handler
+from .interaction import make_ask_user_handler

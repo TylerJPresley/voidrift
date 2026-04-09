@@ -8,19 +8,19 @@ Command prompt file for the gather command. Each section is loaded via `get_prom
 
 Given a file tree, return ONLY a JSON object with files sorted into these categories:
 
-- **source**: Application code written by developers (the product itself)
+- **source**: Logic-carrying application code — JS, TS, Python, Go, Rust, Java, Vue, JSX, and similar. Never stylesheets.
 - **tests**: Test files that validate the source
 - **config**: Build and project configuration (Makefiles, pyproject.toml, tsconfig, .env.example)
 - **infrastructure**: Deployment, CI/CD, IaC (Dockerfiles, docker-compose, terraform, GitHub Actions)
 - **documentation**: Human-readable docs (READMEs, ADRs, guides, changelogs)
-- **assets**: Static resources consumed by the application (migrations, seeds, images, fonts, localization)
+- **assets**: Stylesheets (CSS, SCSS, LESS), images, fonts, migrations, seeds, localization files
 
 Use your knowledge of the project's toolchain to distinguish source from build output, generated files, binaries, lock files, and dependency directories.
 
 All categories are flat file lists. Return raw JSON, no markdown fences.
 
 Example:
-{{"source": ["src/main.py", "src/routes.py"], "tests": ["tests/test_api.py"], "config": ["pyproject.toml"], "infrastructure": ["Dockerfile"], "documentation": ["README.md"], "assets": []}}
+{{"source": ["src/main.py", "src/routes.py"], "tests": ["tests/test_api.py"], "config": ["pyproject.toml"], "infrastructure": ["Dockerfile"], "documentation": ["README.md"], "assets": ["src/style.css"]}}
 
 ## TRIAGE-VALIDATION
 
@@ -44,9 +44,7 @@ Output format: bullet points only, maximum 10 items. Start each item with `-`. F
 
 **Role:** Source Analyst — extract requirements from a source file.
 
-Steps:
-1. Call `read_source_file()` with the filepath from the user message.
-2. Return your analysis directly in your response. Do NOT call any other tool.
+The file content is provided in the user message. Analyze it directly.
 
 {analysis_lens}
 
@@ -86,4 +84,8 @@ Files:
 
 ## ANALYSIS-USER
 
-Analyze: {filepath}
+Analyze `{filepath}`:
+
+```
+{file_content}
+```

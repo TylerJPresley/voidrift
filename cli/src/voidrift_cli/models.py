@@ -12,6 +12,7 @@ operational limits; a defaults: section provides fallbacks.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import logging
 import yaml
@@ -45,6 +46,27 @@ class ModelConfig(BaseModel):
     fallback: str | None = None  # alias of fallback model (REQ-MC-4)
     max_input_tokens: int | None = None  # token budget per run (REQ-ARCH-13)
     max_output_tokens: int | None = None  # token budget per run (REQ-ARCH-13)
+    protocol: str = "openai"
+
+
+class ModelInterface:
+    """Unified interface for a model endpoint: config + protocol adapter.
+
+    The framework holds a ModelInterface everywhere a model is needed.
+    Access config data via .config; wire format via .adapter.
+    Direct attribute access delegates to .config for backward compatibility.
+    """
+
+    def __init__(self, config: "ModelConfig", adapter: "Any") -> None:
+        self.config = config
+        self.adapter = adapter
+
+    def __getattr__(self, name: str) -> Any:
+        # Delegate field access to config for backward compatibility
+        return getattr(self.config, name)
+
+    def __repr__(self) -> str:
+        return f"ModelInterface(alias={self.config.alias!r}, protocol={self.config.protocol!r})"
 
 
 def _load_models_file() -> dict:
@@ -76,14 +98,14 @@ def _load_models() -> dict[str, dict]:
     return merged
 
 
-def resolve_model(alias: str) -> ModelConfig:
+def resolve_model(alias: str) -> ModelInterface:
     """Resolve a model alias to its endpoint configuration (REQ-MC-1).
 
     Args:
         alias: Model alias (e.g. ``qwen35``, ``claude``, ``kiro-sonnet``).
 
     Returns:
-        Fully populated ModelConfig with endpoint details and operational limits.
+        ModelInterface wrapping a fully populated ModelConfig with protocol adapter.
 
     Raises:
         ValueError: If the alias is not found.
@@ -96,7 +118,7 @@ def resolve_model(alias: str) -> ModelConfig:
 
     m = models[alias]
 
-    return ModelConfig(
+    config = ModelConfig(
         alias=alias,
         model_id=m["model_id"],
         model_type=m.get("type", ""),
@@ -111,7 +133,10 @@ def resolve_model(alias: str) -> ModelConfig:
         fallback=m.get("fallback"),
         max_input_tokens=int(m["max_input_tokens"]) if m.get("max_input_tokens") else None,
         max_output_tokens=int(m["max_output_tokens"]) if m.get("max_output_tokens") else None,
+        protocol=m.get("protocol", "openai"),
     )
+    from .agent_protocol import get_adapter
+    return ModelInterface(config, get_adapter(config.protocol))
 
 
 def list_models() -> list[str]:

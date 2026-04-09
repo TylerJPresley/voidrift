@@ -187,6 +187,45 @@ class TestOpenAIAdapter:
         assert kwargs["api_key"] == "ant-key"
         assert "anthropic" in kwargs["base_url"]
 
+    # --- iter_stream ---
+
+    def test_iter_stream_text_with_usage(self):
+        """Streaming text chunks followed by a usage-only chunk capture text and token counts."""
+        def _text_chunk(text, finish=None):
+            chunk = MagicMock()
+            choice = MagicMock()
+            choice.delta.content = text
+            choice.delta.tool_calls = None
+            choice.finish_reason = finish
+            chunk.choices = [choice]
+            return chunk
+
+        def _usage_chunk():
+            chunk = MagicMock()
+            chunk.choices = []
+            chunk.usage = MagicMock()
+            chunk.usage.prompt_tokens = 10
+            chunk.usage.completion_tokens = 5
+            chunk.usage.total_tokens = 15
+            return chunk
+
+        chunks = [
+            _text_chunk("Hello "),
+            _text_chunk("world", finish="stop"),
+            _usage_chunk(),
+        ]
+        emitted = []
+        text, tool_calls, finish_reason, usage = self.adapter.iter_stream(
+            iter(chunks), emit_token=emitted.append, log_fn=lambda _: None
+        )
+        assert text == "Hello world"
+        assert emitted == ["Hello ", "world"]
+        assert finish_reason == "stop"
+        assert tool_calls == []
+        assert usage["prompt_tokens"] == 10
+        assert usage["completion_tokens"] == 5
+        assert usage["total_tokens"] == 15
+
 
 # ---------------------------------------------------------------------------
 # AnthropicAdapter
@@ -490,6 +529,8 @@ from anthropic.types import (
     RawMessageStopEvent,
     TextBlock,
     TextDelta,
+    ThinkingBlock,
+    ThinkingDelta,
     ToolUseBlock,
     Usage,
 )
@@ -556,6 +597,22 @@ def _sdk_message_delta(stop_reason: str, output_tokens: int) -> RawMessageDeltaE
 
 def _sdk_message_stop() -> RawMessageStopEvent:
     return RawMessageStopEvent(type="message_stop")
+
+
+def _sdk_think_block_start(index: int) -> RawContentBlockStartEvent:
+    return RawContentBlockStartEvent(
+        type="content_block_start",
+        index=index,
+        content_block=ThinkingBlock(type="thinking", thinking="", signature="sig"),
+    )
+
+
+def _sdk_thinking_delta(index: int, thinking: str) -> RawContentBlockDeltaEvent:
+    return RawContentBlockDeltaEvent(
+        type="content_block_delta",
+        index=index,
+        delta=ThinkingDelta(type="thinking_delta", thinking=thinking),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -651,3 +708,146 @@ class TestAnthropicAdapterStreamRealSDK:
         assert len(tool_calls) == 1
         assert tool_calls[0]["function"]["name"] == "lookup"
         assert finish_reason == "tool_calls"
+
+    def test_think_block_stream(self):
+        """Think block spanning two thinking_delta events: logged via log_fn, excluded from text."""
+        events = [
+            _sdk_message_start(12),
+            _sdk_think_block_start(0),
+            _sdk_thinking_delta(0, "Let me think "),
+            _sdk_thinking_delta(0, "about this."),
+            _sdk_block_stop(0),
+            _sdk_text_block_start(1),
+            _sdk_text_delta(1, "Answer."),
+            _sdk_block_stop(1),
+            _sdk_message_delta("end_turn", 6),
+            _sdk_message_stop(),
+        ]
+        logged = []
+        emitted = []
+        text, tool_calls, finish_reason, usage = self.adapter.iter_stream(
+            iter(events), emit_token=emitted.append, log_fn=logged.append
+        )
+        assert text == "Answer."
+        assert emitted == ["Answer."]
+        assert len(logged) == 1
+        assert "[THINKING]" in logged[0]
+        assert "Let me think" in logged[0]
+        assert "about this." in logged[0]
+        assert finish_reason == "stop"
+        assert tool_calls == []
+
+    def test_tool_use_stream_three_chunks(self):
+        """Tool call JSON split across three input_json_delta events produces correct arguments."""
+        events = [
+            _sdk_message_start(18),
+            _sdk_tool_block_start(0, "tu3", "search"),
+            _sdk_json_delta(0, '{"q":'),
+            _sdk_json_delta(0, ' "py'),
+            _sdk_json_delta(0, 'thon"}'),
+            _sdk_block_stop(0),
+            _sdk_message_delta("tool_use", 7),
+            _sdk_message_stop(),
+        ]
+        text, tool_calls, finish_reason, usage = self.adapter.iter_stream(
+            iter(events), emit_token=lambda _: None, log_fn=lambda _: None
+        )
+        assert finish_reason == "tool_calls"
+        assert len(tool_calls) == 1
+        assert tool_calls[0]["function"]["name"] == "search"
+        assert json.loads(tool_calls[0]["function"]["arguments"]) == {"q": "python"}
+        assert tool_calls[0]["id"] == "tu3"
+        assert text == ""
+
+
+# ---------------------------------------------------------------------------
+# REQ-ARCH-20 — stream_options only for known providers
+# ---------------------------------------------------------------------------
+
+class TestStreamOptions:
+    """V-ARCH-20: stream_options injected for known providers only (REQ-ARCH-20)."""
+
+    def setup_method(self):
+        self.adapter = OpenAIAdapter()
+
+    def test_openai_provider_gets_stream_options(self):
+        """provider='openai' → stream_options in wire request."""
+        req = self.adapter.build_request(
+            {"model": "gpt-4o", "messages": []},
+            provider="openai",
+        )
+        assert req.get("stream_options") == {"include_usage": True}
+
+    def test_anthropic_provider_gets_stream_options(self):
+        """provider='anthropic' (via OpenAI compat) → stream_options in wire request."""
+        req = self.adapter.build_request(
+            {"model": "claude-4", "messages": []},
+            provider="anthropic",
+        )
+        assert req.get("stream_options") == {"include_usage": True}
+
+    def test_gemini_provider_gets_stream_options(self):
+        """provider='gemini' → stream_options in wire request."""
+        req = self.adapter.build_request(
+            {"model": "gemini-2.5-pro", "messages": []},
+            provider="gemini",
+        )
+        assert req.get("stream_options") == {"include_usage": True}
+
+    def test_no_provider_omits_stream_options(self):
+        """Generic OpenAI-compatible (no provider) → stream_options absent."""
+        req = self.adapter.build_request(
+            {"model": "local-model", "messages": []},
+            provider="",
+        )
+        assert "stream_options" not in req
+
+    def test_unrecognized_provider_omits_stream_options(self):
+        """Unknown cloud provider → stream_options absent."""
+        req = self.adapter.build_request(
+            {"model": "glm-4", "messages": []},
+            provider="z.ai",
+        )
+        assert "stream_options" not in req
+
+    def test_vllm_provider_omits_stream_options(self):
+        """Local vLLM (no provider set) → stream_options absent."""
+        req = self.adapter.build_request(
+            {"model": "qwen3", "messages": []},
+            provider="vllm",
+        )
+        assert "stream_options" not in req
+
+    def test_caller_cannot_inject_stream_options(self):
+        """Caller-supplied stream_options is stripped then re-applied only for known providers.
+
+        For an unknown provider the incoming stream_options must not survive.
+        """
+        req = self.adapter.build_request(
+            {"model": "m", "messages": [], "stream_options": {"include_usage": True}},
+            provider="",
+        )
+        assert "stream_options" not in req
+
+    def test_decision_in_build_request_not_create_raw_stream(self):
+        """create_raw_stream passes wire_request through without adding stream_options itself."""
+        mock_client = MagicMock()
+        captured: list[dict] = []
+
+        def fake_create(**kw):
+            captured.append(kw)
+            stream = MagicMock()
+            stream.__iter__ = MagicMock(return_value=iter([]))
+            return stream
+
+        mock_client.chat.completions.create.side_effect = fake_create
+        # Wire request already has stream_options set (as build_request would for openai)
+        wire_req = {"model": "m", "messages": [], "stream_options": {"include_usage": True}}
+        self.adapter.create_raw_stream(mock_client, wire_req)
+
+        assert mock_client.chat.completions.create.called
+        call_kwargs = mock_client.chat.completions.create.call_args[1]
+        # create_raw_stream should not add another stream_options — it's already in wire_req
+        assert call_kwargs.get("stream") is True
+        # The stream_options from wire_req is passed through unchanged
+        assert call_kwargs.get("stream_options") == {"include_usage": True}

@@ -40,6 +40,32 @@ cache:
   max_entries: 500
   ttl_days: 30
 
+stage_max_tokens:
+  # Gather
+  gather.triage: 8192
+  gather.analysis: 8192
+  gather.consolidation: 32768
+  # Plan
+  plan.delta: 8192
+  plan.architecture: 32768
+  plan.module-arch: 32768
+  plan.outline: 8192
+  plan.deps: 8192
+  plan.task: 16384
+  plan.readme: 32768
+  # Develop
+  develop.task: 16384
+  develop.escalation: 16384
+  # Verify
+  verify.plan: 32768
+  verify.execute: 8192
+  # Chat
+  chat.session: 16384
+  chat.quick: 2048
+  # Deploy
+  deploy.version: 4096
+  deploy.iac: 8192
+
 bash:
   timeout: 120
   max_output_lines: 500

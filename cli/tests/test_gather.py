@@ -129,6 +129,16 @@ class TestGatherInputChunking:
         assert chunks[-1] == text[-(len(chunks[-1])):]
         assert text.endswith(chunks[-1])
 
+    def test_make_chunks_clamps_overlap_when_gte_size(self):
+        """_make_chunks clamps overlap to size-1 when overlap >= size (REQ-G-13)."""
+        from voidrift_cli.commands.gather import _make_chunks
+        text = "x = 1\n" * 100  # 600 chars
+        chunks = _make_chunks(text, 50, overlap=200)
+        # Must terminate with finite chunks covering the full text
+        assert len(chunks) > 1
+        assert all(len(c) <= 50 for c in chunks)
+        assert text.endswith(chunks[-1][-6:])  # last line present
+
     def test_local_model_chunk_size_is_8000(self, local_model):
         """Local model input limit (chunk size) is read from model config."""
         assert local_model.max_input_chars == 8000
@@ -217,7 +227,7 @@ class TestGatherPreflightChecks:
         result = run_gather(cloud_model, from_path="/nonexistent/path")
         assert result == 1
 
-    @patch("voidrift_cli.commands.gather.AgentLoop")
+    @patch("voidrift_cli.commands._gather_pipeline.AgentLoop")
     def test_existing_target_reads_for_update(self, MockAgent, tmp_project, cloud_model, sample_requirements):
         """When REQUIREMENTS.md exists and --overwrite is not set, existing content is passed to final pass."""
         from voidrift_cli.commands.gather import run_gather
@@ -299,6 +309,67 @@ class TestAnalysisCachePrune:
         assert stats == {"stale": 0, "expired": 0, "lru": 0, "bytes_freed": 0}
 
 
+class TestTriageJsonSanitization:
+    """V-G-12: REQ-G-20 — control characters stripped before JSON parse in triage."""
+
+    def test_control_chars_stripped_from_triage_response(self, tmp_path, cloud_model):
+        """Literal newlines inside JSON string values don't break triage parsing."""
+        from voidrift_cli.commands.gather import _run_triage
+
+        log = tmp_path / "test.log"
+        log.touch()
+        # Simulate model output with literal newlines inside a JSON string value
+        bad_json = '{"source": ["frontend/index.html\n\n"], "tests": [], "config": [], "infrastructure": [], "documentation": [], "assets": []}'
+
+        with patch("voidrift_cli.commands._gather_pipeline.AgentLoop") as MockAgent:
+            mock = MagicMock()
+            mock.send.side_effect = [bad_json, '["frontend/index.html"]']
+            MockAgent.return_value = mock
+
+            categories = _run_triage(cloud_model, log, "", "tree", None, None)
+
+        assert "source" in categories
+        assert "frontend/index.html" in categories["source"]
+
+    def test_fallback_regex_path_also_sanitized(self, tmp_path, cloud_model):
+        """Regex fallback also strips control characters before parsing."""
+        from voidrift_cli.commands.gather import _run_triage
+
+        log = tmp_path / "test.log"
+        log.touch()
+        # Preamble text before JSON, with control chars inside the JSON
+        bad_response = 'Here is the result:\n{"source": ["main.py\t"], "tests": [], "config": [], "infrastructure": [], "documentation": [], "assets": []}'
+
+        with patch("voidrift_cli.commands._gather_pipeline.AgentLoop") as MockAgent:
+            mock = MagicMock()
+            mock.send.side_effect = [bad_response, '["main.py"]']
+            MockAgent.return_value = mock
+
+            categories = _run_triage(cloud_model, log, "", "tree", None, None)
+
+        assert "main.py" in categories["source"]
+
+    def test_truncated_json_repaired(self, tmp_path, cloud_model):
+        """Truncated JSON from max_tokens cutoff is repaired by closing brackets."""
+        from voidrift_cli.commands.gather import _run_triage
+
+        log = tmp_path / "test.log"
+        log.touch()
+        # Simulate max_tokens truncation — JSON cut off mid-object
+        truncated = '{"source": ["main.py", "app.py"], "tests": [], "config": ["pkg.json"],'
+
+        with patch("voidrift_cli.commands._gather_pipeline.AgentLoop") as MockAgent:
+            mock = MagicMock()
+            mock.send.side_effect = [truncated, '["main.py", "app.py", "pkg.json"]']
+            MockAgent.return_value = mock
+
+            categories = _run_triage(cloud_model, log, "", "tree", None, None)
+
+        assert "main.py" in categories["source"]
+        assert "app.py" in categories["source"]
+        assert "pkg.json" in categories["config"]
+
+
 class TestGatherPipelineStages:
     """V-G-10: pipeline stages are individually callable (REQ-G-8, REQ-ARCH-7)."""
 
@@ -310,7 +381,7 @@ class TestGatherPipelineStages:
         log.touch()
         triage_json = '{"source": ["src/main.py"], "tests": ["tests/test_main.py"]}'
 
-        with patch("voidrift_cli.commands.gather.AgentLoop") as MockAgent:
+        with patch("voidrift_cli.commands._gather_pipeline.AgentLoop") as MockAgent:
             mock = MagicMock()
             # First call: triage; second call: validation
             mock.send.side_effect = [triage_json, '["src/main.py", "tests/test_main.py"]']
@@ -328,7 +399,7 @@ class TestGatherPipelineStages:
         log = tmp_path / "test.log"
         log.touch()
 
-        with patch("voidrift_cli.commands.gather.AgentLoop") as MockAgent:
+        with patch("voidrift_cli.commands._gather_pipeline.AgentLoop") as MockAgent:
             mock = MagicMock()
             mock.send.return_value = "I could not produce JSON"
             MockAgent.return_value = mock
@@ -351,7 +422,7 @@ class TestGatherPipelineStages:
         errors = MagicMock()
         errors.record = MagicMock()
 
-        with patch("voidrift_cli.commands.gather.AgentLoop") as MockAgent:
+        with patch("voidrift_cli.commands._gather_pipeline.AgentLoop") as MockAgent:
             mock = MagicMock()
             mock.send.return_value = "Summary of tests category"
             MockAgent.return_value = mock
@@ -373,24 +444,24 @@ class TestGatherPipelineStages:
         errors = MagicMock()
 
         result = _run_source_analysis(
-            cloud_model, [], tmp_path, log, [], {}, "",
+            cloud_model, [], tmp_path, log, "",
             tmp_path / ".voidrift" / "REQUIREMENTS.md", None, None, 1, errors
         )
         assert result == {}
 
-    def test_run_final_pass_returns_string(self, tmp_path, cloud_model):
-        """_run_final_pass returns the agent response string."""
-        from voidrift_cli.commands.gather import _run_final_pass
+    def test_run_consolidation_returns_string(self, tmp_path, cloud_model):
+        """_run_consolidation returns the agent response string."""
+        from voidrift_cli.commands.gather import _run_consolidation
 
         log = tmp_path / "test.log"
         log.touch()
 
-        with patch("voidrift_cli.commands.gather.AgentLoop") as MockAgent:
+        with patch("voidrift_cli.commands._gather_pipeline.AgentLoop") as MockAgent:
             mock = MagicMock()
             mock.send.return_value = "# Requirements\n\nREQ-1: Test requirement"
             MockAgent.return_value = mock
 
-            result = _run_final_pass(
+            result = _run_consolidation(
                 cloud_model,
                 {"src/main.py": "analysis text"},
                 {"tests": "test summary"},
@@ -401,10 +472,282 @@ class TestGatherPipelineStages:
         assert "# Requirements" in result
 
     def test_gather_from_uses_named_stages(self):
-        """_run_triage, _run_context_build, _run_source_analysis, _run_final_pass
+        """_run_triage, _run_context_build, _run_source_analysis, _run_consolidation
         are importable from gather module (REQ-ARCH-7)."""
         from voidrift_cli.commands import gather as gather_mod
         assert hasattr(gather_mod, "_run_triage")
         assert hasattr(gather_mod, "_run_context_build")
         assert hasattr(gather_mod, "_run_source_analysis")
-        assert hasattr(gather_mod, "_run_final_pass")
+        assert hasattr(gather_mod, "_run_consolidation")
+
+
+class TestGatherSourceReads:
+    """V-G-10: REQ-G-18 — gather reads source files via WriteContext with full guards."""
+
+    def test_reads_from_source_dir(self, tmp_path):
+        """Source WriteContext is rooted at from_path, not project dir."""
+        from voidrift_cli.tools.filesystem import WriteContext
+
+        source_dir = tmp_path / "src"
+        source_dir.mkdir()
+        (source_dir / "main.py").write_text("print('hello')\n")
+
+        ctx = WriteContext(project_dir=source_dir, max_read_lines=2000)
+        result = ctx.read_source_file("main.py")
+        assert "print('hello')" in result
+
+    def test_offset_limit_supported(self, tmp_path):
+        """Source reads support offset and limit parameters."""
+        from voidrift_cli.tools.filesystem import WriteContext
+
+        source_dir = tmp_path / "src"
+        source_dir.mkdir()
+        lines = "\n".join(f"line {i}" for i in range(100)) + "\n"
+        (source_dir / "big.py").write_text(lines)
+
+        ctx = WriteContext(project_dir=source_dir, max_read_lines=2000)
+        result = ctx.read_source_file("big.py", offset=10, limit=5)
+        assert "line 10" in result
+        assert "line 14" in result
+        assert "line 9" not in result
+        assert "line 15" not in result
+
+    def test_sandbox_blocks_traversal(self, tmp_path):
+        """Sandbox enforcement blocks path traversal outside source dir."""
+        from voidrift_cli.tools.filesystem import WriteContext
+
+        source_dir = tmp_path / "src"
+        source_dir.mkdir()
+        (tmp_path / "secret.txt").write_text("secret")
+
+        ctx = WriteContext(project_dir=source_dir, max_read_lines=2000)
+        result = ctx.read_source_file("../secret.txt")
+        assert "Access denied" in result or "outside" in result.lower()
+
+    def test_pagination_warning_on_large_file(self, tmp_path):
+        """Large files get pagination warning with offset instructions."""
+        from voidrift_cli.tools.filesystem import WriteContext
+
+        source_dir = tmp_path / "src"
+        source_dir.mkdir()
+        lines = "\n".join(f"line {i}" for i in range(200)) + "\n"
+        (source_dir / "big.py").write_text(lines)
+
+        ctx = WriteContext(project_dir=source_dir, max_read_lines=50)
+        result = ctx.read_source_file("big.py")
+        assert "WARNING" in result
+        assert "offset=" in result
+
+    def test_no_post_build_handler_override(self, tmp_path, cloud_model):
+        """build_local_tools with source_read_ctx returns handler at build time."""
+        from voidrift_cli.tools.filesystem import WriteContext
+        from voidrift_cli.tool_builder import build_local_tools
+
+        project_dir = tmp_path / "project"
+        project_dir.mkdir()
+        (project_dir / ".voidrift").mkdir()
+        source_dir = tmp_path / "src"
+        source_dir.mkdir()
+        (source_dir / "app.py").write_text("x = 1\n")
+
+        source_ctx = WriteContext(project_dir=source_dir, max_read_lines=2000)
+        tools, handlers = build_local_tools(
+            cmd="gather", project_dir=project_dir,
+            source_read_ctx=source_ctx,
+        )
+        # Handler should be the source context's method — reads from source_dir
+        result = handlers["read_source_file"]("app.py")
+        assert "x = 1" in result
+
+    def test_build_handlers_source_read_ctx(self, tmp_path):
+        """build_handlers with source_read_ctx wires source context at build time."""
+        from voidrift_cli.tools.filesystem import WriteContext
+        from voidrift_cli.tool_builder import build_handlers
+
+        project_dir = tmp_path / "project"
+        project_dir.mkdir()
+        source_dir = tmp_path / "src"
+        source_dir.mkdir()
+        (source_dir / "mod.py").write_text("y = 2\n")
+
+        source_ctx = WriteContext(project_dir=source_dir, max_read_lines=2000)
+        handlers = build_handlers(
+            cmd="gather", project_dir=project_dir,
+            source_read_ctx=source_ctx,
+        )
+        result = handlers["read_source_file"]("mod.py")
+        assert "y = 2" in result
+
+    def test_build_handlers_without_source_read_ctx(self, tmp_path):
+        """Without source_read_ctx, read_source_file uses project dir."""
+        from voidrift_cli.tools.filesystem import WriteContext
+        from voidrift_cli.tool_builder import build_handlers
+
+        project_dir = tmp_path / "project"
+        project_dir.mkdir()
+        (project_dir / "app.py").write_text("z = 3\n")
+
+        handlers = build_handlers(cmd="gather", project_dir=project_dir)
+        result = handlers["read_source_file"]("app.py")
+        assert "z = 3" in result
+
+
+class TestZeroToolSourceAnalysis:
+    """V-G-11: REQ-G-19 — source analysis subagent has zero tools, content in user message."""
+
+    def test_normal_flow_agent_has_zero_tools(self, tmp_path, cloud_model):
+        """Normal-flow source analysis creates AgentLoop with tools=[] and tool_handlers={}."""
+        from voidrift_cli.commands.gather import _run_source_analysis
+        from unittest.mock import MagicMock, patch
+
+        source_dir = tmp_path / "src"
+        source_dir.mkdir()
+        (source_dir / "app.py").write_text("x = 1\n")
+
+        log = tmp_path / "test.log"
+        log.touch()
+        target = tmp_path / ".voidrift" / "REQUIREMENTS.md"
+        target.parent.mkdir(parents=True)
+        errors = MagicMock()
+
+        captured_kwargs = {}
+
+        with patch("voidrift_cli.commands._gather_pipeline.AgentLoop") as MockAgent:
+            mock_instance = MagicMock()
+            mock_instance.send.return_value = "- REQ: x equals 1"
+
+            def capture_init(**kwargs):
+                captured_kwargs.update(kwargs)
+                return mock_instance
+
+            MockAgent.side_effect = capture_init
+
+            _run_source_analysis(
+                cloud_model, ["app.py"], source_dir, log, "",
+                target, None, None, 1, errors,
+            )
+
+        assert captured_kwargs["tools"] == []
+        assert captured_kwargs["tool_handlers"] == {}
+
+    def test_file_content_in_user_message(self, tmp_path, cloud_model):
+        """Normal-flow source analysis injects file content into the user message."""
+        from voidrift_cli.commands.gather import _run_source_analysis
+        from unittest.mock import MagicMock, patch
+
+        source_dir = tmp_path / "src"
+        source_dir.mkdir()
+        (source_dir / "main.py").write_text("def hello():\n    return 'world'\n")
+
+        log = tmp_path / "test.log"
+        log.touch()
+        target = tmp_path / ".voidrift" / "REQUIREMENTS.md"
+        target.parent.mkdir(parents=True)
+        errors = MagicMock()
+
+        sent_message = {}
+
+        with patch("voidrift_cli.commands._gather_pipeline.AgentLoop") as MockAgent:
+            mock_instance = MagicMock()
+
+            def capture_send(msg):
+                sent_message["text"] = msg
+                return "- REQ: hello returns world"
+
+            mock_instance.send.side_effect = capture_send
+            MockAgent.return_value = mock_instance
+
+            _run_source_analysis(
+                cloud_model, ["main.py"], source_dir, log, "",
+                target, None, None, 1, errors,
+            )
+
+        assert "def hello():" in sent_message["text"]
+        assert "return 'world'" in sent_message["text"]
+        assert "main.py" in sent_message["text"]
+
+    def test_analysis_prompt_no_tool_instruction(self):
+        """ANALYSIS prompt does not reference read_source_file or tool calls."""
+        from voidrift_cli import prompts
+
+        prompt = prompts.load_prompt("gather", "ANALYSIS")
+        assert "read_source_file" not in prompt
+        assert "Call" not in prompt.split("\n")[0] if prompt else True
+
+    def test_chunked_flow_unchanged(self, tmp_path):
+        """Chunked flow for large files still uses zero tools with content in message."""
+        from voidrift_cli.commands.gather import _run_source_analysis
+        from voidrift_cli.models import ModelConfig
+        from unittest.mock import MagicMock, patch
+
+        model = ModelConfig(
+            alias="test", model_id="test", model_type="local",
+            api_base="http://localhost:8000/v1", api_key="k",
+            max_input_chars=50,
+        )
+
+        source_dir = tmp_path / "src"
+        source_dir.mkdir()
+        (source_dir / "big.py").write_text("x = 1\n" * 100)
+
+        log = tmp_path / "test.log"
+        log.touch()
+        target = tmp_path / ".voidrift" / "REQUIREMENTS.md"
+        target.parent.mkdir(parents=True)
+        errors = MagicMock()
+
+        agent_kwargs_list = []
+
+        with patch("voidrift_cli.commands._gather_pipeline.AgentLoop") as MockAgent:
+            mock_instance = MagicMock()
+            mock_instance.send.return_value = "- REQ: chunked analysis"
+
+            def capture_init(**kwargs):
+                agent_kwargs_list.append(dict(kwargs))
+                return mock_instance
+
+            MockAgent.side_effect = capture_init
+
+            _run_source_analysis(
+                model, ["big.py"], source_dir, log, "",
+                target, None, None, 1, errors,
+            )
+
+        # All chunk agents should have zero tools
+        for kwargs in agent_kwargs_list:
+            assert kwargs["tools"] == []
+            assert kwargs["tool_handlers"] == {}
+
+
+class TestGatherElapsedOutput:
+    """V-G-15: REQ-G-21 — gather final line includes total elapsed time."""
+
+    @patch("voidrift_cli.commands._gather_pipeline.AgentLoop")
+    def test_done_line_contains_elapsed(self, MockAgent, tmp_project, cloud_model, capsys):
+        """The final success message includes a total elapsed time string."""
+        from voidrift_cli.commands.gather import run_gather
+
+        mock_instance = MagicMock()
+
+        def make_mock():
+            m = MagicMock()
+            call_count = [0]
+
+            def side_effect(msg):
+                call_count[0] += 1
+                if call_count[0] == 1 and msg.startswith("File tree:"):
+                    return "{}"
+                return "# Requirements\n\n- REQ-1: test"
+
+            m.send.side_effect = side_effect
+            return m
+
+        MockAgent.side_effect = lambda **kwargs: make_mock()
+
+        run_gather(cloud_model, from_path=str(tmp_project))
+        captured = capsys.readouterr()
+        # The done line must contain an elapsed time — either Ns or Nm Ns format.
+        import re
+        assert re.search(r"\(\d+s\)|\(\d+m \d+s\)", captured.out), (
+            f"Expected elapsed time in output, got: {captured.out!r}"
+        )

@@ -135,7 +135,7 @@ def run_deploy(worker: ModelConfig, architect: ModelConfig | None = None) -> int
         system_prompt=prompts.load_prompt("deploy", "VERSION-CLASSIFY"),
         tools=[], tool_handlers={},
         stream=False,
-        max_tokens=32,
+        max_tokens=get_max_tokens(worker, "deploy.version"),
         log_path=log,
         show_spinner=False,
     )
@@ -221,7 +221,8 @@ def run_deploy(worker: ModelConfig, architect: ModelConfig | None = None) -> int
             model=worker,
             system_prompt=prompts.load_prompt("deploy", "IAC"),
             tools=iac_tools, tool_handlers=iac_handlers,
-            stream=False, log_path=log, show_spinner=False,
+            stream=False, max_tokens=get_max_tokens(worker, "deploy.iac"),
+            log_path=log, show_spinner=False,
         )
         iac_mode = "Review" if _detect_iac() else "Generate"
         iac_user = prompts.load_prompt("deploy", "IAC-USER").format(
