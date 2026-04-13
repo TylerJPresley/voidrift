@@ -67,7 +67,7 @@ Test baseline: **792 passing, 1 pre-existing failure** (`make test`, 2026-04-13)
 |------|-------|------------|--------|
 | `agent.py` | 1094 | −39 | Over target — abort extracted to `_agent_abort.py` |
 | `main.py` | 750 | 0 | Over target |
-| `commands/plan.py` | 736 | +36 | Over target — coverage check added |
+| `commands/plan.py` | 423 | **−313** | ✅ Under target after split |
 | `commands/chat.py` | 681 | **−379** | ✅ Under target after split |
 | `agent_protocol.py` | 634 | −3 | Over target — never deeply audited |
 | `commands/develop.py` | 615 | +60 | Over target — hooks added |
@@ -109,7 +109,7 @@ Mixes command registration, interactive mode, and utility helpers. Could extract
 
 #### OPEN-04 — `plan.py` at 736 lines
 
-Grew with coverage check. Six pipeline stages are still inline. Could extract stage functions similar to the gather pipeline split.
+✅ FIXED — Extracted `_plan_pipeline.py` (317 lines) containing all helper functions: `dispatch_agent`, `check_req_coverage`, `extract_modules`, `arch_summary`, `parse_outline_tasks`, `format_task_entry`, `build_task_files`, skill helpers, and source file listing. `plan.py` reduced to 423 lines. 796 tests pass.
 
 #### OPEN-05 — Pre-existing test failure
 
