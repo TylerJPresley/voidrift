@@ -839,3 +839,80 @@ class TestStreamOptions:
         assert call_kwargs.get("stream") is True
         # The stream_options from wire_req is passed through unchanged
         assert call_kwargs.get("stream_options") == {"include_usage": True}
+
+
+class TestConvertMessages:
+    """Unit tests for AnthropicAdapter._convert_messages tool batching."""
+
+    def test_consecutive_tool_results_batched(self):
+        """Consecutive tool role messages are batched into a single user message."""
+        adapter = AnthropicAdapter()
+        messages = [
+            {"role": "user", "content": "hello"},
+            {"role": "assistant", "content": None, "tool_calls": [
+                {"id": "tc1", "type": "function", "function": {"name": "read", "arguments": "{}"}},
+                {"id": "tc2", "type": "function", "function": {"name": "write", "arguments": "{}"}},
+            ]},
+            {"role": "tool", "tool_call_id": "tc1", "content": "result1"},
+            {"role": "tool", "tool_call_id": "tc2", "content": "result2"},
+        ]
+        result = adapter._convert_messages(messages)
+        # user, assistant, user (batched tool results)
+        assert len(result) == 3
+        assert result[2]["role"] == "user"
+        assert len(result[2]["content"]) == 2
+        assert result[2]["content"][0]["tool_use_id"] == "tc1"
+        assert result[2]["content"][1]["tool_use_id"] == "tc2"
+
+    def test_system_messages_skipped(self):
+        """System messages are excluded (extracted separately by caller)."""
+        adapter = AnthropicAdapter()
+        messages = [
+            {"role": "system", "content": "you are helpful"},
+            {"role": "user", "content": "hi"},
+        ]
+        result = adapter._convert_messages(messages)
+        assert len(result) == 1
+        assert result[0]["role"] == "user"
+
+
+class TestOpenAIStreamThinkTag:
+    """Unit test for OpenAI iter_stream partial think-tag detection."""
+
+    def test_partial_think_tag_across_chunks(self):
+        """A <think> tag split across two chunks is handled correctly."""
+        from unittest.mock import MagicMock
+
+        adapter = OpenAIAdapter()
+        emitted = []
+        logged = []
+
+        # Simulate chunks: "Hello <thi" then "nk>secret</think> world"
+        def make_chunk(content=None, finish_reason=None):
+            chunk = MagicMock()
+            delta = MagicMock()
+            delta.content = content
+            delta.tool_calls = None
+            choice = MagicMock()
+            choice.delta = delta
+            choice.finish_reason = finish_reason
+            chunk.choices = [choice]
+            return chunk
+
+        chunks = [
+            make_chunk("Hello <thi"),
+            make_chunk("nk>secret</think> world"),
+            make_chunk(None, "stop"),
+        ]
+
+        text, tool_calls, finish, usage = adapter.iter_stream(
+            iter(chunks),
+            emit_token=lambda t: emitted.append(t),
+            log_fn=lambda t: logged.append(t),
+        )
+
+        joined = "".join(emitted)
+        assert "secret" not in joined
+        assert "Hello" in joined
+        assert "world" in joined
+        assert any("secret" in l for l in logged)

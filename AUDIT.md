@@ -104,7 +104,7 @@ The largest file in the codebase. Contains: `AgentLoop` class, all streaming/syn
 
 #### OPEN-02 — `agent_protocol.py` at 634 lines — depth unreviewed
 
-`AnthropicAdapter.iter_stream()` handles think-block buffering, tool call accumulation, and SSE event routing in a single method. Test coverage depth unknown. Should be reviewed before adding a third protocol adapter.
+✅ REVIEWED (Pass 4 deep review). No bugs or design issues found. No broad `except Exception` catches. `iter_stream()` in both adapters is linear state machine — not as complex as the old `_stream_response`. No duplicated logic between adapters. Two test coverage gaps closed: `_convert_messages` tool batching and OpenAI `iter_stream` partial think-tag detection. 64 tests now cover the file. Split recommended when a third adapter is added — not before.
 
 ### MEDIUM Priority
 
@@ -142,7 +142,7 @@ Grew with Stage 0 doc verification. Manageable but approaching threshold.
 | Queue drain correctness | 90% | **+35%** | `_drain_steering` and `_drain_one_followup` called from loop |
 | Security (log masking) | 95% | **+15%** | Newline injection fixed (A-2); `_redact_tool_result` in place |
 | File size / navigability | 55% | **+15%** | chat.py and gather.py split; 8 files still over target |
-| `agent_protocol.py` | 60% | 0% | Still unreviewed at depth |
+| `agent_protocol.py` | 90% | **+30%** | Deep review complete; 64 tests; no issues found |
 | Plan pipeline quality | 80% | NEW | REQ traceability, task-scoped ACs, coverage check |
 | Develop task quality | 85% | NEW | Self-review, reads-before-writes, file list check, done guard |
 | Chat UX | 80% | NEW | Read-first, propose, summarize, thinking indicator, gap marker |
