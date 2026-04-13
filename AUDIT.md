@@ -118,7 +118,7 @@ Grew with coverage check. Six pipeline stages are still inline. Could extract st
 
 #### OPEN-05 — Pre-existing test failure
 
-`cli/tests/test_config.py::TestGetMaxTokens::test_task_stage` has been failing throughout this session. Asserts `get_max_tokens(mc, "plan.task") == 4000` but gets `16384`. Either the test expectation is stale or the config logic changed.
+`cli/tests/test_config.py::TestGetMaxTokens::test_task_stage` — ✅ FIXED. Test was reading real `~/.voidrift/config.yml` which had `plan.task: 16384` overriding the built-in 4000. Fixed by isolating all config tests with `monkeypatch` pointing to an empty temp config.
 
 ### LOW Priority
 

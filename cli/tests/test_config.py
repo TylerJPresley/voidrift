@@ -9,7 +9,9 @@ from voidrift_cli.models import ModelConfig
 
 
 @pytest.fixture(autouse=True)
-def clear_cache():
+def clear_cache(tmp_path, monkeypatch):
+    monkeypatch.setenv("VOIDRIFT_HOME", str(tmp_path))
+    (tmp_path / "config.yml").write_text("{}\n")
     clear_config_cache()
     yield
     clear_config_cache()
