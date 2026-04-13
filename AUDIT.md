@@ -66,7 +66,7 @@ Test baseline: **792 passing, 1 pre-existing failure** (`make test`, 2026-04-13)
 | File | Lines | vs. Pass 3 | Status |
 |------|-------|------------|--------|
 | `agent.py` | 1094 | −39 | Over target — abort extracted to `_agent_abort.py` |
-| `main.py` | 750 | 0 | Over target |
+| `main.py` | 290 | **−460** | ✅ Under target after split |
 | `commands/plan.py` | 423 | **−313** | ✅ Under target after split |
 | `commands/chat.py` | 681 | **−379** | ✅ Under target after split |
 | `agent_protocol.py` | 634 | −3 | Over target — never deeply audited |
@@ -105,7 +105,7 @@ Test baseline: **792 passing, 1 pre-existing failure** (`make test`, 2026-04-13)
 
 #### OPEN-03 — `main.py` at 750 lines
 
-Mixes command registration, interactive mode, and utility helpers. Could extract interactive mode to a separate module.
+✅ FIXED — Extracted `_main_utils.py` (491 lines) containing all utility commands: status, log, prune, unlock, rollback, doctor, memory, completions. `main.py` reduced to 290 lines. Commands registered via `cli.add_command()`. 796 tests pass.
 
 #### OPEN-04 — `plan.py` at 736 lines
 
