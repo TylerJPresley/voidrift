@@ -54,6 +54,21 @@ from ._chat_display import (
 
 from ..models import shell_complete_model as _complete_model
 
+_SESSION_GAP_THRESHOLD = 1800  # 30 minutes in seconds
+
+
+def _inject_session_gap_marker(messages: list[dict], elapsed: str) -> None:
+    """Append a session gap marker to reorient the model after a long break (REQ-U-23)."""
+    gap_label = elapsed.strip(", last active ")
+    messages.append({
+        "role": "user",
+        "content": f"[Session resumed after {gap_label}. Treat this as a new conversation. Do not continue previous actions — wait for instructions.]",
+    })
+    messages.append({
+        "role": "assistant",
+        "content": "Understood — ready for your next request.",
+    })
+
 
 def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None, web_fetch_kwargs=None, original_skill=None, session=None, style="verbose", fs_ctx=None, permission_gate=None, permission_confirm_holder=None):
     """Shared interactive terminal loop (REQ-UI-1, REQ-UI-2, REQ-UI-4)."""
@@ -114,18 +129,19 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
 
     def _thinking_text(elapsed: float = 0.0, tokens_in: int = 0, ctx_pct: int | None = None) -> str:
         """Build thinking spinner text with optional telemetry."""
-        parts = [ui.elapsed_str(elapsed)] if elapsed >= 1 else []
+        parts = []
+        if elapsed >= 1:
+            parts.append(ui.elapsed_str(elapsed))
         if tokens_in:
             parts.append(f"↓ {ui.token_str(tokens_in)} tokens")
         if ctx_pct is not None:
             parts.append(f"ctx {ctx_pct}%")
         if parts:
-            parts.append("thinking")
-            return f"  {_turn_label[0]} ({' · '.join(parts)})"
-        return f"  {_turn_label[0]}"
+            return f"  {_turn_label[0]} ({' · '.join(parts)} · thinking)"
+        return f"  {_turn_label[0]} (thinking)"
 
     def _thinking() -> _RPadding:
-        return _RPadding(_RSpinner("dots", text=_thinking_text(), style="dim"), pad=(1, 0, 0, 0))
+        return _RPadding(_RSpinner("dots", text=_thinking_text()), pad=(1, 0, 0, 0))
 
     _stats_parts: list[str] = []
     _tool_calls_this_turn: list[str] = []
@@ -423,7 +439,13 @@ def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None
                 _live_holder[0] = _live
                 try:
                     response = agent.send(user_input)
-                    _live.update(ui.render_text(response))
+                    if response and response.strip():
+                        _live.update(ui.render_text(response))
+                    elif _tool_calls_this_turn:
+                        summary = f"(Completed: {', '.join(dict.fromkeys(_tool_calls_this_turn))})"
+                        _live.update(ui.render_text(summary))
+                    else:
+                        _live.update(ui.render_text("(No response from model)"))
                 except KeyboardInterrupt:
                     _interrupted = True
                     _live.transient = True
@@ -625,11 +647,13 @@ def chat(model, doc, style, bare, system_prompt_path) -> None:
                     agent.messages.append(m)
         ts = session.last_timestamp() or ""
         elapsed = ""
+        gap_seconds = 0
         if ts:
             from datetime import datetime, timezone
             try:
                 last = datetime.fromisoformat(ts)
                 delta = datetime.now(timezone.utc) - last
+                gap_seconds = int(delta.total_seconds())
                 if delta.days > 0:
                     elapsed = f", last active {delta.days}d ago"
                 elif delta.seconds >= 3600:
@@ -639,6 +663,10 @@ def chat(model, doc, style, bare, system_prompt_path) -> None:
             except Exception:
                 pass
         ui.info(f"Resuming session ({session.message_count()} messages{elapsed})")
+
+        # Inject session gap marker when resuming after 30+ minutes (REQ-U-23)
+        if gap_seconds >= 1800:
+            _inject_session_gap_marker(agent.messages, elapsed)
 
     title = f"VoidRift Chat — {doc}" if doc else "VoidRift Chat"
     _interactive_loop(

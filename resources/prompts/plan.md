@@ -154,6 +154,8 @@ OUTLINES:
 
 The task outline and module arch below are your primary context. Write the task file based on them.
 
+The developer will only see this task file. Include every specification detail needed to satisfy the acceptance criteria: field names, environment variable names, configuration keys, data shapes, enum values, endpoint paths, error codes. Do not write implementation code — provide interfaces, types, and constraints. The developer decides how to implement.
+
 TASK OUTLINE:
 {task_outline}
 

@@ -93,3 +93,67 @@ class TestOptionalDeps:
         checks = run_checks()
         optional = [c for c in checks if c.name.startswith("optional:")]
         assert len(optional) >= 5  # tree-sitter, tree-sitter-python, pymupdf, python-docx, openpyxl
+
+
+class TestModelEntryValidation:
+    """REQ-U-16b: doctor validates individual model entries."""
+
+    def _make_models_file(self, tmp_path, models: dict) -> Path:
+        import yaml
+        p = tmp_path / "models.yml"
+        p.write_text(yaml.dump({"models": models}))
+        return p
+
+    def test_missing_api_key_produces_fail(self, tmp_path):
+        mf = self._make_models_file(tmp_path, {
+            "claude": {"model_id": "x", "base_url": "https://api.anthropic.com"},
+        })
+        from voidrift_cli.doctor import _check_model_entries
+        checks = _check_model_entries(mf)
+        assert len(checks) == 1
+        assert checks[0].result == "fail"
+        assert "claude" in checks[0].message
+        assert "api_key" in checks[0].message
+
+    def test_invalid_protocol_produces_fail(self, tmp_path):
+        mf = self._make_models_file(tmp_path, {
+            "local": {
+                "model_id": "x",
+                "base_url": "http://localhost/v1",
+                "api_key": "k",
+                "protocol": "badvalue",
+            },
+        })
+        from voidrift_cli.doctor import _check_model_entries
+        checks = _check_model_entries(mf)
+        assert len(checks) == 1
+        assert checks[0].result == "fail"
+        assert "local" in checks[0].message
+        assert "badvalue" in checks[0].message
+
+    def test_valid_entries_produce_pass(self, tmp_path):
+        mf = self._make_models_file(tmp_path, {
+            "m1": {"model_id": "x", "base_url": "http://localhost/v1", "api_key": "k"},
+            "m2": {"model_id": "y", "base_url": "http://localhost/v1", "api_key": "k", "protocol": "anthropic"},
+        })
+        from voidrift_cli.doctor import _check_model_entries
+        checks = _check_model_entries(mf)
+        assert len(checks) == 1
+        assert checks[0].result == "pass"
+
+    def test_model_entries_check_in_run_checks(self, tmp_path, monkeypatch):
+        """run_checks includes model-entries check when models file is present."""
+        fake_home = tmp_path / "voidrift"
+        fake_home.mkdir()
+        (fake_home / "config.yml").write_text(
+            f"models_file: {tmp_path / 'models.yml'}\n"
+        )
+        import yaml
+        (tmp_path / "models.yml").write_text(yaml.dump({"models": {
+            "m": {"model_id": "x", "base_url": "http://localhost/v1", "api_key": "k"},
+        }}))
+        monkeypatch.setenv("VOIDRIFT_HOME", str(fake_home))
+        checks = run_checks()
+        entry_checks = [c for c in checks if c.name == "model-entries"]
+        assert entry_checks
+        assert entry_checks[0].result == "pass"

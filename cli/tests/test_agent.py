@@ -159,29 +159,6 @@ class TestAgentClientConfig:
             assert kwargs["base_url"] == "http://custom:1234/v1"
             assert kwargs["api_key"] == "key123"
 
-    def test_anthropic_config(self, monkeypatch):
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "ant-key")
-        m = _mi(alias="c", model_id="anthropic/claude", model_type="cloud", provider="anthropic")
-        a = AgentLoop(model=m, stream=False)
-        with patch("voidrift_cli.agent_protocol.OpenAI") as MockOpenAI:
-            MockOpenAI.return_value = MagicMock()
-            MockOpenAI.return_value.chat.completions.create.return_value = make_openai_response()
-            a.send("test")
-            kwargs = MockOpenAI.call_args[1]
-            assert kwargs["api_key"] == "ant-key"
-            assert "anthropic" in kwargs["base_url"]
-
-    def test_gemini_config(self, monkeypatch):
-        monkeypatch.setenv("GEMINI_API_KEY", "gem-key")
-        m = _mi(alias="g", model_id="gemini/pro", model_type="cloud", provider="gemini")
-        a = AgentLoop(model=m, stream=False)
-        with patch("voidrift_cli.agent_protocol.OpenAI") as MockOpenAI:
-            MockOpenAI.return_value = MagicMock()
-            MockOpenAI.return_value.chat.completions.create.return_value = make_openai_response()
-            a.send("test")
-            kwargs = MockOpenAI.call_args[1]
-            assert kwargs["api_key"] == "gem-key"
-            assert "generativelanguage" in kwargs["base_url"]
 
 
 class TestRetryLogic:
@@ -1331,3 +1308,129 @@ class TestLoopExitTokens:
         log_text = log.read_text()
         assert "total_input=80" in log_text
         assert "total_output=15" in log_text
+
+
+class TestAbortMechanism:
+    """Tests for REQ-D-13: abort-aware interrupt handling."""
+
+    def test_abort_aware_sleep_raises_when_flag_set(self):
+        from voidrift_cli.agent import _abort_aware_sleep, AbortRequested, clear_abort, request_abort
+        clear_abort()
+        request_abort()
+        with pytest.raises(AbortRequested):
+            _abort_aware_sleep(10.0)
+        clear_abort()
+
+    def test_abort_aware_sleep_completes_when_no_abort(self):
+        from voidrift_cli.agent import _abort_aware_sleep, clear_abort
+        clear_abort()
+        _abort_aware_sleep(0.1)  # should not raise
+
+    def test_request_abort_closes_active_client(self):
+        from voidrift_cli.agent import _register_loop, _unregister_loop, request_abort, clear_abort, _active_loops
+        clear_abort()
+        _active_loops.clear()
+
+        mock_client = MagicMock()
+        agent = AgentLoop(
+            model=_mi(),
+            system_prompt="test",
+            stream=False,
+        )
+        agent._active_client = mock_client
+        _register_loop(agent)
+        try:
+            request_abort()
+            mock_client.close.assert_called_once()
+        finally:
+            _unregister_loop(agent)
+            clear_abort()
+
+    def test_register_unregister_loop(self):
+        from voidrift_cli.agent import _register_loop, _unregister_loop, _active_loops
+        _active_loops.clear()
+        agent = AgentLoop(model=_mi(), system_prompt="test", stream=False)
+        _register_loop(agent)
+        assert id(agent) in _active_loops
+        _unregister_loop(agent)
+        assert id(agent) not in _active_loops
+
+    def test_retry_raises_abort_when_flag_set(self):
+        from voidrift_cli.agent import AbortRequested, request_abort, clear_abort
+        clear_abort()
+        agent = AgentLoop(model=_mi(), system_prompt="test", stream=False)
+        request_abort()
+        try:
+            with pytest.raises(AbortRequested):
+                agent._create_with_retry(
+                    MagicMock(chat=MagicMock(completions=MagicMock(
+                        create=MagicMock(side_effect=openai.APIConnectionError(request=MagicMock()))
+                    ))),
+                    {"model": "test", "messages": []},
+                )
+        finally:
+            clear_abort()
+
+    def test_send_converts_abort_to_runtime_error(self):
+        from voidrift_cli.agent import AbortRequested, clear_abort
+        clear_abort()
+        agent = AgentLoop(model=_mi(), system_prompt="test", stream=False)
+        with patch.object(agent, "_run_loop", side_effect=AbortRequested("abort")):
+            with pytest.raises(RuntimeError, match="Operator abort"):
+                agent.send("hi")
+        clear_abort()
+
+
+class TestDoneHookIntercept:
+    """Tests for before_tool_call intercepting done tool (REQ-D-5)."""
+
+    def test_done_intercepted_by_hook(self):
+        """Hook can reject done and keep the loop running."""
+        call_count = 0
+
+        def hook(name, args):
+            nonlocal call_count
+            if name == "done" and call_count == 0:
+                call_count += 1
+                return "ERROR: write files first"
+            return None
+
+        # First call: done (rejected by hook) + second call: done (accepted)
+        responses = [
+            make_openai_response(tool_calls=[make_tool_call("done", "{}")]),
+            make_openai_response(tool_calls=[make_tool_call("done", "{}")]),
+            make_openai_response(content="Finished"),
+        ]
+        mock_client = MagicMock()
+        mock_client.chat.completions.create = MagicMock(side_effect=responses)
+
+        agent = AgentLoop(
+            model=_mi(), system_prompt="test", stream=False,
+            before_tool_call=hook,
+        )
+        with patch.object(agent, "_get_client", return_value=mock_client):
+            result = agent.send("go")
+
+        assert call_count == 1
+        assert result == "Finished"
+
+    def test_done_passes_when_hook_returns_none(self):
+        """Hook returning None allows done to proceed normally."""
+        def hook(name, args):
+            return None
+
+        responses = [
+            make_openai_response(tool_calls=[make_tool_call("done", "{}")]),
+            make_openai_response(content="Done"),
+        ]
+        mock_client = MagicMock()
+        mock_client.chat.completions.create = MagicMock(side_effect=responses)
+
+        agent = AgentLoop(
+            model=_mi(), system_prompt="test", stream=False,
+            before_tool_call=hook,
+        )
+        with patch.object(agent, "_get_client", return_value=mock_client):
+            result = agent.send("go")
+
+        assert result == "Done"

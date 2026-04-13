@@ -83,7 +83,7 @@ def _read_arch_field(d: Path, field: str) -> str:
         return ""
     pattern = re.compile(rf"^\s*{re.escape(field)}:\s*(.+)$", re.MULTILINE)
     m = pattern.search(arch.read_text())
-    return m.group(1).strip() if m else ""
+    return m.group(1).strip().strip('"').strip("'") if m else ""
 
 
 # ---------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-"""Model alias resolution (REQ-MC-1, REQ-MC-3, REQ-ARCH-5).
+"""Model alias resolution (REQ-MC-1, REQ-MC-3, REQ-ARCH-5, REQ-MC-5).
 
 The CLI is model-agnostic. It resolves aliases to (base_url, api_key, model_id)
 from a single models file and connects to the endpoint directly. It does NOT
@@ -19,6 +19,9 @@ import yaml
 from pydantic import BaseModel
 
 from .config import expand_config_refs, get_models_file
+
+# Valid protocol values (REQ-MC-5, REQ-ARCH-22)
+_VALID_PROTOCOLS: frozenset[str] = frozenset({"openai", "anthropic"})
 
 # Hardcoded defaults when models file has no defaults: section
 _DEFAULTS = {
@@ -98,6 +101,27 @@ def _load_models() -> dict[str, dict]:
     return merged
 
 
+def _validate_model_entry(alias: str, m: dict) -> None:
+    """Validate required fields and protocol for a model entry (REQ-MC-5).
+
+    Raises:
+        ValueError: With alias, missing/invalid field, and doctor hint.
+    """
+    for field in ("base_url", "api_key", "model_id"):
+        if field not in m:
+            raise ValueError(
+                f"Model '{alias}' is missing required field '{field}'. "
+                "Run 'voidrift doctor' to diagnose your model configuration."
+            )
+    protocol = m.get("protocol", "openai")
+    if protocol not in _VALID_PROTOCOLS:
+        raise ValueError(
+            f"Model '{alias}' has invalid protocol '{protocol}'. "
+            f"Valid values: {', '.join(sorted(_VALID_PROTOCOLS))}. "
+            "Run 'voidrift doctor' to diagnose your model configuration."
+        )
+
+
 def resolve_model(alias: str) -> ModelInterface:
     """Resolve a model alias to its endpoint configuration (REQ-MC-1).
 
@@ -117,6 +141,7 @@ def resolve_model(alias: str) -> ModelInterface:
         raise ValueError(f"Unknown model: {alias}. Available: {', '.join(available)}")
 
     m = models[alias]
+    _validate_model_entry(alias, m)
 
     config = ModelConfig(
         alias=alias,

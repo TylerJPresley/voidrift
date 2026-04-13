@@ -175,18 +175,6 @@ class TestOpenAIAdapter:
         assert kwargs["base_url"] == "http://example.com/v1"
         assert kwargs["api_key"] == "key"
 
-    @patch("voidrift_cli.agent_protocol.OpenAI")
-    def test_get_client_anthropic_provider_uses_env_key(self, MockOpenAI, monkeypatch):
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "ant-key")
-        model = MagicMock()
-        model.api_base = None
-        model.api_key = None
-        model.provider = "anthropic"
-        self.adapter.get_client(model)
-        kwargs = MockOpenAI.call_args[1]
-        assert kwargs["api_key"] == "ant-key"
-        assert "anthropic" in kwargs["base_url"]
-
     # --- iter_stream ---
 
     def test_iter_stream_text_with_usage(self):

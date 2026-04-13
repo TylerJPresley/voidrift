@@ -358,13 +358,19 @@ def _run_task(
     task_info = mm.get_task(task_id)
     module = task_info.get("module", "") if task_info else ""
 
-    # Parse frontmatter for skills
+    # Parse frontmatter for skills and expected files
     skills: list[str] = []
+    expected_files: list[str] = []
     if task_content.startswith("---"):
         import yaml
         end = task_content.index("---", 3)
         fm = yaml.safe_load(task_content[3:end]) or {}
         skills = fm.get("skills", [])
+        for f in fm.get("files", []):
+            # Strip annotations like "(create)" or "(modify)"
+            path = f.split("(")[0].strip() if "(" in f else f.strip()
+            if path:
+                expected_files.append(path)
 
     # Pre-load skills into system prompt (REQ-CTX-2)
     skill_parts = []
@@ -412,6 +418,31 @@ def _run_task(
         with git_lock:
             checkpoints.create(turn=task_id, task_id=f"TASK-{task_id}")
 
+    # Build before_tool_call hook — compose skill guard with done guard (REQ-D-5)
+    def _done_guard(name: str, args: str) -> str | None:
+        if name == "done" and ctx is not None and ctx.get_write_count() == 0:
+            return "ERROR: No files written yet. You must call write_source_file() or edit_source_file() before calling done()."
+        return None
+
+    def _composed_hook(name: str, args: str) -> str | None:
+        result = _done_guard(name, args)
+        if result is not None:
+            return result
+        if _skill_guard is not None:
+            return _skill_guard(name, args)
+        return None
+
+    # Follow-up hook — nudge model to write files if it exits with text only (REQ-D-5)
+    _write_nudge_count = 0
+    _MAX_WRITE_NUDGES = 2
+
+    def _write_follow_up(state) -> list[dict] | None:
+        nonlocal _write_nudge_count
+        if ctx is not None and ctx.get_write_count() == 0 and _write_nudge_count < _MAX_WRITE_NUDGES:
+            _write_nudge_count += 1
+            return [{"role": "user", "content": "You have not written any files yet. Call write_source_file() to implement the task. Do not explain — write the code now."}]
+        return None
+
     agent = AgentLoop(
         model=worker,
         system_prompt=system,
@@ -422,7 +453,8 @@ def _run_task(
         log_path=log,
         show_spinner=False,
         token_budget=token_budget,
-        before_tool_call=_skill_guard,
+        before_tool_call=_composed_hook,
+        get_follow_up_messages=_write_follow_up,
     )
 
     start_time = time.time()
@@ -505,6 +537,13 @@ def _run_task(
                 ui.warn(f"TASK-{task_id}: writes occurred but git shows no changes")
         except (FileNotFoundError, subprocess.SubprocessError):
             pass
+
+    # File list verification (REQ-D-21)
+    if expected_files and ctx is not None:
+        written = {str(Path(p)) for p in (ctx.get_session_files() or [])}
+        for ef in expected_files:
+            if not any(ef in w or w.endswith(ef) for w in written):
+                ui.warn(f"TASK-{task_id}: expected {ef} but it was not written")
 
     # Mark implemented (REQ-D-9)
     diff_stats = compute_diff_stats()

@@ -1,4 +1,4 @@
-"""Diagnostic checks for voidrift doctor (REQ-U-16)."""
+"""Diagnostic checks for voidrift doctor (REQ-U-16, REQ-U-16b)."""
 
 from __future__ import annotations
 
@@ -105,10 +105,62 @@ def run_checks(fix: bool = False) -> list[Check]:
     except OSError:
         checks.append(Check("disk", "warn", "Could not check disk space"))
 
-    # 6. Optional tool dependencies (REQ-U-16a)
+    # 6. Model entry validation (REQ-U-16b)
+    try:
+        mf = get_models_file()
+        if mf.exists():
+            checks.extend(_check_model_entries(mf))
+    except Exception:
+        pass
+
+    # 7. Optional tool dependencies (REQ-U-16a)
     checks.extend(_check_optional_deps())
 
     return checks
+
+
+_VALID_PROTOCOLS: frozenset[str] = frozenset({"openai", "anthropic"})
+
+
+def _check_model_entries(models_file_path: Path) -> list[Check]:
+    """Validate individual model entries for required fields and valid protocol (REQ-U-16b)."""
+    import yaml
+
+    try:
+        data = yaml.safe_load(models_file_path.read_text()) or {}
+    except Exception:
+        return []  # Already reported by the models file YAML check
+
+    defaults = data.get("defaults", {}) or {}
+    models = data.get("models", {}) or {}
+    if not isinstance(models, dict):
+        return []
+
+    failures: list[str] = []
+    for alias, entry in models.items():
+        if not isinstance(entry, dict):
+            failures.append(f"'{alias}': not a valid entry")
+            continue
+        m = {**defaults, **entry}
+        for field in ("base_url", "api_key", "model_id"):
+            if field not in m:
+                failures.append(f"'{alias}': missing required field '{field}'")
+        protocol = m.get("protocol", "openai")
+        if protocol not in _VALID_PROTOCOLS:
+            failures.append(
+                f"'{alias}': invalid protocol '{protocol}' "
+                f"(valid: {', '.join(sorted(_VALID_PROTOCOLS))})"
+            )
+
+    if failures:
+        return [Check(
+            "model-entries",
+            "fail",
+            "; ".join(failures),
+            "Fix missing/invalid fields in models.yml then re-run 'voidrift doctor'",
+        )]
+    count = len(models)
+    return [Check("model-entries", "pass", f"{count} entr{'y' if count == 1 else 'ies'} valid")]
 
 
 _OPTIONAL_DEPS: list[tuple[str, str, str]] = [

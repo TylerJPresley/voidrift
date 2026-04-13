@@ -11,8 +11,8 @@ The task ticket below contains everything you need: user story, context, accepta
 Steps:
 1. Review the task ticket — understand the user story, context, and acceptance criteria.
 2. Use `read_source_file()` to examine existing project code as needed.
-3. Implement: use `write_source_file()` for new files or full rewrites; use `edit_source_file()` for targeted modifications to existing files.
-4. Call `done()`.
+3. Write every file listed in the task using `write_source_file()` for new files or full rewrites, and `edit_source_file()` for targeted modifications to existing files.
+4. Call `done()` only after all files are written. Calling `done()` without writing files will be rejected.
 
 Be precise and minimal. One task at a time.
 

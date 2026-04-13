@@ -86,21 +86,11 @@ class ProtocolAdapter(ABC):
 class OpenAIAdapter(ProtocolAdapter):
 
     def get_client(self, model: Any) -> Any:
-        from .config import get_api_key
-
         kwargs: dict[str, Any] = {}
         if model.api_base:
             kwargs["base_url"] = model.api_base
         if model.api_key:
             kwargs["api_key"] = model.api_key
-        elif model.provider == "anthropic":
-            kwargs["api_key"] = get_api_key("anthropic") or ""
-            kwargs["base_url"] = "https://api.anthropic.com/v1/"
-        elif model.provider == "gemini":
-            kwargs["api_key"] = get_api_key("gemini") or ""
-            kwargs["base_url"] = "https://generativelanguage.googleapis.com/v1beta/openai/"
-        else:
-            kwargs["api_key"] = "no-key"
         return OpenAI(
             timeout=httpx.Timeout(connect=30.0, read=600.0, write=60.0, pool=30.0),
             **kwargs,
@@ -321,7 +311,7 @@ class AnthropicAdapter(ProtocolAdapter):
 
     def get_client(self, model: Any) -> Any:
         return anthropic.Anthropic(
-            base_url=model.api_base or "https://api.anthropic.com",
+            base_url=model.api_base,
             api_key=model.api_key or "",
             timeout=600.0,
         )

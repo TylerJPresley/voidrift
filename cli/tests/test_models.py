@@ -1,4 +1,4 @@
-"""Tests for models.py — alias resolution (REQ-MC-1, REQ-MC-3)."""
+"""Tests for models.py — alias resolution (REQ-MC-1, REQ-MC-3, REQ-MC-5)."""
 
 from pathlib import Path
 from unittest.mock import patch
@@ -15,8 +15,11 @@ _SAMPLE_MODELS = {
     "models": {
         "claude": {
             "model_id": "anthropic/claude-opus-4-6",
+            "base_url": "https://api.anthropic.com",
+            "api_key": "test-anthropic-key",
             "type": "cloud",
             "provider": "anthropic",
+            "protocol": "anthropic",
             "max_context": 200000,
         },
         "qwen35": {
@@ -121,7 +124,12 @@ class TestMaxContext:
     def test_max_context_none_when_unset(self, tmp_path):
         """REQ-MC-3: max_context is None when not in entry."""
         p = tmp_path / "models.yml"
-        p.write_text(yaml.dump({"models": {"bare": {"model_id": "x", "type": "cloud"}}}))
+        p.write_text(yaml.dump({"models": {"bare": {
+            "model_id": "x",
+            "base_url": "http://localhost:8000/v1",
+            "api_key": "test-key",
+            "type": "cloud",
+        }}}))
         with patch("voidrift_cli.models.get_models_file", return_value=p):
             m = resolve_model("bare")
         assert m.max_context is None
@@ -142,3 +150,65 @@ class TestListModels:
         missing = tmp_path / "nope.yml"
         with patch("voidrift_cli.models.get_models_file", return_value=missing):
             assert list_models() == []
+
+
+class TestModelEntryValidation:
+    """REQ-MC-5: required fields and protocol validation at resolve time."""
+
+    def _write_models(self, tmp_path, entry: dict) -> Path:
+        p = tmp_path / "models.yml"
+        p.write_text(yaml.dump({"models": {"m": entry}}))
+        return p
+
+    def test_missing_api_key_raises(self, tmp_path):
+        p = self._write_models(tmp_path, {"model_id": "x", "base_url": "http://localhost/v1"})
+        with patch("voidrift_cli.models.get_models_file", return_value=p):
+            with pytest.raises(ValueError, match="'m'.*'api_key'"):
+                resolve_model("m")
+
+    def test_missing_base_url_raises(self, tmp_path):
+        p = self._write_models(tmp_path, {"model_id": "x", "api_key": "k"})
+        with patch("voidrift_cli.models.get_models_file", return_value=p):
+            with pytest.raises(ValueError, match="'m'.*'base_url'"):
+                resolve_model("m")
+
+    def test_missing_model_id_raises(self, tmp_path):
+        p = self._write_models(tmp_path, {"base_url": "http://localhost/v1", "api_key": "k"})
+        with patch("voidrift_cli.models.get_models_file", return_value=p):
+            with pytest.raises(ValueError, match="'m'.*'model_id'"):
+                resolve_model("m")
+
+    def test_invalid_protocol_raises(self, tmp_path):
+        p = self._write_models(tmp_path, {
+            "model_id": "x", "base_url": "http://localhost/v1", "api_key": "k",
+            "protocol": "badvalue",
+        })
+        with patch("voidrift_cli.models.get_models_file", return_value=p):
+            with pytest.raises(ValueError, match="'m'.*'badvalue'"):
+                resolve_model("m")
+
+    def test_error_message_includes_doctor_hint(self, tmp_path):
+        p = self._write_models(tmp_path, {"model_id": "x", "base_url": "http://localhost/v1"})
+        with patch("voidrift_cli.models.get_models_file", return_value=p):
+            with pytest.raises(ValueError, match="voidrift doctor"):
+                resolve_model("m")
+
+    def test_valid_entry_resolves_without_error(self, tmp_path):
+        p = self._write_models(tmp_path, {
+            "model_id": "x", "base_url": "http://localhost/v1", "api_key": "k",
+            "protocol": "openai",
+        })
+        with patch("voidrift_cli.models.get_models_file", return_value=p):
+            m = resolve_model("m")
+        assert m.model_id == "x"
+
+    def test_anthropic_protocol_valid(self, tmp_path):
+        p = self._write_models(tmp_path, {
+            "model_id": "claude-opus-4-6",
+            "base_url": "https://api.anthropic.com",
+            "api_key": "test-key",
+            "protocol": "anthropic",
+        })
+        with patch("voidrift_cli.models.get_models_file", return_value=p):
+            m = resolve_model("m")
+        assert m.protocol == "anthropic"

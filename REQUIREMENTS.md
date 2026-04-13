@@ -360,9 +360,12 @@
   - Given the manifest has 3 dispatchable tasks and concurrency is 3, When develop runs, Then all 3 are dispatched concurrently.
   - Given a task file contains a user story, context, and ACs, When the sub-agent receives it, Then the agent writes code without making context-loading tool calls.
   - Given a task has skills `[BACKEND-ENG]` in frontmatter, When the sub-agent is created, Then the BACKEND-ENG skill content is in the system prompt.
-- **REQ-D-5:** AFTER a task completes, THE SYSTEM SHALL verify that `write_source_file()` was called at least once during the task. IF no writes occurred, THE SYSTEM SHALL retry the task once. IF the retry also produces no writes AND an architect is configured, THE SYSTEM SHALL escalate. Additionally, IF git is initialized and HEAD exists, THE SYSTEM SHALL check `git diff HEAD` — if no changes are detected despite writes, THE SYSTEM SHALL log a warning.
+- **REQ-D-5:** AFTER a task completes, THE SYSTEM SHALL verify that `write_source_file()` was called at least once during the task. IF no writes occurred, THE SYSTEM SHALL retry the task once. IF the retry also produces no writes AND an architect is configured, THE SYSTEM SHALL escalate. Additionally, IF git is initialized and HEAD exists, THE SYSTEM SHALL check `git diff HEAD` — if no changes are detected despite writes, THE SYSTEM SHALL log a warning. THE SYSTEM SHALL intercept `done` tool calls via the `before_tool_call` hook: WHEN the agent calls `done` with zero writes, the hook SHALL reject the call with an error instructing the agent to write files first, and the loop SHALL continue. THE SYSTEM SHALL use the `get_follow_up_messages` hook to nudge the agent when it produces a text-only response with zero writes: a user message instructing the agent to call `write_source_file()` SHALL be injected, up to 2 times per task.
+  - *Rationale:* Small models call `done` prematurely — treating it as "I understand" rather than "I've finished writing." They also exit via text-only responses without calling any tool. A structural hook prevents premature exit regardless of model instruction-following quality. The follow-up nudge catches text-only exits that bypass the done guard.
   - Given a task completes without any `write_source_file()` calls, When the system checks, Then the task is retried.
   - Given a retry also produces no writes and an architect is configured, When the system checks, Then the task is escalated.
+  - Given the agent calls `done` with zero writes during a task, When the `before_tool_call` hook fires, Then the call is rejected with an error and the agent loop continues.
+  - Given the agent produces a text-only response with zero writes, When the `get_follow_up_messages` hook fires, Then a nudge message is injected and the loop continues (up to 2 nudges).
 - **REQ-D-6:** WHEN the developer escalates, THE SYSTEM SHALL consult the architect model with the escalation context and inject the architect's response into the agent's message history, then retry the task. Escalations and responses are ephemeral — they exist only in the agent's message history during the run. The architect's system prompt SHALL be constructed per REQ-RES-7: the escalation prompt (loaded via `get_prompt("develop", "ESCALATION")`) with the question, task text, requirements, and architecture injected via format variables. WHEN only one model is provided, THE SYSTEM SHALL use that model for both task execution and escalation consultations.
   - *Rationale:* Any model can fill either role. The escalation prompt assigns the architect role regardless of which model serves it. A single capable model (e.g. claude) can handle both implementation and design guidance.
   - Given a developer writes an escalation file, When the system detects it, Then the architect is consulted and the response is injected into the developer's next attempt.
@@ -383,8 +386,11 @@
   - *Rationale:* Concurrent `git diff` or future `git commit` calls from parallel task workers can corrupt the git index. A shared lock serializes access.
   - Given 3 tasks running concurrently, When two workers trigger git diff simultaneously, Then only one executes at a time (the other blocks until the lock is released).
 - **REQ-D-12:** *(Removed — module-level dispatch replaced by task-level dispatch per REQ-D-10.)*
-- **REQ-D-13:** WHEN Ctrl+C or SIGTERM is received, THE SYSTEM SHALL set an interrupted flag and stop after the current task completes. The lock file SHALL be cleaned up in all cases. WHEN multiple workers are active (REQ-D-10), THE SYSTEM SHALL send SIGTERM to active workers, allow a 2-second grace period, then SIGKILL.
-  - Given a develop session is running a task, When Ctrl+C is pressed, Then the current task finishes and the session exits with the lock file removed.
+- **REQ-D-13:** WHEN Ctrl+C or SIGTERM is received, THE SYSTEM SHALL set an abort flag, close the HTTP client on all active agent loops to unblock pending API calls, and exit within 5 seconds. The lock file SHALL be cleaned up in all cases. WHEN the abort flag is set during a retry sleep, the sleep SHALL be interrupted and an `AbortRequested` error raised. WHEN a second Ctrl+C is received, THE SYSTEM SHALL raise `KeyboardInterrupt` immediately.
+  - *Rationale:* API calls block on a 600-second read timeout. In concurrent mode, `KeyboardInterrupt` only reaches the main thread — worker threads blocked on HTTP calls are unaffected. Closing the HTTP client unblocks all threads regardless of what they're waiting on.
+  - Given a develop session has an agent blocked on an API call, When Ctrl+C is pressed, Then the HTTP client is closed, the blocked call raises an error, and the session exits within 5 seconds with the lock file removed.
+  - Given a develop session is in a retry sleep, When Ctrl+C is pressed, Then the sleep is interrupted immediately and the session exits.
+  - Given a develop session is running, When Ctrl+C is pressed twice, Then `KeyboardInterrupt` is raised immediately.
 
 - **REQ-D-14:** *(Replaced by REQ-TM-5 and REQ-TM-6. Task completion tracked in manifest; archival moves files to `archived/` and appends to history.log.)*
 
@@ -594,6 +600,12 @@ Verify is a two-stage requirements-driven acceptance testing command. Stage 1 pr
   - Given `tree-sitter` is not installed, When `voidrift doctor` runs, Then a warn check appears with `pip install tree-sitter`.
   - Given all optional dependencies are installed, When `voidrift doctor` runs, Then the optional dependencies check passes.
 
+- **REQ-U-16b:** `voidrift doctor` SHALL validate individual model entries in the models file when the file is present and parseable. For each entry, THE SYSTEM SHALL check that `base_url`, `api_key`, and `model_id` are present, and that `protocol`, when specified, is a known value (`openai` or `anthropic`). WHEN any entry fails validation, THE SYSTEM SHALL report a `fail` check identifying the alias and the missing or invalid field. WHEN all entries pass, THE SYSTEM SHALL report a single `pass` check for model entry validation.
+  - *Rationale:* REQ-U-16 checks that the models file exists and parses as YAML but does not inspect individual entries. A valid YAML file with incomplete entries passes doctor today — misconfiguration is only discovered at command runtime. Per-entry validation surfaces broken entries before a run starts.
+  - Given a models file where alias `claude` is missing `api_key`, When `voidrift doctor` runs, Then a fail check appears identifying alias `claude` and field `api_key`.
+  - Given a models file where alias `local` has `protocol: badvalue`, When `voidrift doctor` runs, Then a fail check appears identifying alias `local` and the invalid protocol value.
+  - Given all model entries have required fields and valid protocol values, When `voidrift doctor` runs, Then the model entry validation check passes.
+
 - **REQ-U-21:** The `chat` command's interactive session logic SHALL be structured such that terminal state management, Rich display callbacks (spinner, live rendering), the idea state machine (`/idea`/`/done` flow), and the readline/prompt-toolkit input loop are each implemented as independently testable concerns. No single function or closure SHALL combine more than one of these four concerns. THE SYSTEM SHALL provide an `IdeaSession` class that tracks idea refinement state transitions without I/O, and a `ContextCompactor` class that encapsulates compaction logic and failure-state without requiring a running terminal loop.
   - *Rationale:* A ~1060-line `_interactive_loop()` function containing 15+ nested closures is not testable at the concern level — every test must drive the full terminal input loop. Decomposed concerns allow stall-display tests that never start a TTY, idea-state tests that never call the model, and terminal-state tests that never enter the event loop. `IdeaSession` is zero-I/O — it transitions state and accumulates lines, making it trivially testable. `ContextCompactor` encapsulates failure counting, auto-disable logic, and the compaction API call, eliminating closure variables from `_interactive_loop` and enabling isolated unit testing without a running session.
   - Given a TTY session is active, When the idea state machine transitions from Intake to Exploration, Then no terminal state setup or input handling code is involved in the transition.
@@ -618,6 +630,11 @@ Verify is a two-stage requirements-driven acceptance testing command. Stage 1 pr
   - Given cmd="develop", When `write_source_file` is called, Then no confirmation prompt is shown and the write proceeds normally.
   - Given cmd="gather", When `read_source_file` resolves outside the project dir, Then it is hard-blocked per REQ-SEC-1 with no operator prompt.
 
+- **REQ-U-23:** WHEN `voidrift chat` resumes a session AND the time since the last message exceeds 30 minutes, THE SYSTEM SHALL inject a session gap marker into the agent's message history: a user message stating the session was resumed and instructing the model not to continue previous actions, followed by an assistant acknowledgment. WHEN the gap is under 30 minutes, no marker SHALL be injected.
+  - *Rationale:* Models resume stale sessions by continuing the last action in context — writing files, running commands — regardless of whether the operator's intent has changed. A gap marker reorients the model to wait for new instructions instead of replaying old intent.
+  - Given a session is resumed after 2 hours, When the agent's messages are restored, Then a gap marker and assistant ack are appended.
+  - Given a session is resumed after 5 minutes, When the agent's messages are restored, Then no gap marker is injected.
+
 ### 4.10 Model Configuration
 
 - **REQ-MC-1:** WHEN a model alias is used, THE SYSTEM SHALL resolve it to `(base_url, api_key, model_id)`. The CLI SHALL read all model definitions from a single models file. The path to this file SHALL be configurable via `models_file` in `config.yml` (default: `~/.worker-cli/models.yml`). Each model entry SHALL be self-contained: `base_url`, `api_key`, `model_id`, and optional `provider` and `max_context`. IF an alias is not found, THE SYSTEM SHALL exit with an error listing all available aliases.
@@ -638,6 +655,13 @@ Verify is a two-stage requirements-driven acceptance testing command. Stage 1 pr
   - Given a model with no `fallback` field and retries exhausted, When the error is raised, Then no fallback is attempted.
   - Given a fallback model that also exhausts retries, When the fallback fails, Then the error is raised (no cascade).
   - Given a 401 authentication error with retries exhausted, When the error is raised, Then fallback is NOT activated.
+
+- **REQ-MC-5:** WHEN a model entry is loaded from the models file, THE SYSTEM SHALL validate that `base_url`, `api_key`, and `model_id` are present. WHEN any required field is missing, THE SYSTEM SHALL raise a `ConfigError` identifying the alias and missing field, directing the operator to run `voidrift doctor`. WHEN `protocol` is specified, it SHALL be validated against known values (`openai`, `anthropic`); an unrecognized value SHALL raise a `ConfigError` identifying the alias and invalid value. No connection field (`base_url`, `api_key`) SHALL be inferred or defaulted from other field values (`provider`, `protocol`, or any other field).
+  - *Rationale:* The previous implementation auto-filled `base_url` and `api_key` from `provider: anthropic` / `provider: gemini` in `OpenAIAdapter.get_client()`, and silently fell back to `api_key="no-key"` when no key was present. Incomplete model configs produced silent runtime failures rather than actionable errors at load time. Config-forward validation ensures the operator explicitly controls every connection detail — the framework never guesses what to connect to.
+  - Given a model entry with no `api_key`, When `resolve_model` is called, Then a ConfigError is raised naming the alias and `api_key`, with a hint to run `voidrift doctor`.
+  - Given a model entry with no `base_url`, When `resolve_model` is called, Then a ConfigError is raised naming the alias and `base_url`, with a hint to run `voidrift doctor`.
+  - Given a model entry with `protocol: badvalue`, When `resolve_model` is called, Then a ConfigError is raised naming the alias and listing valid protocol values.
+  - Given a fully specified model entry with `base_url`, `api_key`, `model_id`, and `protocol: anthropic`, When `resolve_model` is called, Then no validation error is raised.
 
 ### 4.12 Git
 
@@ -744,6 +768,14 @@ Two log roots, two intents:
   - Given a manifest with 5 planned, 2 in-progress, 3 implemented tasks, When `voidrift status` runs, Then the table shows those counts in the correct columns.
   - Given no manifest exists, When `voidrift status` runs, Then a message is displayed and no table is rendered.
   - Given a manifest with 2 ideas (1 now, 1 next), When `voidrift status` runs, Then the idea count appears below the task table.
+
+- **REQ-UI-14:** The `voidrift chat` thinking indicator SHALL be visible at normal text weight (not dim) and SHALL always display the word "thinking" immediately — not deferred until elapsed time exceeds 1 second. WHEN streaming tokens pause for more than 1.5 seconds mid-response, the thinking indicator SHALL resume alongside the elapsed timer. WHEN tokens resume, the streaming text display SHALL replace the thinking indicator. WHEN the model returns an empty text response after executing tool calls, THE SYSTEM SHALL display a summary of the tool calls completed (e.g. "(Completed: write_source_file, edit_source_file)"). WHEN the model returns an empty response with no tool calls, THE SYSTEM SHALL display "(No response from model)".
+  - *Rationale:* Users see blank screens during model processing — no indication whether the model is working, stuck, or finished. Small models frequently pause mid-stream while building tool call JSON or reasoning internally. Empty responses after tool calls leave users with no confirmation of what happened. Visible, continuous feedback eliminates ambiguity about system state.
+  - Given the user sends a message in chat, When the model is processing before the first token, Then a spinner with "(thinking)" is visible immediately at normal text weight.
+  - Given the model is streaming tokens and pauses for 2 seconds, When the on_progress tick fires, Then the thinking indicator resumes showing elapsed time.
+  - Given the model streamed tokens and then resumes, When new tokens arrive, Then the streaming text display replaces the thinking indicator.
+  - Given the model executed write_source_file and edit_source_file but returned empty text, When the response is displayed, Then the user sees "(Completed: write_source_file, edit_source_file)".
+  - Given the model returned empty text with no tool calls, When the response is displayed, Then the user sees "(No response from model)".
 
 ### 4.16 Framework Configuration
 
@@ -966,6 +998,13 @@ Two log roots, two intents:
   - Given a clean working tree, When checkpoint creation is attempted, Then no checkpoint is created (None returned).
   - Given 3 checkpoints exist, When `voidrift rollback` is run with turn 2, Then the working tree is restored to the state at turn 2.
 
+- **REQ-D-21:** AFTER a develop task succeeds (files written, before marking implemented), THE SYSTEM SHALL parse the task frontmatter `files:` list, extract file paths (stripping `(create)` and `(modify)` annotations), and compare against the files actually written during the task (tracked by `WriteContext.get_session_files()`). WHEN a file listed in the frontmatter was not written or modified during the task, THE SYSTEM SHALL emit a warning naming the missing file. This check is a warning only — it does not block the task from being marked implemented.
+  - *Rationale:* Tasks specify which files they intend to create or modify. When the develop agent skips a file — due to hallucination, context loss, or misinterpretation — the task is marked implemented despite being incomplete. A post-task file list check catches this immediately rather than deferring to verify.
+  - Given a task with `files: [backend/config.py (create), env.list (create)]` and both were written, When the check runs, Then no warning is emitted.
+  - Given a task with `files: [backend/config.py (create), env.list (create)]` and only `backend/config.py` was written, When the check runs, Then a warning is emitted naming `env.list`.
+  - Given a task with `files: [backend/main.py (modify)]` and the agent edited it, When the check runs, Then no warning is emitted.
+  - Given a task with no `files:` field in frontmatter, When the check runs, Then no warning is emitted and the check is skipped.
+
 ### 4.19 Task Management
 
 - **REQ-TM-1:** `cli/src/voidrift_cli/manifest.py` SHALL provide a `ManifestManager` class that reads and writes `.voidrift/tasks/manifest.yml`. The manifest tracks: task status, module grouping, dependencies, bug references, assignment, and next ID counters (`next_id`, `next_bug_id`). The manifest is owned exclusively by the CLI — no agent tool provides write access to it. The manifest SHALL only contain active work — archived entries are removed from the manifest and recorded in history.log.
@@ -1117,6 +1156,7 @@ Two log roots, two intents:
 | V-U-19 | REQ-U-19 | Test | `test_document.py::TestReadDocument` — PDF extraction; DOCX with headings and tables; XLSX as markdown tables; missing library returns install hint; unsupported extension returns error; path sandboxed; tool in chat and gather, absent from develop |
 | V-U-20 | REQ-U-20 | Test | `test_code_analysis.py::TestCodeAnalysis` — Python extraction returns JSON with imports/symbols/complexity; missing tree-sitter returns install hint; missing grammar returns install hint; unsupported extension returns error; tool in chat and gather, absent from develop |
 | V-U-16a | REQ-U-16a | Test | `test_doctor.py::TestOptionalDeps` — missing optional dep produces warn; all installed produces pass |
+| V-U-16b | REQ-U-16b | Test | `test_doctor.py::TestModelEntryValidation` — missing api_key produces fail with alias; invalid protocol produces fail with alias; all valid entries produce pass |
 | V-TEST-1 | REQ-TEST-1 | Test | `test_faux_provider.py` — replay returns recorded response; missing cassette raises CassetteNotFoundError; api_key excluded from hash; record saves to cassette; cassette is valid JSONL |
 | V-MEM-1 | REQ-MEM-1 | Test | `test_memory.py` — write/read round-trip; index contains names+descriptions; delete removes from index; project overrides global; read searches project then global; memory tools absent from develop |
 | V-TOOL-1 | REQ-TOOL-1 | Test | `test_agent.py::TestToolGuidelines` — guidelines assembled from tool defs; empty when no guidelines |
@@ -1131,6 +1171,7 @@ Two log roots, two intents:
 | V-D-18 | REQ-D-18 | Test | `test_git.py::TestGitSnapshot` — snapshot captures branch/commits/changed files; non-git returns None; git unavailable returns None; changed files capped at 20; develop and chat inject block into system prompt |
 | V-D-19 | REQ-D-19 | Test | `test_tools.py::TestMtimeGuard` — external mod returns warning; no mod proceeds; force_write overrides; first write no check; cleared between tasks |
 | V-D-20 | REQ-D-20 | Test | `test_git_checkpoint.py` — dirty tree creates checkpoint; clean tree returns None; restore applies stash; checkpoints persisted to JSONL |
+| V-D-21 | REQ-D-21 | Test | `test_develop.py::TestFileListVerification` — frontmatter parsed with annotations stripped; missing files emit warning; all files written emits no warning; no files field skips check |
 | V-GIT-4 | REQ-GIT-4 | Test | `test_git.py::TestBoundedDiff` — total lines truncated at limit; files capped at limit; binary excluded; per-file limit applied; truncated=False when within bounds |
 | V-LOG-6 | REQ-LOG-6 | Test | `test_error_tracker.py` — summary_by_category counts; to_state_dict structure; render_summary_table renders; errors.jsonl valid; no errors = no table |
 | V-G-3 | REQ-G-12 | Inspection | `gather.py` — all gather agents use `stream=True` |
@@ -1164,7 +1205,7 @@ Two log roots, two intents:
 | V-D-10 | REQ-D-9 | Test | `test_manifest.py` — `set_status("implemented")` updates manifest after write verification |
 | V-D-13 | REQ-TM-5 | Test | `test_manifest.py::TestArchive` — archived task moved to `archived/`, removed from manifest, history.log appended |
 | V-D-11 | REQ-D-11 | Inspection | `develop.py::run_develop` — `threading.Lock` passed to all `_develop_module` calls, acquired around git ops |
-| V-D-12 | REQ-D-13 | Inspection | `develop.py::run_develop` — SIGTERM/SIGINT set interrupted flag, lock cleaned in finally block |
+| V-D-12 | REQ-D-13 | Test | `test_agent.py::TestAbortMechanism` — abort flag closes active clients, abort-aware sleep raises, retry skips on abort, send converts to RuntimeError |
 | V-D-15 | REQ-D-15 | Test | `test_tools.py::TestSnapshots` — rollback restores modified files, deletes new files, clears on success, thread-isolated |
 | V-U-1 | REQ-U-1 | Test | `test_commands.py::TestCLICommands::test_status_command` |
 | V-U-2 | REQ-U-2 | Test | `test_commands.py` — chat session loads skill, prompt, and --doc context |
@@ -1173,6 +1214,7 @@ Two log roots, two intents:
 | V-MC-1 | REQ-MC-1 | Test | `test_models.py::TestResolveModel` — alias resolution from configured models file |
 | V-MC-2 | REQ-MC-3 | Test | `test_models.py::TestMaxContext` — max_context from models file used when API returns no max_model_len |
 | V-MC-4 | REQ-MC-4 | Test | `test_agent.py::TestModelFallback` — fallback used on 429 exhaustion; no fallback without config; no cascade; no fallback on 401 |
+| V-MC-5 | REQ-MC-5 | Test | `test_models.py::TestModelEntryValidation` — missing api_key raises ConfigError with alias; missing base_url raises ConfigError with alias; invalid protocol raises ConfigError; valid entry resolves without error |
 | V-CFG-1 | REQ-CFG-6 | Test | `test_config.py` — get_max_tokens returns min(stage_default, model_cap); missing limits section uses defaults |
 | V-CFG-2 | REQ-CFG-7 | Test | `test_config.py::TestGetMaxTokens` — built-in defaults apply; model cap wins when lower; config.yml override wins over built-in; config override still capped by model; unknown stage falls back to 4096; all agent invocations use `command.stage` dot notation |
 | V-CFG-3 | REQ-CFG-8 | Test | `test_cli.py::TestSetupCheck` — framework commands exit with setup error when models.yml missing; utility commands unaffected |
@@ -1222,6 +1264,7 @@ Two log roots, two intents:
 | V-SKL-10 | REQ-SKL-10 | Test | `test_skills.py::TestProgressiveSynthesis` — synthesis triggered when skill missing and synthesis_model configured; pending skill written; approve moves to project layer; no synthesis when synthesis_model absent; synthesis failure logs and continues |
 | V-TM-8 | REQ-TM-8 | Test | `test_manifest.py::TestHistoryRotation` — successful deploy renames history.log to history-<version>.log; new empty log created; missing log raises no error; prior archives untouched |
 | V-UI-13 | REQ-UI-13 | Test | `test_commands.py::TestStatusKanban` — task counts per status column; no manifest shows message; idea count displayed |
+| V-UI-14 | REQ-UI-14 | Test | `test_chat.py::TestThinkingIndicator` — thinking text shows immediately; token stall resumes indicator; empty response with tools shows summary; empty response without tools shows fallback |
 | V-U-21 | REQ-U-21 | Test | `test_chat.py::TestIdeaSession` — state transitions, add_line, confirm, cancel, is_active; `test_chat.py::TestContextCompactor` — should_compact threshold, compact with mock client; Inspection: display callbacks and input loop in separate functions |
 | V-U-22 | REQ-U-22 | Test | `test_chat.py::TestPermissionGate` — write prompts before writing; deny returns denial and no write; always-writes skips subsequent write prompts; run prompts before executing; always-runs skips subsequent run prompts; read inside project dir needs no prompt; read outside project dir prompts; always-reads-outside skips subsequent out-of-sandbox reads; non-TTY auto-denies all gated actions; develop cmd writes without prompt; gather out-of-sandbox read is hard-blocked |
 | V-SKL-10a | REQ-SKL-10 | Test | `test_skills.py::TestApproveSkill` — approve moves pending skill to project layer; missing pending skill returns error |

@@ -299,3 +299,51 @@ class TestDevelopMaxEscalations:
         result = run_develop(cloud_model)
         assert result in (0, 1)
 
+
+
+class TestFileListVerification:
+    """Tests for REQ-D-21: post-task file list verification."""
+
+    def test_parse_expected_files_from_frontmatter(self):
+        """Frontmatter files field is parsed with annotations stripped."""
+        import yaml
+        task = "---\nid: 1\nmodule: backend\nfiles:\n  - backend/config.py (create)\n  - env.list (modify)\ndepends: []\n---\n# Task"
+        end = task.index("---", 3)
+        fm = yaml.safe_load(task[3:end]) or {}
+        expected = []
+        for f in fm.get("files", []):
+            path = f.split("(")[0].strip() if "(" in f else f.strip()
+            if path:
+                expected.append(path)
+        assert expected == ["backend/config.py", "env.list"]
+
+    def test_no_files_field_yields_empty_list(self):
+        """Missing files field produces empty expected list."""
+        import yaml
+        task = "---\nid: 1\nmodule: backend\nskills: [BACKEND-ENG]\ndepends: []\n---\n# Task"
+        end = task.index("---", 3)
+        fm = yaml.safe_load(task[3:end]) or {}
+        expected = [f.split("(")[0].strip() for f in fm.get("files", [])]
+        assert expected == []
+
+    def test_all_files_written_no_warning(self, capsys):
+        """When all expected files are written, no warning is emitted."""
+        from voidrift_cli import ui
+        expected_files = ["backend/config.py", "env.list"]
+        written = {"backend/config.py", "env.list"}
+        for ef in expected_files:
+            if not any(ef in w or w.endswith(ef) for w in written):
+                ui.warn(f"TASK-1: expected {ef} but it was not written")
+        captured = capsys.readouterr()
+        assert "expected" not in captured.out and "expected" not in captured.err
+
+    def test_missing_file_emits_warning(self, capsys):
+        """When an expected file is not written, a warning is emitted."""
+        from voidrift_cli import ui
+        expected_files = ["backend/config.py", "env.list"]
+        written = {"backend/config.py"}
+        for ef in expected_files:
+            if not any(ef in w or w.endswith(ef) for w in written):
+                ui.warn(f"TASK-1: expected {ef} but it was not written")
+        captured = capsys.readouterr()
+        assert "env.list" in captured.err

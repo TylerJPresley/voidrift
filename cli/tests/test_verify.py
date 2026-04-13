@@ -213,3 +213,35 @@ class TestVerifyOrchestrator:
         assert "run_command" in names
         assert "read_process_output" in names
 
+
+
+class TestReadArchField:
+    """Tests for _read_arch_field quote stripping."""
+
+    def test_strips_double_quotes(self, tmp_project):
+        d = Path.cwd() / ".voidrift"
+        d.mkdir(exist_ok=True)
+        (d / "ARCHITECTURE.md").write_text('startup_command: "uvicorn main:app --port 8000"\n')
+        from voidrift_cli.commands.verify import _read_arch_field
+        assert _read_arch_field(d, "startup_command") == "uvicorn main:app --port 8000"
+
+    def test_strips_single_quotes(self, tmp_project):
+        d = Path.cwd() / ".voidrift"
+        d.mkdir(exist_ok=True)
+        (d / "ARCHITECTURE.md").write_text("startup_command: 'uvicorn main:app'\n")
+        from voidrift_cli.commands.verify import _read_arch_field
+        assert _read_arch_field(d, "startup_command") == "uvicorn main:app"
+
+    def test_empty_quoted_string_returns_empty(self, tmp_project):
+        d = Path.cwd() / ".voidrift"
+        d.mkdir(exist_ok=True)
+        (d / "ARCHITECTURE.md").write_text('test_bootstrap: ""\n')
+        from voidrift_cli.commands.verify import _read_arch_field
+        assert _read_arch_field(d, "test_bootstrap") == ""
+
+    def test_unquoted_value_unchanged(self, tmp_project):
+        d = Path.cwd() / ".voidrift"
+        d.mkdir(exist_ok=True)
+        (d / "ARCHITECTURE.md").write_text("startup_command: uvicorn main:app\n")
+        from voidrift_cli.commands.verify import _read_arch_field
+        assert _read_arch_field(d, "startup_command") == "uvicorn main:app"

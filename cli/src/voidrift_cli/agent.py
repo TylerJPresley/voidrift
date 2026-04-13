@@ -25,18 +25,52 @@ from .token_budget import BudgetExhaustedError
 
 # Module-level abort flag for signal-based loop stop (REQ-ARCH-14, TASK-FW-007)
 _abort_requested = False
+_active_loops: dict[int, "AgentLoop"] = {}
+_active_loops_lock = threading.Lock()
+
+
+class AbortRequested(Exception):
+    """Raised when operator abort interrupts a blocking operation."""
 
 
 def request_abort() -> None:
-    """Set the abort flag — called from signal handlers."""
+    """Set the abort flag and close HTTP clients on all active loops (REQ-D-13)."""
     global _abort_requested
     _abort_requested = True
+    with _active_loops_lock:
+        for loop in _active_loops.values():
+            client = getattr(loop, "_active_client", None)
+            if client is not None:
+                try:
+                    client.close()
+                except Exception:
+                    pass
 
 
 def clear_abort() -> None:
     """Reset the abort flag — called at command start."""
     global _abort_requested
     _abort_requested = False
+
+
+def _register_loop(loop: "AgentLoop") -> None:
+    with _active_loops_lock:
+        _active_loops[id(loop)] = loop
+
+
+def _unregister_loop(loop: "AgentLoop") -> None:
+    with _active_loops_lock:
+        _active_loops.pop(id(loop), None)
+
+
+def _abort_aware_sleep(seconds: float) -> None:
+    """Sleep in 0.25s increments, raising AbortRequested if abort flag is set (REQ-D-13)."""
+    remaining = seconds
+    while remaining > 0:
+        if _abort_requested:
+            raise AbortRequested("Operator abort during retry sleep")
+        time.sleep(min(0.25, remaining))
+        remaining -= 0.25
 
 
 class Message(BaseModel):
@@ -166,8 +200,11 @@ class AgentLoop(BaseModel):
             RuntimeError: If the API call fails (wraps OpenAI/network errors).
         """
         self.messages.append({"role": "user", "content": user_message})
+        _register_loop(self)
         try:
             return self._run_loop()
+        except AbortRequested:
+            raise RuntimeError("Operator abort")
         except RuntimeError:
             raise
         except Exception as e:
@@ -180,6 +217,8 @@ class AgentLoop(BaseModel):
             elif "json_invalid" in msg or ("EOF while parsing" in msg and "list" in msg):
                 msg = f"Tool results exceeded context window for {self.model.alias}. The agent accumulated too much content in tool call results. Try a model with a larger context window or reduce the input size."
             raise RuntimeError(msg) from e
+        finally:
+            _unregister_loop(self)
 
     # done tool definition — auto-injected when tools are present (REQ-ARCH-4)
     _DONE_TOOL: dict = {
@@ -425,7 +464,12 @@ class AgentLoop(BaseModel):
                             tools_called_this_turn.append(name)
                             self._log(f"[TOOL_CALL] {name}({args})")
                             if name == "done":
-                                result = "OK"
+                                intercepted = self.before_tool_call(name, args) if self.before_tool_call else None
+                                if intercepted is not None:
+                                    result = intercepted
+                                    done = False  # hook rejected done — keep looping
+                                else:
+                                    result = "OK"
                             else:
                                 intercepted = self.before_tool_call(name, args) if self.before_tool_call else None
                                 if intercepted is not None:
@@ -668,6 +712,8 @@ class AgentLoop(BaseModel):
                 return self.model.adapter.create_raw(client, wire_request)
             except Exception as exc:
                 last_exc = exc
+                if _abort_requested:
+                    raise AbortRequested("Operator abort") from exc
                 if not self.model.adapter.is_retryable(exc) or attempt == self._RETRY_MAX:
                     raise
                 retry_after = self.model.adapter.get_retry_after(exc)
@@ -678,7 +724,7 @@ class AgentLoop(BaseModel):
                     f"[RETRY attempt={attempt} delay={jittered:.1f}s"
                     f" reason={type(exc).__name__}{ra_info}]"
                 )
-                time.sleep(jittered)
+                _abort_aware_sleep(jittered)  # REQ-D-13
                 if retry_after is None:
                     delay = min(delay * self._RETRY_MULT, self._RETRY_CAP)
         raise last_exc  # type: ignore[misc]

@@ -240,8 +240,11 @@ def _make_display_callbacks(
     from rich.text import Text as _RText
     from .. import ui as _ui
 
+    _last_token_time: list[float] = [0.0]
+
     def on_token(token: str) -> None:
         got_token[0] = True
+        _last_token_time[0] = _time.time()
         stream_buf.append(token)
         live = live_holder[0]
         if live is not None:
@@ -270,28 +273,29 @@ def _make_display_callbacks(
     def _thinking_widget():
         if thinking_fn is not None:
             return thinking_fn()
-        return _RPadding(_RSpinner("dots", text=f"  {turn_label[0]}", style="dim"), pad=(1, 0, 0, 0))
+        return _RPadding(_RSpinner("dots", text=f"  {turn_label[0]} (thinking)"), pad=(1, 0, 0, 0))
 
     def on_progress(data: dict) -> None:
-        if got_token[0]:
+        if got_token[0] and (_time.time() - _last_token_time[0]) < 1.5:
             return
         live = live_holder[0]
         if live is not None and data.get("state") == "thinking":
             elapsed = _time.time() - live_start[0]
             tokens_in = data.get("prompt_tokens", 0)
             ctx_pct = data.get("ctx_pct")
-            parts = [_ui.elapsed_str(elapsed)] if elapsed >= 1 else []
+            parts = []
+            if elapsed >= 1:
+                parts.append(_ui.elapsed_str(elapsed))
             if tokens_in:
                 parts.append(f"↓ {_ui.token_str(tokens_in)} tokens")
             if ctx_pct is not None:
                 parts.append(f"ctx {ctx_pct}%")
             if parts:
-                parts.append("thinking")
-                text = f"  {turn_label[0]} ({' · '.join(parts)})"
+                text = f"  {turn_label[0]} ({' · '.join(parts)} · thinking)"
             else:
-                text = f"  {turn_label[0]}"
+                text = f"  {turn_label[0]} (thinking)"
             live.update(_RPadding(
-                _RSpinner("dots", text=text, style="dim"),
+                _RSpinner("dots", text=text),
                 pad=(1, 0, 0, 0),
             ))
 

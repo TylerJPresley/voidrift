@@ -290,6 +290,42 @@ chat.py / _interactive_loop
 
 **Why:** Integration tests against real APIs are slow, expensive, and non-deterministic. Record/replay enables fast, deterministic CI. Missing cassettes fail loudly (REQ-TEST-1).
 
+### 3.24 Prompt authoring guidelines
+
+When writing or editing prompts in `resources/prompts/`:
+- Use positive instructions. Tell the model what to do. For example: "Write the full file content" not "never write placeholder stubs."
+- Keep prompts compact. Every token in the system prompt competes with the model's working memory for the task.
+
+### 3.25 Abort-aware interrupt handling (REQ-D-13)
+
+`request_abort()` does two things: sets the `_abort_requested` flag and closes the HTTP client on every active `AgentLoop`. Active loops register themselves in a module-level dict on `send()` entry and unregister on exit. Closing the client causes any blocked `client.chat.completions.create()` call to raise a connection error, which unblocks worker threads in `ThreadPoolExecutor`. The retry loop (`_create_with_retry`) checks the abort flag before retrying — a connection error caused by abort is not retried. Retry sleeps use `_abort_aware_sleep()` which checks the flag every 0.25s.
+
+**Why:** `KeyboardInterrupt` is only delivered to the main thread. Worker threads blocked on HTTP calls with a 600-second read timeout are unreachable by signals. Closing the client is the only way to unblock them without `SIGKILL`. The abort flag check in the retry loop prevents the closed-client error from being retried as a transient connection failure.
+
+### 3.26 Done guard and write nudge for develop tasks (REQ-D-5)
+
+The `before_tool_call` hook now fires for `done` tool calls (previously bypassed). In develop, a `_done_guard` hook rejects `done` when zero writes have occurred — the agent receives an error message and the loop continues. A `get_follow_up_messages` hook (`_write_follow_up`) catches the other exit path: when the model produces a text-only response with no tool calls and zero writes, a user message is injected telling it to call `write_source_file()`. Limited to 2 nudges per task to prevent infinite loops. Both hooks are composed with the existing skill guard via `_composed_hook`.
+
+**Why:** Small models (35B) fail to write files in two ways: calling `done` prematurely, and producing text-only responses that narrate code instead of calling write tools. The done guard blocks the first path; the follow-up nudge blocks the second. Together they cover all exit paths from the agent loop. The 2-nudge limit ensures the task eventually falls through to the existing retry/escalation mechanism if the model truly cannot produce tool calls.
+
+### 3.27 Session gap marker for chat (REQ-U-23)
+
+When resuming a chat session after 30+ minutes (`_SESSION_GAP_THRESHOLD = 1800`), `_inject_session_gap_marker()` appends two messages: a user message stating the session was resumed with a "do not continue previous actions" instruction, and an assistant acknowledgment. The elapsed time label (e.g. "2h ago") is reused from the resume summary calculation.
+
+**Why:** Models resume stale sessions by continuing the last action in context. After 20 hours, a model seeing "let's look at the verify result" in a session that ended with file writes will attempt more file writes instead of reading VERIFY.md. The gap marker breaks the intent chain at minimal cost (2 messages, ~50 tokens).
+
+### 3.28 Chat thinking indicator and empty response feedback (REQ-UI-14)
+
+The thinking spinner shows "(thinking)" immediately at normal text weight (not dim). `_last_token_time` tracks when the last streaming token arrived. `on_progress` checks: if tokens were received but none in the last 1.5 seconds, the thinking spinner resumes — the user sees the model is still working during mid-stream pauses (tool call JSON generation, think-tag reasoning). When `agent.send()` returns empty text, the display checks `_tool_calls_this_turn`: if tools were called, a summary is shown; otherwise "(No response from model)" appears.
+
+**Why:** Users see blank screens during three states: initial processing, mid-stream pauses, and empty responses after tool calls. Small models frequently pause mid-stream while building tool call JSON. Empty responses after tool calls (common with qwen35) leave users with no confirmation. Continuous visible feedback eliminates ambiguity about system state.
+
+### 3.29 Develop post-task file list verification (REQ-D-21)
+
+After a task succeeds (files written, before marking implemented), `_run_task` parses the `files:` list from the task frontmatter, strips `(create)`/`(modify)` annotations, and compares against `ctx.get_session_files()`. Missing files emit a `ui.warn`. The check is a warning only — it does not block the task.
+
+**Why:** The develop agent can write different files than specified in the task, or skip files entirely, and the task still gets marked implemented. The env.list problem (agent wrote 4 vars instead of 8) would have been caught here — the task listed `env.list (create)` but the agent's output didn't match the spec. Catching this at task completion is cheaper than catching it at verify.
+
 ---
 
 ## 4. Data Flows
