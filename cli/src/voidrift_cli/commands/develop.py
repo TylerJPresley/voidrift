@@ -7,6 +7,7 @@ AGENT_TOOLS: frozenset[str] = frozenset({
     "read_source_file",
     "write_source_file",
     "edit_source_file",
+    "delete_source_file",
     "read_framework_file",
     "run_command",
 })
@@ -443,6 +444,25 @@ def _run_task(
             return [{"role": "user", "content": "You have not written any files yet. Call write_source_file() to implement the task. Do not explain — write the code now."}]
         return None
 
+    # Self-review hook — inject once after first write (REQ-D-22)
+    _self_review_injected = False
+
+    def _self_review_steering(state) -> list[dict] | None:
+        nonlocal _self_review_injected
+        if not _self_review_injected and ctx is not None and ctx.get_write_count() > 0:
+            _self_review_injected = True
+            return [{
+                "role": "user",
+                "content": (
+                    "Re-read the acceptance criteria in the task. "
+                    "For each AC, confirm the code you wrote satisfies it. "
+                    "Score your confidence 0–100% that all ACs are satisfied. "
+                    "If below 90%, identify the gaps and fix them now. "
+                    "If 90% or above, call done()."
+                ),
+            }]
+        return None
+
     agent = AgentLoop(
         model=worker,
         system_prompt=system,
@@ -455,6 +475,7 @@ def _run_task(
         token_budget=token_budget,
         before_tool_call=_composed_hook,
         get_follow_up_messages=_write_follow_up,
+        get_steering_messages=_self_review_steering,
     )
 
     start_time = time.time()

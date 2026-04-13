@@ -231,3 +231,58 @@ class TestWebImport:
     def test_make_web_fetch_handler_importable_from_web(self):
         from voidrift_cli.tools.web import make_web_fetch_handler
         assert callable(make_web_fetch_handler)
+
+
+class TestDeleteSourceFile:
+    """Tests for REQ-D-24: delete_source_file tool."""
+
+    def test_delete_existing_file(self, tmp_path):
+        from voidrift_cli.tools.filesystem import WriteContext
+        (tmp_path / "src").mkdir()
+        target = tmp_path / "src" / "old.py"
+        target.write_text("old content")
+        ctx = WriteContext(project_dir=tmp_path)
+        result = ctx.delete_source_file("src/old.py")
+        assert "Deleted" in result
+        assert not target.exists()
+
+    def test_delete_nonexistent_file(self, tmp_path):
+        from voidrift_cli.tools.filesystem import WriteContext
+        ctx = WriteContext(project_dir=tmp_path)
+        result = ctx.delete_source_file("src/missing.py")
+        assert "does not exist" in result
+
+    def test_delete_directory_rejected(self, tmp_path):
+        from voidrift_cli.tools.filesystem import WriteContext
+        (tmp_path / "src").mkdir()
+        ctx = WriteContext(project_dir=tmp_path)
+        result = ctx.delete_source_file("src")
+        assert "directory" in result.lower()
+
+    def test_delete_protected_path_rejected(self, tmp_path):
+        from voidrift_cli.tools.filesystem import WriteContext
+        (tmp_path / "Makefile").write_text("all:")
+        ctx = WriteContext(project_dir=tmp_path)
+        ctx._protected_paths.add("Makefile")
+        result = ctx.delete_source_file("Makefile")
+        assert "protected" in result.lower()
+
+    def test_delete_outside_root_rejected(self, tmp_path):
+        from voidrift_cli.tools.filesystem import WriteContext
+        ctx = WriteContext(project_dir=tmp_path)
+        result = ctx.delete_source_file("../../etc/passwd")
+        assert "outside" in result.lower()
+
+    def test_delete_snapshots_for_rollback(self, tmp_path):
+        from voidrift_cli.tools.filesystem import WriteContext
+        from voidrift_cli.tools.snapshot import set_snapshots, get_snapshots, rollback_snapshots
+        (tmp_path / "src").mkdir()
+        target = tmp_path / "src" / "old.py"
+        target.write_text("original content")
+        ctx = WriteContext(project_dir=tmp_path)
+        set_snapshots()
+        ctx.delete_source_file("src/old.py")
+        assert not target.exists()
+        rollback_snapshots(project_dir=tmp_path)
+        assert target.exists()
+        assert target.read_text() == "original content"

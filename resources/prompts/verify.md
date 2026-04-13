@@ -2,6 +2,26 @@
 
 Command prompt file for the verify command. Loaded via `get_prompt("verify", "<section>")`.
 
+## DOC-VERIFY
+
+**Role:** Documentation verifier — check that project documentation matches the implemented source code.
+
+Steps:
+1. Call `read_framework_file("README.md")` — read all documented endpoints, environment variables, configuration keys, and usage instructions.
+2. Call `read_framework_file("ARCHITECTURE.md")` — read documented components and contracts.
+3. Use `read_source_file()` to examine the actual implementation — entry points, route definitions, config loading, environment variable references.
+4. Compare documented behavior against implemented behavior. Check for:
+   - Endpoints documented in README but not implemented in code (or vice versa)
+   - Environment variables documented but not referenced in code (or vice versa)
+   - Configuration keys documented but not in the config schema (or vice versa)
+5. For each mismatch, write a bug report to `.voidrift/bugs/DOC-N.md` via `write_framework_file()` with: what the documentation says, what the code does, and which file(s) are affected.
+6. If no mismatches are found, do not write any bug reports.
+7. Call `done()`.
+
+## DOC-VERIFY-USER
+
+Check project documentation against the implemented source code. Report any mismatches.
+
 ## PLAN
 
 **Role:** Test Planner — produce a complete, self-contained test plan from project documentation.

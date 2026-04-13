@@ -350,6 +350,9 @@ def run_plan(
     task_count = _build_task_files(d, requirements, arch_text, idea_id=idea_id)
     ui.success(f"{task_count} tasks")
 
+    # ── Requirement coverage check (REQ-P-17) ────────────────────────────
+    _check_req_coverage(d, requirements)
+
     # ── Stage 6: README (REQ-P-1) ────────────────────────────────────────
     ui.stage("Stage 6/6: README...")
     readme_template = prompts.load_template("README-TEMPLATE")
@@ -404,6 +407,39 @@ def run_plan(
 
     ui.done("Plan complete.")
     return 0
+
+
+def _check_req_coverage(d: Path, requirements: str) -> None:
+    """Warn on REQ IDs in REQUIREMENTS.md not covered by any task's reqs: field (REQ-P-17)."""
+    import yaml as _yaml
+
+    # Extract all REQ IDs from requirements text
+    all_reqs = set(re.findall(r"REQ-[A-Z]+-\d+", requirements))
+    if not all_reqs:
+        return
+
+    # Collect reqs from task frontmatter
+    covered: set[str] = set()
+    active = d / "tasks" / "active"
+    if active.exists():
+        for tf in active.glob("TASK-*.md"):
+            text = tf.read_text()
+            if text.startswith("---"):
+                try:
+                    end = text.index("---", 3)
+                    fm = _yaml.safe_load(text[3:end]) or {}
+                    for r in fm.get("reqs", []):
+                        covered.update(re.findall(r"REQ-[A-Z]+-\d+", str(r)))
+                except (ValueError, _yaml.YAMLError):
+                    pass
+
+    uncovered = sorted(all_reqs - covered)
+    if uncovered:
+        ui.warn(f"{len(uncovered)} requirement(s) not covered by any task: {', '.join(uncovered[:10])}")
+        if len(uncovered) > 10:
+            ui.warn(f"  ... and {len(uncovered) - 10} more")
+    else:
+        ui.detail(f"All {len(all_reqs)} requirements covered by tasks.")
 
 
 def _dispatch_agent(

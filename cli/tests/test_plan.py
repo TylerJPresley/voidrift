@@ -422,3 +422,55 @@ class TestPlanUpdateMode:
         # Delta agent was called (agent_count >= 2 means delta + at least stage 1)
         assert agent_count >= 2
 
+
+
+class TestReqCoverage:
+    """Tests for REQ-P-17: requirement coverage check."""
+
+    def test_all_covered(self, tmp_project, capsys):
+        """No warning when all REQ IDs are covered by tasks."""
+        import yaml
+        d = Path.cwd() / ".voidrift"
+        d.mkdir(exist_ok=True)
+        (d / "tasks" / "active").mkdir(parents=True, exist_ok=True)
+        (d / "tasks" / "active" / "TASK-1.md").write_text(
+            "---\nid: 1\nmodule: backend\nreqs: [REQ-WX-1, REQ-WX-2]\n---\n# Task"
+        )
+        requirements = "- **REQ-WX-1:** Weather\n- **REQ-WX-2:** More weather"
+        from voidrift_cli.commands.plan import _check_req_coverage
+        _check_req_coverage(d, requirements)
+        captured = capsys.readouterr()
+        assert "not covered" not in captured.err
+
+    def test_uncovered_warns(self, tmp_project, capsys):
+        """Warning emitted for REQ IDs not in any task's reqs field."""
+        d = Path.cwd() / ".voidrift"
+        d.mkdir(exist_ok=True)
+        (d / "tasks" / "active").mkdir(parents=True, exist_ok=True)
+        (d / "tasks" / "active" / "TASK-1.md").write_text(
+            "---\nid: 1\nmodule: backend\nreqs: [REQ-WX-1]\n---\n# Task"
+        )
+        requirements = "- **REQ-WX-1:** Weather\n- **REQ-CAL-1:** Calendar"
+        from voidrift_cli.commands.plan import _check_req_coverage
+        _check_req_coverage(d, requirements)
+        captured = capsys.readouterr()
+        assert "REQ-CAL-1" in captured.err
+
+    def test_no_reqs_in_requirements(self, tmp_project, capsys):
+        """No warning when requirements has no REQ IDs."""
+        d = Path.cwd() / ".voidrift"
+        d.mkdir(exist_ok=True)
+        from voidrift_cli.commands.plan import _check_req_coverage
+        _check_req_coverage(d, "No requirements here")
+        captured = capsys.readouterr()
+        assert "not covered" not in captured.err
+
+    def test_no_tasks_warns_all(self, tmp_project, capsys):
+        """All REQs uncovered when no task files exist."""
+        d = Path.cwd() / ".voidrift"
+        d.mkdir(exist_ok=True)
+        requirements = "- **REQ-WX-1:** Weather"
+        from voidrift_cli.commands.plan import _check_req_coverage
+        _check_req_coverage(d, requirements)
+        captured = capsys.readouterr()
+        assert "REQ-WX-1" in captured.err

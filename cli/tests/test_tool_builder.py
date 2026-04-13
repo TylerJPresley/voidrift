@@ -83,7 +83,7 @@ class TestBuildToolGuidelines:
 # All tool names that should exist in the system (22 unique tools)
 EXPECTED_TOOL_NAMES = {
     # Filesystem + interaction
-    "write_source_file", "edit_source_file", "write_framework_file",
+    "write_source_file", "edit_source_file", "delete_source_file", "write_framework_file",
     "read_source_file", "read_framework_file", "list_project_artifacts",
     "web_fetch", "ask_user_question",
     # Skills
@@ -114,7 +114,7 @@ class TestRegistryCentralization:
 
     def test_all_tools_count(self):
         """ALL_TOOLS has exactly 23 tool schemas."""
-        assert len(ALL_TOOLS) == 23
+        assert len(ALL_TOOLS) == 24
 
     def test_all_tools_is_concatenation_of_groups(self):
         """ALL_TOOLS is the concatenation of all named groups."""
@@ -163,7 +163,7 @@ class TestRegistryCentralization:
         expected_per_cmd = {
             "gather": {"read_source_file", "write_framework_file", "read_framework_file", "read_document", "code_analysis"},
             "plan": {"read_framework_file", "write_framework_file"},
-            "develop": {"read_source_file", "write_source_file", "edit_source_file", "read_framework_file", "run_command"},
+            "develop": {"read_source_file", "write_source_file", "edit_source_file", "delete_source_file", "read_framework_file", "run_command"},
             "chat": {
                 "read_source_file", "write_source_file", "edit_source_file",
                 "read_framework_file", "write_framework_file", "list_project_artifacts",

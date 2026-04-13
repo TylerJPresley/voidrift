@@ -347,3 +347,88 @@ class TestFileListVerification:
                 ui.warn(f"TASK-1: expected {ef} but it was not written")
         captured = capsys.readouterr()
         assert "env.list" in captured.err
+
+
+class TestSelfReviewSteering:
+    """Tests for REQ-D-22: develop agent self-review with confidence scoring."""
+
+    def test_injects_after_first_write(self):
+        """Steering message fires when write count > 0."""
+        injected = False
+        ctx_mock = MagicMock()
+        ctx_mock.get_write_count.return_value = 1
+
+        _self_review_injected = False
+
+        def _self_review_steering(state):
+            nonlocal _self_review_injected
+            if not _self_review_injected and ctx_mock.get_write_count() > 0:
+                _self_review_injected = True
+                return [{"role": "user", "content": "Re-read the acceptance criteria"}]
+            return None
+
+        result = _self_review_steering(None)
+        assert result is not None
+        assert "acceptance criteria" in result[0]["content"]
+
+    def test_does_not_inject_without_writes(self):
+        """No steering when write count is 0."""
+        ctx_mock = MagicMock()
+        ctx_mock.get_write_count.return_value = 0
+
+        _self_review_injected = False
+
+        def _self_review_steering(state):
+            nonlocal _self_review_injected
+            if not _self_review_injected and ctx_mock.get_write_count() > 0:
+                _self_review_injected = True
+                return [{"role": "user", "content": "Re-read the acceptance criteria"}]
+            return None
+
+        result = _self_review_steering(None)
+        assert result is None
+
+    def test_injects_only_once(self):
+        """Steering message fires exactly once even with multiple tool rounds."""
+        ctx_mock = MagicMock()
+        ctx_mock.get_write_count.return_value = 1
+
+        _self_review_injected = False
+
+        def _self_review_steering(state):
+            nonlocal _self_review_injected
+            if not _self_review_injected and ctx_mock.get_write_count() > 0:
+                _self_review_injected = True
+                return [{"role": "user", "content": "Re-read the acceptance criteria"}]
+            return None
+
+        first = _self_review_steering(None)
+        second = _self_review_steering(None)
+        third = _self_review_steering(None)
+        assert first is not None
+        assert second is None
+        assert third is None
+
+    def test_message_includes_confidence_scoring(self):
+        """Steering message asks for confidence score."""
+        ctx_mock = MagicMock()
+        ctx_mock.get_write_count.return_value = 1
+
+        _self_review_injected = False
+
+        def _self_review_steering(state):
+            nonlocal _self_review_injected
+            if not _self_review_injected and ctx_mock.get_write_count() > 0:
+                _self_review_injected = True
+                return [{"role": "user", "content": (
+                    "Re-read the acceptance criteria in the task. "
+                    "For each AC, confirm the code you wrote satisfies it. "
+                    "Score your confidence 0–100% that all ACs are satisfied. "
+                    "If below 90%, identify the gaps and fix them now. "
+                    "If 90% or above, call done()."
+                )}]
+            return None
+
+        result = _self_review_steering(None)
+        assert "confidence" in result[0]["content"].lower()
+        assert "90%" in result[0]["content"]

@@ -262,6 +262,25 @@ class WriteContext:
         preview = "\n".join(old_str.splitlines()[:3])
         return f"Error: old_str not found in {path}. First 3 lines of old_str:\n{preview}"
 
+    def delete_source_file(self, path: str) -> str:
+        """Delete a source file from the project directory (REQ-D-24)."""
+        root = self._project_dir
+        full = (root / path).resolve()
+
+        if err := self._check_protected(path):
+            return err
+        if err := self._check_sandbox(path, full, root):
+            return err
+        if full.is_dir():
+            return f"Error: {path} is a directory. Only files can be deleted."
+        if not full.exists():
+            return f"Error: {path} does not exist."
+
+        self._snapshot_before_write(path, full)
+        full.unlink()
+        self._session_files.append(path)
+        return f"Deleted {path}"
+
     def write_framework_file(self, path: str, content: str, append: bool = False) -> str:
         """Write a framework artifact to the .voidrift/ directory."""
         if err := self._validate_content(content):

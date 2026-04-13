@@ -2,62 +2,40 @@
 
 Improvements identified during the 2026-04-09 through 2026-04-12 development session. These apply START.md's principles to VoidRift's own command pipeline — the framework should scrutinize the projects it builds with the same rigor the operator applies to the framework itself.
 
+Tasks are ordered by dependency — complete them in sequence.
+
 ---
 
-## TASK-F1: Per-stage verification in each command
+## TASK-F1: Task-scoped ACs decomposed from requirement ACs
 
-**Problem:** Verification only happens at the end via `voidrift verify`. Plan doesn't check that its tasks cover all requirements. Develop doesn't check that its code satisfies the task ACs. Errors compound through the pipeline and are only caught at integration time — or by the operator.
+**Status:** ✅ Complete (REQ-P-16)
+
+**Problem:** Tasks currently carry ACs that are either too vague ("environment variable substitution works") or copied verbatim from requirements ("the system shall display weather data"). Task ACs should be scoped to what that specific task does — independently verifiable, collectively covering the requirement. This is the foundation — every other improvement depends on tasks having proper ACs.
 
 **What this changes:**
-- **Plan:** After generating all tasks, a verification pass checks that every requirement in REQUIREMENTS.md has at least one task with ACs that trace to it. Missing coverage is reported as a warning with the uncovered REQ IDs.
-- **Develop:** After each task completes (files written, before marking implemented), a lightweight check confirms the written files match the `files:` list in the task frontmatter. Missing files trigger a warning.
-- **Gather:** After consolidation, verify that every source file categorized in triage appears in ANALYSIS.md. Missing entries are logged.
+- The PLAN-TASK prompt explicitly instructs: "Write acceptance criteria scoped to this task only. Each AC must be verifiable by examining only the files this task produces. The requirement-level AC is verified by `voidrift verify` — the task AC is verified by the develop agent."
+- The task template format section is updated to reinforce: "ACs are observable behaviors of the code this task writes, not the system as a whole."
+- Example in the prompt: Requirement says "display weather with temperature, conditions, alerts." Task for the API client says "returns a dict with `temp` (float), `conditions` (str), `alerts` (list[str]) fields." Task for the endpoint says "GET /api/weather returns 200 with `{temp, conditions, alerts}` schema." Each is independently testable.
 
 **Affected components:**
-- `cli/src/voidrift_cli/commands/plan.py` — post-task-generation verification pass
-- `cli/src/voidrift_cli/commands/develop.py` — post-task file list check in `_run_task`
-- `cli/src/voidrift_cli/commands/gather.py` — post-consolidation coverage check
+- `resources/prompts/plan.md` — PLAN-TASK prompt and template format section
 
-**Design constraint:** These are warnings, not blockers. The operator decides whether to act on them. No approval gates in automated commands.
+**Design constraint:** Prompt-layer change only. No code changes. The quality of task ACs depends on the plan model's ability to decompose — stronger models will produce better decompositions.
 
 ---
 
 ## TASK-F2: Develop agent self-review against ACs
 
-**Problem:** The develop agent writes code and calls `done` without ever re-reading the acceptance criteria. It satisfies what it remembers from the initial read, which may be incomplete or misinterpreted. The env.list problem (4 vars instead of 8) is a direct result — the agent wrote code that "worked" but didn't satisfy the full AC.
+**Status:** ✅ Complete (REQ-D-22)
 
-**What this changes:**
-- After the develop agent writes all files and before calling `done`, inject a steering message: "Re-read the acceptance criteria in the task. For each AC, confirm the code you wrote satisfies it. If any AC is not satisfied, fix it now."
-- This uses the existing `get_steering_messages` hook on the AgentLoop. The hook fires after each tool round. When the agent has written at least one file, inject the self-review prompt once.
-- The self-review is a prompt injection, not a structural check. The agent may still miss things, but it gets a second pass at the ACs with the written code fresh in context.
-
-**Affected components:**
-- `cli/src/voidrift_cli/commands/develop.py` — `get_steering_messages` hook in `_run_task`
-
-**Design constraint:** One injection per task. Must not trigger on every tool round — only after writes have occurred and before the agent exits. Use a flag similar to `_write_nudge_count`.
+**What was done:** After the agent writes its first file, a one-time steering message is injected asking it to re-read each AC, confirm satisfaction, and score confidence 0–100%. Below 90% triggers self-correction before calling done.
 
 ---
 
-## TASK-F3: Plan traceability — tasks carry REQ references
+## TASK-F3: Develop reads before writing
 
-**Problem:** There's no traceability from requirements to tasks to code. If a requirement is missed during task generation, nobody notices until verify or the operator catches it. Plan generates tasks from architecture, but the link back to specific requirements is implicit.
-
-**What this changes:**
-- Task frontmatter gets a `reqs:` field listing the requirement IDs the task covers (e.g. `reqs: [REQ-WX-1, REQ-WX-2]`).
-- The PLAN-TASK prompt instructs the task-writing agent to include `reqs:` based on which requirements from REQUIREMENTS.md the task's ACs trace to.
-- Plan's post-generation verification (TASK-F1) uses the `reqs:` field to check coverage — every REQ ID in REQUIREMENTS.md should appear in at least one task's `reqs:` list.
-- The `reqs:` field is metadata for traceability. It is NOT injected into the develop agent's context — the develop agent only sees the task ACs.
-
-**Affected components:**
-- `resources/prompts/plan.md` — PLAN-TASK template adds `reqs:` to frontmatter format
-- `cli/src/voidrift_cli/commands/plan.py` — coverage verification reads `reqs:` fields
-- `cli/src/voidrift_cli/manifest.py` — manifest schema accepts `reqs` field
-
-**Depends on:** TASK-F1 (the verification pass that consumes the traceability data)
-
----
-
-## TASK-F4: Develop reads before writing
+**Status:** ✅ Complete (REQ-D-23)
+**Depends on:** F1 (better ACs give the agent clearer targets when reading existing code)
 
 **Problem:** The develop agent reads the task and starts writing immediately. It doesn't understand what code already exists, what patterns are established, or how its changes fit into the existing codebase. This leads to inconsistencies — new code that doesn't follow established patterns, duplicate functionality, or conflicts with existing files.
 
@@ -72,68 +50,72 @@ Improvements identified during the 2026-04-09 through 2026-04-12 development ses
 
 ---
 
-## TASK-F5: Documentation as a develop deliverable
+## TASK-F4: Plan traceability — tasks carry REQ references
 
-**Problem:** Plan generates a README. Develop changes interfaces, adds endpoints, modifies configuration — but never updates the README. By the time all tasks complete, the README is stale. The operator has to manually reconcile documentation with the actual implementation.
+**Status:** ✅ Complete (REQ-P-17)
+**Depends on:** F1 (task ACs must trace to requirements for traceability to be meaningful)
+
+**Problem:** There's no traceability from requirements to tasks to code. If a requirement is missed during task generation, nobody notices until verify or the operator catches it. Plan generates tasks from architecture, but the link back to specific requirements is implicit.
 
 **What this changes:**
-- Tasks that create or modify user-facing interfaces (API endpoints, CLI commands, configuration keys, environment variables) include `readme_update: true` in frontmatter.
-- The PLAN-TASK prompt instructs the task-writing agent to set this flag when the task affects user-facing behavior.
-- When `readme_update: true`, the develop agent's system prompt includes an additional instruction: "After implementing the task, update README.md to reflect any changes to endpoints, configuration, environment variables, or usage instructions."
-- The develop agent gets `write_framework_file` access (already in AGENT_TOOLS via `read_framework_file` — need to check if write is included for `.voidrift/README.md`).
+- Tasks carry a `reqs:` field in frontmatter listing the requirement IDs the task's ACs satisfy.
+- The `reqs:` field is metadata for traceability. It is NOT injected into the develop agent's context — the develop agent only sees the task ACs.
+- Plan's post-generation verification uses the `reqs:` field to check coverage — every REQ ID in REQUIREMENTS.md should appear in at least one task's `reqs:` list. Uncovered REQs are reported as warnings.
 
 **Affected components:**
-- `resources/prompts/plan.md` — PLAN-TASK template adds `readme_update` to frontmatter
-- `resources/prompts/develop.md` — conditional README update instruction
-- `cli/src/voidrift_cli/commands/develop.py` — read `readme_update` from frontmatter, inject instruction
+- `resources/prompts/plan.md` — PLAN-TASK template adds `reqs:` to frontmatter format
+- `cli/src/voidrift_cli/commands/plan.py` — post-generation coverage verification
+- `cli/src/voidrift_cli/manifest.py` — manifest schema accepts `reqs` field
 
-**Design constraint:** The README lives in `.voidrift/README.md`. The develop agent already has `read_framework_file`. It needs `write_framework_file` to update it — verify this is in the develop tool set. If not, add it scoped to README.md only.
+**Design constraint:** The `reqs:` field is populated by the task-writing agent from what it already sees in the module arch. No additional context is injected. The coverage check is a warning, not a blocker.
 
 ---
 
-## TASK-F6: Task-scoped ACs decomposed from requirement ACs
+## TASK-F5: Per-stage verification in each command
 
-**Problem:** Tasks currently carry ACs that are either too vague ("environment variable substitution works") or copied verbatim from requirements ("the system shall display weather data"). Task ACs should be scoped to what that specific task does — independently verifiable, collectively covering the requirement.
+**Status:** ✅ Complete (REQ-D-21 develop file check, REQ-P-17 plan coverage, REQ-G-22 gather triage coverage)
+**Depends on:** F1 (plan coverage check needs good task ACs), F4 (plan coverage check uses `reqs:` field)
 
-**What this changes:**
-- The PLAN-TASK prompt explicitly instructs: "Write acceptance criteria scoped to this task only. Each AC must be verifiable by examining only the files this task produces. The requirement-level AC is verified by `voidrift verify` — the task AC is verified by the develop agent."
-- The task template format section is updated to reinforce: "ACs are observable behaviors of the code this task writes, not the system as a whole."
-- Example in the prompt: Requirement says "display weather with temperature, conditions, alerts." Task for the API client says "returns a dict with `temp` (float), `conditions` (str), `alerts` (list[str]) fields." Task for the endpoint says "GET /api/weather returns 200 with `{temp, conditions, alerts}` schema." Each is independently testable.
+**Problem:** Verification only happens at the end via `voidrift verify`. Plan doesn't check that its tasks cover all requirements. Errors compound through the pipeline and are only caught at integration time — or by the operator.
+
+**What remains:**
+- **Plan:** After generating all tasks, a verification pass checks that every requirement in REQUIREMENTS.md has at least one task covering it (via `reqs:` field from F4). Missing coverage is reported as a warning.
+- **Gather:** After consolidation, verify that every source file categorized in triage appears in ANALYSIS.md. Missing entries are logged.
+- **Develop file list check:** ✅ Already done (REQ-D-21).
 
 **Affected components:**
-- `resources/prompts/plan.md` — PLAN-TASK prompt and template format section
+- `cli/src/voidrift_cli/commands/plan.py` — post-task-generation verification pass
+- `cli/src/voidrift_cli/commands/gather.py` — post-consolidation coverage check
 
-**Design constraint:** This is a prompt-layer change only. No code changes. The quality of task ACs depends on the plan model's ability to decompose — stronger models will produce better decompositions.
-
+**Design constraint:** These are warnings, not blockers. The operator decides whether to act on them. No approval gates in automated commands.
 
 ---
 
-## TASK-F7: Add delete_source_file tool to develop
+## TASK-F6: Documentation verification in verify command
 
-**Problem:** The develop agent can create and modify files but cannot delete them. When requirements change in a later run and a file is no longer needed — a module removed, a file replaced, direction changed — the agent has no way to clean up. Dead files accumulate and confuse future agents and operators.
+**Status:** ✅ Complete (REQ-VF-17)
+
+**Problem:** Plan generates README. Develop changes interfaces, endpoints, configuration — but never updates the README. By the time all tasks complete, the README is stale. The operator has to manually reconcile documentation with the actual implementation.
+
+**Revised approach:** Instead of giving develop write access to framework files, verify catches stale documentation. A new Stage 0 in verify checks that documented endpoints, environment variables, and configuration keys match the actual source code. Stale docs become bug reports — same as test failures.
 
 **What this changes:**
-- Add `delete_source_file(path)` tool to the develop agent's tool set.
-- The tool deletes a file within the project root, subject to the same path sandboxing as `write_source_file` (REQ-SEC-1) and `protected_paths` checks.
-- The tool logs the deletion and records it in the snapshot system for rollback (REQ-D-15) — if the task fails, deleted files are restored from the snapshot.
-- Task frontmatter `files:` field supports `(delete)` annotation: `- backend/old_module.py (delete)`.
-- The file list verification (TASK-F1 develop check) includes `(delete)` — warns if a file annotated for deletion still exists after the task completes.
+- Add a documentation verification stage as the first stage of `voidrift verify`, before the current test planning stage.
+- The stage reads README.md and ARCHITECTURE.md, reads the source code, and checks for mismatches: documented endpoints vs implemented endpoints, documented env vars vs env vars referenced in code, documented config keys vs config schema.
+- Mismatches are reported as bug reports in `.voidrift/bugs/` — same format as test failures.
+- The operator fixes stale docs via `voidrift chat` (which already has `write_framework_file`).
 
 **Affected components:**
-- `cli/src/voidrift_cli/tools/filesystem.py` — new `delete_source_file` handler
-- `cli/src/voidrift_cli/tools/registry.py` — tool schema for `delete_source_file`
-- `cli/src/voidrift_cli/commands/develop.py` — add to `AGENT_TOOLS`, snapshot integration
-- `resources/prompts/develop.md` — mention deletion in the steps
-- `resources/prompts/plan.md` — PLAN-TASK template documents `(delete)` annotation
+- `cli/src/voidrift_cli/commands/verify.py` — new Stage 0 before existing Stage 1
+- `resources/prompts/verify.md` — new prompt section for documentation verification
 
-**Design constraint:** Deletion is sandboxed to the project root. Protected paths cannot be deleted. Snapshots must capture the original file content before deletion for rollback. The tool should refuse to delete directories — files only.
-
-**Depends on:** None (can be done independently, but the verification check from TASK-F1 should be updated to handle `(delete)` once this ships).
-
+**Design constraint:** This is an agent-based check, not a code-level parser. The verify agent reads docs and source code and identifies mismatches. It uses the same sub-agent pattern as the existing test case execution. The develop command boundary is preserved — develop never writes to `.voidrift/`.
 
 ---
 
-## TASK-F8: Chat diagnose-before-acting prompt
+## TASK-F7: Chat diagnose-before-acting prompt
+
+**Status:** ✅ Complete (REQ-U-24)
 
 **Problem:** The chat agent jumps to action without understanding the request. "Let's look at the verify result" triggers file writes instead of reading VERIFY.md. The agent interprets intent and acts on it in the same turn, often incorrectly. START.md step 1: "Trace the root cause. Understand the full impact before proposing anything."
 
@@ -148,7 +130,10 @@ Improvements identified during the 2026-04-09 through 2026-04-12 development ses
 
 ---
 
-## TASK-F9: Chat propose-before-writing
+## TASK-F8: Chat propose-before-writing
+
+**Status:** ✅ Complete (REQ-U-25)
+**Depends on:** F7 (diagnose comes before propose)
 
 **Problem:** The chat agent goes straight from understanding to executing. It decides what to do and does it — the operator only finds out what happened after the fact (or via permission prompts that show tool names without context). START.md step 2: "Present a high-confidence solution — what changes, where, and why. Wait for approval."
 
@@ -164,7 +149,9 @@ Improvements identified during the 2026-04-09 through 2026-04-12 development ses
 
 ---
 
-## TASK-F10: Chat post-action summary
+## TASK-F9: Chat post-action summary
+
+**Status:** ✅ Complete (REQ-U-26)
 
 **Problem:** After the model executes tool calls, the operator often gets no summary of what happened. The model writes 3 files, edits 2 more, and returns empty text or a vague response. The operator has to check git diff to understand what changed. START.md step 12: "Files changed, ACs satisfied, open questions."
 
@@ -176,3 +163,27 @@ Improvements identified during the 2026-04-09 through 2026-04-12 development ses
 - `resources/prompts/chat.md` or `resources/prompts/system.md` (CHAT-ROLE section)
 
 **Design constraint:** Prompt-layer only. The summary should be concise — a bullet list of changes, not a narrative. The model should not repeat file contents in the summary.
+
+---
+
+## TASK-F10: Add delete_source_file tool to develop
+
+**Status:** ✅ Complete (REQ-D-24)
+
+**Problem:** The develop agent can create and modify files but cannot delete them. When requirements change in a later run and a file is no longer needed — a module removed, a file replaced, direction changed — the agent has no way to clean up. Dead files accumulate and confuse future agents and operators.
+
+**What this changes:**
+- Add `delete_source_file(path)` tool to the develop agent's tool set.
+- The tool deletes a file within the project root, subject to the same path sandboxing as `write_source_file` (REQ-SEC-1) and `protected_paths` checks.
+- The tool logs the deletion and records it in the snapshot system for rollback (REQ-D-15) — if the task fails, deleted files are restored from the snapshot.
+- Task frontmatter `files:` field supports `(delete)` annotation: `- backend/old_module.py (delete)`.
+- The file list verification (REQ-D-21) includes `(delete)` — warns if a file annotated for deletion still exists after the task completes.
+
+**Affected components:**
+- `cli/src/voidrift_cli/tools/filesystem.py` — new `delete_source_file` handler
+- `cli/src/voidrift_cli/tools/registry.py` — tool schema for `delete_source_file`
+- `cli/src/voidrift_cli/commands/develop.py` — add to `AGENT_TOOLS`, snapshot integration
+- `resources/prompts/develop.md` — mention deletion in the steps
+- `resources/prompts/plan.md` — PLAN-TASK template documents `(delete)` annotation
+
+**Design constraint:** Deletion is sandboxed to the project root. Protected paths cannot be deleted. Snapshots must capture the original file content before deletion for rollback. The tool should refuse to delete directories — files only.

@@ -326,6 +326,12 @@ After a task succeeds (files written, before marking implemented), `_run_task` p
 
 **Why:** The develop agent can write different files than specified in the task, or skip files entirely, and the task still gets marked implemented. The env.list problem (agent wrote 4 vars instead of 8) would have been caught here — the task listed `env.list (create)` but the agent's output didn't match the spec. Catching this at task completion is cheaper than catching it at verify.
 
+### 3.30 Develop agent self-review with confidence scoring (REQ-D-22)
+
+After the agent writes at least one file, `_self_review_steering` injects a one-time user message via `get_steering_messages`: "Re-read the acceptance criteria. For each AC, confirm the code satisfies it. Score confidence 0–100%. Below 90%, fix the gaps. 90% or above, call done()." A `_self_review_injected` flag ensures it fires exactly once per task.
+
+**Why:** The agent reads ACs at the start of the task, then writes code from memory. Details get lost — especially with small models. A self-review pass after writing forces the agent to re-read the ACs with the written code fresh in context. The confidence score creates a decision point: fix or finish. This mirrors START.md step 10.
+
 ---
 
 ## 4. Data Flows

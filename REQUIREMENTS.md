@@ -275,6 +275,10 @@
 - **REQ-G-21:** WHEN the gather command completes successfully, THE SYSTEM SHALL display the total elapsed wall-clock time for the entire run in the final completion line.
   - *Rationale:* Individual stage timings are shown per-spinner, but no aggregate is displayed, making it impossible to know how long the full run took without summing stages manually — and stage-level timers omit inter-stage overhead.
   - Given a gather run completes all four stages, When the final success line is printed, Then it includes the total elapsed time (e.g. `Requirements written to .voidrift/REQUIREMENTS.md (3m 42s)`).
+- **REQ-G-22:** AFTER the gather triage stage completes, THE SYSTEM SHALL compare the number of input files against the number of categorized files. WHEN any files were not categorized, THE SYSTEM SHALL emit a warning with the count of uncategorized files. This check is a warning only — it does not block subsequent stages.
+  - *Rationale:* If triage drops files, they are silently excluded from the entire gather pipeline — no source analysis, no requirements extracted. A post-triage count check catches this immediately.
+  - Given triage categorizes all 20 input files, When the check runs, Then no warning is emitted.
+  - Given triage categorizes 18 of 20 input files, When the check runs, Then a warning reports 2 uncategorized files.
 
 ### 4.5 Command: Plan
 
@@ -302,6 +306,16 @@
   - *Rationale:* Front-loading the skill list into a monolithic prompt places it thousands of tokens from the model's current generation position by task 5+. Per-agent injection ensures the skill constraint is at position 0 of context for every task file agent, eliminating the attention decay that causes local models to invent skill names.
   - Given a Stage 5 agent is dispatched for any task, When its system prompt is examined, Then the valid skill list appears after the task outline entry.
   - Given the plan command runs, When Stage 5 agents are dispatched, Then each agent's skill list is resolved at dispatch time from the current skill directories — not from a value computed at command start.
+- **REQ-P-16:** The PLAN-TASK prompt SHALL instruct the task-writing agent to write acceptance criteria scoped to the task only. Each AC SHALL be verifiable by examining only the files the task produces. ACs SHALL describe observable behaviors with specific values — not vague descriptions or system-level statements. The requirement-level ACs are verified by `voidrift verify`; task ACs are the develop agent's definition of done.
+  - *Rationale:* Tasks with vague or system-level ACs leave the develop agent guessing what "done" looks like. The agent writes code that technically works but misses specific details from the requirement. Task-scoped ACs with concrete values give the develop agent a clear, independently verifiable contract.
+  - Given a task is generated for a weather API client, When the ACs are examined, Then each AC references specific values verifiable in the task's output files (e.g. field names, types, status codes) — not system-level behaviors.
+  - Given a task is generated, When the ACs are examined, Then no AC requires examining files outside the task's `files:` list to verify.
+- **REQ-P-17:** The plan pipeline SHALL maintain requirement traceability from REQUIREMENTS.md through to task files. The PLAN-ARCH prompt SHALL instruct the architect to reference REQ IDs inline when describing components and contracts. The PLAN-MODULE prompt SHALL instruct the module architect to carry REQ ID references from the architecture into the module design. The PLAN-TASK template SHALL include a `reqs:` field in task frontmatter for the REQ IDs the task traces to. AFTER all tasks are generated, THE SYSTEM SHALL extract all REQ IDs from REQUIREMENTS.md, collect all `reqs:` values from task frontmatter, and emit a warning for any REQ ID not covered by at least one task. The coverage check is a warning only — not a blocker.
+  - *Rationale:* The architecture is the bridge between requirements and implementation. If it doesn't reference which requirements each component satisfies, the link is broken and tasks are generated without knowing what problem they solve. Inline REQ references flow naturally through the pipeline: architecture → module arch → task frontmatter. The coverage check catches requirements that fell through the cracks.
+  - Given REQUIREMENTS.md contains REQ-WX-1, When the architecture is generated, Then REQ-WX-1 appears inline referencing the component that satisfies it.
+  - Given the architecture references REQ-WX-1 in the Weather Service, When the module arch is generated, Then REQ-WX-1 appears in the module arch.
+  - Given the module arch references REQ-WX-1, When a task is generated, Then the task frontmatter includes `reqs: [REQ-WX-1]`.
+  - Given all tasks collectively cover all REQ IDs except REQ-CAL-1, When the coverage check runs, Then a warning names REQ-CAL-1 as uncovered.
 - **REQ-P-2:** Planner output SHALL be fully hidden from the terminal. Only a spinner and status line SHALL be shown.
 - **REQ-P-3:** WHEN `--overwrite` is specified, THE SYSTEM SHALL remove all plan-produced directories (`tasks/`, `arch/`) and `ARCHITECTURE.md` and `README.md` before planning. Gather-produced artifacts (REQUIREMENTS.md, analysis/) SHALL be preserved.
   - Given a previous plan created ARCHITECTURE.md and populated arch/ and tasks/, When `voidrift plan <model> --overwrite` is run, Then ARCHITECTURE.md is deleted and the arch/ and tasks/ directories are removed entirely before the planning agent starts.
@@ -491,6 +505,11 @@ Verify is a two-stage requirements-driven acceptance testing command. Stage 1 pr
 - **REQ-VF-16:** THE SYSTEM SHALL pass `cmd="verify-plan"` and `cmd="verify-execute"` to `build_local_tools()`. The `cmd="verify-execute"` tool set SHALL include: `read_framework_file`, `write_framework_file`, `read_process_output`, `http_request`, `run_command`, and browser tools. It SHALL NOT include `read_source_file`, `write_source_file`, `start_process`, or `stop_process`.
   - Given cmd="verify-plan", When build_local_tools() is called, Then read_framework_file, read_source_file, and write_framework_file are present.
   - Given cmd="verify-execute", When build_local_tools() is called, Then read_source_file and write_source_file are absent; http_request, run_command, read_process_output, and browser tools are present.
+- **REQ-VF-17:** BEFORE the test planning stage, THE SYSTEM SHALL run a documentation verification stage (Stage 0). A documentation verification agent SHALL read README.md, ARCHITECTURE.md, and source code, then check for mismatches between documented behavior and implemented behavior — endpoints, environment variables, configuration keys. WHEN mismatches are found, the agent SHALL write bug reports to `.voidrift/bugs/` in the same format as test failure bug reports. Documentation verification results SHALL appear in the final VERIFY.md summary alongside test results.
+  - *Rationale:* Plan generates README before develop runs. Develop changes interfaces but never updates documentation. By the time verify runs, the README is stale. Catching stale docs as the first verify stage surfaces the problem early without giving develop write access to framework files.
+  - Given README documents an endpoint that does not exist in source code, When doc verification runs, Then a bug report is written naming the mismatch.
+  - Given README and source code are consistent, When doc verification runs, Then no doc-related bug reports are written.
+  - Given doc verification finds 2 mismatches, When VERIFY.md is written, Then the doc verification results appear in the summary.
 
 ### 4.9 Utility Commands
 
@@ -634,6 +653,19 @@ Verify is a two-stage requirements-driven acceptance testing command. Stage 1 pr
   - *Rationale:* Models resume stale sessions by continuing the last action in context — writing files, running commands — regardless of whether the operator's intent has changed. A gap marker reorients the model to wait for new instructions instead of replaying old intent.
   - Given a session is resumed after 2 hours, When the agent's messages are restored, Then a gap marker and assistant ack are appended.
   - Given a session is resumed after 5 minutes, When the agent's messages are restored, Then no gap marker is injected.
+
+- **REQ-U-24:** The CHAT-ROLE section of the system prompt SHALL instruct the model to read relevant files before responding to understand the current state. Write tools SHALL only be used when the operator has explicitly asked to create or modify something specific. References to framework commands SHALL be answered with the CLI command to run — not simulated via write tools.
+  - *Rationale:* The chat agent jumps to action without understanding the request — reading "let's look at the verify result" as intent to write files instead of reading VERIFY.md. A positive read-first instruction replaces the negative "do not infer" rule, aligning with the prompt authoring principle of telling the model what to do.
+  - Given the CHAT-ROLE section is examined, Then it contains a positive instruction to read files before responding.
+  - Given the CHAT-ROLE section is examined, Then it retains the rule about explicit write intent.
+
+- **REQ-U-25:** The CHAT-ROLE section of the system prompt SHALL instruct the model to propose changes and wait for operator confirmation before writing. The proposal SHALL describe what will change and why. This complements the permission gate (REQ-U-22) — the gate controls tool execution; the proposal controls approach.
+  - *Rationale:* The permission gate asks "allow this tool call?" but not "is this the right approach?" The operator sees `write_source_file('config.yml')` and has to guess whether the model understood the request. A proposal step gives the operator a chance to redirect before any changes are made.
+  - Given the CHAT-ROLE section is examined, Then it contains an instruction to propose changes and wait for confirmation before writing.
+
+- **REQ-U-26:** The CHAT-ROLE section of the system prompt SHALL instruct the model to summarize actions after making changes — files created, files modified, commands run, and any issues encountered.
+  - *Rationale:* After tool calls, the model often returns empty text or vague responses. The operator has to check git diff to understand what changed. A post-action summary instruction ensures the model reports what it did.
+  - Given the CHAT-ROLE section is examined, Then it contains an instruction to summarize actions after making changes.
 
 ### 4.10 Model Configuration
 
@@ -1005,6 +1037,24 @@ Two log roots, two intents:
   - Given a task with `files: [backend/main.py (modify)]` and the agent edited it, When the check runs, Then no warning is emitted.
   - Given a task with no `files:` field in frontmatter, When the check runs, Then no warning is emitted and the check is skipped.
 
+- **REQ-D-22:** AFTER a develop agent has written at least one file during a task, THE SYSTEM SHALL inject a one-time steering message via the `get_steering_messages` hook instructing the agent to: re-read each acceptance criterion in the task, confirm the written code satisfies it, score confidence 0–100%, and fix any gaps if confidence is below 90%. The message SHALL be injected once per task — subsequent tool rounds SHALL NOT re-inject it. WHEN the agent has not written any files, no steering message SHALL be injected.
+  - *Rationale:* The develop agent writes code based on its initial read of the ACs, then calls done without re-checking. Details get lost between reading and writing, especially with small models. A self-review pass with confidence scoring catches incomplete implementations before the task is marked done.
+  - Given the agent has written at least one file, When the next tool round completes, Then a self-review steering message is injected asking the agent to verify each AC and score confidence.
+  - Given the agent has not written any files, When a tool round completes, Then no self-review message is injected.
+  - Given the self-review message has already been injected, When subsequent tool rounds complete, Then no additional self-review messages are injected.
+
+- **REQ-D-24:** THE SYSTEM SHALL provide a `delete_source_file(path)` agent tool available to the develop command. The tool SHALL delete a file within the project root, subject to path sandboxing (REQ-SEC-1) and `protected_paths` checks. Before deletion, the original file content SHALL be recorded in the snapshot system (REQ-D-15) for rollback. WHEN the file does not exist, the tool SHALL return an error. WHEN the path is a directory, the tool SHALL return an error. The deletion SHALL be tracked in the session files list.
+  - *Rationale:* When requirements change in a later run and a file is no longer needed, the develop agent has no way to clean up. Dead files accumulate and confuse future agents and operators. Snapshot integration ensures deletions are reversible on task failure.
+  - Given a file exists at the path, When `delete_source_file` is called, Then the file is deleted and the original content is snapshotted for rollback.
+  - Given the path is in `protected_paths`, When `delete_source_file` is called, Then the deletion is rejected with an error.
+  - Given the path is outside the project root, When `delete_source_file` is called, Then the deletion is rejected.
+  - Given the path does not exist, When `delete_source_file` is called, Then an error is returned.
+  - Given a task fails after deleting a file, When rollback runs, Then the deleted file is restored.
+
+- **REQ-D-23:** The develop TASK prompt SHALL instruct the agent to read existing code before writing. Step 2 SHALL direct the agent to use `read_source_file()` to examine files listed in the task's `depends` and any existing files at the target paths. The agent SHALL understand established patterns before writing new code.
+  - *Rationale:* The develop agent writes code without understanding what already exists — leading to inconsistencies with established patterns, duplicate functionality, and conflicts with existing files. Directive read-first instruction scoped to the task's immediate dependencies keeps context small while ensuring the agent understands its surroundings.
+  - Given the develop prompt is loaded, When the steps are examined, Then step 2 directs the agent to read dependency files and existing target files before writing.
+
 ### 4.19 Task Management
 
 - **REQ-TM-1:** `cli/src/voidrift_cli/manifest.py` SHALL provide a `ManifestManager` class that reads and writes `.voidrift/tasks/manifest.yml`. The manifest tracks: task status, module grouping, dependencies, bug references, assignment, and next ID counters (`next_id`, `next_bug_id`). The manifest is owned exclusively by the CLI — no agent tool provides write access to it. The manifest SHALL only contain active work — archived entries are removed from the manifest and recorded in history.log.
@@ -1172,6 +1222,9 @@ Two log roots, two intents:
 | V-D-19 | REQ-D-19 | Test | `test_tools.py::TestMtimeGuard` — external mod returns warning; no mod proceeds; force_write overrides; first write no check; cleared between tasks |
 | V-D-20 | REQ-D-20 | Test | `test_git_checkpoint.py` — dirty tree creates checkpoint; clean tree returns None; restore applies stash; checkpoints persisted to JSONL |
 | V-D-21 | REQ-D-21 | Test | `test_develop.py::TestFileListVerification` — frontmatter parsed with annotations stripped; missing files emit warning; all files written emits no warning; no files field skips check |
+| V-D-22 | REQ-D-22 | Test | `test_develop.py::TestSelfReviewSteering` — injects after first write; no injection without writes; injects only once; message includes confidence scoring |
+| V-D-23 | REQ-D-23 | Inspection | `resources/prompts/develop.md` TASK section — step 2 directs agent to read depends and existing target files before writing |
+| V-D-24 | REQ-D-24 | Test | `test_tools.py::TestDeleteSourceFile` — deletes existing file; rejects nonexistent; rejects directory; rejects protected; rejects outside root; snapshots for rollback |
 | V-GIT-4 | REQ-GIT-4 | Test | `test_git.py::TestBoundedDiff` — total lines truncated at limit; files capped at limit; binary excluded; per-file limit applied; truncated=False when within bounds |
 | V-LOG-6 | REQ-LOG-6 | Test | `test_error_tracker.py` — summary_by_category counts; to_state_dict structure; render_summary_table renders; errors.jsonl valid; no errors = no table |
 | V-G-3 | REQ-G-12 | Inspection | `gather.py` — all gather agents use `stream=True` |
@@ -1187,6 +1240,8 @@ Two log roots, two intents:
 | V-P-3 | REQ-P-6 | Analysis | Code review of generated TASKS.md for file ownership |
 | V-P-4 | REQ-P-9 | Test | `test_commands.py` — invalid tags resolved by word-overlap or stripped; valid skills prompt includes descriptions |
 | V-P-5 | REQ-P-11 | Test | `test_commands.py` — delta analysis runs when artifacts exist without `--overwrite`; fresh plan when absent; `--overwrite` clears artifacts before pipeline |
+| V-P-6 | REQ-P-16 | Inspection | `resources/prompts/plan.md` PLAN-TASK section — AC template instructs task-scoped criteria with specific values; Bad/Good examples present |
+| V-P-7 | REQ-P-17 | Test | `test_plan.py::TestReqCoverage` — all covered emits no warning; uncovered REQ warns; no REQs skips check; no tasks warns all |
 | V-G-10 | REQ-G-1 | Test | `test_commands.py` — gather update mode: existing REQUIREMENTS.md provided as context in final pass |
 | V-DPL-1 | REQ-DPL-1 | Test | `test_commands.py::TestDeployPipeline` — version bump patch classification; version bump minor classification; invalid response defaults to minor |
 | V-DPL-2 | REQ-DPL-2 | Test | `test_commands.py::TestDeployPipeline` — CHANGELOG.md created with version entry after deploy |
@@ -1230,6 +1285,11 @@ Two log roots, two intents:
 | V-G-13 | REQ-G-8 (stage isolation) | Test | `test_gather.py::TestGatherPipelineStages` — each stage callable independently; triage, context build, source analysis, consolidation each unit-tested with mocked AgentLoop; stage functions live in `_gather_pipeline.py` |
 | V-G-14 | REQ-G-8 (triage assets) | Inspection | `resources/prompts/gather.md` TRIAGE section — assets definition includes stylesheets (CSS, SCSS, LESS) |
 | V-G-15 | REQ-G-21 | Test | `test_gather.py::TestGatherElapsedOutput` — final success line contains elapsed time string |
+| V-G-16 | REQ-G-22 | Test | `test_gather.py::TestTriageCoverageCheck` — all categorized emits no warning; missing files emits warning with count |
+| V-VF-1 | REQ-VF-17 | Test | `test_verify.py::TestDocVerification` — doc bugs included in VERIFY.md; no doc bugs omits section; doc bugs cause FAIL verdict |
+| V-U-24 | REQ-U-24 | Inspection | `resources/prompts/system.md` CHAT-ROLE section — positive read-first instruction; explicit write intent rule; framework command rule |
+| V-U-25 | REQ-U-25 | Inspection | `resources/prompts/system.md` CHAT-ROLE section — propose changes and wait for confirmation before writing |
+| V-U-26 | REQ-U-26 | Inspection | `resources/prompts/system.md` CHAT-ROLE section — summarize actions after making changes |
 | V-ARCH-7 | REQ-ARCH-9 | Inspection | `agent.py` — develop per-task tool set excludes task orchestration tools; gather excludes dead analysis-store tools |
 | V-U-3 | REQ-U-3 | Test | `test_commands.py::TestCLICommands::test_log_view` |
 | V-U-4 | REQ-U-4 | Test | `test_commands.py::TestCLICommands::test_unlock_no_lock` |

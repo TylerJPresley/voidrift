@@ -72,6 +72,20 @@ FILESYSTEM_TOOLS: list[dict] = [
     {
         "type": "function",
         "function": {
+            "name": "delete_source_file",
+            "description": "Delete a source file from the project directory. The file must exist. Directories cannot be deleted.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Relative path from project root (e.g. src/old_module.py)"},
+                },
+                "required": ["path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "write_framework_file",
             "description": "Write a framework artifact to the .voidrift/ directory. Use append=true to add content to an existing file.",
             "parameters": {
@@ -463,6 +477,7 @@ def make_local_handlers(ctx: "WriteContext") -> dict:
     return {
         "write_source_file": ctx.write_source_file,
         "edit_source_file": ctx.edit_source_file,
+        "delete_source_file": ctx.delete_source_file,
         "write_framework_file": ctx.write_framework_file,
         "read_source_file": ctx.read_source_file,
         "read_framework_file": ctx.read_framework_file,

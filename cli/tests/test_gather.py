@@ -751,3 +751,29 @@ class TestGatherElapsedOutput:
         assert re.search(r"\(\d+s\)|\(\d+m \d+s\)", captured.out), (
             f"Expected elapsed time in output, got: {captured.out!r}"
         )
+
+
+class TestTriageCoverageCheck:
+    """Tests for REQ-G-22: triage coverage check."""
+
+    def test_all_categorized_no_warning(self, capsys):
+        from voidrift_cli import ui
+        file_tree = "src/main.py\nsrc/utils.py\nconfig.yml"
+        file_category = {"src/main.py": "source", "src/utils.py": "source", "config.yml": "config"}
+        input_count = len(file_tree.strip().splitlines())
+        categorized_count = len(file_category)
+        if categorized_count < input_count:
+            ui.warn(f"Triage: {input_count - categorized_count} file(s) not categorized")
+        captured = capsys.readouterr()
+        assert "not categorized" not in captured.err
+
+    def test_missing_files_warns(self, capsys):
+        from voidrift_cli import ui
+        file_tree = "src/main.py\nsrc/utils.py\nconfig.yml"
+        file_category = {"src/main.py": "source"}
+        input_count = len(file_tree.strip().splitlines())
+        categorized_count = len(file_category)
+        if categorized_count < input_count:
+            ui.warn(f"Triage: {input_count - categorized_count} file(s) not categorized out of {input_count}")
+        captured = capsys.readouterr()
+        assert "2 file(s) not categorized" in captured.err

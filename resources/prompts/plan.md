@@ -64,7 +64,7 @@ modules:
    - `modules` — one entry per distinct technology layer or major subsystem. Frontend and backend are always separate modules. A data pipeline, ML layer, or mobile app is its own module. Never collapse the whole system into one module.
 3. Call `done()`.
 
-`ARCHITECTURE.md` contains system-level context only: introduction, constraints, context diagram, module list, cross-module API contracts, and cross-cutting concerns.
+`ARCHITECTURE.md` contains system-level context only: introduction, constraints, context diagram, module list, cross-module API contracts, and cross-cutting concerns. Reference REQ IDs inline when describing components and contracts (e.g. "The Weather Service (REQ-WX-1, REQ-WX-2) fetches current conditions").
 
 ARCHITECTURE TEMPLATE:
 {arch_template}
@@ -81,6 +81,7 @@ You are designing the `{module}` module. The architecture summary below contains
 Steps:
 1. Design the module: component breakdown, data models, internal interfaces, error handling patterns, and cross-module interfaces this module exposes or consumes.
 2. Write `arch/{module}.md` via `write_framework_file("arch/{module}.md")`.
+   - Carry REQ ID references from the architecture into each component section.
    - Interfaces and data models as signatures only — no full implementations.
    - Code examples must not exceed 5 lines.
    - A module arch file that exceeds 4KB is too verbose — focus on what the developer needs to know.
@@ -178,6 +179,7 @@ skills: [SKILL-NAME]
 files:
   - path/to/file.py (create)
 depends: []
+reqs: [REQ-IDs from module arch that this task satisfies]
 ---
 
 # Task title
@@ -189,7 +191,15 @@ As a [role], I want [feature] so that [benefit].
 [Module context from arch file. What patterns and components to follow.]
 
 ## Acceptance Criteria
-- [Testable criterion]
+Write ACs scoped to this task only. Each AC must be verifiable by examining
+only the files this task produces. Use specific values — not vague descriptions.
+
+Bad: "Configuration loading works correctly"
+Good: "load_config() returns a dict with keys: api_key (str), timeout (int), debug (bool)"
+Good: "Output file contains exactly these fields: name, email, created_at"
+Good: "Function raises ValueError when input is empty"
+
+- [Observable behavior with specific values]
 
 ## Implementation Notes
 [Key interfaces, data shapes, behavior. No full implementations — signatures and type hints only, max 5 lines of code.]

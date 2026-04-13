@@ -245,3 +245,37 @@ class TestReadArchField:
         (d / "ARCHITECTURE.md").write_text("startup_command: uvicorn main:app\n")
         from voidrift_cli.commands.verify import _read_arch_field
         assert _read_arch_field(d, "startup_command") == "uvicorn main:app"
+
+
+class TestDocVerification:
+    """Tests for REQ-VF-17: documentation verification stage."""
+
+    def test_write_verify_md_includes_doc_bugs(self, tmp_project):
+        """VERIFY.md includes documentation section when doc bugs exist."""
+        d = Path.cwd() / ".voidrift"
+        d.mkdir(exist_ok=True)
+        from voidrift_cli.commands.verify import _write_verify_md
+        verdict = _write_verify_md(d, [], "test-run", doc_bug_count=2)
+        content = (d / "VERIFY.md").read_text()
+        assert "Documentation" in content
+        assert "2 documentation mismatch" in content
+        assert verdict == "FAIL"
+
+    def test_write_verify_md_no_doc_bugs(self, tmp_project):
+        """VERIFY.md omits documentation section when no doc bugs."""
+        d = Path.cwd() / ".voidrift"
+        d.mkdir(exist_ok=True)
+        from voidrift_cli.commands.verify import _write_verify_md
+        verdict = _write_verify_md(d, [], "test-run", doc_bug_count=0)
+        content = (d / "VERIFY.md").read_text()
+        assert "Documentation" not in content
+        assert verdict == "PASS"
+
+    def test_doc_bugs_cause_fail_verdict(self, tmp_project):
+        """Doc bugs cause FAIL even if all test items pass."""
+        d = Path.cwd() / ".voidrift"
+        d.mkdir(exist_ok=True)
+        from voidrift_cli.commands.verify import _write_verify_md
+        results = [{"item_id": "ITEM-1", "status": "pass", "bug_report_path": None}]
+        verdict = _write_verify_md(d, results, "test-run", doc_bug_count=1)
+        assert verdict == "FAIL"

@@ -87,6 +87,41 @@ def _read_arch_field(d: Path, field: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Documentation verification (REQ-VF-17)
+# ---------------------------------------------------------------------------
+
+def _run_doc_verify(worker: "ModelConfig", d: Path, log: Path, fs_ctx: object) -> bool:
+    """Run documentation verification agent. Returns True if no issues found."""
+    doc_prompt = prompts.load_prompt("verify", "DOC-VERIFY")
+    if not doc_prompt:
+        return True
+
+    (d / "bugs").mkdir(exist_ok=True)
+
+    tools, handlers = build_local_tools("verify-plan", project_dir=d.parent, ctx=fs_ctx)
+    agent = AgentLoop(
+        model=worker,
+        system_prompt=doc_prompt,
+        tools=tools,
+        tool_handlers=handlers,
+        stream=False,
+        max_tokens=get_max_tokens(worker, "verify.plan"),
+        log_path=log,
+        show_spinner=False,
+    )
+
+    with ui.spinner(ui.random_label(), "doc verify") as spin:
+        agent.on_progress = spin.on_progress
+        try:
+            agent.send(prompts.load_prompt("verify", "DOC-VERIFY-USER"))
+        except (RuntimeError, OSError, ValueError) as exc:
+            ui.warn(f"Doc verification failed: {exc}")
+            return False
+
+    return True
+
+
+# ---------------------------------------------------------------------------
 # Sub-agent executor
 # ---------------------------------------------------------------------------
 
@@ -199,13 +234,14 @@ def _write_verify_md(
     d: Path,
     results: list[dict],
     run_id: str,
+    doc_bug_count: int = 0,
 ) -> str:
     """Write .voidrift/VERIFY.md and return the verdict string."""
     total = len(results)
     passed = sum(1 for r in results if r["status"] == "pass")
     failed = sum(1 for r in results if r["status"] == "fail")
     skipped = sum(1 for r in results if r["status"] == "skip")
-    verdict = "PASS" if failed == 0 else "FAIL"
+    verdict = "PASS" if failed == 0 and doc_bug_count == 0 else "FAIL"
     ts = datetime.now().isoformat(timespec="seconds")
 
     lines = [
@@ -215,6 +251,17 @@ def _write_verify_md(
         f"Completed: {ts}",
         f"Verdict: {verdict}",
         "",
+    ]
+
+    if doc_bug_count:
+        lines += [
+            "## Documentation",
+            "",
+            f"{doc_bug_count} documentation mismatch(es) found. See `.voidrift/bugs/DOC-*.md`.",
+            "",
+        ]
+
+    lines += [
         "## Summary",
         "",
         "| Total | Passed | Failed | Skipped |",
@@ -368,10 +415,22 @@ def run_verify(worker: ModelConfig) -> int:
     prev_sigint = signal.signal(signal.SIGINT, _handle_sigterm)
 
     try:
-        # ── Stage 1: Plan agent ──────────────────────────────────────────
-        ui.stage("Stage 1 — Planning test cases...")
+        # ── Stage 0: Documentation verification (REQ-VF-17) ─────────────
+        ui.stage("Stage 0 — Verifying documentation...")
         from ..tools.filesystem import WriteContext as _WriteContext
         _fs_ctx = _WriteContext(project_dir=d.parent, max_read_lines=worker.max_read_lines)
+
+        doc_bugs_before = set((d / "bugs").glob("DOC-*.md")) if (d / "bugs").exists() else set()
+        _doc_verify_ok = _run_doc_verify(worker, d, log, _fs_ctx)
+        doc_bugs_after = set((d / "bugs").glob("DOC-*.md")) if (d / "bugs").exists() else set()
+        doc_bug_count = len(doc_bugs_after - doc_bugs_before)
+        if doc_bug_count:
+            ui.warn(f"Documentation: {doc_bug_count} mismatch(es) found. See .voidrift/bugs/DOC-*.md")
+        else:
+            ui.detail("Documentation consistent with source code.")
+
+        # ── Stage 1: Plan agent ──────────────────────────────────────────
+        ui.stage("Stage 1 — Planning test cases...")
         plan_tools, plan_handlers = build_local_tools("verify-plan", project_dir=d.parent, ctx=_fs_ctx)
         plan_agent = AgentLoop(
             model=worker,
@@ -496,7 +555,7 @@ def run_verify(worker: ModelConfig) -> int:
         ui.stage("Stage 3 — Writing report...")
         # Sort results by item_id for deterministic output
         results.sort(key=lambda r: r["item_id"])
-        verdict = _write_verify_md(d, results, run_id)
+        verdict = _write_verify_md(d, results, run_id, doc_bug_count=doc_bug_count)
 
         failed_count = sum(1 for r in results if r["status"] == "fail")
         append_state(
