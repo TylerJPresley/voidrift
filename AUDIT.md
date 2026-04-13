@@ -65,7 +65,7 @@ Test baseline: **792 passing, 1 pre-existing failure** (`make test`, 2026-04-13)
 
 | File | Lines | vs. Pass 3 | Status |
 |------|-------|------------|--------|
-| `agent.py` | 1133 | +60 | Over target — abort mechanism added |
+| `agent.py` | 1094 | −39 | Over target — abort extracted to `_agent_abort.py` |
 | `main.py` | 750 | 0 | Over target |
 | `commands/plan.py` | 736 | +36 | Over target — coverage check added |
 | `commands/chat.py` | 681 | **−379** | ✅ Under target after split |
@@ -95,12 +95,7 @@ Test baseline: **792 passing, 1 pre-existing failure** (`make test`, 2026-04-13)
 
 #### OPEN-01 — `agent.py` at 1133 lines (2.3× target)
 
-The largest file in the codebase. Contains: `AgentLoop` class, all streaming/sync response methods, think-tag stripping, retry logic, tool execution and batching, normalization, stall handling, queue helpers, abort mechanism. Each is a candidate for extraction.
-
-**Recommended splits:**
-- `_agent_retry.py` — `_create_with_retry`, `_jitter`, `_abort_aware_sleep`, retry constants
-- `_agent_stream.py` — `_stream_response`, `_sync_response`, token accumulation
-- `_agent_tools.py` — tool execution, batching, deduplication, normalization
+⚠️ PARTIAL — Extracted `_agent_abort.py` (62 lines) containing abort mechanism, loop registry, and abort-aware sleep. `agent.py` reduced to 1094 lines. Remaining methods (`_run_loop`, streaming, retry, tool execution) are tightly coupled to `AgentLoop` instance state — further extraction requires a larger refactor (mixins or parameter-passing pattern). 796 tests pass.
 
 #### OPEN-02 — `agent_protocol.py` at 634 lines — depth unreviewed
 

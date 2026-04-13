@@ -22,55 +22,16 @@ from pydantic import BaseModel, Field
 
 from .models import ModelConfig, ModelInterface
 from .token_budget import BudgetExhaustedError
-
-# Module-level abort flag for signal-based loop stop (REQ-ARCH-14, TASK-FW-007)
-_abort_requested = False
-_active_loops: dict[int, "AgentLoop"] = {}
-_active_loops_lock = threading.Lock()
-
-
-class AbortRequested(Exception):
-    """Raised when operator abort interrupts a blocking operation."""
-
-
-def request_abort() -> None:
-    """Set the abort flag and close HTTP clients on all active loops (REQ-D-13)."""
-    global _abort_requested
-    _abort_requested = True
-    with _active_loops_lock:
-        for loop in _active_loops.values():
-            client = getattr(loop, "_active_client", None)
-            if client is not None:
-                try:
-                    client.close()
-                except Exception:
-                    pass
-
-
-def clear_abort() -> None:
-    """Reset the abort flag — called at command start."""
-    global _abort_requested
-    _abort_requested = False
-
-
-def _register_loop(loop: "AgentLoop") -> None:
-    with _active_loops_lock:
-        _active_loops[id(loop)] = loop
-
-
-def _unregister_loop(loop: "AgentLoop") -> None:
-    with _active_loops_lock:
-        _active_loops.pop(id(loop), None)
-
-
-def _abort_aware_sleep(seconds: float) -> None:
-    """Sleep in 0.25s increments, raising AbortRequested if abort flag is set (REQ-D-13)."""
-    remaining = seconds
-    while remaining > 0:
-        if _abort_requested:
-            raise AbortRequested("Operator abort during retry sleep")
-        time.sleep(min(0.25, remaining))
-        remaining -= 0.25
+from ._agent_abort import (
+    AbortRequested,
+    request_abort,
+    clear_abort,
+    is_abort_requested,
+    register_loop as _register_loop,
+    unregister_loop as _unregister_loop,
+    abort_aware_sleep as _abort_aware_sleep,
+    _active_loops,
+)
 
 
 class Message(BaseModel):
@@ -527,7 +488,7 @@ class AgentLoop(BaseModel):
                         "last_tool": tools_called_this_turn[-1],
                     })
                 stop_reason: str | None = None
-                if _abort_requested:
+                if is_abort_requested():
                     stop_reason = "operator_abort"
                 elif self.max_turns > 0 and turn_count >= self.max_turns:
                     stop_reason = "max_turns"
@@ -712,7 +673,7 @@ class AgentLoop(BaseModel):
                 return self.model.adapter.create_raw(client, wire_request)
             except Exception as exc:
                 last_exc = exc
-                if _abort_requested:
+                if is_abort_requested():
                     raise AbortRequested("Operator abort") from exc
                 if not self.model.adapter.is_retryable(exc) or attempt == self._RETRY_MAX:
                     raise
