@@ -71,7 +71,7 @@ Test baseline: **792 passing, 1 pre-existing failure** (`make test`, 2026-04-13)
 | `commands/chat.py` | 681 | **−379** | ✅ Under target after split |
 | `agent_protocol.py` | 634 | −3 | Over target — never deeply audited |
 | `commands/develop.py` | 231 | **−384** | ✅ Under target after split |
-| `commands/verify.py` | 589 | +59 | Over target — Stage 0 added |
+| `commands/verify.py` | 260 | **−329** | ✅ Under target after split |
 | `commands/_gather_pipeline.py` | 581 | 0 | Over target (extracted from gather) |
 | `ui.py` | 535 | +11 | Over target |
 | `tools/registry.py` | 485 | +15 | Near target — delete tool added |
@@ -123,7 +123,7 @@ Test baseline: **792 passing, 1 pre-existing failure** (`make test`, 2026-04-13)
 
 #### OPEN-07 — `verify.py` at 589 lines
 
-Grew with Stage 0 doc verification. Manageable but approaching threshold.
+✅ FIXED — Extracted `_verify_pipeline.py` (375 lines) containing parsing, sub-agent execution, doc verification, plan agent, report writing, and manifest updates. `verify.py` reduced to 260 lines. 796 tests pass.
 
 ---
 

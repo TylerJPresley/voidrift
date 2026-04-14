@@ -20,7 +20,7 @@ class TestVerifyPreflight:
 
     def test_missing_requirements_no_model_call(self, tmp_project, cloud_model):
         """No REQUIREMENTS.md → no AgentLoop instantiation (REQ-VF-P)."""
-        with patch("voidrift_cli.commands.verify.AgentLoop") as MockAgent:
+        with patch("voidrift_cli.commands._verify_pipeline.AgentLoop") as MockAgent:
             from voidrift_cli.commands.verify import run_verify
             run_verify(cloud_model)
             MockAgent.assert_not_called()
@@ -64,7 +64,7 @@ class TestVerifyOrchestrator:
     @patch("voidrift_cli.commands.verify.stop_all")
     @patch("voidrift_cli.commands.verify.clear_sessions")
     @patch("voidrift_cli.commands.verify.close_all_sessions")
-    @patch("voidrift_cli.commands.verify.AgentLoop")
+    @patch("voidrift_cli.commands._verify_pipeline.AgentLoop")
     def test_pass_when_no_bug_reports(
         self, MockAgent, mock_close_browser, mock_clear_http, mock_stop_all,
         tmp_project, cloud_model, sample_requirements
@@ -76,8 +76,8 @@ class TestVerifyOrchestrator:
         def fake_send(msg):
             nonlocal call_count
             call_count += 1
-            if call_count == 1:
-                # Plan agent writes VERIFY-PLAN.md
+            if call_count == 2:
+                # Plan agent writes VERIFY-PLAN.md (call 1 is doc verify)
                 (vd / "VERIFY-PLAN.md").write_text(
                     "# Verify Plan\n\n### ITEM-1\n\nTest REQ-X.\n\n"
                     "### ITEM-2 [SKIP]\n\nReason: qualitative.\n"
@@ -99,7 +99,7 @@ class TestVerifyOrchestrator:
     @patch("voidrift_cli.commands.verify.stop_all")
     @patch("voidrift_cli.commands.verify.clear_sessions")
     @patch("voidrift_cli.commands.verify.close_all_sessions")
-    @patch("voidrift_cli.commands.verify.AgentLoop")
+    @patch("voidrift_cli.commands._verify_pipeline.AgentLoop")
     def test_fail_when_bug_report_written(
         self, MockAgent, mock_close_browser, mock_clear_http, mock_stop_all,
         tmp_project, cloud_model, sample_requirements
@@ -111,11 +111,11 @@ class TestVerifyOrchestrator:
         def fake_send(msg):
             nonlocal call_count
             call_count += 1
-            if call_count == 1:
+            if call_count == 2:
                 (vd / "VERIFY-PLAN.md").write_text(
                     "# Verify Plan\n\n### ITEM-1\n\nTest REQ-Y.\n"
                 )
-            else:
+            elif call_count > 2:
                 # Sub-agent writes a bug report
                 (vd / "bugs").mkdir(exist_ok=True)
                 (vd / "bugs" / "ITEM-1.md").write_text("# Bug Report — ITEM-1\n\nFAIL")
@@ -136,7 +136,7 @@ class TestVerifyOrchestrator:
     @patch("voidrift_cli.commands.verify.stop_all")
     @patch("voidrift_cli.commands.verify.clear_sessions")
     @patch("voidrift_cli.commands.verify.close_all_sessions")
-    @patch("voidrift_cli.commands.verify.AgentLoop")
+    @patch("voidrift_cli.commands._verify_pipeline.AgentLoop")
     def test_stop_all_called_on_exception(
         self, MockAgent, mock_close_browser, mock_clear_http, mock_stop_all,
         tmp_project, cloud_model, sample_requirements
@@ -155,7 +155,7 @@ class TestVerifyOrchestrator:
     @patch("voidrift_cli.commands.verify.stop_all")
     @patch("voidrift_cli.commands.verify.clear_sessions")
     @patch("voidrift_cli.commands.verify.close_all_sessions")
-    @patch("voidrift_cli.commands.verify.AgentLoop")
+    @patch("voidrift_cli.commands._verify_pipeline.AgentLoop")
     def test_state_md_written_after_run(
         self, MockAgent, mock_close_browser, mock_clear_http, mock_stop_all,
         tmp_project, cloud_model, sample_requirements
@@ -184,7 +184,7 @@ class TestVerifyOrchestrator:
     @patch("voidrift_cli.commands.verify.stop_all")
     @patch("voidrift_cli.commands.verify.clear_sessions")
     @patch("voidrift_cli.commands.verify.close_all_sessions")
-    @patch("voidrift_cli.commands.verify.AgentLoop")
+    @patch("voidrift_cli.commands._verify_pipeline.AgentLoop")
     def test_no_source_file_tools_in_execute(
         self, MockAgent, mock_close_browser, mock_clear_http, mock_stop_all,
         tmp_project, cloud_model, sample_requirements
