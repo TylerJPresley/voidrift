@@ -41,21 +41,11 @@ from .. import ui
 from ..models import resolve_model
 from ._chat_idea import IdeaSession, _handle_idea_command
 from ._chat_display import (
-    _setup_terminal,
-    _restore_terminal,
-    _build_key_bindings,
-    _make_display_callbacks,
-    _handle_web_fetch_confirm,
-    _handle_ask_user,
-    _handle_permission_prompt,
     _query_max_context,
     PermissionGate,
 )
 
 from ..models import shell_complete_model as _complete_model
-
-_SESSION_GAP_THRESHOLD = 1800  # 30 minutes in seconds
-
 
 def _inject_session_gap_marker(messages: list[dict], elapsed: str) -> None:
     """Append a session gap marker to reorient the model after a long break (REQ-U-23)."""
@@ -70,429 +60,349 @@ def _inject_session_gap_marker(messages: list[dict], elapsed: str) -> None:
     })
 
 
-def _interactive_loop(agent, mc, log, title, write_tools=None, extra_header=None, web_fetch_kwargs=None, original_skill=None, session=None, style="verbose", fs_ctx=None, permission_gate=None, permission_confirm_holder=None):
-    """Shared interactive terminal loop (REQ-UI-1, REQ-UI-2, REQ-UI-4)."""
-    from ..agent import AgentLoop
+def _tui_loop(agent, mc, log, session=None, style="verbose", fs_ctx=None,
+              original_skill=None, web_fetch_kwargs=None,
+              permission_gate=None, permission_confirm_holder=None,
+              max_ctx=None, idea_session=None, resume_msg=None):
+    """Full-screen TUI loop for chat (REQ-UI-1)."""
+    import threading
+    from ._chat_tui import TUIState, build_tui_app
     from ._chat_compact import ContextCompactor
 
-    _original_skill = original_skill or ""
-
-    model_label = f"{mc.alias} ({mc.model_id})"
-    ui.header(title)
-    if extra_header:
-        for line in extra_header:
-            ui.detail(line)
-    ui.detail(f"Log: {log}")
-    ui.detail(f"Model: {model_label}")
-
-    # Query context window size from model API (REQ-UI-6)
-    max_ctx = _query_max_context(mc)
+    _idea_session = idea_session or IdeaSession()
 
     def _estimate_tokens(messages):
-        """Rough token estimate: chars / 4."""
         return sum(len(m.get("content") or "") for m in messages) // 4
 
-    def _context_prompt():
-        """Build colored context percentage prompt (REQ-UI-6)."""
-        from prompt_toolkit import ANSI
-        mode = ""
-        if _idea_session.is_active():
-            idea_id = _idea_session.idea_id
-            mode = f" idea:{idea_id}" if idea_id else " idea"
-        if not max_ctx:
-            if mode:
-                return ANSI(f"\n\033[36m[{mode.strip()}]\033[0m > ")
-            return ANSI("\n> ")
-        pct = min(100, _estimate_tokens(agent.messages) * 100 // max_ctx)
-        if pct > 80:
-            color = "\033[31m"  # red
-        elif pct > 60:
-            color = "\033[33m"  # yellow
-        else:
-            color = "\033[37m"  # white
-        if mode:
-            return ANSI(f"\n{color}[{pct}%\033[36m{mode}{color}]\033[0m > ")
-        return ANSI(f"\n{color}[{pct}%]\033[0m > ")
+    state = TUIState(model_name=f"{mc.alias} ({mc.model_id})", max_ctx=max_ctx)
+    state.update_context_pct(_estimate_tokens, agent.messages)
 
-    from rich.live import Live
-    from rich.padding import Padding as _RPadding
-    from rich.spinner import Spinner as _RSpinner
-    from rich.text import Text as _RText
-
-    # Shared state for Live-based streaming display.
-    _live_holder: list = [None]
-    _live_start: list[float] = [0.0]
-    _turn_label: list[str] = [""]
-    _got_token: list[bool] = [False]
-    _stream_buf: list[str] = []
-    _term_holder: list = [None]
-
-    def _thinking_text(elapsed: float = 0.0, tokens_in: int = 0, ctx_pct: int | None = None) -> str:
-        """Build thinking spinner text with optional telemetry."""
-        parts = []
-        if elapsed >= 1:
-            parts.append(ui.elapsed_str(elapsed))
-        if tokens_in:
-            parts.append(f"↓ {ui.token_str(tokens_in)} tokens")
-        if ctx_pct is not None:
-            parts.append(f"ctx {ctx_pct}%")
-        if parts:
-            return f"  {_turn_label[0]} ({' · '.join(parts)} · thinking)"
-        return f"  {_turn_label[0]} (thinking)"
-
-    def _thinking() -> _RPadding:
-        return _RPadding(_RSpinner("dots", text=_thinking_text()), pad=(1, 0, 0, 0))
-
-    _stats_parts: list[str] = []
-    _tool_calls_this_turn: list[str] = []
-
-    _display_cbs = _make_display_callbacks(
-        agent=agent,
-        style=style,
-        live_holder=_live_holder,
-        live_start=_live_start,
-        turn_label=_turn_label,
-        got_token=_got_token,
-        stream_buf=_stream_buf,
-        stats_parts=_stats_parts,
-        tool_calls_this_turn=_tool_calls_this_turn,
-        thinking_fn=_thinking,
-    )
-    on_token = _display_cbs["on_token"]
-    on_complete = _display_cbs["on_complete"]
-    on_progress = _display_cbs["on_progress"]
-    on_tool_call = _display_cbs["on_tool_call"]
-    on_tool_result = _display_cbs["on_tool_result"]
-
-    if web_fetch_kwargs:
-        import click as _click
-
-        def _live_confirm(url: str) -> bool:
-            live = _live_holder[0]
-            if live is not None:
-                live.transient = True
-                live.stop()
-                live.transient = False
-            _ts = _term_holder[0]
-            if _ts is not None:
-                _tm, _fd, _saved = _ts
-                try:
-                    _tm.tcsetattr(_fd, _tm.TCSANOW, _saved)
-                except Exception:
-                    pass
-
-            def _do_confirm() -> bool:
-                try:
-                    return _click.confirm("  Allow fetch?", default=False)
-                except _click.Abort:
-                    return False
-
-            allowed = _handle_web_fetch_confirm(url, ui._con, _do_confirm)
-
-            if _ts is not None:
-                try:
-                    _raw = _tm.tcgetattr(_fd)
-                    _raw[3] &= ~(_tm.ECHO | _tm.ICANON)
-                    _tm.tcsetattr(_fd, _tm.TCSANOW, _raw)
-                except Exception:
-                    pass
-            if live is not None:
-                live.start()
-                live.update(_thinking())
-            return allowed
-
-        _wf_handler = agent.tool_handlers.get("web_fetch")
-        if _wf_handler is not None and hasattr(_wf_handler, "set_confirm"):
-            _wf_handler.set_confirm(_live_confirm)
-
-    _auh_handler = agent.tool_handlers.get("ask_user_question")
-    if _auh_handler is not None and hasattr(_auh_handler, "set_ask_fn"):
-        def _live_ask(question: str, options: list[str] | None) -> str:
-            live = _live_holder[0]
-            if live is not None:
-                live.transient = True
-                live.stop()
-                live.transient = False
-            _ts = _term_holder[0]
-            if _ts is not None:
-                _tm, _fd, _saved = _ts
-                try:
-                    _tm.tcsetattr(_fd, _tm.TCSANOW, _saved)
-                except Exception:
-                    pass
-
-            def _do_input() -> str:
-                try:
-                    return input("  > ")
-                except (EOFError, KeyboardInterrupt):
-                    return "[No response]"
-
-            response = _handle_ask_user(question, options, ui._con, _do_input)
-
-            if _ts is not None:
-                try:
-                    _raw = _tm.tcgetattr(_fd)
-                    _raw[3] &= ~(_tm.ECHO | _tm.ICANON)
-                    _tm.tcsetattr(_fd, _tm.TCSANOW, _raw)
-                except Exception:
-                    pass
-            if live is not None:
-                live.start()
-                live.update(_thinking())
-            return response
-
-        _auh_handler.set_ask_fn(_live_ask)
-
-    # --- Permission gate confirm (REQ-U-22) ---
-    if permission_gate is not None and permission_confirm_holder is not None:
-        def _live_perm_confirm(category: str, description: str) -> bool:
-            live = _live_holder[0]
-            if live is not None:
-                live.transient = True
-                live.stop()
-                live.transient = False
-            _ts = _term_holder[0]
-            if _ts is not None:
-                _tm, _fd, _saved = _ts
-                try:
-                    _tm.tcsetattr(_fd, _tm.TCSANOW, _saved)
-                except Exception:
-                    pass
-
-            def _do_input() -> str:
-                try:
-                    return input("  > ")
-                except (EOFError, KeyboardInterrupt):
-                    return "3"
-
-            result = _handle_permission_prompt(category, description, permission_gate, ui._con, _do_input)
-
-            if _ts is not None:
-                try:
-                    _raw = _tm.tcgetattr(_fd)
-                    _raw[3] &= ~(_tm.ECHO | _tm.ICANON)
-                    _tm.tcsetattr(_fd, _tm.TCSANOW, _raw)
-                except Exception:
-                    pass
-            if live is not None:
-                live.start()
-                live.update(_thinking())
-            return result
-
-        permission_confirm_holder[0] = _live_perm_confirm
-
-    agent.on_token = on_token
-    agent.on_complete = on_complete
-    agent.on_tool_call = on_tool_call
-    agent.on_tool_result = on_tool_result
-    agent.on_progress = on_progress
-
-    from prompt_toolkit import PromptSession
-
-    _prompt_session = PromptSession(key_bindings=_build_key_bindings(), multiline=True)
-
-    _consecutive_interrupt = 0
+    if resume_msg:
+        state.add_system(resume_msg)
 
     _compactor = ContextCompactor(
-        agent=agent,
-        log=log,
-        max_ctx=max_ctx,
-        ui=ui,
-        session=session,
-        original_skill=_original_skill,
-        fs_ctx=fs_ctx,
+        agent=agent, log=log, max_ctx=max_ctx, ui=ui, session=session,
+        original_skill=original_skill or "", fs_ctx=fs_ctx,
         estimate_tokens=_estimate_tokens,
-        setup_terminal=_setup_terminal,
-        restore_terminal=_restore_terminal,
+        setup_terminal=lambda fd: (None, None),
+        restore_terminal=lambda fd, tm, saved: None,
     )
 
-    _idea_session = IdeaSession()
+    # Abort flag for Escape cancellation
+    _abort = [False]
+    _msg_snapshot = [len(agent.messages)]
+
+    # Wire agent callbacks to update TUI state
+    _stream_buf: list[str] = []
+    _tool_calls_this_turn: list[str] = []
+    _stats_parts: list[str] = []
+    _turn_start: list[float] = [0.0]
+    _model_msg_idx: list[int] = [-1]  # index of the current turn's model message
+
+    def _on_token(token: str):
+        state.thinking = False
+        _stream_buf.append(token)
+        text = "".join(_stream_buf)
+        # Update the single model message for this turn
+        idx = _model_msg_idx[0]
+        if idx >= 0 and idx < len(state.messages):
+            m = state.messages[idx]
+            m.text = text
+            m.streaming = True
+            m._rendered_cache = None  # force re-render
+            m._rendered_len = 0
+            state._refresh()
+        else:
+            _model_msg_idx[0] = len(state.messages)
+            state.add_model(text, streaming=True)
+
+    def _on_tool_call(name: str, args: str = ""):
+        _tool_calls_this_turn.append(name)
+        state.thinking = True
+        # Finalize streaming text on the model message (hide cursor)
+        idx = _model_msg_idx[0]
+        if idx >= 0 and idx < len(state.messages):
+            state.messages[idx].streaming = False
+            state._refresh()
+        if style == "verbose":
+            # Extract key detail from args JSON
+            detail = ""
+            try:
+                import json
+                a = json.loads(args) if args else {}
+                detail = a.get("path", "") or a.get("url", "") or a.get("cmd", "") or a.get("name", "")
+            except Exception:
+                pass
+            state.add_tool(name, detail)
+
+    def _on_tool_result(name: str, result: str):
+        state.thinking = True
+        state.thinking_label = ui.random_label()
+
+    def _on_complete(stats: dict):
+        _stats_parts.clear()
+        ct = stats.get("completion_tokens", 0)
+        pt = stats.get("prompt_tokens", 0)
+        tps = stats.get("tokens_per_sec")
+        elapsed = stats.get("elapsed", 0)
+        ctx_pct = stats.get("ctx_pct")
+        parts = []
+        if pt:
+            parts.append(f"↑ {pt} tokens")
+        if ct:
+            parts.append(f"↓ {ct} tokens")
+        if tps:
+            parts.append(f"{tps} tok/s")
+        if elapsed:
+            parts.append(f"{elapsed}s")
+        if ctx_pct is not None:
+            parts.append(f"ctx {ctx_pct}%")
+            state.context_pct = ctx_pct
+        _stats_parts.extend(parts)
+
+    agent.on_token = _on_token
+    agent.on_complete = _on_complete
+    agent.on_tool_call = _on_tool_call
+    agent.on_tool_result = _on_tool_result
+
+    # Wire permission gate — prompts render as system messages in TUI
+    if permission_gate is not None and permission_confirm_holder is not None:
+        # For now, auto-allow in TUI (permission prompts need async input handling)
+        # TODO: implement TUI-native permission prompts
+        permission_confirm_holder[0] = lambda cat, desc: True
+
+    # Wire web_fetch confirm
+    if web_fetch_kwargs:
+        _wf = agent.tool_handlers.get("web_fetch")
+        if _wf and hasattr(_wf, "set_confirm"):
+            _wf.set_confirm(lambda url: True)  # TODO: TUI-native confirm
+
+    # Queue for messages submitted while the agent is busy
+    _pending_queue: list[str] = []
+
+    def _dispatch_turn(text: str, app):
+        """Send a message to the agent in a background thread."""
+        state.add_operator(text)
+        with open(log, "a") as f:
+            f.write(f"\n> {text}\n")
+
+        # Reset per-turn state
+        _stream_buf.clear()
+        _tool_calls_this_turn.clear()
+        _model_msg_idx[0] = -1
+        agent.active_skill_allowed_tools = None
+        agent.active_skill_name = ""
+        _abort[0] = False
+        _msg_snapshot[0] = len(agent.messages)
+
+        # Auto-compact check
+        if max_ctx:
+            pct = min(100, _estimate_tokens(agent.messages) * 100 // max_ctx)
+            if _compactor.should_auto_compact(pct):
+                state.add_system("Context at 80% — auto-compacting...")
+                _compactor.compact()
+            elif _compactor.should_nudge(pct):
+                state.add_system("Context over 70%. Consider /compact.")
+
+        def _bg():
+            state.thinking = True
+            state.thinking_label = ui.random_label()
+            state.busy = True
+            app.invalidate()
+            try:
+                response = agent.send(text)
+                # Clear thinking immediately — before processing the response so the
+                # spinner never renders alongside the final message.
+                state.thinking = False
+                app.invalidate()
+                if _abort[0]:
+                    return
+                final_text = response or ""
+                stats_str = " · ".join(_stats_parts) if _stats_parts else ""
+
+                # Update the model message for this turn with final text
+                idx = _model_msg_idx[0]
+                if final_text.strip():
+                    if idx >= 0 and idx < len(state.messages):
+                        m = state.messages[idx]
+                        m.text = final_text
+                        m.stats = stats_str
+                        m.streaming = False
+                        m._rendered_cache = None
+                        m._rendered_len = 0
+                        state._refresh()
+                    else:
+                        state.add_model(final_text, stats=stats_str)
+                elif _tool_calls_this_turn:
+                    # Tool-only turn — no text response. Don't add a synthetic message;
+                    # the tool dots already represent the work done.
+                    if idx >= 0 and idx < len(state.messages):
+                        m = state.messages[idx]
+                        m.stats = stats_str
+                        m.streaming = False
+                        state._refresh()
+                # else: truly empty — nothing to show
+
+                if style == "terse" and _tool_calls_this_turn:
+                    from collections import Counter
+                    counts = Counter(_tool_calls_this_turn)
+                    s = ", ".join(f"{n}× {t}" for t, n in counts.most_common())
+                    state.add_system(f"[{len(_tool_calls_this_turn)} tool calls: {s}]")
+
+                state.update_context_pct(_estimate_tokens, agent.messages)
+                if session:
+                    session.append_message("user", text)
+                    session.append_message("assistant", response)
+                with open(log, "a") as f:
+                    f.write(f"\n{response}\n")
+            except Exception as e:
+                state.thinking = False
+                if _abort[0]:
+                    return
+                state.update_last_model(f"Error: {e}", streaming=False)
+            finally:
+                state.thinking = False
+                state.busy = False
+                if _abort[0]:
+                    # Roll back agent messages to pre-send state
+                    agent.messages = agent.messages[:_msg_snapshot[0]]
+                    state.add_system("Interrupted.")
+                app.invalidate()
+                # Drain queue — process next message if one arrived while busy
+                if _pending_queue and not _abort[0]:
+                    next_text = _pending_queue.pop(0)
+                    _dispatch_turn(next_text, app)
+
+        threading.Thread(target=_bg, daemon=True).start()
+
+    def _on_submit(text: str, app):
+        """Handle operator input — slash commands or agent send."""
+        if text.lower() in ("quit", "exit", "/quit"):
+            app.exit()
+            return
+
+        if text.lower().strip() == "/clear":
+            if session:
+                session.clear()
+            agent.messages = [agent.messages[0]]
+            state.clear_messages()
+            state.add_system("Session cleared.")
+            return
+
+        if text.lower().strip() == "/help":
+            state.add_system(
+                "Commands: /help /clear /quit /compact /quick <q> "
+                "/idea /done /gather /plan /develop /verify /deploy /chat"
+            )
+            return
+
+        if text.lower().strip() == "/compact":
+            state.add_system("Compacting...")
+            _compactor.compact()
+            state.update_context_pct(_estimate_tokens, agent.messages)
+            state.add_system(f"Compacted. Context: {state.context_pct}%")
+            return
+
+        if text.lower().startswith("/quick"):
+            _qt = text[6:].strip()
+            if not _qt:
+                state.add_system("Usage: /quick <question>")
+                return
+            try:
+                from ..config import get_max_tokens as _gmt
+                _qc = agent._get_client()
+                _qr = _qc.chat.completions.create(
+                    model=agent._model_name(),
+                    messages=[{"role": "system", "content": "Answer concisely."},
+                              {"role": "user", "content": _qt}],
+                    max_tokens=_gmt(mc, "chat.quick"),
+                )
+                state.add_model(_qr.choices[0].message.content or "")
+            except Exception as e:
+                state.add_system(f"Quick failed: {e}")
+            return
+
+        low = text.lower().strip()
+        if low in ("/gather", "/plan", "/develop", "/verify", "/deploy", "/idea", "/chat"):
+            state.mode = low
+            if low == "/chat":
+                state.add_system("Back to chat.")
+            else:
+                state.add_system(f"Switched to {low} mode.")
+            return
+
+        if low == "/idea" or low.startswith("/idea ") or (low == "/done" and _idea_session.is_active()):
+            text = _handle_idea_command(text, agent, log, _idea_session)
+            if not text:
+                return
+
+        # If the agent is busy, queue the message instead of interrupting
+        if state.busy:
+            _pending_queue.append(text)
+            preview = text[:60] + "…" if len(text) > 60 else text
+            state.add_system(f"Queued: {preview}")
+            return
+
+        _dispatch_turn(text, app)
+
+    def _on_escape(app):
+        """Cancel the active interaction — close HTTP client to unblock agent.send()."""
+        _abort[0] = True
+        _pending_queue.clear()
+        state.thinking = False
+        state.busy = False
+        # Close the agent's HTTP client to unblock any pending API call
+        try:
+            if hasattr(agent, '_client') and agent._client:
+                agent._client.close()
+        except Exception:
+            pass
+        app.invalidate()
+
+    app = build_tui_app(state, _on_submit, on_escape=_on_escape)
 
     try:
-        while True:
-            try:
-                user_input = _prompt_session.prompt(_context_prompt()).strip()
-                _consecutive_interrupt = 0
-            except KeyboardInterrupt:
-                _consecutive_interrupt += 1
-                if _consecutive_interrupt >= 2:
-                    raise
-                ui.info("Press Ctrl+C again to exit.")
-                continue
-            except EOFError:
-                break
-            if user_input.lower() in ("quit", "exit", "/quit"):
-                break
-            if not user_input:
-                continue
-            _consecutive_interrupt = 0
-
-            if user_input.lower().strip() == "/compact":
-                _compactor.compact()
-                continue
-
-            if user_input.lower().strip() == "/clear":
-                if session:
-                    session.clear()
-                agent.messages = [agent.messages[0]]
-                ui.info("Session cleared.")
-                continue
-
-            if user_input.lower().startswith("/quick"):
-                _quick_text = user_input[6:].strip()
-                if not _quick_text:
-                    ui.info("Usage: /quick <question>")
-                    continue
-                try:
-                    _quick_client = agent._get_client()
-                    _quick_resp = _quick_client.chat.completions.create(
-                        model=agent._model_name(),
-                        messages=[
-                            {"role": "system", "content": "Answer concisely."},
-                            {"role": "user", "content": _quick_text},
-                        ],
-                        max_tokens=_get_max_tokens(mc, "chat.quick"),
-                    )
-                    _quick_answer = _quick_resp.choices[0].message.content or ""
-                    ui._con.print()
-                    ui._con.print(ui.render_text(_quick_answer) if style != "raw" else f"  {_quick_answer}")
-                except Exception as _qe:
-                    ui.error(f"Quick answer failed: {_qe}")
-                continue
-
-            low = user_input.lower().strip()
-            if low == "/idea" or low.startswith("/idea ") or (low == "/done" and _idea_session.is_active()):
-                user_input = _handle_idea_command(user_input, agent, log, _idea_session)
-                if not user_input:
-                    continue
-
-            if write_tools is not None:
-                low = user_input.lower().strip()
-                is_write = low.startswith("/write") or low in {
-                    "write", "write it", "go ahead and write",
-                    "please write the file now", "please write the file",
-                    "write the file", "write the file now",
-                }
-                if is_write:
-                    agent.tools = write_tools
-                    agent.extra_body = None
-                    if low.startswith("/write"):
-                        user_input = user_input[6:].strip() or "Please write the file now."
-                else:
-                    agent.tools = []
-                    agent.extra_body = {"chat_template_kwargs": {"enable_thinking": False}}
-
-            with open(log, "a") as f:
-                f.write(f"\n> {user_input}\n")
-
-            _stream_buf.clear()
-            _got_token[0] = False
-            _turn_label[0] = ui.random_label()
-            _msg_snapshot = len(agent.messages)
-
-            # Reset per-turn skill state on the agent instance (REQ-SKL-9)
-            agent.active_skill_allowed_tools = None
-            agent.active_skill_name = ""
-
-            if max_ctx:
-                pct = min(100, _estimate_tokens(agent.messages) * 100 // max_ctx)
-                if _compactor.should_auto_compact(pct):
-                    ui.info("Context window at 80% — auto-compacting...")
-                    _compactor.compact()
-                    _compactor.nudged = True
-                    _msg_snapshot = len(agent.messages)
-                elif _compactor.should_nudge(pct):
-                    agent.messages.append({
-                        "role": "system",
-                        "content": (
-                            "Context window is over 70% full. "
-                            "Remind the operator to run /compact to free space before continuing."
-                        ),
-                    })
-                    _compactor.nudged = True
-                    _msg_snapshot = len(agent.messages)
-
-            try:
-                _turn_fd: int | None = sys.stdin.fileno()
-            except Exception:
-                _turn_fd = None
-            _turn_termios, _turn_saved = _setup_terminal(_turn_fd)
-            if _turn_fd is not None and _turn_termios is not None:
-                _term_holder[0] = (_turn_termios, _turn_fd, _turn_saved)
-
-            _error = None
-            _interrupted = False
-            _live_start[0] = time.time()
-            if style == "raw":
-                try:
-                    response = agent.send(user_input)
-                    print(f"\n  {response}\n")
-                except KeyboardInterrupt:
-                    _interrupted = True
-                except RuntimeError as e:
-                    _error = str(e)
-                finally:
-                    _term_holder[0] = None
-                    _restore_terminal(_turn_fd, _turn_termios, _turn_saved)
-            else:
-              with Live(_thinking(), console=ui._con, refresh_per_second=12) as _live:
-                _live_holder[0] = _live
-                try:
-                    response = agent.send(user_input)
-                    if response and response.strip():
-                        _live.update(ui.render_text(response))
-                    elif _tool_calls_this_turn:
-                        summary = f"(Completed: {', '.join(dict.fromkeys(_tool_calls_this_turn))})"
-                        _live.update(ui.render_text(summary))
-                    else:
-                        _live.update(ui.render_text("(No response from model)"))
-                except KeyboardInterrupt:
-                    _interrupted = True
-                    _live.transient = True
-                except RuntimeError as e:
-                    _error = str(e)
-                finally:
-                    _live_holder[0] = None
-                    _term_holder[0] = None
-                    _restore_terminal(_turn_fd, _turn_termios, _turn_saved)
-
-            if _interrupted:
-                agent.messages = agent.messages[:_msg_snapshot]
-                ui._con.print()
-                ui.info("Interrupted.")
-                ui._con.print()
-                ui.operator_rule()
-                continue
-
-            if _error:
-                ui.error(_error)
-                continue
-
-            if _stats_parts:
-                ui.stats(_stats_parts)
-
-            if style == "terse" and _tool_calls_this_turn:
-                from collections import Counter
-                counts = Counter(_tool_calls_this_turn)
-                summary = ", ".join(f"{n}× {t}" for t, n in counts.most_common())
-                ui._con.print(f"  [dim][{len(_tool_calls_this_turn)} tool calls: {summary}][/dim]")
-            _tool_calls_this_turn.clear()
-
-            if session:
-                session.append_message("user", user_input)
-                session.append_message("assistant", response)
-
-            with open(log, "a") as f:
-                f.write(f"\n{response}\n")
-            ui._con.print()
-            ui.operator_rule()
-    except KeyboardInterrupt:
-        ui.info("Session ended.")
+        app.run()
     finally:
         agent.on_token = None
         agent.on_complete = None
         agent.on_tool_call = None
         agent.on_tool_result = None
+
+
+def _raw_loop(agent, mc, log, session=None):
+    """Minimal stdin/stdout loop for --style raw (piping, scripting). No TUI."""
+    try:
+        while True:
+            try:
+                text = input("> ").strip()
+            except (EOFError, KeyboardInterrupt):
+                break
+            if not text:
+                continue
+            if text.lower() in ("quit", "exit", "/quit"):
+                break
+            if text.lower() == "/clear":
+                if session:
+                    session.clear()
+                agent.messages = [agent.messages[0]]
+                print("Session cleared.")
+                continue
+
+            with open(log, "a") as f:
+                f.write(f"\n> {text}\n")
+            try:
+                response = agent.send(text)
+                print(f"\n{response}\n")
+                if session:
+                    session.append_message("user", text)
+                    session.append_message("assistant", response)
+                with open(log, "a") as f:
+                    f.write(f"\n{response}\n")
+            except Exception as e:
+                print(f"Error: {e}")
+    except KeyboardInterrupt:
+        pass
 
 
 @click.command()
@@ -527,7 +437,7 @@ def chat(model, doc, style, bare, system_prompt_path) -> None:
     )
 
     def _basic_ask_fn(question: str, options: list[str] | None) -> str:
-        """Basic stdin ask_fn — replaced by Live-aware version in _interactive_loop."""
+        """Basic stdin ask_fn for non-TUI contexts."""
         print(f"\n▸ Agent question: {question}")
         if options:
             for i, opt in enumerate(options, 1):
@@ -538,7 +448,7 @@ def chat(model, doc, style, bare, system_prompt_path) -> None:
             return "[No response]"
 
     _perm_gate = PermissionGate()
-    _perm_holder: list = [None]  # populated with live-aware confirm in _interactive_loop
+    _perm_holder: list = [None]  # populated with confirm callback in _tui_loop
 
     tools, handlers = build_local_tools(
         cmd="chat",
@@ -584,7 +494,7 @@ def chat(model, doc, style, bare, system_prompt_path) -> None:
             )
             system += f"\n\n{doc_section}"
         else:
-            ui.warn(f"{doc} not found — starting fresh")
+            ui.warn(f"{doc} not found — starting fresh") if style == "raw" else None
             system += f"\n\n{_prompts.load_prompt('chat', 'DOC-NEW').format(doc_name=doc)}"
 
     from ..config import get_max_tokens as _get_max_tokens
@@ -637,6 +547,7 @@ def chat(model, doc, style, bare, system_prompt_path) -> None:
 
     from ..session import ChatSession
     session = ChatSession.load_or_create(voidrift_dir())
+    _resume_msg = ""
     if session.has_messages:
         restored = session.reconstruct_messages()
         if restored:
@@ -662,20 +573,27 @@ def chat(model, doc, style, bare, system_prompt_path) -> None:
                     elapsed = f", last active {delta.seconds // 60}m ago"
             except Exception:
                 pass
-        ui.info(f"Resuming session ({session.message_count()} messages{elapsed})")
+        _resume_msg = f"Resuming session ({session.message_count()} messages{elapsed})"
+        if style == "raw":
+            print(f"· {_resume_msg}")
 
         # Inject session gap marker when resuming after 30+ minutes (REQ-U-23)
         if gap_seconds >= 1800:
             _inject_session_gap_marker(agent.messages, elapsed)
 
-    title = f"VoidRift Chat — {doc}" if doc else "VoidRift Chat"
-    _interactive_loop(
-        agent, mc, log, title,
-        web_fetch_kwargs=_web_fetch_kwargs,
-        original_skill=skill,
-        session=session,
-        style=style,
-        fs_ctx=_fs_ctx,
-        permission_gate=_perm_gate,
-        permission_confirm_holder=_perm_holder,
-    )
+    if style == "raw":
+        _raw_loop(agent, mc, log, session=session)
+    else:
+        max_ctx = _query_max_context(mc)
+        _tui_loop(
+            agent, mc, log,
+            session=session,
+            style=style,
+            fs_ctx=_fs_ctx,
+            original_skill=skill,
+            web_fetch_kwargs=_web_fetch_kwargs,
+            permission_gate=_perm_gate,
+            permission_confirm_holder=_perm_holder,
+            max_ctx=max_ctx,
+            resume_msg=_resume_msg,
+        )

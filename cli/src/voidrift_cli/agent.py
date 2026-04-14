@@ -886,7 +886,7 @@ class AgentLoop(BaseModel):
         # Fire on_tool_call for each tool call discovered during the stream
         if tool_calls and self.on_tool_call:
             for tc in tool_calls:
-                self.on_tool_call(tc["function"]["name"])
+                self.on_tool_call(tc["function"]["name"], tc["function"].get("arguments", ""))
 
         # Token accumulation — unconditional so LOOP_EXIT totals are always accurate
         # and budget enforcement is never silently skipped (REQ-ARCH-13, REQ-ARCH-18).
