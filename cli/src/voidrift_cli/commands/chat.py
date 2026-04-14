@@ -100,6 +100,8 @@ def _tui_loop(agent, mc, log, session=None, style="verbose", fs_ctx=None,
     _model_msg_idx: list[int] = [-1]  # index of the current turn's model message
 
     def _on_token(token: str):
+        if _abort[0]:
+            return
         state.thinking = False
         _stream_buf.append(token)
         text = "".join(_stream_buf)
@@ -117,6 +119,8 @@ def _tui_loop(agent, mc, log, session=None, style="verbose", fs_ctx=None,
             state.add_model(text, streaming=True)
 
     def _on_tool_call(name: str, args: str = ""):
+        if _abort[0]:
+            return
         _tool_calls_this_turn.append(name)
         state.thinking = True
         # Finalize streaming text on the model message (hide cursor)
@@ -136,6 +140,8 @@ def _tui_loop(agent, mc, log, session=None, style="verbose", fs_ctx=None,
             state.add_tool(name, detail)
 
     def _on_tool_result(name: str, result: str):
+        if _abort[0]:
+            return
         state.thinking = True
         state.thinking_label = ui.random_label()
 
@@ -177,8 +183,7 @@ def _tui_loop(agent, mc, log, session=None, style="verbose", fs_ctx=None,
         if _wf and hasattr(_wf, "set_confirm"):
             _wf.set_confirm(lambda url: True)  # TODO: TUI-native confirm
 
-    # Queue for messages submitted while the agent is busy
-    _pending_queue: list[str] = []
+    # Single pending message — replaces queue (only one staged at a time)
 
     def _dispatch_turn(text: str, app):
         """Send a message to the agent in a background thread."""
@@ -268,10 +273,7 @@ def _tui_loop(agent, mc, log, session=None, style="verbose", fs_ctx=None,
                     agent.messages = agent.messages[:_msg_snapshot[0]]
                     state.add_system("Interrupted.")
                 app.invalidate()
-                # Drain queue — process next message if one arrived while busy
-                if _pending_queue and not _abort[0]:
-                    next_text = _pending_queue.pop(0)
-                    _dispatch_turn(next_text, app)
+                # Pending message dispatch handled by _check_pending in tick thread
 
         threading.Thread(target=_bg, daemon=True).start()
 
@@ -282,9 +284,18 @@ def _tui_loop(agent, mc, log, session=None, style="verbose", fs_ctx=None,
             return
 
         if text.lower().strip() == "/clear":
+            # Abort running agent if busy
+            if state.busy:
+                _abort[0] = True
+                try:
+                    if hasattr(agent, '_client') and agent._client:
+                        agent._client.close()
+                except Exception:
+                    pass
             if session:
                 session.clear()
             agent.messages = [agent.messages[0]]
+            state.pending_message = None
             state.clear_messages()
             state.add_system("Session cleared.")
             return
@@ -336,11 +347,10 @@ def _tui_loop(agent, mc, log, session=None, style="verbose", fs_ctx=None,
             if not text:
                 return
 
-        # If the agent is busy, queue the message instead of interrupting
+        # If the agent is busy, stage as pending (replaces any existing pending)
         if state.busy:
-            _pending_queue.append(text)
-            preview = text[:60] + "…" if len(text) > 60 else text
-            state.add_system(f"Queued: {preview}")
+            state.pending_message = text
+            state._refresh()
             return
 
         _dispatch_turn(text, app)
@@ -348,7 +358,7 @@ def _tui_loop(agent, mc, log, session=None, style="verbose", fs_ctx=None,
     def _on_escape(app):
         """Cancel the active interaction — close HTTP client to unblock agent.send()."""
         _abort[0] = True
-        _pending_queue.clear()
+        state.pending_message = None
         state.thinking = False
         state.busy = False
         # Close the agent's HTTP client to unblock any pending API call
@@ -359,7 +369,18 @@ def _tui_loop(agent, mc, log, session=None, style="verbose", fs_ctx=None,
             pass
         app.invalidate()
 
-    app = build_tui_app(state, _on_submit, on_escape=_on_escape)
+    def _on_recall_pending():
+        """Pull pending message back into input for editing."""
+        text = state.pending_message
+        state.pending_message = None
+        state._refresh()
+        return text
+
+    def _on_idle(app):
+        app.invalidate()
+
+    app = build_tui_app(state, _on_submit, on_escape=_on_escape,
+                         on_recall_pending=_on_recall_pending, on_idle=_on_idle)
 
     try:
         app.run()

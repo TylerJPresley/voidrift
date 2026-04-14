@@ -830,6 +830,15 @@ Two log roots, two intents:
   - Given the model executed write_source_file and edit_source_file but returned empty text, When the response is displayed, Then the user sees "(Completed: write_source_file, edit_source_file)".
   - Given the model returned empty text with no tool calls, When the response is displayed, Then the user sees "(No response from model)".
 
+- **REQ-UI-15:** WHEN the operator submits a message while the agent is busy, THE SYSTEM SHALL stage it as a single pending message — not a queue. The pending message SHALL be displayed pinned at the bottom of the conversation area with a yellow `┃` bar (`#e5c07b`), a dotted rule separator (`┄`), and a hint line (`↑ to edit · esc to cancel`). Typing again while a pending message exists SHALL replace it. WHEN the agent finishes the current turn, the pending message SHALL auto-dispatch. WHEN the operator presses Up arrow with an empty input, the pending message SHALL be pulled back into the input area for editing and removed from pending. WHEN Escape is pressed or `/clear` is run, the pending message SHALL be cleared. Only one pending message SHALL exist at a time.
+  - *Rationale:* A queue of invisible messages creates irreversible commits — the operator can't retract or edit. A single visible pending slot with recall gives the operator full control over what the agent processes next.
+  - Given the agent is busy and the operator types "fix the bug", When the message is submitted, Then it appears pinned at the bottom with a yellow bar.
+  - Given a pending message exists and the operator types "actually refactor it", When submitted, Then the pending message is replaced.
+  - Given a pending message exists and the operator presses Up arrow with empty input, When the key is pressed, Then the pending text moves to the input area and pending is cleared.
+  - Given the agent finishes and a pending message exists, When the turn completes, Then the pending message auto-dispatches.
+  - Given a pending message exists and the operator presses Escape, When Escape is pressed, Then the pending message is cleared.
+  - Given a pending message exists and the operator runs /clear, When /clear executes, Then the pending message is cleared.
+
 - **REQ-UI-15:** WHEN the operator submits a message while the model is processing (`state.busy`), THE SYSTEM SHALL add the message to a per-session queue rather than dropping it. WHEN the current model turn completes, THE SYSTEM SHALL dispatch the first queued message immediately. WHEN the operator presses Escape, THE SYSTEM SHALL clear the message queue. The input placeholder text SHALL indicate that queued input is accepted (per REQ-UI-3).
   - *Rationale:* Dropping input while the model processes forces the operator to retype. A queue preserves intent without blocking the display thread or requiring the operator to wait and watch.
   - Given the model is processing and the operator submits a message, When the current turn completes, Then the queued message is dispatched automatically without operator action.

@@ -129,6 +129,7 @@ class TUIState:
         self.thinking = False
         self.thinking_label = "thinking..."
         self.busy = False
+        self.pending_message: str | None = None  # staged message waiting to send
         self._invalidate = None
         self._scroll_to_end = None
 
@@ -300,6 +301,13 @@ def _render_to_lines(state: TUIState, width: int) -> list[list[tuple[str, str]]]
         _spinner_idx = (_spinner_idx + 1) % len(SPINNER)
         lines.append([("class:thinking", f"  {SPINNER[_spinner_idx]} {state.thinking_label}")])
 
+    if state.pending_message:
+        lines.append([("", "")])
+        lines.append([("class:pending-rule", "┄" * usable)])
+        for l in state.pending_message.splitlines():
+            lines.append([("class:pending-bar", "┃ "), ("class:pending-text", l)])
+        lines.append([("class:pending-hint", "  ↑ to edit · esc to cancel")])
+
     return lines
 
 
@@ -355,6 +363,10 @@ TUI_STYLE = Style.from_dict({
     "stats": "#555555",
     "thinking": "#e5c07b",
     "system-msg": "#888888 italic",
+    "pending-rule": "#555555",
+    "pending-bar": "#e5c07b",
+    "pending-text": "#e5c07b italic",
+    "pending-hint": "#555555 italic",
     "footer-bg": "bg:#1a1a2e #aaaaaa",
     "ft-name": "#4ec9b0",
     "ft-mode": "#e5c07b",
@@ -375,6 +387,8 @@ def build_tui_app(
     state: TUIState,
     on_submit: "callable",
     on_escape: "callable | None" = None,
+    on_recall_pending: "callable | None" = None,
+    on_idle: "callable | None" = None,
 ) -> Application:
     """Build the full-screen prompt_toolkit Application.
 
@@ -447,6 +461,9 @@ def build_tui_app(
     def _get_prompt():
         if input_area.text:
             return FormattedText([("class:input-text", "")])
+        if state.pending_message and not state.busy:
+            return FormattedText([("class:input-placeholder",
+                                   "press enter to send · ↑ to edit · esc to cancel ")])
         if state.busy:
             return FormattedText([("class:input-placeholder",
                                    "voidrift is working · type to queue a message ")])
@@ -473,6 +490,12 @@ def build_tui_app(
     def _submit(event):
         text = input_area.text.strip()
         if not text:
+            # Empty Enter with pending message and idle agent → dispatch pending
+            if state.pending_message and not state.busy:
+                t = state.pending_message
+                state.pending_message = None
+                state._consecutive_interrupt = 0
+                on_submit(t, event.app)
             return
         input_area.text = ""
         input_area.buffer.reset()
@@ -482,6 +505,14 @@ def build_tui_app(
     @kb.add("c-j")
     def _newline(event):
         input_area.buffer.insert_text("\n")
+
+    @kb.add("up")
+    def _recall(event):
+        if on_recall_pending and state.pending_message and not input_area.text:
+            text = on_recall_pending()
+            if text:
+                input_area.text = text
+                input_area.buffer.cursor_position = len(text)
 
     def _scroll_up_n(n):
         cur = _scroll_top[0] if not _scroll_bottom[0] else max(0, len(_all_lines[0]) - _h())
@@ -516,6 +547,9 @@ def build_tui_app(
 
     @kb.add("escape")
     def _cancel(event):
+        if state.pending_message:
+            state.pending_message = None
+            state._refresh()
         if on_escape and state.busy:
             on_escape(event.app)
 
@@ -532,11 +566,17 @@ def build_tui_app(
 
     # Spinner refresh thread
     def _tick(a):
+        _was_busy = [False]
         while True:
             time.sleep(0.1)
             try:
                 if state.thinking or any(m.streaming for m in state.messages):
                     a.invalidate()
+                # Detect busy→idle transition for pending dispatch
+                if _was_busy[0] and not state.busy:
+                    if on_idle:
+                        on_idle(a)
+                _was_busy[0] = state.busy
             except Exception:
                 break
 
