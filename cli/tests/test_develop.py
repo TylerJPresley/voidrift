@@ -62,7 +62,7 @@ class TestDevelopPreflightChecks:
         lock = vd / ".develop.lock"
         lock.write_text("99999999\n2020-01-01T00:00:00")
 
-        with patch("voidrift_cli.commands.develop.AgentLoop") as MockAgent:
+        with patch("voidrift_cli.commands._develop_pipeline.AgentLoop") as MockAgent:
             mock_instance = MagicMock()
             mock_instance.send.return_value = "done"
             MockAgent.return_value = mock_instance
@@ -71,7 +71,7 @@ class TestDevelopPreflightChecks:
 
         assert not lock.exists()
 
-    @patch("voidrift_cli.commands.develop.AgentLoop")
+    @patch("voidrift_cli.commands._develop_pipeline.AgentLoop")
     def test_develop_loop_marks_implemented(self, MockAgent, tmp_project, cloud_model, sample_requirements):
         """REQ-D-9: Task marked implemented after writes."""
         vd = tmp_project / ".voidrift"
@@ -91,7 +91,7 @@ class TestDevelopPreflightChecks:
         manifest = yaml.safe_load((vd / "tasks" / "manifest.yml").read_text())
         assert manifest["tasks"][1]["status"] == "implemented"
 
-    @patch("voidrift_cli.commands.develop.AgentLoop")
+    @patch("voidrift_cli.commands._develop_pipeline.AgentLoop")
     def test_sequential_multi_module(self, MockAgent, tmp_project, cloud_model, sample_requirements):
         vd = tmp_project / ".voidrift"
         self._setup_manifest(vd, [
@@ -139,7 +139,7 @@ class TestDevelopRetryEscalation:
             (active / f"TASK-{tid}.md").write_text(content)
         (tasks_dir / "manifest.yml").write_text(_yaml.dump(manifest, default_flow_style=False))
 
-    @patch("voidrift_cli.commands.develop.AgentLoop")
+    @patch("voidrift_cli.commands._develop_pipeline.AgentLoop")
     def test_no_writes_triggers_retry(self, MockAgent, tmp_project, cloud_model, sample_requirements):
         """When the first task attempt writes nothing, a retry is attempted."""
         vd = tmp_project / ".voidrift"
@@ -171,7 +171,7 @@ class TestDevelopRetryEscalation:
 
         assert call_count >= 2, "Expected at least 2 agent calls (initial + retry)"
 
-    @patch("voidrift_cli.commands.develop.AgentLoop")
+    @patch("voidrift_cli.commands._develop_pipeline.AgentLoop")
     def test_no_writes_no_architect_skips_task(
         self, MockAgent, tmp_project, cloud_model, sample_requirements
     ):
@@ -191,7 +191,7 @@ class TestDevelopRetryEscalation:
         result = run_develop(cloud_model)
         assert result in (0, 1)
 
-    @patch("voidrift_cli.commands.develop.AgentLoop")
+    @patch("voidrift_cli.commands._develop_pipeline.AgentLoop")
     def test_no_writes_with_architect_escalates(
         self, MockAgent, tmp_project, cloud_model, sample_requirements
     ):
@@ -245,7 +245,7 @@ class TestDevelopMaxEscalations:
         from voidrift_cli.commands.develop import MAX_ESCALATIONS
         assert MAX_ESCALATIONS > 0
 
-    @patch("voidrift_cli.commands.develop.AgentLoop")
+    @patch("voidrift_cli.commands._develop_pipeline.AgentLoop")
     def test_max_escalations_blocks_task(
         self, MockAgent, tmp_project, cloud_model, sample_requirements
     ):

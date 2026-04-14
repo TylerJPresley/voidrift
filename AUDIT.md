@@ -70,7 +70,7 @@ Test baseline: **792 passing, 1 pre-existing failure** (`make test`, 2026-04-13)
 | `commands/plan.py` | 423 | **−313** | ✅ Under target after split |
 | `commands/chat.py` | 681 | **−379** | ✅ Under target after split |
 | `agent_protocol.py` | 634 | −3 | Over target — never deeply audited |
-| `commands/develop.py` | 615 | +60 | Over target — hooks added |
+| `commands/develop.py` | 231 | **−384** | ✅ Under target after split |
 | `commands/verify.py` | 589 | +59 | Over target — Stage 0 added |
 | `commands/_gather_pipeline.py` | 581 | 0 | Over target (extracted from gather) |
 | `ui.py` | 535 | +11 | Over target |
@@ -119,7 +119,7 @@ Test baseline: **792 passing, 1 pre-existing failure** (`make test`, 2026-04-13)
 
 #### OPEN-06 — `develop.py` at 615 lines
 
-Grew with hooks (done guard, write nudge, self-review, file list check). The hooks are closures inside `_run_task` — could be extracted as standalone functions.
+✅ FIXED — Extracted `_develop_pipeline.py` (409 lines) containing `_dispatch_loop`, `_run_task`, and `_consult_architect`. `develop.py` reduced to 231 lines. 796 tests pass.
 
 #### OPEN-07 — `verify.py` at 589 lines
 
