@@ -130,6 +130,9 @@ class TUIState:
         self.thinking_label = "thinking..."
         self.busy = False
         self.pending_message: str | None = None  # staged message waiting to send
+        self.input_history: list[str] = []
+        self._history_idx: int = -1  # -1 = not browsing history
+        self._saved_input: str = ""  # saved current input when entering history
         self._invalidate = None
         self._scroll_to_end = None
 
@@ -500,6 +503,7 @@ def build_tui_app(
         input_area.text = ""
         input_area.buffer.reset()
         state._consecutive_interrupt = 0
+        state._history_idx = -1
         on_submit(text, event.app)
 
     @kb.add("c-j")
@@ -508,11 +512,39 @@ def build_tui_app(
 
     @kb.add("up")
     def _recall(event):
+        # Pending recall takes priority
         if on_recall_pending and state.pending_message and not input_area.text:
             text = on_recall_pending()
             if text:
                 input_area.text = text
                 input_area.buffer.cursor_position = len(text)
+            return
+        # Input history
+        if not state.input_history:
+            return
+        if state._history_idx == -1:
+            state._saved_input = input_area.text
+            state._history_idx = len(state.input_history) - 1
+        elif state._history_idx > 0:
+            state._history_idx -= 1
+        else:
+            return
+        input_area.text = state.input_history[state._history_idx]
+        input_area.buffer.cursor_position = len(input_area.text)
+
+    @kb.add("down")
+    def _history_fwd(event):
+        if state._history_idx == -1:
+            return
+        if state._history_idx < len(state.input_history) - 1:
+            state._history_idx += 1
+            input_area.text = state.input_history[state._history_idx]
+            input_area.buffer.cursor_position = len(input_area.text)
+        else:
+            # Past newest — restore saved input
+            state._history_idx = -1
+            input_area.text = state._saved_input
+            input_area.buffer.cursor_position = len(input_area.text)
 
     def _scroll_up_n(n):
         cur = _scroll_top[0] if not _scroll_bottom[0] else max(0, len(_all_lines[0]) - _h())

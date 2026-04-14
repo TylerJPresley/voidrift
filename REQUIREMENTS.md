@@ -839,6 +839,11 @@ Two log roots, two intents:
   - Given a pending message exists and the operator presses Escape, When Escape is pressed, Then the pending message is cleared.
   - Given a pending message exists and the operator runs /clear, When /clear executes, Then the pending message is cleared.
 
+- **REQ-UI-16:** WHEN the operator presses Up arrow with an empty input and no pending message, THE SYSTEM SHALL cycle backward through previous inputs (newest first). Down arrow SHALL cycle forward. The current input SHALL be saved when entering history mode and restored when cycling past the newest entry. Pending message recall (REQ-UI-15) SHALL take priority over history. Input history SHALL persist for the duration of the session only.
+  - Given 3 previous inputs and empty input, When Up is pressed, Then the most recent input appears.
+  - Given history mode is active, When Down is pressed past the newest entry, Then the saved input is restored.
+  - Given a pending message exists, When Up is pressed, Then pending is recalled (not history).
+
 - **REQ-UI-15:** WHEN the operator submits a message while the model is processing (`state.busy`), THE SYSTEM SHALL add the message to a per-session queue rather than dropping it. WHEN the current model turn completes, THE SYSTEM SHALL dispatch the first queued message immediately. WHEN the operator presses Escape, THE SYSTEM SHALL clear the message queue. The input placeholder text SHALL indicate that queued input is accepted (per REQ-UI-3).
   - *Rationale:* Dropping input while the model processes forces the operator to retype. A queue preserves intent without blocking the display thread or requiring the operator to wait and watch.
   - Given the model is processing and the operator submits a message, When the current turn completes, Then the queued message is dispatched automatically without operator action.

@@ -353,6 +353,7 @@ def _tui_loop(agent, mc, log, session=None, style="verbose", fs_ctx=None,
             state._refresh()
             return
 
+        state.input_history.append(text)
         _dispatch_turn(text, app)
 
     def _on_escape(app):
