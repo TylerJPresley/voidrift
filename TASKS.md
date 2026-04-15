@@ -128,7 +128,7 @@ Open tasks ordered by dependency. Complete in sequence.
 
 ## TASK-F14: /gather slash command in chat
 
-**Status:** Not started
+**Status:** Complete
 **Depends on:** F11, F12, F13
 
 **Problem:** `voidrift gather` is a black-box pipeline. The operator runs it and hopes the output is right. There's no way to review, correct, or steer the process mid-run.
