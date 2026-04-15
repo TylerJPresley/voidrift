@@ -159,18 +159,12 @@ class TestRegistryCentralization:
         )
 
     def test_build_local_tools_unchanged_for_all_commands(self, tmp_path):
-        """build_local_tools output tool names are unchanged for all commands."""
+        """build_local_tools output tool names match AGENT_TOOLS for all commands."""
         expected_per_cmd = {
-            "gather": {"read_source_file", "write_framework_file", "read_framework_file", "read_document", "code_analysis"},
-            "plan": {"read_framework_file", "write_framework_file"},
-            "develop": {"read_source_file", "write_source_file", "edit_source_file", "delete_source_file", "read_framework_file", "run_command"},
-            "chat": {
-                "read_source_file", "write_source_file", "edit_source_file",
-                "read_framework_file", "write_framework_file", "list_project_artifacts",
-                "web_fetch", "ask_user_question", "get_skill", "list_skills",
-                "read_memory", "write_memory", "list_memory", "search_history",
-                "read_document", "code_analysis", "run_command",
-            },
+            "gather": {"file", "analyze"},
+            "plan": {"file"},
+            "develop": {"file", "shell"},
+            "chat": {"file", "http", "shell", "skill", "memory", "session", "analyze", "ask"},
         }
         for cmd, expected_names in expected_per_cmd.items():
             tools, handlers = build_local_tools(cmd, project_dir=tmp_path)
@@ -178,30 +172,24 @@ class TestRegistryCentralization:
             assert actual_names == expected_names, f"Mismatch for cmd={cmd!r}: {actual_names ^ expected_names}"
 
     def test_build_local_tools_verify_plan(self, tmp_path):
-        """verify-plan returns the correct tool set."""
+        """verify-plan returns the correct domain tool set."""
         tools, _ = build_local_tools("verify-plan", project_dir=tmp_path)
         names = {t["function"]["name"] for t in tools}
-        assert names == {"read_source_file", "read_framework_file", "write_framework_file"}
+        assert names == {"file"}
 
     def test_build_local_tools_verify_execute(self, tmp_path):
-        """verify-execute returns the correct tool set."""
+        """verify-execute returns the correct domain tool set."""
         tools, _ = build_local_tools("verify-execute", project_dir=tmp_path)
         names = {t["function"]["name"] for t in tools}
-        expected = {
-            "read_framework_file", "write_framework_file",
-            "read_process_output", "http_request", "run_command",
-            "browser_navigate", "browser_screenshot", "browser_click", "browser_get_text",
-        }
-        assert names == expected
+        assert names == {"file", "http", "shell", "browser", "process"}
 
     def test_build_local_tools_no_cmd_returns_all(self, tmp_path):
-        """build_local_tools(cmd=None) returns all tools."""
+        """build_local_tools(cmd=None) returns all domain tools."""
         tools, _ = build_local_tools(cmd=None, project_dir=tmp_path)
         names = {t["function"]["name"] for t in tools}
-        # Should include everything except run_command (bash only built for specific commands)
-        assert "read_source_file" in names
-        assert "get_skill" in names
-        assert "http_request" in names
+        assert "file" in names
+        assert "skill" in names
+        assert "http" in names
 
 
 class TestBuildHandlers:
@@ -459,7 +447,7 @@ class TestWebFetchBuildTime:
         # Should not raise
         validate_schema_handler_contract(tools, handlers)
         tool_names = {t["function"]["name"] for t in tools}
-        assert "web_fetch" in tool_names
+        assert "http" in tool_names
 
     def test_no_placeholder_in_interaction_module(self):
         """interaction.py has no web_fetch function."""
@@ -562,7 +550,7 @@ class TestAskUserBuildTime:
         )
         validate_schema_handler_contract(tools, handlers)
         tool_names = {t["function"]["name"] for t in tools}
-        assert "ask_user_question" in tool_names
+        assert "ask" in tool_names
 
     def test_commands_without_ask_user_unaffected(self, tmp_path):
         """Commands that don't include ask_user_question in AGENT_TOOLS are unaffected."""

@@ -173,7 +173,7 @@ class TestRetryLogic:
         conn_err = openai.APIConnectionError(request=MagicMock())
         success = make_openai_response("ok")
         with patch("voidrift_cli.agent_protocol.OpenAI") as MockOpenAI:
-            with patch("voidrift_cli.agent.time.sleep"):
+            with patch("voidrift_cli._agent_abort.time.sleep"):
                 mock_client = MagicMock()
                 MockOpenAI.return_value = mock_client
                 mock_client.chat.completions.create.side_effect = [conn_err, success]
@@ -187,7 +187,7 @@ class TestRetryLogic:
         rate_err = openai.RateLimitError("rate limited", response=MagicMock(), body={})
         success = make_openai_response("ok")
         with patch("voidrift_cli.agent_protocol.OpenAI") as MockOpenAI:
-            with patch("voidrift_cli.agent.time.sleep"):
+            with patch("voidrift_cli._agent_abort.time.sleep"):
                 mock_client = MagicMock()
                 MockOpenAI.return_value = mock_client
                 mock_client.chat.completions.create.side_effect = [rate_err, success]
@@ -199,7 +199,7 @@ class TestRetryLogic:
         agent = self._make_agent(cloud_model)
         auth_err = openai.AuthenticationError("unauthorized", response=MagicMock(), body={})
         with patch("voidrift_cli.agent_protocol.OpenAI") as MockOpenAI:
-            with patch("voidrift_cli.agent.time.sleep") as mock_sleep:
+            with patch("voidrift_cli._agent_abort.time.sleep") as mock_sleep:
                 mock_client = MagicMock()
                 MockOpenAI.return_value = mock_client
                 mock_client.chat.completions.create.side_effect = auth_err
@@ -213,7 +213,7 @@ class TestRetryLogic:
         agent = self._make_agent(cloud_model)
         ctx_err = Exception("context length exceeded")
         with patch("voidrift_cli.agent_protocol.OpenAI") as MockOpenAI:
-            with patch("voidrift_cli.agent.time.sleep") as mock_sleep:
+            with patch("voidrift_cli._agent_abort.time.sleep") as mock_sleep:
                 mock_client = MagicMock()
                 MockOpenAI.return_value = mock_client
                 mock_client.chat.completions.create.side_effect = ctx_err
@@ -226,7 +226,7 @@ class TestRetryLogic:
         agent = self._make_agent(cloud_model)
         conn_err = openai.APIConnectionError(request=MagicMock())
         with patch("voidrift_cli.agent_protocol.OpenAI") as MockOpenAI:
-            with patch("voidrift_cli.agent.time.sleep"):
+            with patch("voidrift_cli._agent_abort.time.sleep"):
                 mock_client = MagicMock()
                 MockOpenAI.return_value = mock_client
                 mock_client.chat.completions.create.side_effect = conn_err
@@ -241,7 +241,7 @@ class TestRetryLogic:
         conn_err = openai.APIConnectionError(request=MagicMock())
         success = make_openai_response("done")
         with patch("voidrift_cli.agent_protocol.OpenAI") as MockOpenAI:
-            with patch("voidrift_cli.agent.time.sleep"):
+            with patch("voidrift_cli._agent_abort.time.sleep"):
                 mock_client = MagicMock()
                 MockOpenAI.return_value = mock_client
                 mock_client.chat.completions.create.side_effect = [conn_err, success]
@@ -264,7 +264,7 @@ class TestRetryLogic:
                 )
             return make_openai_response("ok")
         with patch("voidrift_cli.agent_protocol.OpenAI") as MockOpenAI:
-            with patch("voidrift_cli.agent.time.sleep"):
+            with patch("voidrift_cli._agent_abort.time.sleep"):
                 mock_client = MagicMock()
                 MockOpenAI.return_value = mock_client
                 mock_client.chat.completions.create.side_effect = mock_create
@@ -374,44 +374,40 @@ class TestBuildLocalTools:
     def test_expected_tools_present_no_cmd(self):
         tools, handlers = build_local_tools()
         expected = [
-            "read_source_file", "write_source_file",
-            "read_framework_file", "write_framework_file",
-            "list_project_artifacts", "web_fetch",
-            "get_skill", "list_skills",
+            "file", "http", "shell", "skill", "memory",
+            "session", "analyze", "ask", "browser", "process",
         ]
         tool_names = {t["function"]["name"] for t in tools}
         for name in expected:
             assert name in tool_names, f"Missing tool: {name}"
 
     def test_develop_command_excludes_skill_tools(self):
-        """V-ARCH-5: develop command must not expose get_skill/list_skills tools (skills are pre-injected)."""
+        """V-ARCH-5: develop command must not expose skill tools (skills are pre-injected)."""
         tools, handlers = build_local_tools(cmd="develop")
         tool_names = {t["function"]["name"] for t in tools}
-        assert "get_skill" not in tool_names
+        assert "skill" not in tool_names
         assert "list_skills" not in tool_names
 
     def test_develop_command_has_source_tools(self):
-        """V-ARCH-5: develop command includes source file read/write tools."""
+        """V-ARCH-5: develop command includes file and shell domain tools."""
         tools, handlers = build_local_tools(cmd="develop")
         tool_names = {t["function"]["name"] for t in tools}
-        assert "read_source_file" in tool_names
-        assert "write_source_file" in tool_names
+        assert "file" in tool_names
+        assert "shell" in tool_names
 
     def test_plan_command_excludes_source_write(self):
-        """V-ARCH-5: plan command excludes write_source_file."""
+        """V-ARCH-5: plan command exposes file domain tool only."""
         tools, handlers = build_local_tools(cmd="plan")
         tool_names = {t["function"]["name"] for t in tools}
-        assert "write_source_file" not in tool_names
-        assert "write_framework_file" in tool_names
+        assert "shell" not in tool_names
+        assert "file" in tool_names
 
     def test_chat_command_includes_skill_tools(self):
-        """V-ARCH-5: chat command exposes get_skill and list_skills tools."""
+        """V-ARCH-5: chat command exposes the skill domain tool."""
         tools, handlers = build_local_tools(cmd="chat")
         tool_names = {t["function"]["name"] for t in tools}
-        assert "get_skill" in tool_names
-        assert "list_skills" in tool_names
-        assert "get_skill" in handlers
-        assert "list_skills" in handlers
+        assert "skill" in tool_names
+        assert "skill" in handlers
 
 
     def test_build_local_tools_no_cmd_returns_all_tools(self):
@@ -781,10 +777,10 @@ class TestToolCallDedup:
 
 class TestBuildLocalToolsProjectDir:
     def test_build_local_tools_uses_provided_project_dir(self, tmp_path):
-        """Memory and session handlers use the provided project_dir, not Path.cwd()."""
+        """Memory handler uses the provided project_dir, not Path.cwd()."""
         (tmp_path / ".voidrift").mkdir()
         tools, handlers = build_local_tools(cmd="chat", project_dir=tmp_path)
-        result = handlers["write_memory"](name="test-key", content="hello")
+        result = handlers["memory"](action="write", name="test-key", content="hello")
         assert (tmp_path / ".voidrift" / "memory" / "test-key.md").exists()
 
 
@@ -977,18 +973,18 @@ class TestSensitivePathRedaction:
     def test_sensitive_path_redacted_in_log(self, cloud_model, tmp_path):
         log = tmp_path / "agent.log"
         agent = AgentLoop(model=cloud_model, log_path=log)
-        redacted = agent._redact_tool_result("read_source_file", '{"path": ".env"}', "SECRET=abc123")
+        redacted = agent._redact_tool_result("file", '{"action": "read", "path": ".env"}', "SECRET=abc123")
         assert "SECRET" not in redacted
         assert "REDACTED" in redacted
 
     def test_non_sensitive_path_not_redacted(self, cloud_model):
         agent = AgentLoop(model=cloud_model)
-        result = agent._redact_tool_result("read_source_file", '{"path": "src/main.py"}', "def main(): pass")
+        result = agent._redact_tool_result("file", '{"action": "read", "path": "src/main.py"}', "def main(): pass")
         assert "def main" in result
 
     def test_write_tool_not_redacted(self, cloud_model):
         agent = AgentLoop(model=cloud_model)
-        result = agent._redact_tool_result("write_source_file", '{"path": ".env", "content": "x"}', "wrote .env")
+        result = agent._redact_tool_result("file", '{"action": "write", "path": ".env", "content": "x"}', "wrote .env")
         assert "wrote .env" in result
 
 
@@ -1149,7 +1145,7 @@ class TestAnthropicProtocol:
         mock_client.messages.create.side_effect = [rate_err, success]
 
         agent = AgentLoop(model=anthropic_model, stream=False)
-        with patch("voidrift_cli.agent.time.sleep"):
+        with patch("voidrift_cli._agent_abort.time.sleep"):
             result = agent.send("hi")
 
         assert result == "Success after retry!"

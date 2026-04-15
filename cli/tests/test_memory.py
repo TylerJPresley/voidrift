@@ -65,14 +65,12 @@ class TestMemoryManager:
         assert "list_memory" not in names
 
     def test_memory_tools_present_in_chat(self):
-        """Memory tools are in the chat command tool set."""
+        """Memory domain tool is in the chat command tool set."""
         from voidrift_cli.agent import build_local_tools
         tools, handlers = build_local_tools(cmd="chat")
         names = {t["function"]["name"] for t in tools}
-        assert "read_memory" in names
-        assert "write_memory" in names
-        assert "list_memory" in names
-        assert "read_memory" in handlers
+        assert "memory" in names
+        assert "memory" in handlers
 
 
 class TestMemoryCLI:

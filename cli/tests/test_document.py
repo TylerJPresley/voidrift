@@ -163,14 +163,14 @@ class TestReadDocumentToolRegistration:
         from voidrift_cli.agent import build_local_tools
         tools, handlers = build_local_tools(cmd="chat")
         names = {t["function"]["name"] for t in tools}
-        assert "read_document" in names
-        assert "read_document" in handlers
+        assert "analyze" in names
+        assert "analyze" in handlers
 
     def test_gather_has_read_document(self):
         from voidrift_cli.agent import build_local_tools
         tools, handlers = build_local_tools(cmd="gather")
         names = {t["function"]["name"] for t in tools}
-        assert "read_document" in names
+        assert "analyze" in names
 
     def test_develop_no_read_document(self):
         from voidrift_cli.agent import build_local_tools

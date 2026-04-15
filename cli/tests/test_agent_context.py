@@ -8,7 +8,7 @@ class TestTrimMessages:
         msgs = [
             {"role": "system", "content": "sys"},
             {"role": "user", "content": "hi"},
-            {"role": "assistant", "tool_calls": [{"id": "1", "function": {"name": "read_source_file"}}]},
+            {"role": "assistant", "tool_calls": [{"id": "1", "function": {"name": "file", "arguments": '{"action":"read"}'}}]},
             {"role": "tool", "tool_call_id": "1", "content": "file content"},
             {"role": "assistant", "content": "done"},
         ]
@@ -32,15 +32,15 @@ class TestSnipOldToolResults:
             {"role": "system", "content": "system prompt"},
             {"role": "user", "content": "read the file"},
             {"role": "assistant", "tool_calls": [
-                {"id": "tc1", "function": {"name": "read_source_file", "arguments": '{"path":"src/a.py"}'}}
+                {"id": "tc1", "function": {"name": "file", "arguments": '{"action":"read","path":"src/a.py"}'}}
             ]},
             {"role": "tool", "tool_call_id": "tc1", "content": "x" * 600},
             {"role": "assistant", "tool_calls": [
-                {"id": "tc2", "function": {"name": "write_source_file", "arguments": '{"path":"src/b.py"}'}}
+                {"id": "tc2", "function": {"name": "file", "arguments": '{"action":"write","path":"src/b.py"}'}}
             ]},
             {"role": "tool", "tool_call_id": "tc2", "content": "wrote file"},
             {"role": "assistant", "tool_calls": [
-                {"id": "tc3", "function": {"name": "read_source_file", "arguments": '{"path":"src/c.py"}'}}
+                {"id": "tc3", "function": {"name": "file", "arguments": '{"action":"read","path":"src/c.py"}'}}
             ]},
             {"role": "tool", "tool_call_id": "tc3", "content": "y" * 600},
             {"role": "assistant", "content": "Done."},

@@ -4,21 +4,14 @@ from __future__ import annotations
 
 # Tools available to develop agents (consumed by tool_builder.build_local_tools).
 AGENT_TOOLS: frozenset[str] = frozenset({
-    "read_source_file",
-    "write_source_file",
-    "edit_source_file",
-    "delete_source_file",
-    "read_framework_file",
-    "run_command",
+    "file",
+    "shell",
 })
 
-BASH_DESCRIPTION: tuple[str, list[str]] = (
-    "Run build, test, and lint commands to validate written code.",
-    [
-        "Run tests after writing code. Fix failures before moving to the next task.",
-        "Check exit_code in the result — non-zero means failure.",
-    ],
-)
+# Per-command action visibility within each domain tool (REQ-TOOL-8).
+AGENT_TOOL_ACTIONS: dict[str, list[str]] = {
+    "file": ["read", "write", "edit", "delete", "list"],
+}
 
 import os
 import signal

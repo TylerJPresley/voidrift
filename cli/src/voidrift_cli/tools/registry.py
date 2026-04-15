@@ -558,6 +558,7 @@ DOMAIN_PROCESS: dict = {
 
 DOMAIN_SKILL: dict = {
     "type": "function",
+    "concurrent_safe": True,
     "function": {
         "name": "skill",
         "description": "Load or list available skills.",
@@ -575,6 +576,7 @@ DOMAIN_SKILL: dict = {
 
 DOMAIN_MEMORY: dict = {
     "type": "function",
+    "concurrent_safe": True,
     "function": {
         "name": "memory",
         "description": "Persist knowledge across sessions.",
@@ -594,6 +596,7 @@ DOMAIN_MEMORY: dict = {
 
 DOMAIN_SESSION: dict = {
     "type": "function",
+    "concurrent_safe": True,
     "function": {
         "name": "session",
         "description": "Search conversation history.",
@@ -611,6 +614,7 @@ DOMAIN_SESSION: dict = {
 
 DOMAIN_ANALYZE: dict = {
     "type": "function",
+    "concurrent_safe": True,
     "function": {
         "name": "analyze",
         "description": "Analyze source files or extract text from documents.",

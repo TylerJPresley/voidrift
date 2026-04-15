@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from typing import Callable
 
-_SNIP_READ_TOOLS = {"read_source_file", "read_framework_file", "file"}
+_SNIP_READ_TOOLS = {"file"}
 _SNIP_MIN_CHARS = 500
 _REACTIVE_COMPACT_MAX = 2
 

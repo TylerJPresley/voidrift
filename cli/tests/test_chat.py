@@ -154,18 +154,18 @@ class TestChatSession:
     V-UI-2: session log contains operator input and model responses."""
 
     def test_chat_command_tools_include_required_handlers(self, tmp_project):
-        """V-U-2: build_local_tools with cmd='chat' exposes get_skill."""
+        """V-U-2: build_local_tools with cmd='chat' exposes the skill domain tool."""
         from voidrift_cli.agent import build_local_tools
         tools, handlers = build_local_tools(cmd="chat")
-        assert "get_skill" in handlers
+        assert "skill" in handlers
         tool_names = {t["function"]["name"] for t in tools}
-        assert "get_skill" in tool_names
+        assert "skill" in tool_names
 
     def test_chat_analysis_reqs_skill_is_available(self, tmp_project):
-        """V-U-2: get_skill('ANALYSIS-REQS') returns non-empty content in chat context."""
+        """V-U-2: skill(action='get', name='ANALYSIS-REQS') returns non-empty content in chat context."""
         from voidrift_cli.agent import build_local_tools
         _, handlers = build_local_tools(cmd="chat")
-        skill_content = handlers["get_skill"]("ANALYSIS-REQS")
+        skill_content = handlers["skill"](action="get", name="ANALYSIS-REQS")
         assert len(skill_content) > 10
         assert "not found" not in skill_content.lower()
 

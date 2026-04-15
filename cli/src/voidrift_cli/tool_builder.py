@@ -72,6 +72,35 @@ def _make_read_outside_guard(name: str, handler, project_dir: "Path", gate, conf
     return guarded
 
 
+def _narrow_schema_actions(schema: dict, allowed_actions: list[str]) -> dict:
+    """Return a deep copy of schema with the action enum restricted to allowed_actions (REQ-TOOL-8)."""
+    import copy
+    schema = copy.deepcopy(schema)
+    props = schema.get("function", {}).get("parameters", {}).get("properties", {})
+    action_prop = props.get("action")
+    if action_prop and "enum" in action_prop:
+        narrowed = [a for a in action_prop["enum"] if a in allowed_actions]
+        if narrowed:
+            action_prop["enum"] = narrowed
+    return schema
+
+
+def _resolve_tool_actions(cmd: str | None) -> dict[str, list[str]]:
+    """Resolve AGENT_TOOL_ACTIONS for a command via dynamic import (REQ-TOOL-8)."""
+    if cmd is None:
+        return {}
+    _cmd_base = cmd.split("-")[0]
+    try:
+        _mod = _importlib.import_module(f".commands.{_cmd_base}", package=__package__)
+    except ImportError:
+        return {}
+    if cmd == "verify-execute":
+        return getattr(_mod, "AGENT_TOOL_ACTIONS_EXECUTE", {})
+    elif cmd == "verify-plan":
+        return getattr(_mod, "AGENT_TOOL_ACTIONS_PLAN", {})
+    return getattr(_mod, "AGENT_TOOL_ACTIONS", {})
+
+
 def _resolve_allowed(cmd: str | None) -> set[str] | frozenset[str] | None:
     """Resolve the allowed tool names for a command via dynamic import."""
     if cmd is None:
@@ -302,6 +331,23 @@ def build_domain_handlers(cmd: str | None, project_dir: Path, ctx=None,
     _ctx = ctx if ctx is not None else _WriteContext(project_dir=project_dir)
     handlers = _make_dh(_ctx, project_dir=str(project_dir))
 
+    # --- source_read_ctx override (REQ-G-18): reroute source reads through the source context ---
+    if source_read_ctx is not None:
+        _base_file = handlers["file"]
+        _voidrift_pfx = (".voidrift/", ".voidrift\\")
+
+        def _file_with_src(action: str, path: str = "", content: str = "",
+                           old_str: str = "", new_str: str = "",
+                           offset: int = 0, limit=None,
+                           force_write: bool = False) -> str:
+            if action == "read" and not any(path.startswith(p) for p in _voidrift_pfx):
+                return source_read_ctx.read_source_file(path, offset=offset, limit=limit)
+            return _base_file(action=action, path=path, content=content,
+                               old_str=old_str, new_str=new_str,
+                               offset=offset, limit=limit, force_write=force_write)
+
+        handlers["file"] = _file_with_src
+
     # --- HTTP handler (merges web_fetch + http_request) ---
     def _http_handler(action: str, url: str = "", headers: dict | None = None,
                       body: str = "", session_id: str = "") -> str:
@@ -313,7 +359,8 @@ def build_domain_handlers(cmd: str | None, project_dir: Path, ctx=None,
                 return _wf(url)
             return "HTTP GET with summarization is only available during chat."
         from .tools.http_client import http_request as _hr
-        return _hr(method=action.upper(), url=url, headers=headers,
+        headers_str = _json.dumps(headers) if isinstance(headers, dict) else "{}"
+        return _hr(method=action.upper(), url=url, headers=headers_str,
                     body=body, session_id=session_id or "default")
 
     handlers["http"] = _http_handler
@@ -326,6 +373,8 @@ def build_domain_handlers(cmd: str | None, project_dir: Path, ctx=None,
         _bcfg = _get_bash_cfg(_bash_cmd)
         _rc = _create_rc(_bcfg, global_allowed=_get_ac())
         handlers["shell"] = lambda cmd, cwd="": _rc(cmd, cwd=cwd)
+    else:
+        handlers["shell"] = lambda cmd, cwd="": "Shell commands are not available in this context."
 
     # --- Browser handler ---
     from .tools import browser as _browser
@@ -507,26 +556,22 @@ def build_local_tools(
     Returns:
         Tuple of (agent_tool_definitions, agent_tool_handlers) for use with AgentLoop.
     """
-    from .tools.registry import (
-        LOCAL_TOOLS, SKILL_TOOLS, MEMORY_TOOLS, SESSION_TOOLS,
-        DOCUMENT_TOOLS, CODE_ANALYSIS_TOOLS, VERIFY_TOOLS,
-    )
+    from .tools.registry import DOMAIN_TOOLS
 
     _project_dir = project_dir or Path.cwd()
     allowed = _resolve_allowed(cmd)
-    handlers = build_handlers(cmd, _project_dir, ctx=ctx, web_fetch_kwargs=web_fetch_kwargs, ask_fn=ask_fn, source_read_ctx=source_read_ctx, permission_gate=permission_gate, permission_confirm_holder=permission_confirm_holder)
+    tool_actions = _resolve_tool_actions(cmd)
+    handlers = build_domain_handlers(cmd, _project_dir, ctx=ctx, web_fetch_kwargs=web_fetch_kwargs, ask_fn=ask_fn, source_read_ctx=source_read_ctx, permission_gate=permission_gate, permission_confirm_holder=permission_confirm_holder)
 
-    # Assemble the full schema list (non-bash tools)
-    all_schemas = (
-        LOCAL_TOOLS + SKILL_TOOLS + MEMORY_TOOLS + SESSION_TOOLS
-        + DOCUMENT_TOOLS + CODE_ANALYSIS_TOOLS + VERIFY_TOOLS
-    )
-    tools = filter_tools(all_schemas, allowed)
+    tools = filter_tools(DOMAIN_TOOLS, allowed)
 
-    # Bash tool has dynamic description — handle separately
-    bash_def = _build_bash_tool_def(cmd)
-    if bash_def is not None and (allowed is None or "run_command" in allowed):
-        tools.append(bash_def)
+    if tool_actions:
+        tools = [
+            _narrow_schema_actions(t, tool_actions[t["function"]["name"]])
+            if t["function"]["name"] in tool_actions
+            else t
+            for t in tools
+        ]
 
     validate_schema_handler_contract(tools, handlers)
 

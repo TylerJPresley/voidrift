@@ -555,8 +555,8 @@ class TestGatherSourceReads:
             cmd="gather", project_dir=project_dir,
             source_read_ctx=source_ctx,
         )
-        # Handler should be the source context's method — reads from source_dir
-        result = handlers["read_source_file"]("app.py")
+        # file handler with source_read_ctx reads source files from source_dir
+        result = handlers["file"](action="read", path="app.py")
         assert "x = 1" in result
 
     def test_build_handlers_source_read_ctx(self, tmp_path):

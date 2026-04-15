@@ -29,6 +29,12 @@ packages = ["src/voidrift_cli"]
 [project.scripts]
 voidrift = "voidrift_cli.main:main"
 
+[project.optional-dependencies]
+test = [
+    "pytest>=7.0",
+    "pytest-timeout>=2.2",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-v --tb=short"
+addopts = "-v --tb=short --timeout=30"
