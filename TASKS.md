@@ -150,7 +150,7 @@ Open tasks ordered by dependency. Complete in sequence.
 
 ## TASK-F15: /plan slash command in chat
 
-**Status:** Not started
+**Status:** Complete
 **Depends on:** F14 (validates the slash command pattern)
 
 **Problem:** `voidrift plan` generates architecture and tasks without operator review. Task quality issues (incomplete ACs, missing details) aren't caught until develop or verify.
