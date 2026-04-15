@@ -279,6 +279,10 @@
   - *Rationale:* If triage drops files, they are silently excluded from the entire gather pipeline — no source analysis, no requirements extracted. A post-triage count check catches this immediately.
   - Given triage categorizes all 20 input files, When the check runs, Then no warning is emitted.
   - Given triage categorizes 18 of 20 input files, When the check runs, Then a warning reports 2 uncategorized files.
+- **REQ-G-23:** AFTER the gather triage stage completes, THE SYSTEM SHALL display files grouped by category with full relative paths. Each category SHALL appear as a dim header followed by indented file paths. WHEN uncategorized files exist, they SHALL appear under an "uncategorized" header with full paths before the uncategorized count warning (REQ-G-22). All triage display output SHALL use dim styling for visual hierarchy.
+  - *Rationale:* The triage count one-liner (`source(6), config(4)`) gives no visibility into which files are in each category. When important source files are miscategorized or dropped, the operator has no way to know without reading logs.
+  - Given triage categorizes 20 files into 4 categories, When the display runs, Then each category name and its file paths are printed.
+  - Given 2 files are uncategorized, When the display runs, Then both file paths appear under an "uncategorized" header.
 
 ### 4.5 Command: Plan
 

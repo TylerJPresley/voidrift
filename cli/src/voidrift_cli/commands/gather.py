@@ -250,8 +250,22 @@ def _gather_from(
     cat_counts = {c: len(fs) for c, fs in categories.items() if fs}
     ui.info(f"{len(file_category)} files: {', '.join(f'{c}({n})' for c, n in cat_counts.items())}")
 
-    # Triage coverage check (REQ-G-21)
-    input_count = len(file_tree.strip().splitlines())
+    # Triage file listing (REQ-G-23)
+    all_input_files = set(file_tree.strip().splitlines())
+    uncategorized = sorted(all_input_files - set(file_category))
+    for cat in CATEGORIES:
+        files = categories.get(cat, [])
+        if files:
+            ui.detail(f"{cat}:")
+            for fp in sorted(files):
+                ui.detail(f"  {fp}")
+    if uncategorized:
+        ui.detail("uncategorized:")
+        for fp in uncategorized:
+            ui.detail(f"  {fp}")
+
+    # Triage coverage check (REQ-G-22)
+    input_count = len(all_input_files)
     categorized_count = len(file_category)
     if categorized_count < input_count:
         ui.warn(f"Triage: {input_count - categorized_count} file(s) not categorized out of {input_count}")
