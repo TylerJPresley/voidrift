@@ -12,10 +12,12 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.89.0",
     "@types/react": "^19.2.14",
     "commander": "^14.0.3",
     "ink": "^7.0.0",
     "ink-text-input": "^6.0.0",
+    "openai": "^6.34.0",
     "react": "^19.2.5",
     "yaml": "^2.7.1"
   },
