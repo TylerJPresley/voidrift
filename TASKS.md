@@ -187,7 +187,7 @@ Open tasks ordered by dependency. Complete in sequence.
 
 ## TASK-F17: /verify slash command in chat
 
-**Status:** Not started
+**Status:** Complete
 **Depends on:** F14
 
 **Problem:** `voidrift verify` runs all test cases without operator visibility into what's being tested or why items fail.
