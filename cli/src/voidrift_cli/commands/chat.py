@@ -290,10 +290,17 @@ def _tui_loop(agent, mc, log, session=None, style="verbose", fs_ctx=None,
             return
 
         if text.lower().strip() == "/help":
-            state.add_system(
-                "Commands: /help /clear /quit /compact /quick <q> "
-                "/idea /done /gather /plan /develop /verify /deploy /chat"
-            )
+            state.add_system("Commands:")
+            state.add_system("  /gather [path]  reverse-engineer requirements")
+            state.add_system("  /plan           generate architecture + tasks")
+            state.add_system("  /develop        execute tasks from manifest")
+            state.add_system("  /verify         run acceptance tests")
+            state.add_system("  /idea           guided idea refinement")
+            state.add_system("  /compact        summarize context to free space")
+            state.add_system("  /quick <q>      one-shot answer (no context)")
+            state.add_system("  /clear          reset conversation")
+            state.add_system("  /help           this list")
+            state.add_system("  /quit           exit")
             return
 
         if text.lower().strip() == "/compact":
