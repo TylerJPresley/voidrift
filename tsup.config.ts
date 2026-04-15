@@ -8,4 +8,5 @@ export default defineConfig({
   dts: true,
   sourcemap: true,
   banner: { js: "#!/usr/bin/env node" },
+  external: ["openai", "@anthropic-ai/sdk", "ink", "ink-text-input", "react"],
 });
