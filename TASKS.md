@@ -6,7 +6,7 @@ Open tasks ordered by dependency. Complete in sequence.
 
 ## TASK-F20: Consolidate tools — 25 tools → 10 domain tools with action parameters
 
-**Status:** Not started
+**Status:** Complete
 
 **Problem:** The tool system has 25 individual tools where the industry standard is one tool per domain with an `action` parameter. Models waste context on 25 tool schemas. Filesystem has 7 tools that could be 1. The name-based domain separation (`read_source_file` vs `read_framework_file`) duplicates logic that the security layer already handles.
 
