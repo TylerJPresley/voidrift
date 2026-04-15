@@ -86,7 +86,7 @@ Open tasks ordered by dependency. Complete in sequence.
 
 ## TASK-F12: Uncategorized file assignment UX
 
-**Status:** Not started
+**Status:** Complete
 **Depends on:** F11
 
 **Problem:** When triage drops files, they are silently excluded from the entire pipeline. The operator has no way to assign them to categories without re-running gather. Important source files (e.g. `traffic.js`, `drivetime.js`) can be missed entirely.
