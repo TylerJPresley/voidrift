@@ -169,7 +169,7 @@ Open tasks ordered by dependency. Complete in sequence.
 
 ## TASK-F16: System prompt — slash command awareness
 
-**Status:** Not started
+**Status:** Complete
 **Depends on:** F13
 
 **Problem:** The chat model doesn't know slash commands exist. After updating requirements, it offers to draft config files instead of suggesting `/plan`. The model can't recommend the right workflow if it doesn't know the tools available.
