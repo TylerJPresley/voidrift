@@ -1,189 +1,240 @@
-# Follow-Up Tasks
+# Tasks
 
-Improvements identified during the 2026-04-09 through 2026-04-12 development session. These apply START.md's principles to VoidRift's own command pipeline — the framework should scrutinize the projects it builds with the same rigor the operator applies to the framework itself.
-
-Tasks are ordered by dependency — complete them in sequence.
+Open tasks ordered by dependency. Complete in sequence.
 
 ---
 
-## TASK-F1: Task-scoped ACs decomposed from requirement ACs
+## TASK-F20: Consolidate tools — 25 tools → 10 domain tools with action parameters
 
-**Status:** ✅ Complete (REQ-P-16)
+**Status:** Not started
 
-**Problem:** Tasks currently carry ACs that are either too vague ("environment variable substitution works") or copied verbatim from requirements ("the system shall display weather data"). Task ACs should be scoped to what that specific task does — independently verifiable, collectively covering the requirement. This is the foundation — every other improvement depends on tasks having proper ACs.
+**Problem:** The tool system has 25 individual tools where the industry standard is one tool per domain with an `action` parameter. Models waste context on 25 tool schemas. Filesystem has 7 tools that could be 1. The name-based domain separation (`read_source_file` vs `read_framework_file`) duplicates logic that the security layer already handles.
 
 **What this changes:**
-- The PLAN-TASK prompt explicitly instructs: "Write acceptance criteria scoped to this task only. Each AC must be verifiable by examining only the files this task produces. The requirement-level AC is verified by `voidrift verify` — the task AC is verified by the develop agent."
-- The task template format section is updated to reinforce: "ACs are observable behaviors of the code this task writes, not the system as a whole."
-- Example in the prompt: Requirement says "display weather with temperature, conditions, alerts." Task for the API client says "returns a dict with `temp` (float), `conditions` (str), `alerts` (list[str]) fields." Task for the endpoint says "GET /api/weather returns 200 with `{temp, conditions, alerts}` schema." Each is independently testable.
+
+| Domain | Tool | Actions |
+|---|---|---|
+| Filesystem | `file` | `read`, `write`, `edit`, `delete`, `list` |
+| HTTP | `http` | `get`, `post`, `put`, `delete` |
+| Shell | `shell` | single action |
+| Browser | `browser` | `navigate`, `screenshot`, `click`, `get_text` |
+| Process | `process` | `read_output` |
+| Skills | `skill` | `get`, `list` |
+| Memory | `memory` | `read`, `write`, `list`, `delete` |
+| Session | `session` | `search` |
+| Analysis | `analyze` | `code`, `document` |
+| Interactive | `ask` | single action |
+
+- Path-based security (REQ-SEC-1) replaces name-based domain separation
+- Per-command tool visibility (REQ-ARCH-9) controls which actions are available per command
+- `read_document` merges into `file(action="read")` with format auto-detection by extension
+- `web_fetch` + `http_request` merge into `http` — GET without session = summarize
+- `memory` gains `delete` action
 
 **Affected components:**
-- `resources/prompts/plan.md` — PLAN-TASK prompt and template format section
+- `cli/src/voidrift_cli/tools/registry.py` — new schemas (10 tools, action parameter each)
+- `cli/src/voidrift_cli/tools/filesystem.py` — unified handler dispatching on action
+- `cli/src/voidrift_cli/tools/tool_builder.py` — updated build_local_tools, per-command action filtering
+- `cli/src/voidrift_cli/agent.py` — tool argument normalization for new schema
+- All command modules — updated AGENT_TOOLS sets
+- `resources/prompts/system.md` — updated tool guidelines
+- REQUIREMENTS.md — updated REQ-ARCH-9, REQ-TOOL-3, REQ-FSZ-*
 
-**Design constraint:** Prompt-layer change only. No code changes. The quality of task ACs depends on the plan model's ability to decompose — stronger models will produce better decompositions.
-
----
-
-## TASK-F2: Develop agent self-review against ACs
-
-**Status:** ✅ Complete (REQ-D-22)
-
-**What was done:** After the agent writes its first file, a one-time steering message is injected asking it to re-read each AC, confirm satisfaction, and score confidence 0–100%. Below 90% triggers self-correction before calling done.
+**Design constraint:** Security layer decides what paths/actions are allowed per command. No behavioral changes to what the agent can do — same capabilities, fewer tools.
 
 ---
 
-## TASK-F3: Develop reads before writing
+## TASK-F21: TUI tool display — human-friendly names, inline diffs, colored bars
 
-**Status:** ✅ Complete (REQ-D-23)
-**Depends on:** F1 (better ACs give the agent clearer targets when reading existing code)
+**Status:** Not started
+**Depends on:** F20
 
-**Problem:** The develop agent reads the task and starts writing immediately. It doesn't understand what code already exists, what patterns are established, or how its changes fit into the existing codebase. This leads to inconsistencies — new code that doesn't follow established patterns, duplicate functionality, or conflicts with existing files.
+**Problem:** Tool calls in the TUI show raw tool names (`read_source_file`) with no detail about what happened. Write operations show no diff. The operator can't see what changed without checking git.
 
 **What this changes:**
-- Update the develop TASK prompt to add a step between "review the task" and "write files": "Read the existing files listed in the task's `depends` and any files in the same directory as your target files. Understand the established patterns before writing."
-- This is a prompt-layer change. The agent already has `read_source_file` in its tool set. The prompt currently says "Use `read_source_file()` to examine existing project code as needed" — but "as needed" is too weak. The instruction should be directive: read first, then write.
+- Display human-friendly tool names: `Read`, `Write`, `Edit`, `Delete`, `Shell`, `HTTP`
+- Show key detail: file path, line range for reads, URL for HTTP, command for shell
+- Inline diff after write/edit operations: summary line (`added 3 lines, removed 1 line at L22`) + colored diff (green additions, red deletions, dim context)
+- Different colored left bars per tool type (read=blue, write=green, delete=red, shell=yellow)
 
 **Affected components:**
-- `resources/prompts/develop.md` — TASK section step ordering
+- `cli/src/voidrift_cli/commands/_chat_tui.py` — tool rendering, diff rendering, styles
+- `cli/src/voidrift_cli/commands/chat.py` — capture diff data from write/edit tool results
+- `cli/src/voidrift_cli/tools/filesystem.py` — return diff data from write/edit handlers
 
-**Design constraint:** Keep it to reading files in the immediate scope — not the entire project. The agent should read files it depends on and files adjacent to its targets, not do a full codebase survey.
+**Design constraint:** Display only in the TUI. The tool handlers return diff data; the TUI renders it. No changes to the agent loop.
 
 ---
 
-## TASK-F4: Plan traceability — tasks carry REQ references
+## TASK-F11: Gather triage display — show full file listing and uncategorized files
 
-**Status:** ✅ Complete (REQ-P-17)
-**Depends on:** F1 (task ACs must trace to requirements for traceability to be meaningful)
+**Status:** Not started
 
-**Problem:** There's no traceability from requirements to tasks to code. If a requirement is missed during task generation, nobody notices until verify or the operator catches it. Plan generates tasks from architecture, but the link back to specific requirements is implicit.
+**Problem:** The current `voidrift gather` output shows only counts (`source(6), config(4)`) and a vague "8 files not categorized" warning. The operator can't see which files are in each category or which files were dropped. If important source files are uncategorized, the operator has no way to know without digging into logs.
 
 **What this changes:**
-- Tasks carry a `reqs:` field in frontmatter listing the requirement IDs the task's ACs satisfy.
-- The `reqs:` field is metadata for traceability. It is NOT injected into the develop agent's context — the develop agent only sees the task ACs.
-- Plan's post-generation verification uses the `reqs:` field to check coverage — every REQ ID in REQUIREMENTS.md should appear in at least one task's `reqs:` list. Uncovered REQs are reported as warnings.
+- After triage completes, display files grouped by category with full paths.
+- List uncategorized files explicitly with their paths.
+- This applies to the existing CLI `voidrift gather` command, not just the chat slash command.
 
 **Affected components:**
-- `resources/prompts/plan.md` — PLAN-TASK template adds `reqs:` to frontmatter format
-- `cli/src/voidrift_cli/commands/plan.py` — post-generation coverage verification
-- `cli/src/voidrift_cli/manifest.py` — manifest schema accepts `reqs` field
+- `cli/src/voidrift_cli/commands/gather.py` — post-triage display
 
-**Design constraint:** The `reqs:` field is populated by the task-writing agent from what it already sees in the module arch. No additional context is injected. The coverage check is a warning, not a blocker.
+**Design constraint:** Display only. No behavioral changes to the pipeline. The gather command continues to process categorized files as before. All system output is dim for visual hierarchy.
 
 ---
 
-## TASK-F5: Per-stage verification in each command
+## TASK-F12: Uncategorized file assignment UX
 
-**Status:** ✅ Complete (REQ-D-21 develop file check, REQ-P-17 plan coverage, REQ-G-22 gather triage coverage)
-**Depends on:** F1 (plan coverage check needs good task ACs), F4 (plan coverage check uses `reqs:` field)
+**Status:** Not started
+**Depends on:** F11
 
-**Problem:** Verification only happens at the end via `voidrift verify`. Plan doesn't check that its tasks cover all requirements. Errors compound through the pipeline and are only caught at integration time — or by the operator.
-
-**What remains:**
-- **Plan:** After generating all tasks, a verification pass checks that every requirement in REQUIREMENTS.md has at least one task covering it (via `reqs:` field from F4). Missing coverage is reported as a warning.
-- **Gather:** After consolidation, verify that every source file categorized in triage appears in ANALYSIS.md. Missing entries are logged.
-- **Develop file list check:** ✅ Already done (REQ-D-21).
-
-**Affected components:**
-- `cli/src/voidrift_cli/commands/plan.py` — post-task-generation verification pass
-- `cli/src/voidrift_cli/commands/gather.py` — post-consolidation coverage check
-
-**Design constraint:** These are warnings, not blockers. The operator decides whether to act on them. No approval gates in automated commands.
-
----
-
-## TASK-F6: Documentation verification in verify command
-
-**Status:** ✅ Complete (REQ-VF-17)
-
-**Problem:** Plan generates README. Develop changes interfaces, endpoints, configuration — but never updates the README. By the time all tasks complete, the README is stale. The operator has to manually reconcile documentation with the actual implementation.
-
-**Revised approach:** Instead of giving develop write access to framework files, verify catches stale documentation. A new Stage 0 in verify checks that documented endpoints, environment variables, and configuration keys match the actual source code. Stale docs become bug reports — same as test failures.
+**Problem:** When triage drops files, they are silently excluded from the entire pipeline. The operator has no way to assign them to categories without re-running gather. Important source files (e.g. `traffic.js`, `drivetime.js`) can be missed entirely.
 
 **What this changes:**
-- Add a documentation verification stage as the first stage of `voidrift verify`, before the current test planning stage.
-- The stage reads README.md and ARCHITECTURE.md, reads the source code, and checks for mismatches: documented endpoints vs implemented endpoints, documented env vars vs env vars referenced in code, documented config keys vs config schema.
-- Mismatches are reported as bug reports in `.voidrift/bugs/` — same format as test failures.
-- The operator fixes stale docs via `voidrift chat` (which already has `write_framework_file`).
+- When uncategorized files exist, prompt the operator with choices: assign each file to a category, skip all, or abort.
+- For the existing CLI: add an `--interactive` flag to `voidrift gather` that enables the assignment prompt.
+- For the chat slash command: the assignment prompt is always available in `/gather`.
 
 **Affected components:**
-- `cli/src/voidrift_cli/commands/verify.py` — new Stage 0 before existing Stage 1
-- `resources/prompts/verify.md` — new prompt section for documentation verification
+- `cli/src/voidrift_cli/commands/gather.py` — `--interactive` flag, assignment prompt
 
-**Design constraint:** This is an agent-based check, not a code-level parser. The verify agent reads docs and source code and identifies mismatches. It uses the same sub-agent pattern as the existing test case execution. The develop command boundary is preserved — develop never writes to `.voidrift/`.
+**Design constraint:** Non-interactive mode (default) preserves current behavior — uncategorized files are skipped with a warning. Interactive mode adds the assignment prompt.
 
 ---
 
-## TASK-F7: Chat diagnose-before-acting prompt
+## TASK-F13: CHAT-ROLE prompt alignment with START.md workflow
 
-**Status:** ✅ Complete (REQ-U-24)
+**Status:** Not started
 
-**Problem:** The chat agent jumps to action without understanding the request. "Let's look at the verify result" triggers file writes instead of reading VERIFY.md. The agent interprets intent and acts on it in the same turn, often incorrectly. START.md step 1: "Trace the root cause. Understand the full impact before proposing anything."
+**Problem:** The CHAT-ROLE system prompt is 5 loose behavioral sentences. Small models don't follow them reliably. START.md has a clear numbered workflow (diagnose → propose → approve → implement → summarize) that works when followed. The CHAT-ROLE should mirror this structure so the model has a process to follow, not just hints.
 
 **What this changes:**
-- Update the chat system prompt (`resources/prompts/chat.md`) to instruct the model: before making any changes, read the relevant files and understand the current state. Do not write, edit, or run commands until you understand what the operator is asking and have confirmed your understanding.
-- The instruction should be in the CHAT-ROLE section of `system.md` or the chat-specific prompt, reinforcing the existing "do not infer write intent" rule with a positive instruction: read first, understand, then propose.
+- Rewrite the CHAT-ROLE section as a numbered workflow matching START.md:
+  1. Read relevant files to understand the current state
+  2. Propose what you plan to change — list files, describe changes, explain why
+  3. Wait for operator confirmation
+  4. Make the changes
+  5. Summarize what was done — files created, modified, commands run, issues
+- List available slash commands so the model can suggest next steps
+- Keep the rule: respond with the CLI command when the operator references a framework command
 
 **Affected components:**
-- `resources/prompts/chat.md` or `resources/prompts/system.md` (CHAT-ROLE section)
+- `resources/prompts/system.md` — CHAT-ROLE section
 
-**Design constraint:** Prompt-layer only. The model should still be able to act quickly on clear, direct requests ("write a function that does X"). The instruction targets ambiguous requests where the model needs to gather context before acting.
+**Design constraint:** Prompt-layer only. The workflow must be concise enough for small models to follow but structured enough to enforce the pattern.
 
 ---
 
-## TASK-F8: Chat propose-before-writing
+## TASK-F14: /gather slash command in chat
 
-**Status:** ✅ Complete (REQ-U-25)
-**Depends on:** F7 (diagnose comes before propose)
+**Status:** Not started
+**Depends on:** F11, F12, F13
 
-**Problem:** The chat agent goes straight from understanding to executing. It decides what to do and does it — the operator only finds out what happened after the fact (or via permission prompts that show tool names without context). START.md step 2: "Present a high-confidence solution — what changes, where, and why. Wait for approval."
+**Problem:** `voidrift gather` is a black-box pipeline. The operator runs it and hopes the output is right. There's no way to review, correct, or steer the process mid-run.
 
 **What this changes:**
-- Update the chat system prompt to instruct: before writing or editing files, tell the operator what you plan to change and why. List the files, describe the changes, and wait for confirmation. Only proceed after the operator approves.
-- This complements the permission gate (REQ-U-22) — the gate asks "allow this tool call?" while the proposal asks "is this the right approach?" The proposal happens before any tool calls are attempted.
-- For simple, unambiguous requests ("add a docstring to this function"), the model can act directly. The proposal step is for multi-file changes, architectural decisions, or ambiguous requests.
+- `/gather <path>` slash command in chat runs the gather pipeline interactively.
+- Framework orchestrates each stage. Models do leaf work. Operator gets checkpoints.
+- Stages: build file tree → triage (show files, assign uncategorized) → context build → source analysis (per-file progress) → consolidation (show stats, confirm before writing).
+- Slash command handler runs before `agent.send()` — zero impact on chat context window.
+- Errors in slash commands don't crash the chat session.
 
 **Affected components:**
-- `resources/prompts/chat.md` or `resources/prompts/system.md` (CHAT-ROLE section)
+- `cli/src/voidrift_cli/commands/_chat_commands.py` — new module, `/gather` handler
+- `cli/src/voidrift_cli/commands/chat.py` — wire slash command dispatcher into loop
 
-**Design constraint:** Prompt-layer only. Must not slow down simple requests. The model should use judgment about when a proposal is needed — single-file edits with clear intent don't need a proposal; multi-file changes or ambiguous requests do.
+**Design constraint:** Reuses existing pipeline functions from `_gather_pipeline.py` and `gather.py`. No changes to pipeline logic. All system output is dim.
 
 ---
 
-## TASK-F9: Chat post-action summary
+## TASK-F15: /plan slash command in chat
 
-**Status:** ✅ Complete (REQ-U-26)
+**Status:** Not started
+**Depends on:** F14 (validates the slash command pattern)
 
-**Problem:** After the model executes tool calls, the operator often gets no summary of what happened. The model writes 3 files, edits 2 more, and returns empty text or a vague response. The operator has to check git diff to understand what changed. START.md step 12: "Files changed, ACs satisfied, open questions."
+**Problem:** `voidrift plan` generates architecture and tasks without operator review. Task quality issues (incomplete ACs, missing details) aren't caught until develop or verify.
 
 **What this changes:**
-- Update the chat system prompt to instruct: after completing any tool calls that modify files or run commands, provide a summary listing what was done — files created, files modified, commands run, and their outcomes. If anything failed or was unexpected, note it.
-- This is a prompt instruction, not a structural enforcement. The empty response fallback (REQ-UI-14) catches the case where the model says nothing at all, but this addresses the case where the model responds with vague text instead of a concrete summary.
+- `/plan` slash command runs the plan pipeline interactively.
+- Stages: architecture (show modules, confirm) → module arch (per-module progress, confirm) → task outlines (show task summary, confirm) → task files (generate, show coverage check) → README.
+- Operator can review and abort at each stage.
 
 **Affected components:**
-- `resources/prompts/chat.md` or `resources/prompts/system.md` (CHAT-ROLE section)
+- `cli/src/voidrift_cli/commands/_chat_commands.py` — `/plan` handler
 
-**Design constraint:** Prompt-layer only. The summary should be concise — a bullet list of changes, not a narrative. The model should not repeat file contents in the summary.
+**Design constraint:** Reuses existing pipeline functions from `_plan_pipeline.py`. All system output is dim.
 
 ---
 
-## TASK-F10: Add delete_source_file tool to develop
+## TASK-F16: System prompt — slash command awareness
 
-**Status:** ✅ Complete (REQ-D-24)
+**Status:** Not started
+**Depends on:** F13
 
-**Problem:** The develop agent can create and modify files but cannot delete them. When requirements change in a later run and a file is no longer needed — a module removed, a file replaced, direction changed — the agent has no way to clean up. Dead files accumulate and confuse future agents and operators.
+**Problem:** The chat model doesn't know slash commands exist. After updating requirements, it offers to draft config files instead of suggesting `/plan`. The model can't recommend the right workflow if it doesn't know the tools available.
 
 **What this changes:**
-- Add `delete_source_file(path)` tool to the develop agent's tool set.
-- The tool deletes a file within the project root, subject to the same path sandboxing as `write_source_file` (REQ-SEC-1) and `protected_paths` checks.
-- The tool logs the deletion and records it in the snapshot system for rollback (REQ-D-15) — if the task fails, deleted files are restored from the snapshot.
-- Task frontmatter `files:` field supports `(delete)` annotation: `- backend/old_module.py (delete)`.
-- The file list verification (REQ-D-21) includes `(delete)` — warns if a file annotated for deletion still exists after the task completes.
+- CHAT-ROLE section lists available slash commands with one-line descriptions.
+- Model suggests the appropriate next command when the logical next step is a framework operation.
 
 **Affected components:**
-- `cli/src/voidrift_cli/tools/filesystem.py` — new `delete_source_file` handler
-- `cli/src/voidrift_cli/tools/registry.py` — tool schema for `delete_source_file`
-- `cli/src/voidrift_cli/commands/develop.py` — add to `AGENT_TOOLS`, snapshot integration
-- `resources/prompts/develop.md` — mention deletion in the steps
-- `resources/prompts/plan.md` — PLAN-TASK template documents `(delete)` annotation
+- `resources/prompts/system.md` — CHAT-ROLE section
 
-**Design constraint:** Deletion is sandboxed to the project root. Protected paths cannot be deleted. Snapshots must capture the original file content before deletion for rollback. The tool should refuse to delete directories — files only.
+**Design constraint:** Prompt-layer only. Keep the list concise — command name and one-line purpose.
+
+---
+
+## TASK-F17: /verify slash command in chat
+
+**Status:** Not started
+**Depends on:** F14
+
+**Problem:** `voidrift verify` runs all test cases without operator visibility into what's being tested or why items fail.
+
+**What this changes:**
+- `/verify` slash command runs verify interactively.
+- Stages: doc verification (show mismatches) → test planning (show test cases) → test execution (show results as they complete) → report (show summary).
+
+**Affected components:**
+- `cli/src/voidrift_cli/commands/_chat_commands.py` — `/verify` handler
+
+**Design constraint:** Initial implementation can delegate to `run_verify` with better output. Full interactive mode is a follow-up.
+
+---
+
+## TASK-F18: /develop slash command in chat
+
+**Status:** Not started
+**Depends on:** F14
+
+**Problem:** `voidrift develop` executes tasks with limited visibility. The operator sees task completion but not what's happening inside each task.
+
+**What this changes:**
+- `/develop` slash command runs develop interactively.
+- Shows task list and execution order, per-task progress, self-review results, file list verification.
+
+**Affected components:**
+- `cli/src/voidrift_cli/commands/_chat_commands.py` — `/develop` handler
+
+**Design constraint:** Initial implementation can delegate to `run_develop` with better output. Full interactive mode is a follow-up.
+
+---
+
+## TASK-F19: Dim system output across all chat display
+
+**Status:** Not started
+
+**Problem:** System messages in chat are not consistently dim. Some use `style="dim"`, some don't. The operator can't visually distinguish system output from model responses.
+
+**What this changes:**
+- Audit all `ui._con.print()` calls in chat-related modules.
+- Ensure all framework/system messages use dim styling.
+- Operator input and model responses remain normal weight.
+
+**Affected components:**
+- `cli/src/voidrift_cli/commands/chat.py`
+- `cli/src/voidrift_cli/commands/_chat_display.py`
+- `cli/src/voidrift_cli/commands/_chat_commands.py` (when created)
+
+**Design constraint:** Visual change only. No behavioral changes.
