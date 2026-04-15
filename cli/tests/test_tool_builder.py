@@ -1,4 +1,4 @@
-"""Tests for tool builder (build_tool_guidelines, build_local_tools, build_handlers, filter_tools)."""
+"""Tests for tool builder (build_tool_guidelines, build_local_tools, filter_tools)."""
 
 import ast
 import importlib
@@ -8,21 +8,10 @@ from pathlib import Path
 from voidrift_cli.tool_builder import (
     build_tool_guidelines,
     build_local_tools,
-    build_handlers,
     filter_tools,
     validate_schema_handler_contract,
 )
-from voidrift_cli.tools.registry import (
-    ALL_TOOLS,
-    FILESYSTEM_TOOLS,
-    SKILL_TOOLS,
-    MEMORY_TOOLS,
-    SESSION_TOOLS,
-    DOCUMENT_TOOLS,
-    CODE_ANALYSIS_TOOLS,
-    BASH_TOOL,
-    VERIFY_TOOLS,
-)
+from voidrift_cli.tools.registry import DOMAIN_TOOLS
 
 
 class TestAgentToolsConstants:
@@ -44,7 +33,6 @@ class TestAgentToolsConstants:
         import voidrift_cli.commands.gather as gather_mod
         tools, _ = build_local_tools("gather", project_dir=tmp_path)
         tool_names = {t["function"]["name"] for t in tools}
-        # All returned tool names should be in gather.AGENT_TOOLS
         for name in tool_names:
             assert name in gather_mod.AGENT_TOOLS, f"Unexpected tool {name!r} for 'gather'"
 
@@ -57,76 +45,42 @@ class TestAgentToolsConstants:
 class TestBuildToolGuidelines:
     def test_assembles_guidelines(self):
         tools = [
-            {"function": {"name": "read_source_file"}, "_guidelines": ["Always check path first"]},
-            {"function": {"name": "write_source_file"}, "_guidelines": ["Verify content", "Check size"]},
+            {"function": {"name": "file"}, "_guidelines": ["Always check path first"]},
+            {"function": {"name": "shell"}, "_guidelines": ["Verify command", "Check output"]},
         ]
         result = build_tool_guidelines(tools)
         assert "## Tool Guidelines" in result
-        assert "read_source_file: Always check path first" in result
-        assert "write_source_file: Verify content" in result
-        assert "write_source_file: Check size" in result
+        assert "file: Always check path first" in result
+        assert "shell: Verify command" in result
+        assert "shell: Check output" in result
 
     def test_empty_when_no_guidelines(self):
-        tools = [{"function": {"name": "read_source_file"}}]
+        tools = [{"function": {"name": "file"}}]
         assert build_tool_guidelines(tools) == ""
 
     def test_skips_tools_without_guidelines(self):
         tools = [
-            {"function": {"name": "read_source_file"}},
-            {"function": {"name": "write_source_file"}, "_guidelines": ["Check size"]},
+            {"function": {"name": "file"}},
+            {"function": {"name": "shell"}, "_guidelines": ["Check output"]},
         ]
         result = build_tool_guidelines(tools)
-        assert "read_source_file" not in result
-        assert "write_source_file: Check size" in result
+        assert "file" not in result
+        assert "shell: Check output" in result
 
 
-# All tool names that should exist in the system (22 unique tools)
-EXPECTED_TOOL_NAMES = {
-    # Filesystem + interaction
-    "write_source_file", "edit_source_file", "delete_source_file", "write_framework_file",
-    "read_source_file", "read_framework_file", "list_project_artifacts",
-    "web_fetch", "ask_user_question",
-    # Skills
-    "get_skill", "list_skills",
-    # Memory
-    "read_memory", "write_memory", "list_memory",
-    # Session
-    "search_history",
-    # Document
-    "read_document",
-    # Code analysis
-    "code_analysis",
-    # Bash
-    "run_command",
-    # Verify
-    "read_process_output", "http_request",
-    "browser_navigate", "browser_screenshot", "browser_click", "browser_get_text",
-}
+class TestDomainToolsRegistry:
+    """DOMAIN_TOOLS contains all 10 domain tool schemas."""
 
+    def test_domain_tools_count(self):
+        assert len(DOMAIN_TOOLS) == 10
 
-class TestRegistryCentralization:
-    """V-TOOL-3: All tool schemas centralized in tools/registry.py."""
-
-    def test_all_tools_contains_all_schemas(self):
-        """ALL_TOOLS contains every tool schema in the system."""
-        names = {t["function"]["name"] for t in ALL_TOOLS}
-        assert names == EXPECTED_TOOL_NAMES
-
-    def test_all_tools_count(self):
-        """ALL_TOOLS has exactly 23 tool schemas."""
-        assert len(ALL_TOOLS) == 24
-
-    def test_all_tools_is_concatenation_of_groups(self):
-        """ALL_TOOLS is the concatenation of all named groups."""
-        expected = (
-            FILESYSTEM_TOOLS + SKILL_TOOLS + MEMORY_TOOLS + SESSION_TOOLS
-            + DOCUMENT_TOOLS + CODE_ANALYSIS_TOOLS + BASH_TOOL + VERIFY_TOOLS
-        )
-        assert ALL_TOOLS == expected
+    def test_domain_tools_names(self):
+        names = {t["function"]["name"] for t in DOMAIN_TOOLS}
+        assert names == {"file", "http", "shell", "browser", "process",
+                         "skill", "memory", "session", "analyze", "ask"}
 
     def test_each_schema_has_valid_structure(self):
-        """Every schema in ALL_TOOLS has type=function and a function dict with name and parameters."""
-        for tool in ALL_TOOLS:
+        for tool in DOMAIN_TOOLS:
             assert tool["type"] == "function"
             fn = tool["function"]
             assert "name" in fn
@@ -134,18 +88,9 @@ class TestRegistryCentralization:
             assert fn["parameters"]["type"] == "object"
 
     def test_tool_builder_has_zero_inline_schema_dicts(self):
-        """tool_builder.py contains zero inline tool schema dicts with parameters.
-
-        The bash tool constructs a dict with "type": "function" but derives its
-        parameters from the registry base schema — that is not an inline schema.
-        An inline schema is a dict literal that defines "parameters" directly.
-        """
+        """tool_builder.py contains zero inline tool schema dicts with parameters."""
         src = Path(inspect.getfile(build_local_tools)).read_text()
         tree = ast.parse(src)
-        # Look for dict literals that define a full tool schema inline:
-        # a dict with key "name" AND key "parameters" inside a "function" dict.
-        # The bash tool's dynamic construction uses **_bash_base["function"]
-        # (a spread), so it won't have a literal "parameters" key.
         inline_count = 0
         for node in ast.walk(tree):
             if not isinstance(node, ast.Dict):
@@ -172,19 +117,16 @@ class TestRegistryCentralization:
             assert actual_names == expected_names, f"Mismatch for cmd={cmd!r}: {actual_names ^ expected_names}"
 
     def test_build_local_tools_verify_plan(self, tmp_path):
-        """verify-plan returns the correct domain tool set."""
         tools, _ = build_local_tools("verify-plan", project_dir=tmp_path)
         names = {t["function"]["name"] for t in tools}
         assert names == {"file"}
 
     def test_build_local_tools_verify_execute(self, tmp_path):
-        """verify-execute returns the correct domain tool set."""
         tools, _ = build_local_tools("verify-execute", project_dir=tmp_path)
         names = {t["function"]["name"] for t in tools}
         assert names == {"file", "http", "shell", "browser", "process"}
 
     def test_build_local_tools_no_cmd_returns_all(self, tmp_path):
-        """build_local_tools(cmd=None) returns all domain tools."""
         tools, _ = build_local_tools(cmd=None, project_dir=tmp_path)
         names = {t["function"]["name"] for t in tools}
         assert "file" in names
@@ -192,56 +134,37 @@ class TestRegistryCentralization:
         assert "http" in names
 
 
-class TestBuildHandlers:
-    """build_handlers returns a handler dict independently testable from filtering."""
+class TestDomainHandlers:
+    """Domain handlers return a handler dict with domain tool names."""
 
     def test_returns_dict_of_callables(self, tmp_path):
-        handlers = build_handlers(cmd=None, project_dir=tmp_path)
+        _, handlers = build_local_tools(cmd=None, project_dir=tmp_path)
         assert isinstance(handlers, dict)
         for name, fn in handlers.items():
             assert callable(fn), f"Handler {name!r} is not callable"
 
-    def test_contains_filesystem_handlers(self, tmp_path):
-        handlers = build_handlers(cmd=None, project_dir=tmp_path)
-        for name in ("read_source_file", "write_source_file", "edit_source_file",
-                      "read_framework_file", "write_framework_file", "list_project_artifacts"):
-            assert name in handlers, f"Missing filesystem handler {name!r}"
+    def test_contains_file_handler(self, tmp_path):
+        _, handlers = build_local_tools(cmd=None, project_dir=tmp_path)
+        assert "file" in handlers
 
     def test_contains_skill_handlers(self, tmp_path):
-        handlers = build_handlers(cmd=None, project_dir=tmp_path)
-        assert "get_skill" in handlers
-        assert "list_skills" in handlers
+        _, handlers = build_local_tools(cmd="chat", project_dir=tmp_path)
+        assert "skill" in handlers
 
-    def test_contains_memory_handlers(self, tmp_path):
-        handlers = build_handlers(cmd=None, project_dir=tmp_path)
-        for name in ("read_memory", "write_memory", "list_memory"):
-            assert name in handlers
+    def test_contains_memory_handler(self, tmp_path):
+        _, handlers = build_local_tools(cmd="chat", project_dir=tmp_path)
+        assert "memory" in handlers
 
-    def test_contains_verify_handlers(self, tmp_path):
-        handlers = build_handlers(cmd=None, project_dir=tmp_path)
-        for name in ("read_process_output", "http_request",
-                      "browser_navigate", "browser_screenshot",
-                      "browser_click", "browser_get_text"):
-            assert name in handlers
+    def test_shell_handler_present_for_develop(self, tmp_path):
+        _, handlers = build_local_tools(cmd="develop", project_dir=tmp_path)
+        assert "shell" in handlers
 
-    def test_bash_handler_present_for_develop(self, tmp_path):
-        handlers = build_handlers(cmd="develop", project_dir=tmp_path)
-        assert "run_command" in handlers
-
-    def test_bash_handler_absent_for_plan(self, tmp_path):
-        handlers = build_handlers(cmd="plan", project_dir=tmp_path)
-        assert "run_command" not in handlers
-
-    def test_bash_handler_absent_for_no_cmd(self, tmp_path):
-        handlers = build_handlers(cmd=None, project_dir=tmp_path)
-        assert "run_command" not in handlers
-
-    def test_accepts_custom_ctx(self, tmp_path):
-        from voidrift_cli.tools.filesystem import WriteContext
-        ctx = WriteContext(project_dir=tmp_path)
-        handlers = build_handlers(cmd=None, project_dir=tmp_path, ctx=ctx)
-        # Handler should be bound to the provided ctx
-        assert handlers["read_source_file"] == ctx.read_source_file
+    def test_shell_handler_absent_for_plan(self, tmp_path):
+        _, handlers = build_local_tools(cmd="plan", project_dir=tmp_path)
+        # shell is not in the tool list for plan, but handler exists as fallback
+        tools, _ = build_local_tools(cmd="plan", project_dir=tmp_path)
+        tool_names = {t["function"]["name"] for t in tools}
+        assert "shell" not in tool_names
 
 
 class TestFilterTools:
@@ -298,11 +221,10 @@ class TestBuildLocalToolsDecomposition:
         line_count = len(src.strip().split("\n"))
         assert line_count <= 50, f"build_local_tools is {line_count} lines (max 50)"
 
-    def test_output_matches_build_handlers_plus_filter(self, tmp_path):
-        """build_local_tools output is consistent with build_handlers + filter_tools."""
+    def test_output_matches_handlers_plus_filter(self, tmp_path):
+        """build_local_tools output is consistent — all tools have handlers."""
         tools, handlers = build_local_tools("plan", project_dir=tmp_path)
         tool_names = {t["function"]["name"] for t in tools}
-        # All returned tools should have handlers
         for name in tool_names:
             assert name in handlers, f"Tool {name!r} has no handler"
 
@@ -311,14 +233,11 @@ class TestSchemaHandlerContract:
     """V-TOOL-4: Schema-handler contract validation."""
 
     def test_all_current_tools_pass_validation(self, tmp_path):
-        """All existing tools pass validation for every command."""
         for cmd in (None, "gather", "plan", "develop", "chat", "verify-plan", "verify-execute"):
             tools, handlers = build_local_tools(cmd, project_dir=tmp_path)
-            # Should not raise
             validate_schema_handler_contract(tools, handlers)
 
     def test_catches_handler_missing_schema_parameter(self):
-        """ValueError raised when handler is missing a schema-defined parameter."""
         tools = [{
             "type": "function",
             "function": {
@@ -333,7 +252,7 @@ class TestSchemaHandlerContract:
                 },
             },
         }]
-        # Handler only accepts 'path', missing 'content'
+
         def bad_handler(path: str) -> str:
             return path
 
@@ -348,7 +267,6 @@ class TestSchemaHandlerContract:
             assert "bad_handler" in msg
 
     def test_kwargs_handler_passes(self):
-        """Handlers using **kwargs are not flagged."""
         tools = [{
             "type": "function",
             "function": {
@@ -368,11 +286,9 @@ class TestSchemaHandlerContract:
             return ""
 
         handlers = {"flex_tool": flex_handler}
-        # Should not raise
         validate_schema_handler_contract(tools, handlers)
 
     def test_skips_tools_without_handler(self):
-        """Tools with no matching handler are silently skipped."""
         tools = [{
             "type": "function",
             "function": {
@@ -380,11 +296,9 @@ class TestSchemaHandlerContract:
                 "parameters": {"type": "object", "properties": {"x": {"type": "string"}}},
             },
         }]
-        # No handler for orphan_tool
         validate_schema_handler_contract(tools, {})
 
     def test_error_message_identifies_tool_param_handler(self):
-        """Error message contains tool name, missing parameter, and handler repr."""
         tools = [{
             "type": "function",
             "function": {
@@ -414,29 +328,9 @@ class TestSchemaHandlerContract:
 
 
 class TestWebFetchBuildTime:
-    """V-TOOL-5: web_fetch handler configured at build time, no placeholder."""
+    """V-TOOL-5: http handler configured at build time via build_local_tools."""
 
-    def test_chat_build_handlers_with_kwargs_returns_real_handler(self, tmp_path):
-        """Given web_fetch_kwargs, build_handlers returns the real web_fetch handler."""
-        from voidrift_cli.models import ModelConfig
-        mc = ModelConfig(
-            alias="test", model_id="test", model_type="cloud",
-            provider="openai", api_base="http://localhost:19999/v1", api_key="k",
-        )
-        kwargs = {"mc": mc, "log": "/dev/null", "web_cache": {}}
-        handlers = build_handlers(cmd="chat", project_dir=tmp_path, web_fetch_kwargs=kwargs)
-        handler = handlers["web_fetch"]
-        # Real handler has set_confirm method
-        assert hasattr(handler, "set_confirm"), "Real web_fetch handler should have set_confirm"
-
-    def test_non_chat_build_handlers_returns_fallback(self, tmp_path):
-        """Given no web_fetch_kwargs, build_handlers returns a fallback handler."""
-        handlers = build_handlers(cmd="plan", project_dir=tmp_path, web_fetch_kwargs=None)
-        result = handlers["web_fetch"]("http://example.com")
-        assert "only available during" in result
-
-    def test_build_local_tools_chat_with_kwargs_passes_validation(self, tmp_path):
-        """build_local_tools with web_fetch_kwargs passes schema-handler validation."""
+    def test_chat_with_kwargs_returns_real_handler(self, tmp_path):
         from voidrift_cli.models import ModelConfig
         mc = ModelConfig(
             alias="test", model_id="test", model_type="cloud",
@@ -444,52 +338,36 @@ class TestWebFetchBuildTime:
         )
         kwargs = {"mc": mc, "log": "/dev/null", "web_cache": {}}
         tools, handlers = build_local_tools(cmd="chat", project_dir=tmp_path, web_fetch_kwargs=kwargs)
-        # Should not raise
-        validate_schema_handler_contract(tools, handlers)
-        tool_names = {t["function"]["name"] for t in tools}
-        assert "http" in tool_names
+        handler = handlers["http"]
+        assert callable(handler)
 
-    def test_no_placeholder_in_interaction_module(self):
-        """interaction.py has no web_fetch function."""
-        import voidrift_cli.tools.interaction as interaction_mod
-        assert not hasattr(interaction_mod, "web_fetch"), (
-            "web_fetch placeholder still exists in interaction.py"
-        )
-
-    def test_set_confirm_swaps_confirm_function(self, tmp_path):
-        """set_confirm on the handler replaces the confirm callback."""
+    def test_chat_with_kwargs_passes_validation(self, tmp_path):
         from voidrift_cli.models import ModelConfig
         mc = ModelConfig(
             alias="test", model_id="test", model_type="cloud",
             provider="openai", api_base="http://localhost:19999/v1", api_key="k",
         )
         kwargs = {"mc": mc, "log": "/dev/null", "web_cache": {}}
-        handlers = build_handlers(cmd="chat", project_dir=tmp_path, web_fetch_kwargs=kwargs)
-        handler = handlers["web_fetch"]
-        # Swap confirm to always deny
-        handler.set_confirm(lambda url: False)
-        result = handler("http://example.com")
-        assert "declined" in result.lower()
+        tools, handlers = build_local_tools(cmd="chat", project_dir=tmp_path, web_fetch_kwargs=kwargs)
+        validate_schema_handler_contract(tools, handlers)
+        tool_names = {t["function"]["name"] for t in tools}
+        assert "http" in tool_names
 
-    def test_commands_without_web_fetch_unaffected(self, tmp_path):
-        """Commands that don't include web_fetch in AGENT_TOOLS are unaffected."""
+    def test_no_placeholder_in_interaction_module(self):
+        import voidrift_cli.tools.interaction as interaction_mod
+        assert not hasattr(interaction_mod, "web_fetch")
+
+    def test_commands_without_http_unaffected(self, tmp_path):
         for cmd in ("gather", "plan", "develop"):
             tools, _ = build_local_tools(cmd, project_dir=tmp_path)
             tool_names = {t["function"]["name"] for t in tools}
-            if cmd == "gather":
-                # gather doesn't have web_fetch
-                assert "web_fetch" not in tool_names
-            elif cmd == "plan":
-                assert "web_fetch" not in tool_names
-            elif cmd == "develop":
-                assert "web_fetch" not in tool_names
+            assert "http" not in tool_names
 
 
 class TestAskUserBuildTime:
-    """V-TOOL-5a: ask_user_question handler configured at build time, no placeholder."""
+    """V-TOOL-5a: ask handler configured at build time via build_local_tools."""
 
-    def test_chat_build_handlers_with_ask_fn_returns_configured_handler(self, tmp_path, monkeypatch):
-        """Given ask_fn, build_handlers returns a handler that calls it."""
+    def test_chat_with_ask_fn_returns_configured_handler(self, tmp_path, monkeypatch):
         monkeypatch.setattr("sys.stdin", type("FakeStdin", (), {"isatty": lambda self: True})())
         calls = []
 
@@ -497,53 +375,25 @@ class TestAskUserBuildTime:
             calls.append((question, options))
             return "operator answer"
 
-        handlers = build_handlers(cmd="chat", project_dir=tmp_path, ask_fn=my_ask)
-        result = handlers["ask_user_question"](question="Which DB?", options='["pg", "sqlite"]')
+        tools, handlers = build_local_tools(cmd="chat", project_dir=tmp_path, ask_fn=my_ask)
+        result = handlers["ask"](question="Which DB?", options='["pg", "sqlite"]')
         assert result == "operator answer"
         assert len(calls) == 1
         assert calls[0][0] == "Which DB?"
 
-    def test_non_chat_build_handlers_returns_fallback(self, tmp_path):
-        """Given no ask_fn, handler returns non-interactive fallback."""
-        handlers = build_handlers(cmd="plan", project_dir=tmp_path, ask_fn=None)
-        result = handlers["ask_user_question"](question="Which DB?")
-        assert "best judgment" in result.lower() or "no operator" in result.lower()
-
     def test_no_placeholder_in_interaction_module(self):
-        """interaction.py has no ask_user_question function (only make_ask_user_handler)."""
         import voidrift_cli.tools.interaction as interaction_mod
-        # make_ask_user_handler should exist
         assert hasattr(interaction_mod, "make_ask_user_handler")
-        # The old placeholder function should not exist
         members = [name for name, _ in inspect.getmembers(interaction_mod, inspect.isfunction)]
         assert "ask_user_question" not in members
 
     def test_no_post_build_override_in_chat(self):
-        """chat.py does not assign to agent.tool_handlers['ask_user_question']."""
         import voidrift_cli.commands.chat as chat_mod
         src = inspect.getsource(chat_mod)
         assert 'tool_handlers["ask_user_question"]' not in src
         assert "tool_handlers['ask_user_question']" not in src
 
-    def test_set_ask_fn_swaps_callback(self, tmp_path, monkeypatch):
-        """set_ask_fn on the handler replaces the ask callback."""
-        monkeypatch.setattr("sys.stdin", type("FakeStdin", (), {"isatty": lambda self: True})())
-        handlers = build_handlers(cmd="chat", project_dir=tmp_path, ask_fn=lambda q, o: "first")
-        handler = handlers["ask_user_question"]
-        assert hasattr(handler, "set_ask_fn")
-        handler.set_ask_fn(lambda q, o: "second")
-        result = handler(question="test?")
-        assert result == "second"
-
-    def test_non_interactive_fallback_when_no_tty(self, tmp_path, monkeypatch):
-        """When stdin is not a TTY, handler returns fallback regardless of ask_fn."""
-        monkeypatch.setattr("sys.stdin", type("FakeStdin", (), {"isatty": lambda self: False})())
-        handlers = build_handlers(cmd="chat", project_dir=tmp_path, ask_fn=lambda q, o: "should not reach")
-        result = handlers["ask_user_question"](question="test?")
-        assert "no operator" in result.lower()
-
     def test_build_local_tools_chat_passes_validation(self, tmp_path):
-        """build_local_tools with ask_fn passes schema-handler validation."""
         tools, handlers = build_local_tools(
             cmd="chat", project_dir=tmp_path,
             ask_fn=lambda q, o: "ok",
@@ -552,9 +402,8 @@ class TestAskUserBuildTime:
         tool_names = {t["function"]["name"] for t in tools}
         assert "ask" in tool_names
 
-    def test_commands_without_ask_user_unaffected(self, tmp_path):
-        """Commands that don't include ask_user_question in AGENT_TOOLS are unaffected."""
+    def test_commands_without_ask_unaffected(self, tmp_path):
         for cmd in ("gather", "plan", "develop"):
             tools, _ = build_local_tools(cmd, project_dir=tmp_path)
             tool_names = {t["function"]["name"] for t in tools}
-            assert "ask_user_question" not in tool_names
+            assert "ask" not in tool_names

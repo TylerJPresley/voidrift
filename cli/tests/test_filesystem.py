@@ -106,14 +106,17 @@ class TestLocalToolsNotInFilesystem:
         import voidrift_cli.tools.filesystem as fs_mod
         import voidrift_cli.tools.registry as reg_mod
 
-        # Confirm LOCAL_TOOLS and factory are in registry
-        assert hasattr(reg_mod, "LOCAL_TOOLS")
-        assert hasattr(reg_mod, "make_local_handlers")
-        assert callable(reg_mod.make_local_handlers)
+        # Confirm DOMAIN_TOOLS and factory are in registry
+        assert hasattr(reg_mod, "DOMAIN_TOOLS")
+        assert hasattr(reg_mod, "make_domain_handlers")
+        assert callable(reg_mod.make_domain_handlers)
 
-        # Confirm LOCAL_HANDLERS singleton is gone (replaced by factory)
-        assert not hasattr(reg_mod, "LOCAL_HANDLERS"), (
-            "LOCAL_HANDLERS singleton should not exist after TODO-02; use make_local_handlers(ctx)"
+        # Confirm legacy symbols are gone
+        assert not hasattr(reg_mod, "LOCAL_TOOLS"), (
+            "LOCAL_TOOLS should be removed after tool consolidation"
+        )
+        assert not hasattr(reg_mod, "make_local_handlers"), (
+            "make_local_handlers should be removed after tool consolidation"
         )
 
         # Confirm LOCAL_TOOLS is NOT independently defined in filesystem

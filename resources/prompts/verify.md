@@ -7,14 +7,14 @@ Command prompt file for the verify command. Loaded via `get_prompt("verify", "<s
 **Role:** Documentation verifier — check that project documentation matches the implemented source code.
 
 Steps:
-1. Call `read_framework_file("README.md")` — read all documented endpoints, environment variables, configuration keys, and usage instructions.
-2. Call `read_framework_file("ARCHITECTURE.md")` — read documented components and contracts.
-3. Use `read_source_file()` to examine the actual implementation — entry points, route definitions, config loading, environment variable references.
+1. Call `file(action="read", path="README.md")` — read all documented endpoints, environment variables, configuration keys, and usage instructions.
+2. Call `file(action="read", path="ARCHITECTURE.md")` — read documented components and contracts.
+3. Use `file(action="read")` to examine the actual implementation — entry points, route definitions, config loading, environment variable references.
 4. Compare documented behavior against implemented behavior. Check for:
    - Endpoints documented in README but not implemented in code (or vice versa)
    - Environment variables documented but not referenced in code (or vice versa)
    - Configuration keys documented but not in the config schema (or vice versa)
-5. For each mismatch, write a bug report to `.voidrift/bugs/DOC-N.md` via `write_framework_file()` with: what the documentation says, what the code does, and which file(s) are affected.
+5. For each mismatch, write a bug report to `.voidrift/bugs/DOC-N.md` via `file(action="write")` with: what the documentation says, what the code does, and which file(s) are affected.
 6. If no mismatches are found, do not write any bug reports.
 7. Call `done()`.
 
@@ -27,12 +27,12 @@ Check project documentation against the implemented source code. Report any mism
 **Role:** Test Planner — produce a complete, self-contained test plan from project documentation.
 
 Steps (follow this order):
-1. Call `read_framework_file("REQUIREMENTS.md")` — read all acceptance criteria.
-2. Call `read_framework_file("ARCHITECTURE.md")` — read system context, startup_command, test_bootstrap, and component descriptions.
-3. Call `read_framework_file("tasks/manifest.yml")` if it exists — understand what has been implemented.
-4. For each `arch/<module>.md` file, call `read_framework_file("arch/<module>.md")` to read module design details.
-5. Use `read_source_file()` where needed to understand how a component works before writing testable scenarios.
-6. Write `.voidrift/VERIFY-PLAN.md` with `write_framework_file("VERIFY-PLAN.md", ...)`.
+1. Call `file(action="read", path="REQUIREMENTS.md")` — read all acceptance criteria.
+2. Call `file(action="read", path="ARCHITECTURE.md")` — read system context, startup_command, test_bootstrap, and component descriptions.
+3. Call `file(action="read", path="tasks/manifest.yml")` if it exists — understand what has been implemented.
+4. For each `arch/<module>.md` file, call `file(action="read", path="arch/<module>.md")` to read module design details.
+5. Use `file(action="read")` where needed to understand how a component works before writing testable scenarios.
+6. Write `.voidrift/VERIFY-PLAN.md` with `file(action="write", path="VERIFY-PLAN.md")`.
 7. Call `done()`.
 
 **Test plan format:**
@@ -71,7 +71,7 @@ Execute the scenario and report results. Read and test the running system only.
 
 **If this fails:** Collect all available evidence:
 - Full request and response for each step (method, URL, headers, body, status, response body)
-- Process output at time of failure (use read_process_output)
+- Process output at time of failure (use process(action="read_output"))
 - Any stack traces or error messages
 - Screenshots if UI scenario
 - Timestamps for each step
@@ -104,14 +104,14 @@ Your test case is provided in full. Execute each scenario step in order. Assert 
 **On FAIL:** Collect all available evidence before writing the bug report:
 - Every request: method, URL, headers sent, body sent
 - Every response: status code, headers, body
-- Process output: call `read_process_output(handle_id)` and include the relevant lines
+- Process output: call `process(action="read_output", handle_id=handle_id)` and include the relevant lines
 - Stack traces: copy verbatim from process output or response body
-- Screenshots: call `browser_screenshot()` and include the saved path
+- Screenshots: call `browser(action="screenshot")` and include the saved path
 - Timestamps: record the time of each step
 - Token payloads: decode and include JWT claims if auth is involved
 - Your analysis: what you believe caused the failure
 
-Write the bug report to `.voidrift/bugs/<ITEM-ID>.md` using `write_framework_file("bugs/<ITEM-ID>.md", ...)`.
+Write the bug report to `.voidrift/bugs/<ITEM-ID>.md` using `file(action="write", path="bugs/<ITEM-ID>.md")`.
 
 **Bug report format:**
 
@@ -139,7 +139,7 @@ Actual: <what happened>
 ## Process Output at Time of Failure
 
 ```
-<relevant lines from read_process_output>
+<relevant lines from process(action="read_output")>
 ```
 
 ## Stack Trace

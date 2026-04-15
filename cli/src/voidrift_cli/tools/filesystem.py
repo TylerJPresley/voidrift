@@ -391,16 +391,6 @@ class WriteContext:
             return ".voidrift/ directory is empty."
         return f"Project artifacts ({len(result)} files):\n" + "\n".join(result)
 
-    def get_handlers(self) -> dict[str, Callable]:
-        """Return a handler dict mapping tool names to bound methods."""
-        return {
-            "write_source_file": self.write_source_file,
-            "edit_source_file": self.edit_source_file,
-            "write_framework_file": self.write_framework_file,
-            "read_source_file": self.read_source_file,
-            "read_framework_file": self.read_framework_file,
-            "list_project_artifacts": self.list_project_artifacts,
-        }
 
 
 # Snapshot/rollback — moved to tools/snapshot.py; re-exported for back-compat

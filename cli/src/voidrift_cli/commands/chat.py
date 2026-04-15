@@ -168,7 +168,7 @@ def _tui_loop(agent, mc, log, session=None, style="verbose", fs_ctx=None,
 
     # Wire web_fetch confirm
     if web_fetch_kwargs:
-        _wf = agent.tool_handlers.get("web_fetch")
+        _wf = agent.tool_handlers.get("http")
         if _wf and hasattr(_wf, "set_confirm"):
             _wf.set_confirm(lambda url: True)  # TODO: TUI-native confirm
 
@@ -541,8 +541,8 @@ def chat(model, doc, style, bare, system_prompt_path) -> None:
         return result
 
     def _skill_after_tool_call(name: str, result: str) -> str:
-        """after_tool_call hook: extract skill metadata from get_skill responses."""
-        if name == "get_skill":
+        """after_tool_call hook: extract skill metadata from skill(action='get') responses."""
+        if name == "skill":
             return _extract_skill_meta(result)
         return result
 

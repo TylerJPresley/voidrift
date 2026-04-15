@@ -121,11 +121,11 @@ class TestChatWebFetch:
         assert result == "Page summary."
         assert web_cache.get("https://example.com/docs") == "Page summary."
 
-    def test_web_fetch_in_local_tools(self):
-        """web_fetch schema is present in LOCAL_TOOLS."""
-        from voidrift_cli.tools import LOCAL_TOOLS
-        names = [t["function"]["name"] for t in LOCAL_TOOLS]
-        assert "web_fetch" in names
+    def test_http_in_domain_tools(self):
+        """http schema is present in DOMAIN_TOOLS."""
+        from voidrift_cli.tools.registry import DOMAIN_TOOLS
+        names = [t["function"]["name"] for t in DOMAIN_TOOLS]
+        assert "http" in names
 
     def test_web_fetch_absent_from_gather_tools(self):
         """web_fetch is not in the agent tool list for the gather command."""

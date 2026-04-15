@@ -199,14 +199,6 @@ class TestDuplicateWriteGuard:
         assert "Wrote" in result
 
 
-class TestWriteContextHandlers:
-    def test_get_handlers_includes_edit_source_file(self, tmp_path):
-        ctx = WriteContext(project_dir=tmp_path)
-        handlers = ctx.get_handlers()
-        assert "edit_source_file" in handlers
-        assert callable(handlers["edit_source_file"])
-
-
 class TestStripHtml:
     def test_strip_html_logs_parse_error(self, caplog):
         """HTML parse error is logged at DEBUG, partial content returned."""

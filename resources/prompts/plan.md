@@ -44,7 +44,7 @@ Requirements are provided below. The architecture template is also provided.
 
 Steps:
 1. Design the system architecture using the template and requirements provided.
-2. Write `ARCHITECTURE.md` via `write_framework_file("ARCHITECTURE.md", content)`. The path is exactly `ARCHITECTURE.md` — not `arch/ARCHITECTURE.md`. The file MUST begin with a YAML frontmatter block followed by the markdown body:
+2. Write `ARCHITECTURE.md` via `file(action="write", path="ARCHITECTURE.md")`. The path is exactly `ARCHITECTURE.md` — not `arch/ARCHITECTURE.md`. The file MUST begin with a YAML frontmatter block followed by the markdown body:
 
 ```
 ---
@@ -80,7 +80,7 @@ You are designing the `{module}` module. The architecture summary below contains
 
 Steps:
 1. Design the module: component breakdown, data models, internal interfaces, error handling patterns, and cross-module interfaces this module exposes or consumes.
-2. Write `arch/{module}.md` via `write_framework_file("arch/{module}.md")`.
+2. Write `arch/{module}.md` via `file(action="write", path="arch/{module}.md")`.
    - Carry REQ ID references from the architecture into each component section.
    - Interfaces and data models as signatures only — no full implementations.
    - Code examples must not exceed 5 lines.
@@ -99,7 +99,7 @@ You are outlining implementation tasks for the `{module}` module. Write the outl
 Steps:
 1. Review the architecture and module arch provided below.
 2. Break the module into implementation tasks. Task IDs start at {id_offset} and increment by 1.
-3. Write `tasks/outline/{module}.md` via `write_framework_file()` using this exact format:
+3. Write `tasks/outline/{module}.md` via `file(action="write")` using this exact format:
 
 ```
 ---
@@ -134,7 +134,7 @@ You have task outline files for all modules. Identify tasks in one module that d
 Steps:
 1. Read each outline below.
 2. Identify cross-module dependencies: task A in module X must complete before task B in module Y can start.
-3. Write `tasks/outline/deps.yml` via `write_framework_file()` using this format:
+3. Write `tasks/outline/deps.yml` via `file(action="write")` using this format:
 
 ```
 cross_module:
@@ -169,7 +169,7 @@ Available skills (name: description):
 {valid_skills}
 
 Steps:
-1. Write `tasks/active/TASK-{task_id}.md` via `write_framework_file()` using this format:
+1. Write `tasks/active/TASK-{task_id}.md` via `file(action="write")` using this format:
 
 ```
 ---
@@ -263,7 +263,7 @@ Follow the README-TEMPLATE structure. Write for a human operator who needs to in
 - Project structure (directory layout with descriptions)
 - How to develop (setup, test, build)
 
-Write the complete README.md content. Use `write_framework_file("README.md", content)` to save it.
+Write the complete README.md content. Use `file(action="write", path="README.md")` to save it.
 
 {readme_template}
 
@@ -275,7 +275,7 @@ ARCHITECTURE:
 
 ## README-RETRY
 
-The README was not written. Use write_framework_file("README.md", content) to write the complete README now.
+The README was not written. Use file(action="write", path="README.md") to write the complete README now.
 
 ## README-USER
 

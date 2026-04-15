@@ -10,14 +10,14 @@ description: Agent loop patterns, tool dispatch sequencing, pipeline stage desig
 Read files before writing them. Inspect the current state of a file before overwriting
 or editing it. Never assume file contents.
 
-Use `read_source_file` with explicit `offset`/`limit` for files over 300 lines — read
+Use `file(action="read")` with explicit `offset`/`limit` for files over 300 lines — read
 the relevant section, not the whole file.
 
-Use `edit_source_file` for targeted changes to existing files; use `write_source_file`
-only for new files or complete rewrites. `edit_source_file` requires a unique
+Use `file(action="edit")` for targeted changes to existing files; use `file(action="write")`
+only for new files or complete rewrites. `file(action="edit")` requires a unique
 `old_string` — include enough surrounding context lines to make it unambiguous.
 
-Run tests or build commands via `run_command` after every write to validate the change
+Run tests or build commands via `shell` after every write to validate the change
 before calling `done()`.
 
 ## `done()` Call

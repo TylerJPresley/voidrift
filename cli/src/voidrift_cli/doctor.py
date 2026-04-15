@@ -164,11 +164,11 @@ def _check_model_entries(models_file_path: Path) -> list[Check]:
 
 
 _OPTIONAL_DEPS: list[tuple[str, str, str]] = [
-    ("tree_sitter", "tree-sitter", "code_analysis tool"),
-    ("tree_sitter_python", "tree-sitter-python", "code_analysis for Python"),
-    ("fitz", "pymupdf", "read_document for PDF"),
-    ("docx", "python-docx", "read_document for DOCX"),
-    ("openpyxl", "openpyxl", "read_document for XLSX"),
+    ("tree_sitter", "tree-sitter", "analyze tool (code action)"),
+    ("tree_sitter_python", "tree-sitter-python", "analyze tool (Python support)"),
+    ("fitz", "pymupdf", "analyze tool (PDF document support)"),
+    ("docx", "python-docx", "analyze tool (DOCX document support)"),
+    ("openpyxl", "openpyxl", "analyze tool (XLSX document support)"),
 ]
 
 

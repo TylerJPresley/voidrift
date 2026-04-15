@@ -28,7 +28,7 @@ def _make_write_guard(name: str, handler, gate, confirm_holder: list) -> "Callab
 
 
 def _make_run_guard(handler, gate, confirm_holder: list) -> "Callable":
-    """Wrap run_command with the session permission gate (REQ-U-22)."""
+    """Wrap shell with the session permission gate (REQ-U-22)."""
     import json as _json
 
     def guarded(*args, **kwargs):
@@ -37,9 +37,9 @@ def _make_run_guard(handler, gate, confirm_holder: list) -> "Callable":
         cmd = args[0] if args else kwargs.get("cmd", "?")
         confirm = confirm_holder[0]
         if confirm is None:
-            return _json.dumps({"error": "Permission denied: run_command — no operator present (non-interactive session).", "exit_code": -1})
-        if not confirm("runs", f"run_command({cmd!r})"):
-            return _json.dumps({"error": f"Permission denied: operator declined run_command({cmd!r}).", "exit_code": -1})
+            return _json.dumps({"error": "Permission denied: shell — no operator present (non-interactive session).", "exit_code": -1})
+        if not confirm("runs", f"shell({cmd!r})"):
+            return _json.dumps({"error": f"Permission denied: operator declined shell({cmd!r}).", "exit_code": -1})
         return handler(*args, **kwargs)
     return guarded
 
@@ -116,157 +116,6 @@ def _resolve_allowed(cmd: str | None) -> set[str] | frozenset[str] | None:
         return getattr(_mod, "AGENT_TOOLS_PLAN", None)
     return getattr(_mod, "AGENT_TOOLS", None)
 
-
-def build_handlers(cmd: str | None, project_dir: Path, ctx=None, web_fetch_kwargs: dict | None = None, ask_fn=None, source_read_ctx=None, permission_gate=None, permission_confirm_holder=None) -> dict[str, Callable]:
-    """Build all tool handlers bound to the given project directory.
-
-    Args:
-        cmd: Command name (used for bash config). None builds all non-bash handlers.
-        project_dir: Project root directory.
-        ctx: Optional WriteContext instance. Created if not provided.
-        web_fetch_kwargs: Optional kwargs for make_web_fetch_handler (REQ-TOOL-5).
-            When provided, the real web_fetch handler is built at build time.
-            When None, a fallback handler is registered.
-        ask_fn: Optional callback for ask_user_question (REQ-TOOL-5).
-            When provided, the handler calls ask_fn for operator interaction.
-            When None, the handler uses the non-interactive fallback.
-        source_read_ctx: Optional WriteContext rooted at a source directory (REQ-G-18).
-            When provided, its read_source_file replaces the default handler,
-            giving gather full pagination/guards scoped to the source path.
-
-    Returns:
-        Dict mapping tool name to handler callable.
-    """
-    import json as _json
-    import re as _re
-
-    from .tools.filesystem import WriteContext as _WriteContext
-    from .tools.registry import make_local_handlers as _make_handlers
-
-    _ctx = ctx if ctx is not None else _WriteContext(project_dir=project_dir)
-    handlers: dict[str, Callable] = _make_handlers(_ctx)
-
-    # --- Source read context override (REQ-G-18) ---
-    if source_read_ctx is not None:
-        handlers["read_source_file"] = source_read_ctx.read_source_file
-
-    # --- Web fetch handler (REQ-TOOL-5) ---
-    if web_fetch_kwargs is not None:
-        from .tools.web import make_web_fetch_handler as _make_wf
-        handlers["web_fetch"] = _make_wf(**web_fetch_kwargs)
-    else:
-        handlers["web_fetch"] = lambda url: "web_fetch is only available during an active chat session."
-
-    # --- Ask user handler (REQ-TOOL-5) ---
-    from .tools.interaction import make_ask_user_handler as _make_auh
-    handlers["ask_user_question"] = _make_auh(ask_fn=ask_fn)
-
-    # --- Skill handlers ---
-    from .skills import find_skill as _find_skill, list_skills as _list_skills
-    from .skills import get_skill_allowed_tools as _get_allowed
-
-    def _get_skill_handler(name: str, topic: str = "") -> str:
-        content = _find_skill(name)
-        if content is None:
-            return f"Skill '{name}' not found."
-        at = _get_allowed(name)
-        if topic:
-            parts = _re.split(r"^## (.+)$", content, flags=_re.MULTILINE)
-            for i in range(1, len(parts), 2):
-                if parts[i].strip().lower() == topic.strip().lower():
-                    content = parts[i + 1].strip() if i + 1 < len(parts) else ""
-                    break
-            else:
-                return f"Section '{topic}' not found in skill '{name}'."
-        if at is not None or name:
-            meta = _json.dumps({"_skill_allowed_tools": at, "_skill_name": name})
-            prefix = f"<!-- SKILL_META:{meta} -->\n"
-            return prefix + content
-        return content
-
-    handlers["get_skill"] = _get_skill_handler
-    handlers["list_skills"] = _list_skills
-
-    # --- Memory handlers ---
-    from .memory import MemoryManager as _MemMgr
-
-    def _read_memory(name: str) -> str:
-        content = _MemMgr(str(project_dir)).read(name)
-        return content if content else f"Memory entry '{name}' not found."
-
-    def _write_memory(name: str, content: str, scope: str = "project", description: str = "") -> str:
-        _MemMgr(str(project_dir)).write(name, content, scope=scope, description=description)
-        return f"Memory entry '{name}' saved ({scope})."
-
-    def _list_memory() -> str:
-        entries = _MemMgr(str(project_dir)).list_entries()
-        if not entries:
-            return "No memory entries."
-        return "\n".join(f"- {e.name} ({e.scope}): {e.description}" for e in entries)
-
-    handlers["read_memory"] = _read_memory
-    handlers["write_memory"] = _write_memory
-    handlers["list_memory"] = _list_memory
-
-    # --- Session handler ---
-    from .session import ChatSession as _ChatSes
-
-    def _search_history(query: str, limit: int = 5) -> str:
-        _session = _ChatSes.load_or_create(project_dir / ".voidrift")
-        if not _session.path.exists():
-            return "No session history available."
-        results = _session.search_entries(query, limit=limit)
-        if not results:
-            return f"No matches found for '{query}'."
-        lines = [f"Found {len(results)} match(es) for '{query}':"]
-        for r in results:
-            lines.append(f"\n[{r['timestamp']}] {r['role']}:\n{r['content']}")
-        return "\n".join(lines)
-
-    handlers["search_history"] = _search_history
-
-    # --- Document handler ---
-    from .tools.document import read_document as _read_doc
-
-    handlers["read_document"] = lambda path: _read_doc(path, str(project_dir))
-
-    # --- Code analysis handler ---
-    from .tools.code_analysis import code_analysis as _code_analysis
-
-    handlers["code_analysis"] = lambda path: _code_analysis(path, str(project_dir))
-
-    # --- Verify execution handlers ---
-    from .tools import process_manager as _pm, http_client as _http, browser as _browser
-
-    handlers["read_process_output"] = _pm.read_process_output
-    handlers["http_request"] = _http.http_request
-    handlers["browser_navigate"] = _browser.browser_navigate
-    handlers["browser_screenshot"] = _browser.browser_screenshot
-    handlers["browser_click"] = _browser.browser_click
-    handlers["browser_get_text"] = _browser.browser_get_text
-
-    # --- Bash handler ---
-    _bash_cmd = cmd.split("-")[0] if cmd is not None else ""
-    if _bash_cmd in ("develop", "chat", "verify"):
-        from .config import get_bash_config as _get_bash_cfg, get_allowed_commands as _get_ac
-        from .tools.bash import create_run_command as _create_rc
-
-        _bcfg = _get_bash_cfg(_bash_cmd)
-        handlers["run_command"] = _create_rc(_bcfg, global_allowed=_get_ac())
-
-    # --- Permission gate (REQ-U-22, chat only) ---
-    if permission_gate is not None and permission_confirm_holder is not None:
-        for _wname in ("write_source_file", "edit_source_file", "write_framework_file"):
-            if _wname in handlers:
-                handlers[_wname] = _make_write_guard(_wname, handlers[_wname], permission_gate, permission_confirm_holder)
-        if "run_command" in handlers:
-            handlers["run_command"] = _make_run_guard(handlers["run_command"], permission_gate, permission_confirm_holder)
-        _read_ctx = ctx if ctx is not None else _ctx
-        for _rname in ("read_source_file", "read_framework_file"):
-            if _rname in handlers:
-                handlers[_rname] = _make_read_outside_guard(_rname, handlers[_rname], project_dir, permission_gate, permission_confirm_holder, _read_ctx)
-
-    return handlers
 
 
 def filter_tools(all_tools: list[dict], allowed_names: set[str] | frozenset[str] | None) -> list[dict]:

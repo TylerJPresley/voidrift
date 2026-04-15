@@ -10,8 +10,8 @@ The task ticket below contains everything you need: user story, context, accepta
 
 Steps:
 1. Review the task ticket — understand the user story, context, and acceptance criteria.
-2. Read existing code: use `read_source_file()` to examine files listed in `depends` and any existing files at the paths you will write. Understand established patterns before writing.
-3. Write every file listed in the task using `write_source_file()` for new files or full rewrites, `edit_source_file()` for targeted modifications, and `delete_source_file()` for files marked for removal.
+2. Read existing code: use `file(action="read")` to examine files listed in `depends` and any existing files at the paths you will write. Understand established patterns before writing.
+3. Write every file listed in the task using `file(action="write")` for new files or full rewrites, `file(action="edit")` for targeted modifications, and `file(action="delete")` for files marked for removal.
 4. Call `done()` only after all files are written. Calling `done()` without writing files will be rejected.
 
 Be precise and minimal. One task at a time.
@@ -48,7 +48,7 @@ Execute this task.
 
 ## TASK-RETRY
 
-Execute this task. You must call write_source_file() to produce output.
+Execute this task. You must call file(action="write") to produce output.
 
 ## ESCALATION-USER
 

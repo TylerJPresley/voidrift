@@ -1,11 +1,11 @@
 ---
 name: WEB-RESEARCH
-description: Guidelines for effective web research using web_fetch — URL construction, search strategy, multi-step navigation, and source selection for software development contexts.
+description: Guidelines for effective web research using http(action="get") — URL construction, search strategy, multi-step navigation, and source selection for software development contexts.
 ---
 
 # WEB-RESEARCH
 
-## When to Use web_fetch
+## When to Use http(action="get")
 
 Fetch when the operator asks you to look something up, when the answer is version-specific (changelogs, migration guides, release notes), or when your knowledge may be outdated relative to recent releases.
 
@@ -13,7 +13,7 @@ Use existing knowledge for stable, well-established concepts.
 
 ## Search Strategy
 
-`web_fetch` retrieves one URL at a time. To search, construct a search URL directly:
+`http(action="get")` retrieves one URL at a time. To search, construct a search URL directly:
 
 **DuckDuckGo HTML** — no API key required, returns scraper-readable HTML:
 ```
@@ -32,9 +32,9 @@ https://html.duckduckgo.com/html/?q=python+requests+timeout+2024
 
 Search result pages list titles and links — not answers. Standard two-step flow:
 
-1. `web_fetch("https://html.duckduckgo.com/html/?q=...")` → summary includes result titles and URLs
+1. `http(action="get", url="https://html.duckduckgo.com/html/?q=...")` → summary includes result titles and URLs
 2. Identify the most relevant URL from the summary
-3. `web_fetch(relevant_url)` → fetch the actual documentation page
+3. `http(action="get", url=relevant_url)` → fetch the actual documentation page
 
 Include technology and version context in queries:
 - `fastapi pydantic v2 model migration guide`
@@ -52,4 +52,4 @@ Avoid JavaScript-heavy sites — the raw page text will be empty or near-empty.
 
 ## Caching
 
-Results are cached for the duration of the session. Calling `web_fetch` with the same URL a second time returns the cached summary instantly at no cost.
+Results are cached for the duration of the session. Calling `http(action="get")` with the same URL a second time returns the cached summary instantly at no cost.

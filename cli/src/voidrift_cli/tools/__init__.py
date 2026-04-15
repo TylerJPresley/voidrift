@@ -6,7 +6,7 @@ Re-exports from sub-modules:
   interaction — make_ask_user_handler
   snapshot    — set_snapshots, get_snapshots, clear_snapshots,
                 rollback_snapshots, compute_diff_stats
-  registry    — LOCAL_TOOLS, make_local_handlers
+  registry    — DOMAIN_TOOLS, make_domain_handlers
   process_manager — start_process, stop_process, wait_for_ready,
                     read_process_output, stop_all
   bash        — BashConfig, create_run_command
@@ -21,7 +21,6 @@ from .filesystem import WriteContext
 from .web import _strip_html, make_web_fetch_handler
 from .interaction import make_ask_user_handler
 from .snapshot import set_snapshots, get_snapshots, clear_snapshots, rollback_snapshots, compute_diff_stats
-from .registry import LOCAL_TOOLS, make_local_handlers
 
 __all__ = [
     "WriteContext",
@@ -29,9 +28,7 @@ __all__ = [
     "clear_snapshots",
     "compute_diff_stats",
     "get_snapshots",
-    "LOCAL_TOOLS",
     "make_ask_user_handler",
-    "make_local_handlers",
     "make_web_fetch_handler",
     "rollback_snapshots",
     "set_snapshots",

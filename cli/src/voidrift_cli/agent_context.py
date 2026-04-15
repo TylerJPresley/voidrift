@@ -18,7 +18,7 @@ def snip_old_tool_results(messages: list[dict], max_age_turns: int = 2) -> list[
     """Replace old read-tool results with placeholders to free context (TASK-FW-008).
 
     A tool result is snipped when:
-    - It's from a read tool (read_source_file, read_framework_file)
+    - It's from a read tool (file with action="read")
     - At least max_age_turns assistant messages have appeared after it
     - Its content exceeds 500 characters
 
