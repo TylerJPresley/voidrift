@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from typing import Callable
 
-_SNIP_READ_TOOLS = {"read_source_file", "read_framework_file"}
+_SNIP_READ_TOOLS = {"read_source_file", "read_framework_file", "file"}
 _SNIP_MIN_CHARS = 500
 _REACTIVE_COMPACT_MAX = 2
 
@@ -65,6 +65,16 @@ def snip_old_tool_results(messages: list[dict], max_age_turns: int = 2) -> list[
                 and age >= max_age_turns
                 and len(content) > _SNIP_MIN_CHARS
             ):
+                # For domain 'file' tool, only snip read actions
+                if name == "file":
+                    import json as _json
+                    try:
+                        _a = _json.loads(tc_args.get(tc_id, "{}")).get("action")
+                    except (ValueError, KeyError):
+                        _a = None
+                    if _a != "read":
+                        result.append(m)
+                        continue
                 lines = content.count("\n") + 1
                 placeholder = f"[result from {name}({tc_args.get(tc_id, '')[:80]}) — {lines} lines snipped]"
                 result.append({**m, "content": placeholder})
