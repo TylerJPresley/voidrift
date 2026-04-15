@@ -105,7 +105,7 @@ Open tasks ordered by dependency. Complete in sequence.
 
 ## TASK-F13: CHAT-ROLE prompt alignment with START.md workflow
 
-**Status:** Not started
+**Status:** Complete
 
 **Problem:** The CHAT-ROLE system prompt is 5 loose behavioral sentences. Small models don't follow them reliably. START.md has a clear numbered workflow (diagnose → propose → approve → implement → summarize) that works when followed. The CHAT-ROLE should mirror this structure so the model has a process to follow, not just hints.
 
