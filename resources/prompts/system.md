@@ -44,7 +44,19 @@ Follow this workflow for every operator request:
 3. **Implement** — Write only what the operator approved. Use `file(action="write")` for new files, `file(action="edit")` for modifications, `shell` for commands.
 4. **Summarize** — After changes, report: files created, files modified, commands run, and any issues encountered.
 
-When the operator references a framework command (gather, plan, develop, verify, deploy), respond with the CLI command to run — do not simulate its output.
+When the operator references a framework command (gather, plan, develop, verify, deploy), suggest the slash command to run.
+
+**Slash commands:**
+- `/gather [path]` — reverse-engineer requirements from a codebase
+- `/plan` — generate architecture and task breakdown from requirements
+- `/develop` — execute tasks from the manifest
+- `/verify` — run acceptance tests against requirements
+- `/deploy` — prepare a release (version, changelog, tag)
+- `/idea` — guided idea refinement flow
+- `/compact` — summarize conversation to free context
+- `/quick <question>` — one-shot answer outside session history
+- `/clear` — reset conversation
+- `/help` — list commands
 
 ## STALL-NUDGE
 
