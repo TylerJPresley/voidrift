@@ -98,3 +98,56 @@ class TestHandleGatherValidation:
             pass
         # Should NOT have "not a directory" error
         assert not any("not a directory" in m for m in state.messages)
+
+
+class TestHandlePlanValidation:
+    def test_missing_requirements_shows_error(self, tmp_path, monkeypatch):
+        from voidrift_cli.commands._chat_commands import handle_plan
+        monkeypatch.chdir(tmp_path)
+        # No .voidrift/REQUIREMENTS.md
+        state = _FakeState()
+        handle_plan("", None, state, lambda f, c: "skip", None)
+        assert any("REQUIREMENTS.md not found" in m for m in state.messages)
+
+    def test_overwrite_prompt_called_when_artifacts_exist(self, tmp_path, monkeypatch):
+        from voidrift_cli.commands._chat_commands import handle_plan
+        monkeypatch.chdir(tmp_path)
+        d = tmp_path / ".voidrift"
+        d.mkdir()
+        (d / "REQUIREMENTS.md").write_text("# Reqs\n")
+        (d / "ARCHITECTURE.md").write_text("# Arch\n")
+        (d / "tasks").mkdir()
+        (d / "tasks" / "manifest.yml").write_text("tasks: []\n")
+
+        calls = []
+        def _prompt(name, choices):
+            calls.append(name)
+            return "update"
+
+        state = _FakeState()
+        # Will fail at Stage 1 (no model), but prompt should fire first
+        try:
+            handle_plan("", MagicMock(), state, _prompt, None)
+        except Exception:
+            pass
+        assert "plan_overwrite" in calls
+
+    def test_fresh_plan_skips_overwrite_prompt(self, tmp_path, monkeypatch):
+        from voidrift_cli.commands._chat_commands import handle_plan
+        monkeypatch.chdir(tmp_path)
+        d = tmp_path / ".voidrift"
+        d.mkdir()
+        (d / "REQUIREMENTS.md").write_text("# Reqs\n")
+
+        calls = []
+        def _prompt(name, choices):
+            calls.append(name)
+            return "skip"
+
+        state = _FakeState()
+        try:
+            handle_plan("", MagicMock(), state, _prompt, None)
+        except Exception:
+            pass
+        # No overwrite prompt for fresh plan
+        assert "plan_overwrite" not in calls

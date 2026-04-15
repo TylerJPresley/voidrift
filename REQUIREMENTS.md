@@ -539,6 +539,12 @@ Verify is a two-stage requirements-driven acceptance testing command. Stage 1 pr
   - Given `/gather ./nonexistent` is typed, When the handler runs, Then an error message is displayed and no pipeline stages execute.
   - Given the gather handler raises an exception, When `wrap_command` catches it, Then the error is displayed via `state.add_system()` and `state.busy` is reset to False.
   - Given `/gather` completes, When the handler returns, Then `state.mode` is reset to `/chat`.
+- **REQ-U-2c:** WHEN the operator types `/plan` during a chat session, THE SYSTEM SHALL run the plan pipeline interactively via `handle_plan` and the `wrap_command` harness (REQ-U-2b). WHEN plan artifacts already exist (ARCHITECTURE.md and manifest.yml), the handler SHALL ask the operator via `prompt_fn` whether to overwrite (clean slate) or update (delta analysis). The handler SHALL execute all six plan stages using the existing pipeline helpers (`_dispatch_agent`, `_extract_modules`, `_arch_summary`, `_parse_outline_tasks`, `_build_task_files`, `_check_req_coverage`), reporting progress via `state.add_system()`. WHEN REQUIREMENTS.md does not exist, an error SHALL be displayed. Zero chat context tokens SHALL be consumed.
+  - *Rationale:* Running plan inside chat gives the operator visibility into each stage and the ability to choose overwrite vs update mode without CLI flags.
+  - Given `/plan` is typed and REQUIREMENTS.md exists with no prior plan artifacts, When the handler runs, Then all 6 stages execute and ARCHITECTURE.md, arch/*.md, task files, and README.md are written.
+  - Given `/plan` is typed and plan artifacts exist, When the handler runs, Then the operator is prompted to overwrite or update before the pipeline starts.
+  - Given `/plan` is typed and REQUIREMENTS.md does not exist, When the handler runs, Then an error is displayed and no stages execute.
+  - Given the operator chooses overwrite, When the pipeline runs, Then existing plan artifacts are removed before Stage 1.
 - **REQ-U-3:** `voidrift log <command>` SHALL show the last 200 lines of the most recent log. `--follow` / `-f` SHALL tail the latest log file, streaming new lines as they are written. `--prune` SHALL delete log files.
 - **REQ-U-4:** `voidrift unlock` SHALL remove the develop lock file and kill any running develop process.
 - **REQ-U-5:** `voidrift completions <shell>` SHALL output shell completion scripts for bash, zsh, and fish. All model, worker, and architect arguments SHALL complete from configured aliases in `models.yml`.
