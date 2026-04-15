@@ -345,19 +345,19 @@ def _render_footer(state: TUIState, width: int) -> FormattedText:
 # ── Style ────────────────────────────────────────────────────────────
 
 TUI_STYLE = Style.from_dict({
-    "header-art": "#c678dd",
+    "header-art": "#5c8cc8",
     "header-tagline": "#888888 italic",
     "callout-border": "#5a6aa8",
     "callout-bg": "bg:#13132a",
     "callout-label": "bg:#13132a #666666",
     "callout-model": "bg:#13132a #4ec9b0 bold",
     "callout-text": "bg:#13132a #888888",
-    "callout-cmd": "bg:#13132a #c678dd bold",
+    "callout-cmd": "bg:#13132a #5c8cc8 bold",
     "callout-hint": "bg:#13132a #555555",
     "rule": "#444444",
     "operator": "bold #e0e0e0",
     "operator-bar": "#4ec9b0",
-    "tool-dot": "#c678dd bold",
+    "tool-dot": "#5c8cc8 bold",
     "tool-name": "#61afef",
     "tool-detail": "#888888",
     "model-bar": "#6a7ec8",
@@ -378,7 +378,7 @@ TUI_STYLE = Style.from_dict({
     "ctx-warn": "#e5c07b",
     "ctx-crit": "#e06c75",
     "ft-path": "#61afef",
-    "ft-branch": "#c678dd",
+    "ft-branch": "#5c8cc8",
     "input-text": "#e0e0e0",
     "input-placeholder": "#555555 italic",
 })
