@@ -144,7 +144,7 @@ export class AgentLoop {
 
   constructor(opts: AgentLoopOptions) {
     this._model = opts.model;
-    this._adapter = getAdapter(opts.model.config.protocol);
+    this._adapter = (opts.model as Record<string, unknown>).adapter as ProtocolAdapter ?? getAdapter(opts.model.config.protocol);
     this._client = this._adapter.createClient(opts.model.config);
     this._tools = opts.tools ?? [];
     this._toolHandlers = opts.toolHandlers ?? {};
