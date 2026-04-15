@@ -205,7 +205,7 @@ Open tasks ordered by dependency. Complete in sequence.
 
 ## TASK-F18: /develop slash command in chat
 
-**Status:** Not started
+**Status:** Complete
 **Depends on:** F14
 
 **Problem:** `voidrift develop` executes tasks with limited visibility. The operator sees task completion but not what's happening inside each task.
