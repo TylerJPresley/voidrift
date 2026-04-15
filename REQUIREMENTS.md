@@ -550,6 +550,10 @@ Verify is a two-stage requirements-driven acceptance testing command. Stage 1 pr
   - Given `/verify` is typed and REQUIREMENTS.md does not exist, When the handler runs, Then an error is displayed.
   - Given a sub-agent fails, When the handler catches the error, Then the result is recorded as fail and the pipeline continues to the next item.
   - Given the handler completes or raises, When the finally block runs, Then `stop_all()`, `clear_sessions()`, and `close_all_sessions()` are called.
+- **REQ-U-2e:** WHEN the operator types `/develop` during a chat session, THE SYSTEM SHALL run the develop pipeline interactively via `handle_develop` and the `wrap_command` harness (REQ-U-2b). The handler SHALL validate REQUIREMENTS.md and manifest exist, auto-reset orphaned in-progress tasks, build tools/handlers, capture a git snapshot, and call `_dispatch_loop` directly. Progress and diff stats SHALL be reported via `state.add_system()`. No lock file SHALL be created (the `wrap_command` busy flag prevents concurrent execution). The architect model SHALL default to the worker model. Zero chat context tokens SHALL be consumed.
+  - Given `/develop` is typed and manifest has dispatchable tasks, When the handler runs, Then `_dispatch_loop` executes and tasks are implemented.
+  - Given `/develop` is typed and no manifest exists, When the handler runs, Then an error is displayed.
+  - Given orphaned in-progress tasks exist, When the handler starts, Then they are auto-reset to planned.
 - **REQ-U-3:** `voidrift log <command>` SHALL show the last 200 lines of the most recent log. `--follow` / `-f` SHALL tail the latest log file, streaming new lines as they are written. `--prune` SHALL delete log files.
 - **REQ-U-4:** `voidrift unlock` SHALL remove the develop lock file and kill any running develop process.
 - **REQ-U-5:** `voidrift completions <shell>` SHALL output shell completion scripts for bash, zsh, and fish. All model, worker, and architect arguments SHALL complete from configured aliases in `models.yml`.

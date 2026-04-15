@@ -516,3 +516,98 @@ def handle_verify(args, mc, state, prompt_fn, log):
         stop_all()
         clear_sessions()
         close_all_sessions()
+
+
+def handle_develop(args, mc, state, prompt_fn, log):
+    """Run the develop pipeline interactively (REQ-U-2e)."""
+    import threading
+    from ..agent import AgentLoop, build_local_tools, clear_abort
+    from ..manifest import ManifestManager
+    from ..utils import ensure_voidrift_dir, boot_run, append_state, check_requirements_exist
+    from ..error_tracker import ErrorTracker
+    from ..git_checkpoint import GitCheckpointManager
+    from .. import prompts
+    from ._develop_pipeline import _dispatch_loop
+
+    d = ensure_voidrift_dir()
+    if not check_requirements_exist():
+        state.add_system("Error: REQUIREMENTS.md not found. Run /gather first.")
+        return
+
+    mm = ManifestManager()
+    if not mm.exists():
+        state.add_system("Error: No task manifest. Run /plan first.")
+        return
+    mm.load()
+
+    # Auto-reset orphaned tasks (non-interactive)
+    orphaned = [tid for tid, t in mm.tasks().items() if t.get("status") == "in-progress"]
+    if orphaned:
+        for tid in orphaned:
+            mm.set_status(tid, "planned")
+        state.add_system(f"Auto-reset {len(orphaned)} orphaned task(s) to planned.")
+
+    if not mm.has_work():
+        state.add_system("All tasks complete.")
+        return
+
+    dlog, run_id = boot_run("develop")
+    clear_abort()
+
+    from ..tools.filesystem import WriteContext
+    ctx = WriteContext(project_dir=d.parent, max_read_lines=mc.max_read_lines)
+    ctx.reset_session_files()
+
+    tools, handlers = build_local_tools(cmd="develop", project_dir=d.parent, ctx=ctx)
+    dev_prompt_tpl = prompts.load_prompt("develop", "TASK")
+    esc_prompt_tpl = prompts.load_prompt("develop", "ESCALATION")
+    git_lock = threading.Lock()
+
+    from ..git_context import capture_git_snapshot
+    snap = capture_git_snapshot(str(d.parent))
+    git_context = snap.to_prompt_block() if snap else ""
+
+    checkpoints = GitCheckpointManager(str(d.parent)) if snap else None
+    errors = ErrorTracker()
+
+    state.add_system(f"Developing — {sum(mm.summary().values())} tasks in manifest")
+
+    try:
+        result, diff_stats = _dispatch_loop(
+            mm, mc, mc, tools, handlers, dlog,
+            dev_prompt_tpl, esc_prompt_tpl, git_lock,
+            lambda: False, token_budget=None,
+            git_context=git_context, errors=errors,
+            checkpoints=checkpoints, ctx=ctx,
+        )
+    except Exception as e:
+        state.add_system(f"Error: {e}")
+        result, diff_stats = 1, []
+
+    # Diff stats
+    if diff_stats:
+        total_added = total_removed = total_files = 0
+        for tid, stats in diff_stats:
+            added = sum(s["lines_added"] for s in stats)
+            removed = sum(s["lines_removed"] for s in stats)
+            total_added += added
+            total_removed += removed
+            total_files += len(stats)
+            state.add_system(f"  TASK-{tid}: +{added} -{removed} ({len(stats)} file{'s' if len(stats) != 1 else ''})")
+        state.add_system(f"  Total: +{total_added} -{total_removed} ({total_files} files)")
+
+    if errors.has_errors():
+        state.add_system(f"Errors: {errors.summary_by_category()}")
+
+    files_written = ctx.get_session_files()
+    append_state("develop", mc.alias,
+        "completed" if result == 0 else "failed",
+        files_created=files_written or None)
+
+    if checkpoints and checkpoints.checkpoints:
+        checkpoints.save(d / "checkpoints.jsonl")
+
+    if result == 0:
+        state.add_system("✓ Develop complete")
+    else:
+        state.add_system("✗ Develop finished with errors")

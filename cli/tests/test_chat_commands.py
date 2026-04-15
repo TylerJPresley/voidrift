@@ -182,3 +182,35 @@ class TestHandleVerifyValidation:
         assert "stop" in cleanup_calls
         assert "clear" in cleanup_calls
         assert "close" in cleanup_calls
+
+
+class TestHandleDevelopValidation:
+    def test_missing_requirements_shows_error(self, tmp_path, monkeypatch):
+        from voidrift_cli.commands._chat_commands import handle_develop
+        monkeypatch.chdir(tmp_path)
+        state = _FakeState()
+        handle_develop("", None, state, None, None)
+        assert any("REQUIREMENTS.md not found" in m for m in state.messages)
+
+    def test_missing_manifest_shows_error(self, tmp_path, monkeypatch):
+        from voidrift_cli.commands._chat_commands import handle_develop
+        monkeypatch.chdir(tmp_path)
+        d = tmp_path / ".voidrift"
+        d.mkdir()
+        (d / "REQUIREMENTS.md").write_text("# Reqs\n")
+        state = _FakeState()
+        handle_develop("", None, state, None, None)
+        assert any("manifest" in m.lower() for m in state.messages)
+
+    def test_all_complete_shows_message(self, tmp_path, monkeypatch):
+        from voidrift_cli.commands._chat_commands import handle_develop
+        monkeypatch.chdir(tmp_path)
+        d = tmp_path / ".voidrift"
+        d.mkdir()
+        (d / "REQUIREMENTS.md").write_text("# Reqs\n")
+        (d / "tasks").mkdir(parents=True)
+        # Empty manifest with no tasks
+        (d / "tasks" / "manifest.yml").write_text("next_id: 1\nnext_bug_id: 1\ntasks: {}\n")
+        state = _FakeState()
+        handle_develop("", MagicMock(), state, None, None)
+        assert any("complete" in m.lower() for m in state.messages)
