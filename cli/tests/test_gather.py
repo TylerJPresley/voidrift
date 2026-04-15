@@ -776,3 +776,43 @@ class TestTriageCoverageCheck:
             ui.warn(f"Triage: {input_count - categorized_count} file(s) not categorized out of {input_count}")
         captured = capsys.readouterr()
         assert "2 file(s) not categorized" in captured.err
+
+
+class TestAssignUncategorized:
+    """REQ-G-24: Interactive assignment of uncategorized files."""
+
+    def test_assigns_to_category(self):
+        from voidrift_cli.commands.gather import _assign_uncategorized
+        categories = {"source": ["a.py"]}
+        file_category = {"a.py": "source"}
+        _assign_uncategorized(["b.js"], categories, file_category, lambda f, c: "source")
+        assert "b.js" in categories["source"]
+        assert file_category["b.js"] == "source"
+
+    def test_skip_all_stops_iteration(self):
+        from voidrift_cli.commands.gather import _assign_uncategorized
+        categories = {"source": []}
+        file_category = {}
+        calls = []
+        def _prompt(f, c):
+            calls.append(f)
+            return "skip-all"
+        _assign_uncategorized(["a.js", "b.js", "c.js"], categories, file_category, _prompt)
+        assert len(calls) == 1
+        assert not file_category
+
+    def test_skip_leaves_file_unassigned(self):
+        from voidrift_cli.commands.gather import _assign_uncategorized
+        categories = {}
+        file_category = {}
+        responses = iter(["skip", "tests"])
+        _assign_uncategorized(["a.js", "b.js"], categories, file_category, lambda f, c: next(responses))
+        assert "a.js" not in file_category
+        assert file_category.get("b.js") == "tests"
+
+    def test_unknown_choice_treated_as_skip(self):
+        from voidrift_cli.commands.gather import _assign_uncategorized
+        categories = {}
+        file_category = {}
+        _assign_uncategorized(["a.js"], categories, file_category, lambda f, c: "bogus")
+        assert not file_category

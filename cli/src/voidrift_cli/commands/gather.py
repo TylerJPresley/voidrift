@@ -43,6 +43,65 @@ from ._gather_pipeline import (
 
 # ── Context block & preamble helpers ────────────────────────────────────────
 
+def _assign_uncategorized(
+    files: list[str],
+    categories: dict[str, list[str]],
+    file_category: dict[str, str],
+    prompt_fn,
+) -> None:
+    """Prompt operator to assign uncategorized files to categories (REQ-G-24).
+
+    Pure logic — all I/O goes through ``prompt_fn(filename, cat_list) -> str``.
+    Returns a category name, ``"skip"``, or ``"skip-all"``.
+    """
+    cat_list = list(CATEGORIES)
+    for fp in files:
+        choice = prompt_fn(fp, cat_list)
+        if choice == "skip-all":
+            break
+        if choice == "skip":
+            continue
+        if choice in cat_list:
+            categories.setdefault(choice, []).append(fp)
+            file_category[fp] = choice
+
+
+def _make_cli_prompt_fn():
+    """Create a CLI prompt_fn with apply-to-all state."""
+    _apply_all = [None]
+
+    def _prompt(filename: str, cat_list: list[str]) -> str:
+        if _apply_all[0]:
+            return _apply_all[0]
+        import click
+        opts = " ".join(f"[{i+1}]{c}" for i, c in enumerate(cat_list))
+        opts += " [s]skip [S]skip-all [a]apply-to-all"
+        raw = click.prompt(f"  {filename} → {opts}", default="s")
+        raw = raw.strip()
+        if raw == "S":
+            return "skip-all"
+        if raw == "s":
+            return "skip"
+        if raw == "a":
+            cat_raw = click.prompt(f"    apply all → {' '.join(f'[{i+1}]{c}' for i, c in enumerate(cat_list))}")
+            try:
+                idx = int(cat_raw) - 1
+                if 0 <= idx < len(cat_list):
+                    _apply_all[0] = cat_list[idx]
+                    return cat_list[idx]
+            except ValueError:
+                pass
+            return "skip"
+        try:
+            idx = int(raw) - 1
+            if 0 <= idx < len(cat_list):
+                return cat_list[idx]
+        except ValueError:
+            pass
+        return "skip"
+
+    return _prompt
+
 def build_context_block(context_summaries: dict[str, str]) -> str:
     """Build a '## Project Context' block from category summaries (REQ-G-17)."""
     if not context_summaries:
@@ -64,6 +123,7 @@ def run_gather(
     idea_id: int | None = None,
     overwrite: bool = False,
     token_budget: TokenBudget | None = None,
+    prompt_fn=None,
 ) -> int:
     """Execute the gather command — reverse-engineer requirements (REQ-G-1)."""
     check_disk_space()
@@ -75,7 +135,7 @@ def run_gather(
 
     source = Path(from_path)
     try:
-        return _gather_from(model, target, source, overwrite, token_budget=token_budget)
+        return _gather_from(model, target, source, overwrite, token_budget=token_budget, prompt_fn=prompt_fn)
     except Exception as e:
         from ..token_budget import BudgetExhaustedError
         if isinstance(e, BudgetExhaustedError):
@@ -188,6 +248,7 @@ def _gather_from(
     from_path: Path,
     overwrite: bool,
     token_budget: TokenBudget | None = None,
+    prompt_fn=None,
 ) -> int:
     """Reverse engineering mode — four-stage pipeline (REQ-G-8, REQ-ARCH-7).
 
@@ -263,6 +324,11 @@ def _gather_from(
         ui.detail("uncategorized:")
         for fp in uncategorized:
             ui.detail(f"  {fp}")
+
+        # Interactive assignment (REQ-G-24)
+        _pfn = prompt_fn or _make_cli_prompt_fn()
+        _assign_uncategorized(uncategorized, categories, file_category, _pfn)
+        source_files = categories.get("source", [])
 
     # Triage coverage check (REQ-G-22)
     input_count = len(all_input_files)

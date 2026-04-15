@@ -283,6 +283,12 @@
   - *Rationale:* The triage count one-liner (`source(6), config(4)`) gives no visibility into which files are in each category. When important source files are miscategorized or dropped, the operator has no way to know without reading logs.
   - Given triage categorizes 20 files into 4 categories, When the display runs, Then each category name and its file paths are printed.
   - Given 2 files are uncategorized, When the display runs, Then both file paths appear under an "uncategorized" header.
+- **REQ-G-24:** WHEN uncategorized files exist after triage, THE SYSTEM SHALL prompt the operator to assign each file to a category. The prompt SHALL present numbered choices (one per category) plus skip and apply-to-all options. Assignment logic SHALL be implemented as a pure function `_assign_uncategorized(files, categories, file_category, prompt_fn)` that receives a `prompt_fn(filename, category_list) → str` callback for I/O. The callback returns a category name, `"skip"`, or `"skip-all"`. WHEN a file is assigned, it SHALL be added to the `categories` dict and `file_category` dict. WHEN `"skip-all"` is returned, remaining files SHALL be skipped. WHEN all assignments are complete, `source_files` SHALL be recomputed from the updated `categories["source"]`. The prompt SHALL also offer an apply-to-all option that assigns all remaining uncategorized files to the selected category.
+  - *Rationale:* Uncategorized files are silently excluded from the entire pipeline. Interactive assignment lets the operator recover important files without re-running gather. The `prompt_fn` callback decouples assignment logic from I/O — the same function works with `click.prompt` (CLI) or the TUI input line (chat `/gather`).
+  - Given 2 uncategorized files and prompt_fn returns "source" for both, When assignment runs, Then both files appear in `categories["source"]` and `file_category`.
+  - Given prompt_fn returns "skip-all" for the first file, When assignment runs, Then no files are assigned.
+  - Given prompt_fn returns "skip" for file 1 and "tests" for file 2, When assignment runs, Then only file 2 appears in `categories["tests"]`.
+  - Given a mock prompt_fn, When `_assign_uncategorized` is called, Then it is independently testable with no I/O dependency.
 
 ### 4.5 Command: Plan
 
