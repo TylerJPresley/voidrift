@@ -58,6 +58,7 @@ class _Process:
                 with self._buffer_lock:
                     self._buffer.append(line.rstrip("\n"))
         finally:
+            self._proc.stdout.close()
             self._done.set()
 
     def get_output(self) -> list[str]:
@@ -68,16 +69,19 @@ class _Process:
         import signal
 
         if self._proc.poll() is not None:
+            self._reader.join(timeout=2)
             return
         try:
             self._proc.send_signal(signal.SIGTERM)
         except ProcessLookupError:
+            self._reader.join(timeout=2)
             return
         try:
             self._proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
             self._proc.kill()
             self._proc.wait()
+        self._reader.join(timeout=2)
 
     @property
     def pid(self) -> int:

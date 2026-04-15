@@ -197,21 +197,21 @@ class TestVerifyOrchestrator:
         assert "read_source_file" not in names
 
     def test_verify_plan_tool_set_includes_source_read(self, tmp_project):
-        """verify-plan tool set includes read_source_file (REQ-VF-16)."""
+        """verify-plan tool set includes file domain tool (REQ-VF-16)."""
         from voidrift_cli.agent import build_local_tools
         tools, _ = build_local_tools("verify-plan")
         names = {t["function"]["name"] for t in tools}
-        assert "read_source_file" in names
-        assert "write_source_file" not in names
+        assert "file" in names
+        assert "shell" not in names
 
     def test_verify_execute_includes_http_and_run_command(self, tmp_project):
-        """verify-execute tool set includes http_request and run_command (REQ-VF-16)."""
+        """verify-execute tool set includes http, shell, and process domain tools (REQ-VF-16)."""
         from voidrift_cli.agent import build_local_tools
         tools, _ = build_local_tools("verify-execute")
         names = {t["function"]["name"] for t in tools}
-        assert "http_request" in names
-        assert "run_command" in names
-        assert "read_process_output" in names
+        assert "http" in names
+        assert "shell" in names
+        assert "process" in names
 
 
 

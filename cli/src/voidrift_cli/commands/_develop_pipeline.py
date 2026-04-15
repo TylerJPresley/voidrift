@@ -216,7 +216,7 @@ def _run_task(
     # Build before_tool_call hook — compose skill guard with done guard (REQ-D-5)
     def _done_guard(name: str, args: str) -> str | None:
         if name == "done" and ctx is not None and ctx.get_write_count() == 0:
-            return "ERROR: No files written yet. You must call write_source_file() or edit_source_file() before calling done()."
+            return "ERROR: No files written yet. You must call file(action='write') or file(action='edit') before calling done()."
         return None
 
     def _composed_hook(name: str, args: str) -> str | None:
@@ -235,7 +235,7 @@ def _run_task(
         nonlocal _write_nudge_count
         if ctx is not None and ctx.get_write_count() == 0 and _write_nudge_count < _MAX_WRITE_NUDGES:
             _write_nudge_count += 1
-            return [{"role": "user", "content": "You have not written any files yet. Call write_source_file() to implement the task. Do not explain — write the code now."}]
+            return [{"role": "user", "content": "You have not written any files yet. Call file(action='write') to implement the task. Do not explain — write the code now."}]
         return None
 
     # Self-review hook — inject once after first write (REQ-D-22)
@@ -334,7 +334,7 @@ def _run_task(
                             f.write(f"\n\n## Architect Fix Plan\n\n{guidance}\n")
                     mm.set_status(task_id, "planned")  # re-queue for next dispatch
                     rollback_snapshots(log_path=log)
-                    return 0, []  # not a failure — task will be re-dispatched
+                    return 1, []  # count as escalation so dispatch loop can cap retries
             ui.warn(f"TASK-{task_id}: Still no writes after retry")
             rollback_snapshots(log_path=log)
             return 1, []

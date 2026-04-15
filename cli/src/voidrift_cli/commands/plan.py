@@ -4,9 +4,13 @@ from __future__ import annotations
 
 # Tools available to plan agents (consumed by tool_builder.build_local_tools).
 AGENT_TOOLS: frozenset[str] = frozenset({
-    "read_framework_file",
-    "write_framework_file",
+    "file",
 })
+
+# Per-command action visibility within each domain tool (REQ-TOOL-8).
+AGENT_TOOL_ACTIONS: dict[str, list[str]] = {
+    "file": ["read", "write", "edit", "list"],
+}
 
 import re
 from datetime import datetime

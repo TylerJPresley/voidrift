@@ -226,10 +226,13 @@ class AgentLoop(BaseModel):
 
     def _redact_tool_result(self, name: str, arguments: str, result: str) -> str:
         """Redact tool results for known sensitive file paths."""
-        if name not in ("read_source_file", "read_framework_file"):
+        if name != "file":
             return result
         try:
-            path = json.loads(arguments).get("path", "")
+            args = json.loads(arguments)
+            if args.get("action") != "read":
+                return result
+            path = args.get("path", "")
         except (ValueError, KeyError):
             return result
         if _SENSITIVE_PATH_RE.search(path):
@@ -382,13 +385,16 @@ class AgentLoop(BaseModel):
                 # rewriting a file with different content is still detected as a stall.
                 def _tc_sig(tc: dict) -> str:
                     name = tc["function"]["name"]
-                    if name in ("write_framework_file", "write_source_file", "edit_source_file"):
-                        import json as _json
-                        try:
-                            args = _json.loads(tc["function"].get("arguments", "{}"))
-                            return f"{name}:{args.get('path', '')}"
-                        except (ValueError, KeyError):
-                            return name
+                    import json as _json
+                    try:
+                        args = _json.loads(tc["function"].get("arguments", "{}"))
+                    except (ValueError, KeyError):
+                        args = {}
+                    is_write = (
+                        name == "file" and args.get("action") in ("write", "edit", "delete")
+                    )
+                    if is_write:
+                        return f"{name}:{args.get('path', '')}"
                     return f"{name}:{tc['function'].get('arguments', '')}"
 
                 call_sig = frozenset(_tc_sig(tc) for tc in tool_calls)
@@ -505,7 +511,7 @@ class AgentLoop(BaseModel):
 
             # Stalled — force final call with only write tools
             self._log("[STALL] Forcing final text call")
-            self.tools = [t for t in self.tools if t["function"]["name"] in ("write_source_file", "edit_source_file", "write_framework_file", "done")]
+            self.tools = [t for t in self.tools if t["function"]["name"] in ("file", "done")]
             if not self.tools:
                 self.tools = []
             kwargs = {
@@ -955,10 +961,7 @@ class AgentLoop(BaseModel):
         return args
 
     _TOOL_NORMALIZERS: dict[str, list[Callable]] = {
-        "read_source_file": [_normalize_path.__func__],
-        "read_framework_file": [_normalize_path.__func__],
-        "write_source_file": [_normalize_path.__func__, _normalize_content_str.__func__],
-        "edit_source_file": [_normalize_path.__func__],
+        "file": [_normalize_path.__func__, _normalize_content_str.__func__],
     }
 
     def _execute_tool(self, name: str, arguments: str) -> str:
@@ -1040,9 +1043,34 @@ class AgentLoop(BaseModel):
             self._log(f"[DEDUP] {total} identical calls to {name} reduced to 1")
         return unique, dedup_map
 
+    _FILE_SAFE_ACTIONS = frozenset({"read", "list"})
+    _HTTP_SAFE_ACTIONS = frozenset({"get"})
+
+    def _is_concurrent_safe(self, tc: dict, schema_safe: set[str]) -> bool:
+        """Return True if this tool call can be batched for parallel execution."""
+        name = tc["function"]["name"]
+        if name in schema_safe:
+            return True
+        # Action-aware checks for mixed read/write domain tools (REQ-TOOL-6).
+        if name == "file":
+            try:
+                import json as _j
+                action = _j.loads(tc["function"].get("arguments", "{}")).get("action", "")
+            except (ValueError, KeyError):
+                action = ""
+            return action in self._FILE_SAFE_ACTIONS
+        if name == "http":
+            try:
+                import json as _j
+                action = _j.loads(tc["function"].get("arguments", "{}")).get("action", "")
+            except (ValueError, KeyError):
+                action = ""
+            return action in self._HTTP_SAFE_ACTIONS
+        return False
+
     def _partition_tool_calls(self, tool_calls: list[dict]) -> list[list[dict]]:
         """Group consecutive concurrent-safe tool calls into batches (TASK-FW-009)."""
-        concurrent_safe = {
+        schema_safe = {
             t["function"]["name"]
             for t in self.tools
             if t.get("concurrent_safe")
@@ -1050,8 +1078,7 @@ class AgentLoop(BaseModel):
         batches: list[list[dict]] = []
         current: list[dict] = []
         for tc in tool_calls:
-            name = tc["function"]["name"]
-            if name in concurrent_safe:
+            if self._is_concurrent_safe(tc, schema_safe):
                 current.append(tc)
             else:
                 if current:

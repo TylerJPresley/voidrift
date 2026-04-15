@@ -2,13 +2,64 @@
 
 from __future__ import annotations
 
+import gc
 import os
+import resource
 from pathlib import Path
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 os.environ.setdefault("VOIDRIFT_HOME", str(Path.home() / ".voidrift"))
+
+# ---------------------------------------------------------------------------
+# Resource monitor — REQ-TEST-2
+# ---------------------------------------------------------------------------
+
+_PER_TEST_MAX_RSS_MB = int(os.environ.get("VOIDRIFT_TEST_MAX_RSS_MB", "100"))
+_SESSION_MAX_RSS_MB = int(os.environ.get("VOIDRIFT_TEST_MAX_SESSION_RSS_MB", "1024"))
+
+
+class ResourceLeakError(Exception):
+    """Raised when a test exceeds its memory budget (REQ-TEST-2)."""
+
+
+def _rss_mb() -> float:
+    """Current RSS in MB (Linux: ru_maxrss is in KB)."""
+    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+
+
+# Session-level baseline set once at import time
+_session_start_rss: float = _rss_mb()
+
+
+@pytest.fixture(autouse=True)
+def _resource_monitor(request):
+    """Track RSS before/after each test. Fail on leak (REQ-TEST-2)."""
+    gc.collect()
+    rss_before = _rss_mb()
+
+    yield
+
+    gc.collect()
+    rss_after = _rss_mb()
+    delta = rss_after - rss_before
+    session_growth = rss_after - _session_start_rss
+
+    if delta > _PER_TEST_MAX_RSS_MB:
+        raise ResourceLeakError(
+            f"Memory leak in {request.node.nodeid}: "
+            f"RSS grew {delta:.0f} MB ({rss_before:.0f} → {rss_after:.0f} MB), "
+            f"limit {_PER_TEST_MAX_RSS_MB} MB"
+        )
+
+    if session_growth > _SESSION_MAX_RSS_MB:
+        raise ResourceLeakError(
+            f"Session memory budget exhausted after {request.node.nodeid}: "
+            f"cumulative RSS growth {session_growth:.0f} MB "
+            f"(baseline {_session_start_rss:.0f} → {rss_after:.0f} MB), "
+            f"limit {_SESSION_MAX_RSS_MB} MB"
+        )
 
 
 @pytest.fixture(autouse=True)
@@ -30,6 +81,48 @@ def _clear_resource_caches():
     yield
     clear_skills()
     clear_prompts()
+
+
+@pytest.fixture(autouse=True)
+def _clear_module_registries():
+    """Reset module-level mutable state that leaks between tests."""
+    from voidrift_cli._agent_abort import clear_abort, _active_loops, _active_loops_lock
+    from voidrift_cli.tools.process_manager import stop_all, _registry
+    from voidrift_cli.tools.http_client import clear_sessions
+    from voidrift_cli.tools.browser import close_all_sessions
+
+    clear_abort()
+    with _active_loops_lock:
+        # Close any stale clients before clearing
+        for loop in _active_loops.values():
+            client = getattr(loop, "_active_client", None)
+            if client is not None:
+                try:
+                    client.close()
+                except Exception:
+                    pass
+            # Release message history
+            if hasattr(loop, "messages"):
+                loop.messages.clear()
+        _active_loops.clear()
+    yield
+    stop_all()
+    clear_sessions()
+    close_all_sessions()
+    clear_abort()
+    with _active_loops_lock:
+        for loop in _active_loops.values():
+            client = getattr(loop, "_active_client", None)
+            if client is not None:
+                try:
+                    client.close()
+                except Exception:
+                    pass
+            if hasattr(loop, "messages"):
+                loop.messages.clear()
+        _active_loops.clear()
+    # Force cycle collection after all cleanup (REQ-TEST-2)
+    gc.collect()
 
 
 @pytest.fixture

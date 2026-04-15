@@ -45,8 +45,8 @@ the recipe, not the recipe itself.
 <!--
 FRONTMATTER (required)
 All skill files must begin with YAML frontmatter. The `name` field is the lookup
-key used by get_skill() and voidrift skills install. The `description` must be
-≤200 characters — it appears in list_skills() and search results.
+key used by skill(action="get") and voidrift skills install. The `description` must be
+≤200 characters — it appears in skill(action="list") and search results.
 -->
 
 ---
@@ -58,7 +58,7 @@ description: One-sentence description of what domain this covers and when an age
 
 <!--
 SKILL-NAME: uppercase, hyphenated. Examples: FASTAPI, GOOGLE-DOCS, AWS-CDK, STRIPE.
-This name is what operators pass to get_skill() and voidrift skills install.
+This name is what operators pass to skill(action="get") and voidrift skills install.
 -->
 
 ## Overview

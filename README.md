@@ -118,7 +118,7 @@ bash:
 | `api_keys` | API keys for cloud providers, referenced via `${VAR}` expansion |
 | `protected_paths` | Files the agent cannot write to, even inside the project root |
 | `allowed_commands` | Glob patterns for shell commands that bypass security classification |
-| `ssrf_allow_list` | Hostnames or CIDRs that bypass SSRF blocking on `web_fetch` and `http_request`. Private IPs (10.x, 172.16.x, 192.168.x) and cloud metadata (169.254.x) are blocked by default. Loopback (127.0.0.1) is allowed for local dev servers. |
+| `ssrf_allow_list` | Hostnames or CIDRs that bypass SSRF blocking on `http(action="get")` and `http`. Private IPs (10.x, 172.16.x, 192.168.x) and cloud metadata (169.254.x) are blocked by default. Loopback (127.0.0.1) is allowed for local dev servers. |
 | `git.max_diff_lines` | Cap on total git diff lines injected into agent context (default 2000) |
 | `git.max_diff_files` | Cap on number of files in git diff (default 50) |
 | `git.max_file_diff_lines` | Cap on diff lines per file (default 400) |
@@ -129,9 +129,9 @@ bash:
 | `stage_max_tokens.<stage>` | Max output tokens per agent stage. Capped by the model's `max_tokens`. Stages: `triage`, `analysis`, `synthesis`, `consolidation`, `task`, `plan`, `verify-plan`, `verify-execute` |
 | `skills.synthesis_model` | Model alias for skill synthesis via `voidrift skills install --synthesize`; empty disables synthesis (default empty) |
 | `skills.repos` | List of manifest URLs searched by `voidrift skills search` (default empty) |
-| `bash.timeout` | Default timeout for `run_command` across all commands (default 120s) |
+| `bash.timeout` | Default timeout for `shell` across all commands (default 120s) |
 | `bash.max_output_lines` | Truncate stdout/stderr beyond this many lines (default 500) |
-| `bash.<command>.enabled` | Enable/disable `run_command` for a specific command (default true) |
+| `bash.<command>.enabled` | Enable/disable `shell` for a specific command (default true) |
 | `bash.<command>.allowed_patterns` | Glob patterns restricting which commands the agent can run. Empty = use global `allowed_commands` |
 | `bash.<command>.timeout` | Per-command timeout override (inherits from `bash.timeout`) |
 
@@ -180,7 +180,7 @@ Each model needs `base_url`, `api_key`, and `model_id`. Optional fields control 
 
 **Fallback:** Set `fallback: <alias>` on a model to automatically switch to another model when retries are exhausted on rate limits (429) or server errors (5xx). Max one level of fallback — if the fallback also fails, the error is raised.
 
-**Skills `allowed_tools`:** Skill files can include `allowed_tools: [tool1, tool2]` in YAML frontmatter to restrict which tools the agent can call while that skill is active. A read-only analysis skill can block `write_source_file`. Absent field means no restriction; empty list blocks all tools.
+**Skills `allowed_tools`:** Skill files can include `allowed_tools: [tool1, tool2]` in YAML frontmatter to restrict which tools the agent can call while that skill is active. A read-only analysis skill can block `file(action="write")`. Absent field means no restriction; empty list blocks all tools.
 
 ---
 
@@ -209,28 +209,28 @@ Interactive session with full tool access — the central command for iterating 
 - `/compact` — summarize conversation history to free context. Auto-compact triggers at 80% utilization; a nudge appears at 70%. After compaction, recently accessed files and skills are automatically restored.
 - `/quick <question>` — one-shot side question that doesn't affect session history. The answer is displayed inline and nothing is saved to the session.
 
-**History search:** The agent can search earlier conversation turns via `search_history(query, limit)` — a case-insensitive keyword search over the raw session JSONL, including entries before compaction boundaries. Returns matching entries with timestamps and roles, content capped at 2000 characters per result. Useful when specific wording or decisions from earlier in a long session were compacted away.
+**History search:** The agent can search earlier conversation turns via `session(action="search")(query, limit)` — a case-insensitive keyword search over the raw session JSONL, including entries before compaction boundaries. Returns matching entries with timestamps and roles, content capped at 2000 characters per result. Useful when specific wording or decisions from earlier in a long session were compacted away.
 
-**Document reading:** The agent can extract text from binary documents via `read_document(path)` — supports PDF, DOCX, and XLSX. PDF text is extracted via `pymupdf`, DOCX preserves heading hierarchy as markdown, XLSX returns markdown tables per sheet. Libraries are soft dependencies — install only what you need (`pip install pymupdf`, `pip install python-docx`, `pip install openpyxl`). Also available in gather for processing non-plaintext requirements sources.
+**Document reading:** The agent can extract text from binary documents via `analyze(action="document")(path)` — supports PDF, DOCX, and XLSX. PDF text is extracted via `pymupdf`, DOCX preserves heading hierarchy as markdown, XLSX returns markdown tables per sheet. Libraries are soft dependencies — install only what you need (`pip install pymupdf`, `pip install python-docx`, `pip install openpyxl`). Also available in gather for processing non-plaintext requirements sources.
 
-**Code analysis:** The agent can analyze source files via `code_analysis(path)` — returns structured JSON with language, line count, imports, exported symbols (functions, classes, constants with line numbers), and complexity estimate. Powered by tree-sitter — install the base package and per-language grammars (`pip install tree-sitter tree-sitter-python`). Also available in gather for supplementing prompt-based analysis with machine-parsed facts.
+**Code analysis:** The agent can analyze source files via `analyze(action="code")(path)` — returns structured JSON with language, line count, imports, exported symbols (functions, classes, constants with line numbers), and complexity estimate. Powered by tree-sitter — install the base package and per-language grammars (`pip install tree-sitter tree-sitter-python`). Also available in gather for supplementing prompt-based analysis with machine-parsed facts.
 
-**Memory:** The agent can persist project knowledge across sessions using memory entries. When you say "remember this for future sessions," the agent calls `write_memory` to save it. Memory has two layers:
+**Memory:** The agent can persist project knowledge across sessions using memory entries. When you say "remember this for future sessions," the agent calls `memory(action="write")` to save it. Memory has two layers:
 - Project memory (`.voidrift/memory/`) — facts specific to this project (stack, conventions, decisions)
 - Global memory (`~/.voidrift/memory/`) — operator preferences shared across all projects
 
-On session start, the memory index (names and descriptions) is injected into the system prompt. The agent loads full entries on demand via `read_memory`. Project entries override global entries with the same name.
+On session start, the memory index (names and descriptions) is injected into the system prompt. The agent loads full entries on demand via `memory(action="read")`. Project entries override global entries with the same name.
 
 **Idea refinement:** Type `/idea` to start a guided idea flow — the agent walks you through intake, exploration, shaping, and summary. Ideas are stored as `IDEA-{id}.md` in `.voidrift/ideas/` and categorized as `now`, `next`, or `later`. Type `/idea 3` to resume an existing idea. Type `/done` to save and return to normal chat.
 
 **Permission prompts:** Before the agent takes a consequential action, it pauses and asks for your approval:
 
 ```
-▸ Permission required: write_framework_file('REQUIREMENTS.md')
+▸ Permission required: file(action="write")('REQUIREMENTS.md')
   [1] Allow once  [2] Always allow this session  [3] Deny
 ```
 
-Three categories are gated independently: **writes** (any file write or edit), **runs** (`run_command`), and **reads outside the project root**. Reads within the current project directory are always free. Choose `1` to allow once, `2` to allow that category for the rest of the session without further prompts, or `3` to deny (the agent receives an error as the tool result and can try a different approach). The permission state is session-scoped — it resets when you exit chat.
+Three categories are gated independently: **writes** (any file write or edit), **runs** (`shell`), and **reads outside the project root**. Reads within the current project directory are always free. Choose `1` to allow once, `2` to allow that category for the rest of the session without further prompts, or `3` to deny (the agent receives an error as the tool result and can try a different approach). The permission state is session-scoped — it resets when you exit chat.
 
 **Bare mode:** `--bare` strips all automatic context injection — no skills, git snapshot, project state, or memory. Just you and the model with full session mechanics. Combine with `--system-prompt <path>` to replace the system prompt entirely.
 
@@ -308,7 +308,7 @@ voidrift develop <model> --max-input-tokens 200000  # cap total input tokens
 
 ```mermaid
 flowchart TD
-    N[Read manifest → find ready tasks] --> W[Dispatch agent → write_source_file]
+    N[Read manifest → find ready tasks] --> W[Dispatch agent → file(action="write")]
     W --> C{Write occurred?}
     C -- yes --> K[Mark implemented → next]
     C -- no --> R[Retry once]

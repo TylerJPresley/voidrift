@@ -22,7 +22,7 @@ Requirements context:
 
 Generate or review infrastructure-as-code based on ARCHITECTURE.md.
 
-Use write_source_file() to create or modify IaC files. Parameterize all sensitive values — no hardcoded secrets. Tag all cloud resources with project name and environment.
+Use file(action="write") to create or modify IaC files. Parameterize all sensitive values — no hardcoded secrets. Tag all cloud resources with project name and environment.
 
 ## IAC-USER
 

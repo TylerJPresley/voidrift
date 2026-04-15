@@ -555,14 +555,14 @@ class TestGatherSourceReads:
             cmd="gather", project_dir=project_dir,
             source_read_ctx=source_ctx,
         )
-        # Handler should be the source context's method — reads from source_dir
-        result = handlers["read_source_file"]("app.py")
+        # file handler with source_read_ctx reads source files from source_dir
+        result = handlers["file"](action="read", path="app.py")
         assert "x = 1" in result
 
     def test_build_handlers_source_read_ctx(self, tmp_path):
-        """build_handlers with source_read_ctx wires source context at build time."""
+        """build_local_tools with source_read_ctx wires source context at build time."""
         from voidrift_cli.tools.filesystem import WriteContext
-        from voidrift_cli.tool_builder import build_handlers
+        from voidrift_cli.tool_builder import build_local_tools
 
         project_dir = tmp_path / "project"
         project_dir.mkdir()
@@ -571,24 +571,23 @@ class TestGatherSourceReads:
         (source_dir / "mod.py").write_text("y = 2\n")
 
         source_ctx = WriteContext(project_dir=source_dir, max_read_lines=2000)
-        handlers = build_handlers(
+        _, handlers = build_local_tools(
             cmd="gather", project_dir=project_dir,
             source_read_ctx=source_ctx,
         )
-        result = handlers["read_source_file"]("mod.py")
+        result = handlers["file"](action="read", path="mod.py")
         assert "y = 2" in result
 
     def test_build_handlers_without_source_read_ctx(self, tmp_path):
-        """Without source_read_ctx, read_source_file uses project dir."""
-        from voidrift_cli.tools.filesystem import WriteContext
-        from voidrift_cli.tool_builder import build_handlers
+        """Without source_read_ctx, file(action='read') uses project dir."""
+        from voidrift_cli.tool_builder import build_local_tools
 
         project_dir = tmp_path / "project"
         project_dir.mkdir()
         (project_dir / "app.py").write_text("z = 3\n")
 
-        handlers = build_handlers(cmd="gather", project_dir=project_dir)
-        result = handlers["read_source_file"]("app.py")
+        _, handlers = build_local_tools(cmd="gather", project_dir=project_dir)
+        result = handlers["file"](action="read", path="app.py")
         assert "z = 3" in result
 
 

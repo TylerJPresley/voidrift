@@ -206,21 +206,21 @@ class TestTruncate:
 class TestBashToolRegistration:
     @patch("voidrift_cli.config.load_config", return_value={})
     def test_develop_has_run_command(self, _mock):
-        """Develop tool set includes run_command (REQ-ARCH-9)."""
+        """Develop tool set includes shell domain tool (REQ-ARCH-9)."""
         from voidrift_cli.agent import build_local_tools
         tools, handlers = build_local_tools("develop")
         names = {t["function"]["name"] for t in tools}
-        assert "run_command" in names
-        assert "run_command" in handlers
+        assert "shell" in names
+        assert "shell" in handlers
 
     @patch("voidrift_cli.config.load_config", return_value={})
     def test_chat_has_run_command(self, _mock):
-        """Chat tool set includes run_command (REQ-ARCH-9)."""
+        """Chat tool set includes shell domain tool (REQ-ARCH-9)."""
         from voidrift_cli.agent import build_local_tools
         tools, handlers = build_local_tools("chat")
         names = {t["function"]["name"] for t in tools}
-        assert "run_command" in names
-        assert "run_command" in handlers
+        assert "shell" in names
+        assert "shell" in handlers
 
     @patch("voidrift_cli.config.load_config", return_value={})
     def test_gather_no_run_command(self, _mock):
@@ -240,17 +240,17 @@ class TestBashToolRegistration:
 
     @patch("voidrift_cli.config.load_config", return_value={})
     def test_verify_execute_has_run_command(self, _mock):
-        """Verify-execute tool set includes run_command (REQ-VF-11)."""
+        """Verify-execute tool set includes shell domain tool (REQ-VF-11)."""
         from voidrift_cli.agent import build_local_tools
         tools, handlers = build_local_tools("verify-execute")
         names = {t["function"]["name"] for t in tools}
-        assert "run_command" in names
-        assert "run_command" in handlers
+        assert "shell" in names
+        assert "shell" in handlers
 
     @patch("voidrift_cli.config.load_config", return_value={})
-    def test_develop_description_mentions_validate(self, _mock):
-        """Develop run_command description emphasizes validation."""
+    def test_develop_has_shell_tool(self, _mock):
+        """Develop tool set includes the shell domain tool."""
         from voidrift_cli.agent import build_local_tools
         tools, _ = build_local_tools("develop")
-        rc_tool = next(t for t in tools if t["function"]["name"] == "run_command")
-        assert "validate" in rc_tool["function"]["description"].lower()
+        names = {t["function"]["name"] for t in tools}
+        assert "shell" in names

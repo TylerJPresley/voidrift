@@ -102,14 +102,14 @@ class TestCodeAnalysisToolRegistration:
         from voidrift_cli.agent import build_local_tools
         tools, handlers = build_local_tools(cmd="chat")
         names = {t["function"]["name"] for t in tools}
-        assert "code_analysis" in names
-        assert "code_analysis" in handlers
+        assert "analyze" in names
+        assert "analyze" in handlers
 
     def test_gather_has_code_analysis(self):
         from voidrift_cli.agent import build_local_tools
         tools, _ = build_local_tools(cmd="gather")
         names = {t["function"]["name"] for t in tools}
-        assert "code_analysis" in names
+        assert "analyze" in names
 
     def test_develop_no_code_analysis(self):
         from voidrift_cli.agent import build_local_tools

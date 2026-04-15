@@ -113,7 +113,7 @@ def _handle_idea_command(
 
         msg = (
             f"Write the final structured idea to "
-            f"ideas/IDEA-{idea_id}.md using write_framework_file. "
+            f"ideas/IDEA-{idea_id}.md using file(action='write'). "
             f"Include: title, user story, context, acceptance criteria, "
             f"affected modules, and affected files (if modifying existing behavior)."
         )

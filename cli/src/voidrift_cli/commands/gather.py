@@ -4,12 +4,14 @@ from __future__ import annotations
 
 # Tools available to gather agents (consumed by tool_builder.build_local_tools).
 AGENT_TOOLS: frozenset[str] = frozenset({
-    "read_source_file",
-    "write_framework_file",
-    "read_framework_file",
-    "read_document",
-    "code_analysis",
+    "file",
+    "analyze",
 })
+
+# Per-command action visibility within each domain tool (REQ-TOOL-8).
+AGENT_TOOL_ACTIONS: dict[str, list[str]] = {
+    "file": ["read", "list"],
+}
 
 import json
 import time

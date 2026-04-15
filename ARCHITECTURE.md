@@ -41,9 +41,9 @@ The CLI is the orchestration layer. It owns:
 - System log (`~/.voidrift/logs/voidrift.log`)
 
 Agent tools live in `cli/src/voidrift_cli/tools/`:
-- `filesystem.py` — `WriteContext` with path sandboxing, protected paths, snapshots, diff stats, line pagination (REQ-FSZ-1), byte guard (REQ-FSZ-5). Implements file tool handlers (`write_source_file`, `read_source_file`, `edit_source_file`, `write_framework_file`, `read_framework_file`)
-- `registry.py` — ALL tool schemas in OpenAI format, organized as named group lists (`FILESYSTEM_TOOLS`, `SKILL_TOOLS`, `MEMORY_TOOLS`, `SESSION_TOOLS`, `DOCUMENT_TOOLS`, `CODE_ANALYSIS_TOOLS`, `BASH_TOOL`, `VERIFY_TOOLS`). `ALL_TOOLS` concatenates every group. `tool_builder.py` imports schemas from here — it contains zero inline schema dicts (REQ-TOOL-3). `tool_builder.py` is decomposed into four focused functions: `build_handlers(cmd, project_dir, ctx, web_fetch_kwargs, ask_fn, source_read_ctx)` creates all handler callables (including the real `web_fetch` handler when kwargs are provided, the real `ask_user_question` handler when `ask_fn` is provided (REQ-TOOL-5), and a source-directory-rooted `read_source_file` handler when `source_read_ctx` is provided (REQ-G-18)), `filter_tools(all_tools, allowed_names)` selects schemas by command, `validate_schema_handler_contract(tools, handlers)` verifies each handler accepts its schema-defined parameters at build time (REQ-TOOL-4), and `build_local_tools` is a thin orchestrator that composes them
-- `bash.py` — `BashConfig` dataclass and `create_run_command` factory for per-command `run_command` handlers (REQ-SEC-4). Develop agents get a narrow allowlist (build, test, lint); chat agents get broader access; verify agents get full scope. Two-layer security: per-command `allowed_patterns` checked first, then global `classify_command`
+- `filesystem.py` — `WriteContext` with path sandboxing, protected paths, snapshots, diff stats, line pagination (REQ-FSZ-1), byte guard (REQ-FSZ-5). Implements file tool handlers (`file(action="write")`, `file(action="read")`, `file(action="edit")`, `file(action="write")`, `file(action="read")`)
+- `registry.py` — All 10 domain tool schemas in OpenAI format (`DOMAIN_FILE`, `DOMAIN_HTTP`, `DOMAIN_SHELL`, `DOMAIN_BROWSER`, `DOMAIN_PROCESS`, `DOMAIN_SKILL`, `DOMAIN_MEMORY`, `DOMAIN_SESSION`, `DOMAIN_ANALYZE`, `DOMAIN_ASK`). `DOMAIN_TOOLS` concatenates all schemas. `tool_builder.py` imports schemas from here — it contains zero inline schema dicts (REQ-TOOL-3). `tool_builder.py` is decomposed into four focused functions: `build_domain_handlers(cmd, project_dir, ctx, web_fetch_kwargs, ask_fn, source_read_ctx)` creates all handler callables, `filter_tools(all_tools, allowed_names)` selects schemas by command, `validate_schema_handler_contract(tools, handlers)` verifies each handler accepts its schema-defined parameters at build time (REQ-TOOL-4), and `build_local_tools` is a thin orchestrator that composes them
+- `bash.py` — `BashConfig` dataclass and `create_run_command` factory for per-command `shell` handlers (REQ-SEC-4). Develop agents get a narrow allowlist (build, test, lint); chat agents get broader access; verify agents get full scope. Two-layer security: per-command `allowed_patterns` checked first, then global `classify_command`
 - `process_manager.py` — subprocess lifecycle (`start_process`, `stop_process`, `wait_for_ready`, `read_process_output`, `stop_all`) for verify sub-agents
 - `security.py` — `classify_command()` for shell command risk assessment (safe/warn/block)
 - `http_client.py` — stateful HTTP client (`http_request`, `clear_sessions`) with per-session cookie and auth header persistence
@@ -61,7 +61,7 @@ Static guidance loaded at command init:
 
 Synced to `~/.voidrift/resources/` via `make sync`.
 
-> **Note:** The former `resources/agents/` role files (ANALYST.md, ARCHITECT.md, DEVELOPER.md) have been removed. A single command can have multiple distinct agent invocations, each shaped by its specific command prompt — static role files were too coarse-grained and duplicated context already in `system.md`.
+> **Note:** Command prompts in `resources/prompts/<command>.md` shape each agent invocation. A single command can have multiple distinct agent invocations, each shaped by its specific stage prompt — `system.md` provides the shared framework context.
 
 ---
 
@@ -102,7 +102,7 @@ VoidRift reads two files maintained by an external tool (worker-cli). Both paths
 | `type` | No | — | Metadata only (e.g. `local`, `cloud`) — no behavioral effect |
 | `max_context` | No | query API | Context window size in tokens |
 | `max_tokens` | No | 16384 | Max output tokens per API call |
-| `max_read_lines` | No | 2000 | Max lines returned by `read_source_file` |
+| `max_read_lines` | No | 2000 | Max lines returned by `file(action="read")` |
 | `max_input_chars` | No | 0 (unlimited) | Max input chars for gather chunking |
 | `concurrency` | No | 1 | Max concurrent task agents in develop |
 | `fallback` | No | — | Alias of fallback model on 429/5xx retry exhaustion (REQ-MC-4) |
@@ -122,7 +122,33 @@ Automated commands: `tool_choice: "required"` + auto-injected `done` tool. Chat:
 
 ### 3.7 Per-command agent tool visibility
 
-Each command sees only the agent tools relevant to its role (REQ-ARCH-9). Gather cannot write source files. Plan cannot read source files. Develop cannot write `.voidrift/` artifacts. The boundary is structural — an agent tool absent from the list simply cannot be called, no runtime guard needed. Skills can further restrict tools via `allowed_tools` frontmatter (REQ-SKL-9) — enforced by `before_tool_call` hook. Restrictions are additive (can only reduce, never expand).
+Each command sees only the agent tools relevant to its role (REQ-ARCH-9). Write permissions are controlled per-command via `AGENT_TOOL_ACTIONS` (REQ-TOOL-8) — a gather agent sees `file` with only `read` and `list` actions. The boundary is structural — a tool absent from the list cannot be called, and an action absent from the schema enum cannot be requested. Skills can further restrict tools via `allowed_tools` frontmatter (REQ-SKL-9) — enforced by `before_tool_call` hook. Restrictions are additive (can only reduce, never expand).
+
+**Tool inventory (10 domain tools):**
+
+| Tool | Actions | Description |
+|---|---|---|
+| `file` | read, write, edit, delete, list | Read, write, edit, delete, or list files. Path-based routing: `.voidrift/` paths are framework artifacts, all others are project source. Auto-detects PDF/DOCX/XLSX for binary document extraction. |
+| `http` | get, post, put, delete | HTTP requests. `get` in chat fetches+summarizes URLs (SSRF-checked, operator-confirmed, cached). All actions in verify-execute for API testing with session persistence. |
+| `shell` | *(single)* | Run shell commands. Per-command allowlists (REQ-SEC-4), global security classification (REQ-SEC-2). |
+| `browser` | navigate, screenshot, click, get_text | Playwright browser automation for verify sub-agents. |
+| `process` | read_output | Read buffered output from managed subprocesses (verify). |
+| `skill` | get, list | Load or list available skills (chat only — other commands pre-inject skills). |
+| `memory` | read, write, list, delete | Persist project knowledge across chat sessions. Two-layer: project + global. |
+| `session` | search | Search raw chat session JSONL by keyword, including compacted history. |
+| `analyze` | code, document | Tree-sitter code analysis (imports, symbols, complexity) or binary document extraction. Soft dependencies. |
+| `ask` | *(single)* | Ask the operator a clarifying question with optional numbered choices. |
+
+**Per-command visibility:**
+
+| Command | file | http | shell | browser | process | skill | memory | session | analyze | ask |
+|---|---|---|---|---|---|---|---|---|---|---|
+| **gather** | read, list | — | — | — | — | — | — | — | code, doc | — |
+| **plan** | read, write, edit, list | — | — | — | — | — | — | — | — | — |
+| **develop** | all | — | ✓ | — | — | — | — | — | — | — |
+| **chat** | all | get | ✓ | — | — | get, list | all | search | code, doc | ✓ |
+| **verify-plan** | read, list | — | — | — | — | — | — | — | — | — |
+| **verify-exec** | read, write, list | all | ✓ | all | read_output | — | — | — | — | — |
 
 ### 3.8 Separate framework and command logs
 
@@ -142,7 +168,7 @@ The agent loop accepts optional callback hooks (`transform_context`, `before_too
 
 ### 3.11 Defense-in-depth for tool execution
 
-File tools validate paths via `Path.resolve().relative_to()` (REQ-SEC-1). Write tools check a `protected_paths` set and detect external file modifications via mtime comparison (REQ-D-19). `run_command` classifies shell commands via regex patterns (REQ-SEC-2) — block/warn/safe. HTTP tools (`web_fetch`, `http_request`) resolve hostnames and check against blocked IP ranges (REQ-SEC-3) — private, link-local, CGNAT blocked; loopback allowed for local dev; `ssrf_allow_list` in config overrides. Tool arguments are normalized before execution (REQ-ARCH-17). All blocks are logged.
+File tools validate paths via `Path.resolve().relative_to()` (REQ-SEC-1). Write tools check a `protected_paths` set and detect external file modifications via mtime comparison (REQ-D-19). `shell` classifies shell commands via regex patterns (REQ-SEC-2) — block/warn/safe. HTTP tools (`http(action="get")`, `http`) resolve hostnames and check against blocked IP ranges (REQ-SEC-3) — private, link-local, CGNAT blocked; loopback allowed for local dev; `ssrf_allow_list` in config overrides. Tool arguments are normalized before execution (REQ-ARCH-17). All blocks are logged.
 
 **Why:** Models produce incorrect paths and dangerous commands. These are not comprehensive security boundaries — they are defense-in-depth measures that catch the most common failure modes without adding complexity. The operator should not run VoidRift as root or against untrusted inputs.
 
@@ -178,25 +204,25 @@ Before each develop task, `GitCheckpointManager` creates a `git stash create` sn
 
 ### 3.17 Two-layer project memory
 
-`memory.py` provides `MemoryManager` with two layers: project (`.voidrift/memory/`) and global (`~/.voidrift/memory/`). Each entry is a markdown file with YAML frontmatter. A `MEMORY.md` index in each layer lists entries by name and description. At chat init (non-bare), the combined index is injected into the system prompt — names and descriptions only, not full content. `read_memory`, `write_memory`, and `list_memory` tools are available in chat only. Project entries override global entries with the same name, matching the skill resolution pattern.
+`memory.py` provides `MemoryManager` with two layers: project (`.voidrift/memory/`) and global (`~/.voidrift/memory/`). Each entry is a markdown file with YAML frontmatter. A `MEMORY.md` index in each layer lists entries by name and description. At chat init (non-bare), the combined index is injected into the system prompt — names and descriptions only, not full content. `memory(action="read")`, `memory(action="write")`, and `memory(action="list")` tools are available in chat only. Project entries override global entries with the same name, matching the skill resolution pattern.
 
 **Why:** Chat sessions accumulate project knowledge lost on terminal close. Memory persists conventions and decisions across sessions without polluting context — only the index is injected, full content loaded on demand (REQ-MEM-1).
 
 ### 3.18 Conversation history search
 
-`ChatSession.search_entries(query, limit)` in `session.py` searches all JSONL entries (including those before compaction boundaries) by case-insensitive substring match on message content. Returns up to `limit` (default 5, max 10) entries newest-first, each with timestamp, role, and content truncated to 2000 characters. The `search_history` agent tool is registered in `build_local_tools` for the chat command only.
+`ChatSession.search_entries(query, limit)` in `session.py` searches all JSONL entries (including those before compaction boundaries) by case-insensitive substring match on message content. Returns up to `limit` (default 5, max 10) entries newest-first, each with timestamp, role, and content truncated to 2000 characters. The `session(action="search")` agent tool is registered in `build_local_tools` for the chat command only.
 
 **Why:** After compaction, specific details from earlier turns are lost. Memory covers cross-session facts, but intra-session search of raw history fills the gap when the agent needs exact wording from a compacted exchange (REQ-U-18).
 
 ### 3.19 Document format extraction
 
-`tools/document.py` provides `read_document(path, project_root)` that extracts text from PDF (via `pymupdf`), DOCX (via `python-docx`), and XLSX (via `openpyxl`). Format detected by file extension. All three are soft dependencies — missing libraries return an error with the pip install command. DOCX preserves heading hierarchy as markdown headings. XLSX returns one markdown table per sheet. Path validation uses the same project-root sandboxing as source file tools. The `read_document` agent tool is registered for chat and gather commands.
+`tools/document.py` provides `analyze(action="document")(path, project_root)` that extracts text from PDF (via `pymupdf`), DOCX (via `python-docx`), and XLSX (via `openpyxl`). Format detected by file extension. All three are soft dependencies — missing libraries return an error with the pip install command. DOCX preserves heading hierarchy as markdown headings. XLSX returns one markdown table per sheet. Path validation uses the same project-root sandboxing as source file tools. The `analyze(action="document")` agent tool is registered for chat and gather commands.
 
 **Why:** Enterprise requirements arrive as Word/PDF. Extracting text into markdown lets gather and chat process them without manual conversion. Soft dependencies keep the core CLI lightweight (REQ-U-19).
 
 ### 3.20 Structured code analysis
 
-`tools/code_analysis.py` provides `code_analysis(path, project_root)` that parses source files via tree-sitter and returns compact JSON: language, line count, imports, exported symbols (name, type, line), and complexity (branch point count). Language detected by file extension mapped to tree-sitter grammar names. Covers Python, JavaScript, TypeScript, Rust, Go, Java, C, C++, Ruby. Tree-sitter and per-language grammars are soft dependencies. Available in chat and gather.
+`tools/analyze(action="code").py` provides `analyze(action="code")(path, project_root)` that parses source files via tree-sitter and returns compact JSON: language, line count, imports, exported symbols (name, type, line), and complexity (branch point count). Language detected by file extension mapped to tree-sitter grammar names. Covers Python, JavaScript, TypeScript, Rust, Go, Java, C, C++, Ruby. Tree-sitter and per-language grammars are soft dependencies. Available in chat and gather.
 
 **Why:** Prompt-based analysis requires the model to spend tokens parsing file structure. Tree-sitter provides machine-parsed facts (imports, symbols, complexity) directly, improving accuracy for large files and reducing context consumption (REQ-U-20).
 
@@ -235,9 +261,9 @@ Chat agents can read, write, and run — all necessary for legitimate operator-d
 
 | Category | Triggers on | Default |
 |---|---|---|
-| `writes` | `write_source_file`, `edit_source_file`, `write_framework_file` | deny |
-| `runs` | `run_command` | deny |
-| `reads_outside` | `read_source_file` / `read_framework_file` targeting a path outside `project_dir` | deny |
+| `writes` | `file(action="write")`, `file(action="edit")`, `file(action="write")` | deny |
+| `runs` | `shell` | deny |
+| `reads_outside` | `file(action="read")` / `file(action="read")` targeting a path outside `project_dir` | deny |
 
 Reads within the project root are free — no prompt needed.
 
@@ -255,17 +281,17 @@ tool_builder.py
   _make_write_guard(name, handler, gate, confirm_holder) → guarded_handler
   _make_run_guard(handler, gate, confirm_holder) → guarded_handler
   _make_read_outside_guard(name, handler, project_dir, gate, confirm_holder, ctx) → guarded_handler
-  build_handlers(... permission_gate=None, permission_confirm_holder=None)
+  build_domain_handlers(... permission_gate=None, permission_confirm_holder=None)
     # wraps handlers at build time; gate=None → guards not applied (automated commands)
 
 chat.py / _interactive_loop
   _perm_gate = PermissionGate()         # created in run_chat
-  _perm_holder: list = [None]           # mutable holder — same pattern as web_fetch confirm
+  _perm_holder: list = [None]           # mutable holder — same pattern as http(action="get") confirm
   _live_perm_confirm(category, desc)    # Live-aware closure: stops Live, prompts, restarts Live
     # set as _perm_holder[0] inside _interactive_loop (after Live is created)
 ```
 
-**Automated commands unaffected:** `build_handlers` and `build_local_tools` default `permission_gate=None`. Only `run_chat` passes the gate — gather/plan/develop/verify/deploy never do. Non-TTY sessions set `_perm_holder[0] = None`, causing guards to auto-deny.
+**Automated commands unaffected:** `build_domain_handlers` and `build_local_tools` default `permission_gate=None`. Only `run_chat` passes the gate — gather/plan/develop/verify/deploy never do. Non-TTY sessions set `_perm_holder[0] = None`, causing guards to auto-deny.
 
 **Why two mechanisms (prompt + gate):** The `## CHAT-ROLE` section in `system.md` instructs the model not to infer write intent. This catches well-behaved models. The gate at the handler level is a hard stop that cannot be overridden by model behavior — defense in depth for smaller or less instruction-following models.
 
@@ -305,7 +331,7 @@ When writing or editing prompts in `resources/prompts/`:
 
 ### 3.26 Done guard and write nudge for develop tasks (REQ-D-5)
 
-The `before_tool_call` hook now fires for `done` tool calls (previously bypassed). In develop, a `_done_guard` hook rejects `done` when zero writes have occurred — the agent receives an error message and the loop continues. A `get_follow_up_messages` hook (`_write_follow_up`) catches the other exit path: when the model produces a text-only response with no tool calls and zero writes, a user message is injected telling it to call `write_source_file()`. Limited to 2 nudges per task to prevent infinite loops. Both hooks are composed with the existing skill guard via `_composed_hook`.
+The `before_tool_call` hook fires for all tool calls including `done`. In develop, a `_done_guard` hook rejects `done` when zero writes have occurred — the agent receives an error message and the loop continues. A `get_follow_up_messages` hook (`_write_follow_up`) catches the other exit path: when the model produces a text-only response with no tool calls and zero writes, a user message is injected telling it to call `file(action="write")`. Limited to 2 nudges per task to prevent infinite loops. Both hooks are composed with the existing skill guard via `_composed_hook`.
 
 **Why:** Small models (35B) fail to write files in two ways: calling `done` prematurely, and producing text-only responses that narrate code instead of calling write tools. The done guard blocks the first path; the follow-up nudge blocks the second. Together they cover all exit paths from the agent loop. The 2-nudge limit ensures the task eventually falls through to the existing retry/escalation mechanism if the model truly cannot produce tool calls.
 
@@ -437,7 +463,7 @@ Delta analysis (REQ-P-11, update mode only):
   CLI: injects delta summary into Stage 1 and Stage 3 prompts
 
 Stage 1 — Architecture (PLAN-ARCH, one agent):
-  CLI: get_skill(ARCH-DESIGN) + get_prompt(plan, PLAN-ARCH)
+  CLI: skill(action="get")(ARCH-DESIGN) + get_prompt(plan, PLAN-ARCH)
   Agent: writes ARCHITECTURE.md (system-level: modules, contracts, constraints)
   CLI: extract module list from YAML frontmatter
   CLI: recover ARCHITECTURE.md if model writes to arch/ path
@@ -480,7 +506,7 @@ CLI: load tasks/manifest.yml → find dispatchable tasks (planned + deps met)
   capture git snapshot once (branch, commits, changed files) → shared string
   dispatch sub-agents concurrently (up to model.concurrency):
     each agent receives task file content + git context as prompt
-    → write_source_file(path, content)
+    → file(action="write")(path, content)
     → done()
   CLI: verify write occurred → set status=implemented in manifest
   CLI: if no write → retry → if still no write → escalate to architect
@@ -519,21 +545,21 @@ Stage 1 — Plan agent:
   Preflight: .voidrift/REQUIREMENTS.md must exist
   CLI: load REQUIREMENTS.md, ARCHITECTURE.md, tasks/manifest.yml, arch/* → inject into system prompt
   Plan agent:
-    tools: cmd="verify-plan" {read_framework_file, read_source_file, write_framework_file}
+    tools: cmd="verify-plan" {file(action="read"), file(action="read"), file(action="write")}
     writes: .voidrift/VERIFY-PLAN.md (self-contained test cases per testable requirement)
     each ITEM: requirement text, user story, system context, credentials, numbered steps, expected result
     non-testable criteria: ITEM-N [SKIP] with reason
 
   CLI: run test_bootstrap if ARCHITECTURE.md has test_bootstrap: field (subprocess.run)
-  CLI: start_process(startup_command) → process handle
+  CLI: process(action="start")(startup_command) → process handle
   CLI: wait_for_ready(handle, strategy=http|port|log_pattern, target, timeout)
 
 Stage 2 — Concurrent sub-agents (ThreadPoolExecutor, max_workers=get_concurrency()):
   For each ITEM in VERIFY-PLAN.md (non-SKIP):
     sub-agent:
-      tools: cmd="verify-execute" {read_framework_file, write_framework_file,
-              read_process_output, http_request, run_command,
-              browser_navigate, browser_screenshot, browser_click, browser_get_text}
+      tools: cmd="verify-execute" {file(action="read"), file(action="write"),
+              process(action="read_output"), http, shell,
+              browser(action="navigate"), browser(action="screenshot"), browser(action="click"), browser(action="get_text")}
       context: ITEM content verbatim (self-contained, no further assembly)
       PASS → returns without writing bug file
       FAIL → writes .voidrift/bugs/<ITEM-ID>.md with full evidence
@@ -567,7 +593,7 @@ Git tag:
   CLI: git tag -a v{version} -m <changelog entry>
 
 Conditional IaC (if ARCHITECTURE.md mentions infrastructure):
-  Agent: generate or review IaC files via write_source_file()
+  Agent: generate or review IaC files via file(action="write")
 
 Post-deploy hook (if ARCHITECTURE.md has post_deploy: field):
   CLI: run shell command with $VERSION in env
@@ -578,7 +604,7 @@ Post-deploy hook (if ARCHITECTURE.md has post_deploy: field):
 ```
 system_prompt =
   get_prompt("system", "CONTEXT")    # command lifecycle table, artifact boundaries
-  + get_skill("<command-skill>")      # methodology — how to think
+  + skill(action="get")("<command-skill>")      # methodology — how to think
   + get_prompt("<command>", "<stage>")  # stage instructions — what to do
   + injected_context                  # task details, analyses, specs — what to work with
 ```
@@ -626,7 +652,7 @@ Key agent loop features:
 - **Prompt caching** (REQ-ARCH-19): Anthropic system messages get `cache_control` markers. Cache hits logged.
 - **Provider-aware streaming usage** (REQ-ARCH-20): `stream_options: {include_usage: true}` injected in `build_request()` only for `openai`, `anthropic`, `gemini`. Generic endpoints receive a clean wire request.
 - **Transition logging** (REQ-ARCH-18): `[ITERATION]` at every continue, `[LOOP_EXIT]` with accurate cumulative `total_input`/`total_output` at every return.
-- **Security**: Command classification (REQ-SEC-2) in `run_command`. Path sandboxing (REQ-SEC-1) in all file tools.
+- **Security**: Command classification (REQ-SEC-2) in `shell`. Path sandboxing (REQ-SEC-1) in all file tools.
 
 ---
 

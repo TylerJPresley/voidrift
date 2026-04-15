@@ -4,32 +4,21 @@ from __future__ import annotations
 
 # Tools available to chat agents (consumed by tool_builder.build_local_tools).
 AGENT_TOOLS: frozenset[str] = frozenset({
-    "read_source_file",
-    "write_source_file",
-    "edit_source_file",
-    "read_framework_file",
-    "write_framework_file",
-    "list_project_artifacts",
-    "web_fetch",
-    "ask_user_question",
-    "get_skill",
-    "list_skills",
-    "read_memory",
-    "write_memory",
-    "list_memory",
-    "search_history",
-    "read_document",
-    "code_analysis",
-    "run_command",
+    "file",
+    "http",
+    "shell",
+    "skill",
+    "memory",
+    "session",
+    "analyze",
+    "ask",
 })
 
-BASH_DESCRIPTION: tuple[str, list[str]] = (
-    "Run shell commands to explore, debug, and validate.",
-    [
-        "Use for build, test, and lint. Not for git operations or file manipulation.",
-        "Check exit_code in the result — non-zero means failure.",
-    ],
-)
+# Per-command action visibility within each domain tool (REQ-TOOL-8).
+AGENT_TOOL_ACTIONS: dict[str, list[str]] = {
+    "file": ["read", "write", "edit", "delete", "list"],
+    "http": ["get", "post", "put", "delete"],
+}
 
 import sys
 import time
@@ -179,7 +168,7 @@ def _tui_loop(agent, mc, log, session=None, style="verbose", fs_ctx=None,
 
     # Wire web_fetch confirm
     if web_fetch_kwargs:
-        _wf = agent.tool_handlers.get("web_fetch")
+        _wf = agent.tool_handlers.get("http")
         if _wf and hasattr(_wf, "set_confirm"):
             _wf.set_confirm(lambda url: True)  # TODO: TUI-native confirm
 
@@ -552,8 +541,8 @@ def chat(model, doc, style, bare, system_prompt_path) -> None:
         return result
 
     def _skill_after_tool_call(name: str, result: str) -> str:
-        """after_tool_call hook: extract skill metadata from get_skill responses."""
-        if name == "get_skill":
+        """after_tool_call hook: extract skill metadata from skill(action='get') responses."""
+        if name == "skill":
             return _extract_skill_meta(result)
         return result
 

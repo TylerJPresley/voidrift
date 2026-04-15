@@ -4,23 +4,27 @@ from __future__ import annotations
 
 # Tools available to verify-plan agents (consumed by tool_builder.build_local_tools).
 AGENT_TOOLS_PLAN: frozenset[str] = frozenset({
-    "read_source_file",
-    "read_framework_file",
-    "write_framework_file",
+    "file",
 })
 
 # Tools available to verify-execute agents (consumed by tool_builder.build_local_tools).
 AGENT_TOOLS_EXECUTE: frozenset[str] = frozenset({
-    "read_framework_file",
-    "write_framework_file",
-    "read_process_output",
-    "http_request",
-    "run_command",
-    "browser_navigate",
-    "browser_screenshot",
-    "browser_click",
-    "browser_get_text",
+    "file",
+    "http",
+    "shell",
+    "browser",
+    "process",
 })
+
+# Per-command action visibility within each domain tool (REQ-TOOL-8).
+AGENT_TOOL_ACTIONS_PLAN: dict[str, list[str]] = {
+    "file": ["read", "list"],
+}
+
+AGENT_TOOL_ACTIONS_EXECUTE: dict[str, list[str]] = {
+    "file": ["read", "write", "list"],
+    "http": ["get", "post", "put", "delete"],
+}
 
 import json
 import re
