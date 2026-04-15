@@ -323,7 +323,13 @@ def _tui_loop(agent, mc, log, session=None, style="verbose", fs_ctx=None,
             return
 
         low = text.lower().strip()
-        if low in ("/gather", "/plan", "/develop", "/verify", "/deploy", "/idea", "/chat"):
+        if low.startswith("/gather"):
+            from ._chat_commands import wrap_command, handle_gather
+            _gather_args = text[7:].strip()
+            # Use a simple skip-all prompt_fn for now — TUI input integration is a follow-up
+            wrap_command(handle_gather, _gather_args, mc, state, lambda f, c: "skip", log)
+            return
+        if low in ("/plan", "/develop", "/verify", "/deploy", "/idea", "/chat"):
             state.mode = low
             if low == "/chat":
                 state.add_system("Back to chat.")
