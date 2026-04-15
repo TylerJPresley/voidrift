@@ -240,7 +240,7 @@ def _render_to_lines(state: TUIState, width: int) -> list[list[tuple[str, str]]]
     lines.append(_bline([("class:callout-cmd", "  /help"), ("class:callout-hint", "     list commands")]))
     lines.append(_bline([("class:callout-cmd", "  /clear"), ("class:callout-hint", "    reset conversation")]))
     lines.append(_bline([("class:callout-cmd", "  /compact"), ("class:callout-hint", "  compress context")]))
-    lines.append(_bline([("class:callout-cmd", "  /quick"), ("class:callout-hint", "   <question>  fast one-shot answer")]))
+    lines.append(_bline([("class:callout-cmd", "  /ask"), ("class:callout-hint", "   <question>  fast one-shot answer")]))
     lines.append(_bline([("class:callout-cmd", "  /plan · /develop · /verify"), ("class:callout-hint", "  workflow modes")]))
     if state.messages:
         lines.append(_bline())

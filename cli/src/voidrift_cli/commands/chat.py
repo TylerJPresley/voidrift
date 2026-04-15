@@ -297,7 +297,7 @@ def _tui_loop(agent, mc, log, session=None, style="verbose", fs_ctx=None,
             state.add_system("  /verify         run acceptance tests")
             state.add_system("  /idea           guided idea refinement")
             state.add_system("  /compact        summarize context to free space")
-            state.add_system("  /quick <q>      one-shot answer (no context)")
+            state.add_system("  /ask <q>        one-shot answer (no context)")
             state.add_system("  /clear          reset conversation")
             state.add_system("  /help           this list")
             state.add_system("  /quit           exit")
@@ -310,10 +310,10 @@ def _tui_loop(agent, mc, log, session=None, style="verbose", fs_ctx=None,
             state.add_system(f"Compacted. Context: {state.context_pct}%")
             return
 
-        if text.lower().startswith("/quick"):
-            _qt = text[6:].strip()
+        if text.lower().startswith("/ask"):
+            _qt = text[4:].strip()
             if not _qt:
-                state.add_system("Usage: /quick <question>")
+                state.add_system("Usage: /ask <question>")
                 return
             try:
                 from ..config import get_max_tokens as _gmt

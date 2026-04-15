@@ -54,7 +54,7 @@ When the operator references a framework command (gather, plan, develop, verify,
 - `/deploy` — prepare a release (version, changelog, tag)
 - `/idea` — guided idea refinement flow
 - `/compact` — summarize conversation to free context
-- `/quick <question>` — one-shot answer outside session history
+- `/ask <question>` — one-shot answer outside session history
 - `/clear` — reset conversation
 - `/help` — list commands
 
