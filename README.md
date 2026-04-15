@@ -31,17 +31,18 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for component design, data flows, and key
 
 ## Installation
 
-**Workstation requirements:** Linux, macOS, or WSL2 · Git
+**Workstation requirements:** Linux, macOS, or WSL2 · Git · Node.js 22+ or Bun
 
 ```bash
 git clone <repo-url> ~/Projects/voidrift
 cd ~/Projects/voidrift
-make setup        # installs packages and syncs resources to ~/.voidrift/
+bun install       # install dependencies
 ```
 
 Verify:
 
 ```bash
+bun run dev       # runs from source
 voidrift          # opens interactive mode if no args
 ```
 
@@ -489,47 +490,72 @@ your-project/
 ## Development
 
 ```bash
-make setup      # install packages + sync resources to ~/.voidrift/
-make install    # install CLI package (editable)
-make sync       # sync resources/ to ~/.voidrift/
-make test       # run all tests
-make build      # build distribution packages
+bun install     # install dependencies
+bun test        # run all tests (vitest)
+bun run build   # build CLI binary (tsup)
+bun run dev     # run from source
 ```
 
 ### Repository Layout
 
 ```
 voidrift/
-├── cli/                          # VoidRift CLI
-│   └── src/voidrift_cli/
-│       ├── main.py               # Click commands, entry point
-│       ├── agent.py              # Agent loop: API calls, tool dispatch, hooks, retry, streaming
-│       ├── models.py             # Model alias resolution (models.yml)
-│       ├── token_budget.py       # TokenBudget class, BudgetExhaustedError
-│       ├── error_tracker.py      # Structured error accumulation and summary
-│       ├── git_context.py        # Git status snapshot for agent context injection
-│       ├── git_utils.py          # Git diff with safety limits
-│       ├── git_checkpoint.py     # Git stash checkpoints for develop rollback
-│       ├── tools/                # Local agent tools: registry (all schemas), filesystem, process, HTTP, browser, security
-│       ├── utils.py              # Utilities: STATE.md, system log, task helpers
-│       ├── config.py             # Config loading, variable expansion
-│       ├── session.py            # Chat session persistence (JSONL)
-│       ├── memory.py             # Two-layer project/global memory system
-│       ├── manifest.py           # ManifestManager: task status, deps, dispatch
-│       ├── skills.py             # Skill resolution (3-layer), allowed_tools
-│       ├── doctor.py             # Diagnostic checks for voidrift doctor
-│       ├── ui.py                 # Console output: spinners, stats, dashboard, rendering
-│       ├── testing/              # Test infrastructure: FauxProvider (record/replay API fixtures)
-│       └── commands/             # command implementations: gather, plan, develop, deploy, verify, skills
-├── resources/                    # Framework guidance → ~/.voidrift/resources/
-│   ├── prompts/                  # system.md + per-command prompts (6 files)
-│   ├── skills/                   # Domain methodology (16 files)
-│   └── templates/                # Document scaffolding (4 files)
-├── config.yml                    # Default config synced to ~/.voidrift/ by make sync
-├── spinner-labels.txt            # Spinner labels (user-editable, not overwritten on sync)
-├── REQUIREMENTS.md               # IEEE 29148 / EARS requirements
-├── ARCHITECTURE.md               # Component design, data flows, design decisions
-├── CHANGELOG.md
-├── VERSION                       # 0.1.0
-└── Makefile
+├── src/                            # TypeScript CLI
+│   ├── index.ts                    # Commander entry point
+│   ├── config.ts                   # Config loading, variable expansion
+│   ├── models.ts                   # Model alias resolution
+│   ├── prompts.ts                  # Prompt/template loading (3-layer)
+│   ├── skills.ts                   # Skill resolution (3-layer)
+│   ├── manifest.ts                 # ManifestManager: task status, deps, dispatch
+│   ├── session.ts                  # Chat session persistence (JSONL)
+│   ├── memory.ts                   # Two-layer project/global memory
+│   ├── git.ts                      # Git snapshot, bounded diff, checkpoints
+│   ├── utils.ts                    # STATE.md, logging, helpers
+│   ├── agent/                      # Agent loop
+│   │   ├── loop.ts                 # Core loop: API calls, tool dispatch, hooks, retry
+│   │   ├── protocol.ts             # OpenAI + Anthropic adapters
+│   │   ├── stall.ts                # Stall detection
+│   │   ├── context.ts              # Snip old results, reactive compaction
+│   │   ├── think.ts                # Think-tag stripping
+│   │   ├── budget.ts               # Token budget tracking
+│   │   ├── abort.ts                # Abort mechanism
+│   │   └── types.ts                # Shared types
+│   ├── commands/                   # Command implementations
+│   │   ├── gather.ts               # 4-stage gather pipeline
+│   │   ├── plan.ts                 # 6-stage plan pipeline
+│   │   ├── develop.ts              # Task dispatch loop
+│   │   ├── verify.ts               # Acceptance testing pipeline
+│   │   ├── deploy.ts               # Version, changelog, tag
+│   │   ├── chat.ts                 # Ink TUI chat session
+│   │   ├── slashCommands.ts        # /gather, /plan, /develop, /verify handlers
+│   │   ├── idea.ts                 # Idea refinement state machine
+│   │   ├── doctor.ts               # Diagnostic checks
+│   │   └── status.ts               # Task status display
+│   ├── tools/                      # 10 domain tools
+│   │   ├── registry.ts             # Tool schemas
+│   │   ├── builder.ts              # Per-command filtering + handler wiring
+│   │   ├── filesystem.ts           # WriteContext: read, write, edit, delete, list
+│   │   ├── shell.ts                # Shell execution + security
+│   │   ├── security.ts             # Command classification
+│   │   ├── ssrf.ts                 # SSRF guard
+│   │   ├── http.ts                 # HTTP client
+│   │   ├── process.ts              # Subprocess lifecycle
+│   │   └── browser.ts              # Playwright automation
+│   └── tui/                        # Ink components
+│       ├── App.tsx                  # Root layout
+│       ├── Header.tsx               # ASCII art + callout
+│       ├── Footer.tsx               # Status bar
+│       ├── Message.tsx              # Role-colored messages
+│       ├── ToolCall.tsx             # Tool call display
+│       ├── Thinking.tsx             # Braille spinner
+│       └── state.ts                # TUI state management
+├── tests/                          # Vitest test suite (219 tests)
+├── resources/                      # Prompts, skills, templates → ~/.voidrift/
+├── legacy/python/                  # Python reference implementation (archived)
+├── package.json
+├── tsconfig.json
+├── vitest.config.ts
+├── REQUIREMENTS.md
+├── ARCHITECTURE.md
+└── README.md
 ```

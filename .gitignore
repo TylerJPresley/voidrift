@@ -1,10 +1,18 @@
-.claude-flow/
-.aider.chat.history.md
+# Node / TypeScript
+node_modules/
+dist/
+
+# Python (legacy)
 __pycache__/
 *.pyc
 *.egg-info/
-dist/
 .pytest_cache/
+
+# VoidRift
 .voidrift/
 sessions.db
 logs/
+
+# IDE / tools
+.claude-flow/
+.aider.chat.history.md
