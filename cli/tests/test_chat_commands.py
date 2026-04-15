@@ -151,3 +151,34 @@ class TestHandlePlanValidation:
             pass
         # No overwrite prompt for fresh plan
         assert "plan_overwrite" not in calls
+
+
+class TestHandleVerifyValidation:
+    def test_missing_requirements_shows_error(self, tmp_path, monkeypatch):
+        from voidrift_cli.commands._chat_commands import handle_verify
+        monkeypatch.chdir(tmp_path)
+        state = _FakeState()
+        handle_verify("", None, state, None, None)
+        assert any("REQUIREMENTS.md not found" in m for m in state.messages)
+
+    def test_cleanup_called_on_success(self, tmp_path, monkeypatch):
+        """finally block calls stop_all, clear_sessions, close_all_sessions."""
+        from voidrift_cli.commands._chat_commands import handle_verify
+        from unittest.mock import patch
+        monkeypatch.chdir(tmp_path)
+        d = tmp_path / ".voidrift"
+        d.mkdir()
+        (d / "REQUIREMENTS.md").write_text("# Reqs\n")
+
+        state = _FakeState()
+        cleanup_calls = []
+        with patch("voidrift_cli.tools.process_manager.stop_all", lambda: cleanup_calls.append("stop")), \
+             patch("voidrift_cli.tools.http_client.clear_sessions", lambda: cleanup_calls.append("clear")), \
+             patch("voidrift_cli.tools.browser.close_all_sessions", lambda: cleanup_calls.append("close")):
+            try:
+                handle_verify("", MagicMock(), state, None, None)
+            except Exception:
+                pass
+        assert "stop" in cleanup_calls
+        assert "clear" in cleanup_calls
+        assert "close" in cleanup_calls

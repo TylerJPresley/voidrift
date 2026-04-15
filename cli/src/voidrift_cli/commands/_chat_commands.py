@@ -376,3 +376,143 @@ def handle_plan(args, mc, state, prompt_fn, log):
         files_created=[".voidrift/ARCHITECTURE.md", ".voidrift/tasks/manifest.yml"])
 
     state.add_system(f"✓ Plan complete — {task_count} tasks across {len(modules)} module(s)")
+
+
+def handle_verify(args, mc, state, prompt_fn, log):
+    """Run the verify pipeline interactively (REQ-U-2d)."""
+    import json as _json
+    import subprocess
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from ..utils import (
+        ensure_voidrift_dir, boot_run, append_state, check_requirements_exist,
+    )
+    from ..tools.filesystem import WriteContext
+    from ..tools.process_manager import start_process, wait_for_ready, stop_all
+    from ..tools.http_client import clear_sessions
+    from ..tools.browser import close_all_sessions
+    from ._verify_pipeline import (
+        _parse_verify_plan, _read_arch_field, _run_doc_verify,
+        _run_plan_agent, _run_sub_agent, _write_verify_md, _update_manifest,
+    )
+
+    d = ensure_voidrift_dir()
+    if not check_requirements_exist():
+        state.add_system("Error: REQUIREMENTS.md not found. Run /gather first.")
+        return
+
+    vlog, run_id = boot_run("verify")
+    fs_ctx = WriteContext(project_dir=d.parent, max_read_lines=mc.max_read_lines)
+
+    try:
+        # Stage 0: Doc verification
+        state.add_system("Stage 0 — Verifying documentation...")
+        doc_bugs_before = set((d / "bugs").glob("DOC-*.md")) if (d / "bugs").exists() else set()
+        _run_doc_verify(mc, d, vlog, fs_ctx)
+        doc_bugs_after = set((d / "bugs").glob("DOC-*.md")) if (d / "bugs").exists() else set()
+        doc_bug_count = len(doc_bugs_after - doc_bugs_before)
+        if doc_bug_count:
+            state.add_system(f"⚠ Documentation: {doc_bug_count} mismatch(es)")
+        else:
+            state.add_system("✓ Documentation consistent")
+
+        # Stage 1: Plan agent
+        state.add_system("Stage 1 — Planning test cases...")
+        if not _run_plan_agent(mc, d, vlog, fs_ctx):
+            state.add_system("Error: Plan agent failed.")
+            return
+
+        verify_plan_file = d / "VERIFY-PLAN.md"
+        if not verify_plan_file.exists():
+            state.add_system("Error: VERIFY-PLAN.md not produced.")
+            return
+
+        items = _parse_verify_plan(verify_plan_file.read_text())
+        if not items:
+            state.add_system("Error: No test items in VERIFY-PLAN.md.")
+            return
+
+        testable = [it for it in items if not it["skip"]]
+        skipped = [it for it in items if it["skip"]]
+        state.add_system(f"✓ {len(testable)} test cases, {len(skipped)} skipped")
+
+        # Bootstrap
+        bootstrap_cmd = _read_arch_field(d, "test_bootstrap")
+        if bootstrap_cmd and bootstrap_cmd.lower() not in ("none", ""):
+            state.add_system(f"Running bootstrap: {bootstrap_cmd}")
+            try:
+                result = subprocess.run(bootstrap_cmd, shell=True, capture_output=True, text=True, timeout=120)
+                if result.returncode != 0:
+                    state.add_system(f"⚠ Bootstrap exited {result.returncode}")
+                else:
+                    state.add_system("✓ Bootstrap complete")
+            except subprocess.TimeoutExpired:
+                state.add_system("⚠ Bootstrap timed out (120s)")
+
+        # Start product
+        process_handle_id = None
+        startup_cmd = _read_arch_field(d, "startup_command")
+        if startup_cmd and startup_cmd.lower() not in ("none", ""):
+            state.add_system(f"Starting: {startup_cmd}")
+            handle_result = start_process(startup_cmd)
+            try:
+                handle_data = _json.loads(handle_result)
+                process_handle_id = handle_data.get("handle_id")
+                state.add_system(f"✓ PID {handle_data.get('pid')}")
+            except (ValueError, KeyError):
+                state.add_system(f"Error: Failed to start product: {handle_result}")
+                return
+
+            ready = wait_for_ready(process_handle_id, strategy="http", target="http://localhost:8000/", timeout=30)
+            if ready != "ready":
+                state.add_system(f"⚠ Readiness: {ready}")
+
+        # Stage 2: Concurrent sub-agents
+        state.add_system("Stage 2 — Executing test cases...")
+        results = [{"item_id": it["item_id"], "status": "skip", "bug_report_path": None} for it in skipped]
+
+        if testable:
+            (d / "bugs").mkdir(exist_ok=True)
+            max_workers = max(1, mc.concurrency if mc.concurrency else len(testable))
+
+            with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                futures = {
+                    pool.submit(_run_sub_agent, item, run_id, mc, vlog, process_handle_id): item["item_id"]
+                    for item in testable
+                }
+                done_count = 0
+                for future in as_completed(futures):
+                    item_id = futures[future]
+                    try:
+                        r = future.result()
+                    except Exception as exc:
+                        r = {"item_id": item_id, "status": "fail", "bug_report_path": None, "error": str(exc)}
+                    results.append(r)
+                    done_count += 1
+                    icon = "✓" if r["status"] == "pass" else "✗"
+                    state.add_system(f"  {icon} {item_id} ({done_count}/{len(testable)})")
+
+        # Update manifest
+        _update_manifest(d, results, run_id)
+
+        # Stage 3: Report
+        state.add_system("Stage 3 — Writing report...")
+        results.sort(key=lambda r: r["item_id"])
+        verdict = _write_verify_md(d, results, run_id, doc_bug_count=doc_bug_count)
+
+        passed = sum(1 for r in results if r["status"] == "pass")
+        failed = sum(1 for r in results if r["status"] == "fail")
+        skip_count = sum(1 for r in results if r["status"] == "skip")
+
+        append_state(cmd="verify", model_alias=mc.alias,
+            summary=f"Verdict: {verdict} — {passed} passed, {failed} failed, {skip_count} skipped",
+            files_created=["VERIFY.md"])
+
+        if verdict == "PASS":
+            state.add_system(f"✓ Verification passed — {passed} passed, {skip_count} skipped")
+        else:
+            state.add_system(f"✗ Verification failed — {failed} failure(s). See .voidrift/VERIFY.md")
+
+    finally:
+        stop_all()
+        clear_sessions()
+        close_all_sessions()

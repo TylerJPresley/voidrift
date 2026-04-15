@@ -333,7 +333,11 @@ def _tui_loop(agent, mc, log, session=None, style="verbose", fs_ctx=None,
             from ._chat_commands import wrap_command, handle_plan
             wrap_command(handle_plan, low[5:].strip(), mc, state, lambda f, c: "update", log)
             return
-        if low in ("/develop", "/verify", "/deploy", "/idea", "/chat"):
+        if low.startswith("/verify"):
+            from ._chat_commands import wrap_command, handle_verify
+            wrap_command(handle_verify, low[7:].strip(), mc, state, None, log)
+            return
+        if low in ("/develop", "/deploy", "/idea", "/chat"):
             state.mode = low
             if low == "/chat":
                 state.add_system("Back to chat.")

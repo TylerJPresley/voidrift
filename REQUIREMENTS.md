@@ -545,6 +545,11 @@ Verify is a two-stage requirements-driven acceptance testing command. Stage 1 pr
   - Given `/plan` is typed and plan artifacts exist, When the handler runs, Then the operator is prompted to overwrite or update before the pipeline starts.
   - Given `/plan` is typed and REQUIREMENTS.md does not exist, When the handler runs, Then an error is displayed and no stages execute.
   - Given the operator chooses overwrite, When the pipeline runs, Then existing plan artifacts are removed before Stage 1.
+- **REQ-U-2d:** WHEN the operator types `/verify` during a chat session, THE SYSTEM SHALL run the verify pipeline interactively via `handle_verify` and the `wrap_command` harness (REQ-U-2b). The handler SHALL execute all verify stages (doc verification, test planning, bootstrap, product start, concurrent sub-agents, report) using the existing pipeline helpers, reporting progress via `state.add_system()`. Process cleanup (`stop_all`, `clear_sessions`, `close_all_sessions`) SHALL execute in a `finally` block. WHEN REQUIREMENTS.md does not exist, an error SHALL be displayed. Zero chat context tokens SHALL be consumed.
+  - Given `/verify` is typed and REQUIREMENTS.md exists, When the handler runs, Then all verify stages execute and VERIFY.md is written.
+  - Given `/verify` is typed and REQUIREMENTS.md does not exist, When the handler runs, Then an error is displayed.
+  - Given a sub-agent fails, When the handler catches the error, Then the result is recorded as fail and the pipeline continues to the next item.
+  - Given the handler completes or raises, When the finally block runs, Then `stop_all()`, `clear_sessions()`, and `close_all_sessions()` are called.
 - **REQ-U-3:** `voidrift log <command>` SHALL show the last 200 lines of the most recent log. `--follow` / `-f` SHALL tail the latest log file, streaming new lines as they are written. `--prune` SHALL delete log files.
 - **REQ-U-4:** `voidrift unlock` SHALL remove the develop lock file and kill any running develop process.
 - **REQ-U-5:** `voidrift completions <shell>` SHALL output shell completion scripts for bash, zsh, and fish. All model, worker, and architect arguments SHALL complete from configured aliases in `models.yml`.
