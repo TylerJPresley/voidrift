@@ -1,0 +1,23 @@
+{
+  "name": "voidrift",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": {
+    "voidrift": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "bun run src/index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "yaml": "^2.7.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3",
+    "tsup": "^8.5.0",
+    "vitest": "^3.1.3",
+    "@types/node": "^22.15.3"
+  }
+}
