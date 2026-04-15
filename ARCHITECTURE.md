@@ -278,6 +278,7 @@ chat.py / _interactive_loop
 | `_chat_idea.py` | `IdeaState` enum, `IdeaSession` dataclass, `_handle_idea_command()` | Yes — no I/O |
 | `_chat_compact.py` | `ContextCompactor` class — failures, nudged, disabled state; `compact()`, `should_auto_compact()`, `should_nudge()` | Yes — all deps injected |
 | `_chat_display.py` | `_query_max_context`, terminal helpers, `_build_key_bindings`, confirm/ask handlers, `_make_display_callbacks`, `ChatDisplay` class | Yes — console injected |
+| `_chat_tui.py` | `TUIState`, `Message`, `_ScrollableControl`, `_render_to_lines`, `build_tui_app` | Yes — `TUIState` is a plain dataclass; `_render_to_lines` is a pure function |
 | `chat.py` | `_query_max_context` call, `_interactive_loop`, `chat` Click command | Integration only |
 
 **Dependency injection pattern:** `ContextCompactor` receives `agent`, `log`, `max_ctx`, `ui`, `session`, `original_skill`, `fs_ctx`, `estimate_tokens`, `setup_terminal`, `restore_terminal` as constructor arguments. `ChatDisplay` receives `console`. This makes every compaction and display unit independently testable with mocks.
@@ -331,6 +332,32 @@ After a task succeeds (files written, before marking implemented), `_run_task` p
 After the agent writes at least one file, `_self_review_steering` injects a one-time user message via `get_steering_messages`: "Re-read the acceptance criteria. For each AC, confirm the code satisfies it. Score confidence 0–100%. Below 90%, fix the gaps. 90% or above, call done()." A `_self_review_injected` flag ensures it fires exactly once per task.
 
 **Why:** The agent reads ACs at the start of the task, then writes code from memory. Details get lost — especially with small models. A self-review pass after writing forces the agent to re-read the ACs with the written code fresh in context. The confidence score creates a decision point: fix or finish. This mirrors START.md step 10.
+
+### 3.31 Chat TUI implementation (`_chat_tui.py`) (REQ-UI-1, REQ-UI-7, REQ-UI-8, REQ-UI-15)
+
+`_chat_tui.py` owns the full-screen `prompt_toolkit` Application for the chat command. `chat.py` drives the agent loop; `_chat_tui.py` owns terminal state and all rendering.
+
+**Layout (HSplit, top to bottom):**
+
+| Window | Height | Purpose |
+|--------|--------|---------|
+| `scrollable` | `Dimension(weight=1)` | Conversation area — fills all remaining space |
+| `sep` | 1 | Dim `─` rule |
+| `footer` | 1 | Persistent status bar (REQ-UI-6) |
+| `spacer` | 1 | Blank line above input |
+| `input_area` | 1 | `TextArea` with dynamic placeholder |
+
+Footer is always pinned at the bottom. There is no bottom spacer — the scrollable absorbs all surplus rows.
+
+**`_ScrollableControl`:** Subclass of `FormattedTextControl`. Intercepts `SCROLL_UP` and `SCROLL_DOWN` mouse events and returns `None` (handled) instead of `NotImplemented`. `Window._mouse_handler` calls `_scroll_up()` / `_scroll_down()` only when the control returns `NotImplemented` — returning `None` prevents `Window.vertical_scroll` from being mutated. The control then invokes `on_scroll_up` / `on_scroll_down` callbacks that adjust `_scroll_top`, the manual line-slicing offset. **Why:** `prompt_toolkit` routes mouse wheel events through `Keys.Vt100MouseEvent` → `Window._mouse_handler`, bypassing key bindings entirely. The only interception point before `Window.vertical_scroll` is modified is the control's `mouse_handler` return value.
+
+**`_render_to_lines`:** Returns `list[list[tuple[str, str]]]` — one inner list per display line, each a list of `(style_class, text)` fragments. `_get_conv()` in `build_tui_app` slices this list to the viewport height and converts the slice to `FormattedText`. Full re-render occurs on every `app.invalidate()` call; only the slice-to-FormattedText step varies with scroll position.
+
+**Streaming markdown cache:** `Message._rendered_cache` stores the last Rich-rendered line list; `Message._rendered_len` stores the text length at render time. `_render_to_lines` skips re-rendering when `len(text) == _rendered_len`. On stream completion (`streaming=False`), both fields reset to force a clean final render. **Why:** Rich markdown rendering at 10 Hz over a long streaming response is expensive. The length key ensures at most one render per new character, not one per tick.
+
+**Welcome callout:** Rendered unconditionally at the top of the conversation area. Box width: `min(66, usable - 2)`. Border color: `#5a6aa8`. Background: `#13132a`. Fresh session (no messages): model name, capabilities, command reference. Resumed session: same content plus "Resuming previous conversation. /clear to start fresh." appended inside the box before the closing border.
+
+**Message queue (`chat.py`):** `_pending_queue: list[str]` holds messages submitted while `state.busy`. `_dispatch_turn(text, app)` encapsulates the per-turn setup (`state.thinking`, `state.busy`, thread launch). The `_bg()` finally block pops and dispatches the first queued message when the turn ends. Escape calls `_pending_queue.clear()`. **Why:** `prompt_toolkit` buffers keystrokes during model processing — the operator can type freely. Without a queue, the submitted message is silently discarded.
 
 ---
 
