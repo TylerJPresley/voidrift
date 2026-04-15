@@ -151,8 +151,9 @@ class _Spinner:
 
     def __enter__(self) -> "_Spinner":
         self._start = time.time()
-        self._status = _Status(self._format(status="thinking"), console=_con)
-        self._status.__enter__()
+        if not _tui_active:
+            self._status = _Status(self._format(status="thinking"), console=_con)
+            self._status.__enter__()
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
         return self
@@ -169,8 +170,9 @@ class _Spinner:
             except Exception:
                 pass
             self._status.__exit__(exc_type, exc_val, exc_tb)
-        style = "dim" if exc_type is None else "yellow"
-        _con.print(f"[{style}]{final}[/{style}]")
+        if not _tui_active:
+            style = "dim" if exc_type is None else "yellow"
+            _con.print(f"[{style}]{final}[/{style}]")
 
 
 def spinner(label: str, summary: str) -> _Spinner:
@@ -377,6 +379,9 @@ from .ui_dashboard import DevelopDashboard, TaskStatus  # re-export
 
 _con = Console()
 _err = Console(stderr=True)
+
+# When True, spinner() skips Rich rendering (TUI has its own display).
+_tui_active = False
 
 # ANSI for streaming (bypasses Rich for token-by-token output)
 _BLUE = "\033[38;5;117m"

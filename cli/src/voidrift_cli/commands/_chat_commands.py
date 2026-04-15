@@ -30,7 +30,7 @@ def wrap_command(fn, args, mc, state, prompt_fn, log):
             state.add_system(f"Error: {e}")
         finally:
             state.busy = False
-            state.mode = "/chat"
+            state.mode = ""
             state._refresh()
 
     threading.Thread(target=_bg, daemon=True).start()
@@ -223,7 +223,7 @@ def handle_plan(args, mc, state, prompt_fn, log):
         system_prompt=arch_sys, user_message=prompts.load_prompt("plan", "ARCH-USER"),
         retry_message=prompts.load_prompt("plan", "ARCH-RETRY"),
         check_fn=lambda: (d / "ARCHITECTURE.md").exists(),
-        stage_label="architecture", stage_key="plan.architecture")
+        stage_label="architecture", stage_key="plan.architecture", quiet=True)
     if not ok:
         # Recovery: model may write to arch/ARCHITECTURE.md
         misplaced = d / "arch" / "ARCHITECTURE.md"
@@ -258,7 +258,7 @@ def handle_plan(args, mc, state, prompt_fn, log):
             user_message=prompts.load_prompt("plan", "MODULE-USER").format(module=module),
             retry_message=prompts.load_prompt("plan", "MODULE-RETRY").format(module=module),
             check_fn=lambda f=d / "arch" / f"{module}.md": f.exists(),
-            stage_label=module, stage_key="plan.module-arch")
+            stage_label=module, stage_key="plan.module-arch", quiet=True)
         if not ok:
             state.add_system(f"Error: Stage 2 failed for module {module}.")
             return
@@ -280,7 +280,7 @@ def handle_plan(args, mc, state, prompt_fn, log):
             user_message=prompts.load_prompt("plan", "OUTLINE-USER").format(module=module),
             retry_message=prompts.load_prompt("plan", "OUTLINE-RETRY").format(module=module),
             check_fn=lambda p=outline_path: p.exists(),
-            stage_label=module, stage_key="plan.outline")
+            stage_label=module, stage_key="plan.outline", quiet=True)
         if not ok:
             state.add_system(f"Error: Stage 3 failed for module {module}.")
             return
@@ -300,7 +300,7 @@ def handle_plan(args, mc, state, prompt_fn, log):
             user_message=prompts.load_prompt("plan", "DEPS-USER"),
             retry_message=prompts.load_prompt("plan", "DEPS-RETRY"),
             check_fn=lambda: deps_path.exists(),
-            stage_label="dependencies", stage_key="plan.deps")
+            stage_label="dependencies", stage_key="plan.deps", quiet=True)
         if not ok:
             state.add_system("Error: Stage 4 failed.")
             return
@@ -336,7 +336,7 @@ def handle_plan(args, mc, state, prompt_fn, log):
             user_message=prompts.load_prompt("plan", "TASK-USER").format(task_id=task_id),
             retry_message=prompts.load_prompt("plan", "TASK-RETRY").format(task_id=task_id),
             check_fn=lambda f=task_file: f.exists(),
-            stage_label=f"TASK-{task_id}", stage_key="plan.task")
+            stage_label=f"TASK-{task_id}", stage_key="plan.task", quiet=True)
         if not ok:
             state.add_system(f"Error: Stage 5 failed for TASK-{task_id}.")
             return
@@ -356,7 +356,7 @@ def handle_plan(args, mc, state, prompt_fn, log):
         user_message=prompts.load_prompt("plan", "README-USER"),
         retry_message=prompts.load_prompt("plan", "README-RETRY"),
         check_fn=lambda: readme_file.exists(),
-        stage_label="README", stage_key="plan.readme")
+        stage_label="README", stage_key="plan.readme", quiet=True)
 
     # Cleanup outlines
     outline_dir = d / "tasks" / "outline"

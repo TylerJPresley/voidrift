@@ -38,7 +38,7 @@ class TestWrapCommand:
         # After completion, busy is reset
         time.sleep(0.1)
         assert state.busy is False
-        assert state.mode == "/chat"
+        assert state.mode == ""
 
     def test_catches_exception(self):
         state = _FakeState()
@@ -76,7 +76,7 @@ class TestWrapCommand:
         wrap_command(handle_plan, "", None, state, None, None)
         done.wait(timeout=2)
         time.sleep(0.1)
-        assert state.mode == "/chat"
+        assert state.mode == ""
 
 
 class TestHandleGatherValidation:

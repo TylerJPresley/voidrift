@@ -55,6 +55,7 @@ def dispatch_agent(
     stage_label: str,
     stage_key: str = "plan.architecture",
     agent_cls: type | None = None,
+    quiet: bool = False,
 ) -> bool:
     """Dispatch one agent, verify artifact, retry once on failure. Returns True on success."""
     if agent_cls is None:
@@ -72,33 +73,40 @@ def dispatch_agent(
         show_spinner=False,
     )
 
-    with ui.spinner(ui.random_label(), stage_label) as spin:
-        agent.on_progress = spin.on_progress
-        try:
-            response = agent.send(user_message)
-            with open(log, "a") as f:
-                f.write(response + "\n")
-        except (RuntimeError, OSError, ValueError) as e:
+    def _run_send(msg):
+        if quiet:
+            return agent.send(msg)
+        with ui.spinner(ui.random_label(), stage_label) as spin:
+            agent.on_progress = spin.on_progress
+            return agent.send(msg)
+
+    try:
+        response = _run_send(user_message)
+        with open(log, "a") as f:
+            f.write(response + "\n")
+    except (RuntimeError, OSError, ValueError) as e:
+        if not quiet:
             ui.error(f"{stage_label} failed: {e}")
-            return False
+        return False
 
     if check_fn():
         return True
 
     if retry_message is None:
-        ui.error(f"Plan failed: {stage_label} produced no output.")
+        if not quiet:
+            ui.error(f"Plan failed: {stage_label} produced no output.")
         return False
 
-    ui.warn(f"{stage_label} — retrying...")
-    with ui.spinner("Retrying...", f"{stage_label} retry") as spin:
-        agent.on_progress = spin.on_progress
-        try:
-            response = agent.send(retry_message)
-            with open(log, "a") as f:
-                f.write(response + "\n")
-        except (RuntimeError, OSError, ValueError) as e:
+    if not quiet:
+        ui.warn(f"{stage_label} — retrying...")
+    try:
+        response = _run_send(retry_message)
+        with open(log, "a") as f:
+            f.write(response + "\n")
+    except (RuntimeError, OSError, ValueError) as e:
+        if not quiet:
             ui.error(f"{stage_label} retry failed: {e}")
-            return False
+        return False
 
     if not check_fn():
         ui.error(f"Plan failed: {stage_label} still produced no output after retry.")

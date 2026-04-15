@@ -342,10 +342,11 @@ def _tui_loop(agent, mc, log, session=None, style="verbose", fs_ctx=None,
             wrap_command(handle_develop, low[8:].strip(), mc, state, None, log)
             return
         if low in ("/deploy", "/idea", "/chat"):
-            state.mode = low
             if low == "/chat":
+                state.mode = ""
                 state.add_system("Back to chat.")
             else:
+                state.mode = low
                 state.add_system(f"Switched to {low} mode.")
             return
 
@@ -354,10 +355,19 @@ def _tui_loop(agent, mc, log, session=None, style="verbose", fs_ctx=None,
             if not text:
                 return
 
-        # If the agent is busy, stage as pending (replaces any existing pending)
+        # If the agent is busy, only /ask is accepted during command execution
         if state.busy:
-            state.pending_message = text
-            state._refresh()
+            if state.mode and text.lower().startswith("/ask"):
+                # /ask during command — queue for the operator question mechanism
+                state.pending_message = text
+                state._refresh()
+            elif state.mode:
+                # Command running — reject all other input
+                state.add_system("Command running — use /ask for questions.")
+            else:
+                # Model processing (not a command) — queue as pending
+                state.pending_message = text
+                state._refresh()
             return
 
         state.input_history.append(text)
@@ -391,8 +401,10 @@ def _tui_loop(agent, mc, log, session=None, style="verbose", fs_ctx=None,
                          on_recall_pending=_on_recall_pending, on_idle=_on_idle)
 
     try:
+        ui._tui_active = True
         app.run()
     finally:
+        ui._tui_active = False
         agent.on_token = None
         agent.on_complete = None
         agent.on_tool_call = None

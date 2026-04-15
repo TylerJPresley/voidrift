@@ -123,7 +123,7 @@ class TUIState:
         self.model_name = model_name
         self.context_pct = 0
         self.max_ctx = max_ctx
-        self.mode = "/chat"
+        self.mode = ""
         self.cwd = _short_cwd()
         self.branch = _git_branch()
         self.thinking = False
@@ -327,9 +327,10 @@ def _render_footer(state: TUIState, width: int) -> FormattedText:
         ("class:ft-name", state.model_name),
         ("class:ft-dim", " · "),
         (ctx_cls, f"◎ {pct}%"),
-        ("class:ft-dim", " · "),
-        ("class:ft-mode", state.mode),
     ]
+    if state.mode:
+        left.append(("class:ft-dim", " · "))
+        left.append(("class:ft-mode", state.mode))
     right: list[tuple[str, str]] = [("class:ft-path", state.cwd)]
     if state.branch:
         right.append(("class:ft-dim", " · "))
