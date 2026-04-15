@@ -68,7 +68,7 @@ Open tasks ordered by dependency. Complete in sequence.
 
 ## TASK-F11: Gather triage display — show full file listing and uncategorized files
 
-**Status:** Not started
+**Status:** Complete
 
 **Problem:** The current `voidrift gather` output shows only counts (`source(6), config(4)`) and a vague "8 files not categorized" warning. The operator can't see which files are in each category or which files were dropped. If important source files are uncategorized, the operator has no way to know without digging into logs.
 
