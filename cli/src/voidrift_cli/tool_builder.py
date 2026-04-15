@@ -289,6 +289,168 @@ def validate_schema_handler_contract(tools: list[dict], handlers: dict[str, Call
             )
 
 
+def build_domain_handlers(cmd: str | None, project_dir: Path, ctx=None,
+                          web_fetch_kwargs: dict | None = None, ask_fn=None,
+                          source_read_ctx=None, permission_gate=None,
+                          permission_confirm_holder=None) -> dict[str, Callable]:
+    """Build handlers for the consolidated 10-tool domain schema (TASK-F20)."""
+    import json as _json
+
+    from .tools.filesystem import WriteContext as _WriteContext
+    from .tools.registry import make_domain_handlers as _make_dh
+
+    _ctx = ctx if ctx is not None else _WriteContext(project_dir=project_dir)
+    handlers = _make_dh(_ctx, project_dir=str(project_dir))
+
+    # --- HTTP handler (merges web_fetch + http_request) ---
+    def _http_handler(action: str, url: str = "", headers: dict | None = None,
+                      body: str = "", session_id: str = "") -> str:
+        if action == "get" and not session_id:
+            # Summarize mode (like web_fetch)
+            if web_fetch_kwargs is not None:
+                from .tools.web import make_web_fetch_handler as _make_wf
+                _wf = _make_wf(**web_fetch_kwargs)
+                return _wf(url)
+            return "HTTP GET with summarization is only available during chat."
+        from .tools.http_client import http_request as _hr
+        return _hr(method=action.upper(), url=url, headers=headers,
+                    body=body, session_id=session_id or "default")
+
+    handlers["http"] = _http_handler
+
+    # --- Shell handler ---
+    _bash_cmd = cmd.split("-")[0] if cmd is not None else ""
+    if _bash_cmd in ("develop", "chat", "verify"):
+        from .config import get_bash_config as _get_bash_cfg, get_allowed_commands as _get_ac
+        from .tools.bash import create_run_command as _create_rc
+        _bcfg = _get_bash_cfg(_bash_cmd)
+        _rc = _create_rc(_bcfg, global_allowed=_get_ac())
+        handlers["shell"] = lambda cmd, cwd="": _rc(cmd, cwd=cwd)
+
+    # --- Browser handler ---
+    from .tools import browser as _browser
+
+    def _browser_handler(action: str, url: str = "", selector: str = "",
+                         session_id: str = "default") -> str:
+        if action == "navigate":
+            return _browser.browser_navigate(url=url, session_id=session_id)
+        elif action == "screenshot":
+            return _browser.browser_screenshot(session_id=session_id)
+        elif action == "click":
+            return _browser.browser_click(selector=selector, session_id=session_id)
+        elif action == "get_text":
+            return _browser.browser_get_text(selector=selector, session_id=session_id)
+        return f"Unknown browser action: {action}"
+
+    handlers["browser"] = _browser_handler
+
+    # --- Process handler ---
+    from .tools import process_manager as _pm
+
+    def _process_handler(action: str, handle_id: str = "") -> str:
+        if action == "read_output":
+            return _pm.read_process_output(handle_id)
+        return f"Unknown process action: {action}"
+
+    handlers["process"] = _process_handler
+
+    # --- Skill handler ---
+    from .skills import find_skill as _find_skill, list_skills as _list_skills
+    from .skills import get_skill_allowed_tools as _get_allowed
+    import re as _re
+
+    def _skill_handler(action: str, name: str = "", topic: str = "") -> str:
+        if action == "list":
+            return _list_skills()
+        if action == "get":
+            if not name:
+                return "Error: name is required for skill get."
+            content = _find_skill(name)
+            if content is None:
+                return f"Skill '{name}' not found."
+            at = _get_allowed(name)
+            if topic:
+                parts = _re.split(r"^## (.+)$", content, flags=_re.MULTILINE)
+                for i in range(1, len(parts), 2):
+                    if parts[i].strip().lower() == topic.strip().lower():
+                        content = parts[i + 1].strip() if i + 1 < len(parts) else ""
+                        break
+                else:
+                    return f"Section '{topic}' not found in skill '{name}'."
+            if at is not None or name:
+                meta = _json.dumps({"_skill_allowed_tools": at, "_skill_name": name})
+                return f"<!-- SKILL_META:{meta} -->\n{content}"
+            return content
+        return f"Unknown skill action: {action}"
+
+    handlers["skill"] = _skill_handler
+
+    # --- Memory handler ---
+    from .memory import MemoryManager as _MemMgr
+
+    def _memory_handler(action: str, name: str = "", content: str = "",
+                        scope: str = "project", description: str = "") -> str:
+        mgr = _MemMgr(str(project_dir))
+        if action == "read":
+            c = mgr.read(name)
+            return c if c else f"Memory entry '{name}' not found."
+        elif action == "write":
+            mgr.write(name, content, scope=scope, description=description)
+            return f"Memory entry '{name}' saved ({scope})."
+        elif action == "list":
+            entries = mgr.list_entries()
+            if not entries:
+                return "No memory entries."
+            return "\n".join(f"- {e.name} ({e.scope}): {e.description}" for e in entries)
+        elif action == "delete":
+            mgr.delete(name)
+            return f"Memory entry '{name}' deleted."
+        return f"Unknown memory action: {action}"
+
+    handlers["memory"] = _memory_handler
+
+    # --- Session handler ---
+    from .session import ChatSession as _ChatSes
+
+    def _session_handler(action: str, query: str = "", limit: int = 5) -> str:
+        if action == "search":
+            _session = _ChatSes.load_or_create(project_dir / ".voidrift")
+            if not _session.path.exists():
+                return "No session history available."
+            results = _session.search_entries(query, limit=limit)
+            if not results:
+                return f"No matches found for '{query}'."
+            lines = [f"Found {len(results)} match(es) for '{query}':"]
+            for r in results:
+                lines.append(f"\n[{r['timestamp']}] {r['role']}:\n{r['content']}")
+            return "\n".join(lines)
+        return f"Unknown session action: {action}"
+
+    handlers["session"] = _session_handler
+
+    # --- Analyze handler ---
+    from .tools.document import read_document as _read_doc
+    from .tools.code_analysis import code_analysis as _code_analysis
+
+    def _analyze_handler(action: str, path: str = "") -> str:
+        if not path:
+            return "Error: path is required."
+        if action == "code":
+            return _code_analysis(path, str(project_dir))
+        elif action == "document":
+            return _read_doc(path, str(project_dir))
+        return f"Unknown analyze action: {action}"
+
+    handlers["analyze"] = _analyze_handler
+
+    # --- Ask handler ---
+    from .tools.interaction import make_ask_user_handler as _make_auh
+    _auh = _make_auh(ask_fn=ask_fn)
+    handlers["ask"] = lambda question, options=None: _auh(question, options)
+
+    return handlers
+
+
 def _build_bash_tool_def(cmd: str | None) -> dict | None:
     """Build the bash tool definition with dynamic description, or None if not applicable."""
     _bash_cmd = cmd.split("-")[0] if cmd is not None else ""
