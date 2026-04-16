@@ -16,6 +16,8 @@ interface AppProps {
 export function App({ state, onSubmit, onEscape }: AppProps) {
   const [input, setInput] = useState("");
   const [, forceUpdate] = useState(0);
+  const [historyIdx, setHistoryIdx] = useState(-1);
+  const [savedInput, setSavedInput] = useState("");
   const { exit } = useApp();
 
   // Subscribe to state mutations
@@ -29,12 +31,32 @@ export function App({ state, onSubmit, onEscape }: AppProps) {
       onEscape?.();
       return;
     }
+    // Input history cycling (REQ-UI-16)
+    if (key.upArrow && !input) {
+      // Pending message recall takes priority (REQ-UI-15)
+      if (state.pendingMessage) return;
+      if (!state.inputHistory.length) return;
+      if (historyIdx === -1) setSavedInput(input);
+      const newIdx = Math.min(historyIdx + 1, state.inputHistory.length - 1);
+      setHistoryIdx(newIdx);
+      setInput(state.inputHistory[state.inputHistory.length - 1 - newIdx]);
+      return;
+    }
+    if (key.downArrow && historyIdx >= 0) {
+      const newIdx = historyIdx - 1;
+      if (newIdx < 0) { setHistoryIdx(-1); setInput(savedInput); return; }
+      setHistoryIdx(newIdx);
+      setInput(state.inputHistory[state.inputHistory.length - 1 - newIdx]);
+      return;
+    }
   });
 
   const handleSubmit = useCallback((value: string) => {
     const text = value.trim();
     if (!text) return;
     setInput("");
+    setHistoryIdx(-1);
+    state.inputHistory.push(text);
 
     if (text.toLowerCase() === "/quit" || text.toLowerCase() === "quit") {
       exit();
@@ -45,7 +67,7 @@ export function App({ state, onSubmit, onEscape }: AppProps) {
   }, [onSubmit, exit]);
 
   const placeholder = state.busy
-    ? (state.mode ? "command running · /ask for questions" : "voidrift is working · type to queue a message")
+    ? (state.mode ? "command running · /quick for questions" : "voidrift is working · type to queue a message")
     : "ask a question or describe a task ↵";
 
   return (

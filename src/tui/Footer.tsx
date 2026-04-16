@@ -31,7 +31,7 @@ export function Footer({ modelName, contextPct, mode, cwd, branch }: FooterProps
       {branch ? (
         <>
           <Text dimColor> · </Text>
-          <Text color="#5c8cc8">({branch})</Text>
+          <Text color="#c678dd">({branch})</Text>
         </>
       ) : null}
       <Text>  </Text>

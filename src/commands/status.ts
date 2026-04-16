@@ -1,8 +1,17 @@
 /**
- * Status command: task counts by lifecycle status (REQ-UI-13).
+ * Status command: task counts by lifecycle status (REQ-UI-13, REQ-U-1).
  */
 
 import { ManifestManager } from "../manifest.js";
+
+const STATUS_EMOJI: Record<string, string> = {
+  planned: "⬜",
+  "in-progress": "🔄",
+  implemented: "🔧",
+  verified: "✅",
+  failed: "❌",
+  blocked: "🚫",
+};
 
 export function runStatus(): void {
   const mm = new ManifestManager();
@@ -16,12 +25,11 @@ export function runStatus(): void {
 
   console.log("\n  Task Status");
   console.log("  ─────────────────────────────────────");
-  console.log(`  Planned:      ${s.planned}`);
-  console.log(`  In Progress:  ${s["in-progress"]}`);
-  console.log(`  Implemented:  ${s.implemented}`);
-  console.log(`  Verified:     ${s.verified}`);
-  console.log(`  Failed:       ${s.failed}`);
-  console.log(`  Blocked:      ${s.blocked}`);
+  for (const [status, count] of Object.entries(s)) {
+    const emoji = STATUS_EMOJI[status] ?? "  ";
+    const label = status.charAt(0).toUpperCase() + status.slice(1);
+    console.log(`  ${emoji} ${label.padEnd(14)} ${count}`);
+  }
   console.log(`  ─────────────────────────────────────`);
-  console.log(`  Total:        ${total}\n`);
+  console.log(`     Total:        ${total}\n`);
 }

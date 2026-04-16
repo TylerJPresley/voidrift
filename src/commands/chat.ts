@@ -355,7 +355,9 @@ export async function runChat(model: ModelInterface, options: ChatOptions = {}):
         streamBuf = "";
         addModel(state, "", "", true); // Start streaming placeholder
         const response = await agent.send(text);
-        updateLastModel(state, response, "", false); // Finalize
+        // Empty response fallback (REQ-UI-14)
+        const displayText = response.trim() ? response : "(No response from model)";
+        updateLastModel(state, displayText, "", false);
         session.append("assistant", response);
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
