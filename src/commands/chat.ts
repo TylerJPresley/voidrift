@@ -207,7 +207,13 @@ export async function runChat(model: ModelInterface, options: ChatOptions = {}):
         updateLastModel(state, response, "", false);
         session.append("assistant", response);
       } catch (e) {
-        addSystem(state, `Error: ${e instanceof Error ? e.message : e}`);
+        const msg = e instanceof Error ? e.message : String(e);
+        const name = (e as Record<string, unknown>)?.constructor?.name ?? "";
+        if (name === "APIConnectionError" || msg.includes("Connection error")) {
+          addSystem(state, `Cannot connect to ${model.config.baseUrl} — is the model/gateway running?`);
+        } else {
+          addSystem(state, `Error: ${msg}`);
+        }
       } finally {
         state.thinking = false;
         state.busy = false;

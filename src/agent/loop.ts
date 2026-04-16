@@ -546,9 +546,11 @@ export class AgentLoop {
   private _isRetryable(e: unknown): boolean {
     const msg = e instanceof Error ? e.message : String(e);
     const status = (e as Record<string, unknown>)?.status as number | undefined;
+    const name = (e as Record<string, unknown>)?.constructor?.name ?? "";
     if (status === 429) return true;
     if (status && status >= 500) return true;
-    if (msg.includes("ECONNREFUSED") || msg.includes("ECONNRESET") || msg.includes("ETIMEDOUT")) return true;
+    if (name === "APIConnectionError") return true;
+    if (msg.includes("ECONNREFUSED") || msg.includes("ECONNRESET") || msg.includes("ETIMEDOUT") || msg.includes("Connection error")) return true;
     if (status && status >= 400 && status < 500) return false;
     return false;
   }
