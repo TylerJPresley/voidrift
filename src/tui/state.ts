@@ -23,6 +23,8 @@ export interface TUIState {
   busy: boolean;
   pendingMessage: string | null;
   inputHistory: string[];
+  _version: number;
+  _notify?: () => void;
 }
 
 export function createState(modelName: string, cwd: string, branch: string): TUIState {
@@ -38,27 +40,38 @@ export function createState(modelName: string, cwd: string, branch: string): TUI
     busy: false,
     pendingMessage: null,
     inputHistory: [],
+    _version: 0,
   };
+}
+
+function notify(state: TUIState): void {
+  state._version++;
+  state._notify?.();
 }
 
 export function addOperator(state: TUIState, text: string): void {
   state.messages.push({ role: "operator", text });
+  notify(state);
 }
 
 export function addModel(state: TUIState, text: string, stats = "", streaming = false): void {
   state.messages.push({ role: "model", text, stats, streaming });
+  notify(state);
 }
 
 export function addTool(state: TUIState, toolName: string, detail = "", action = ""): void {
   state.messages.push({ role: "tool", text: detail, toolName, toolAction: action });
+  notify(state);
 }
 
 export function addSystem(state: TUIState, text: string): void {
   state.messages.push({ role: "system", text });
+  notify(state);
 }
 
 export function addDiff(state: TUIState, summary: string, diffLines: string): void {
   state.messages.push({ role: "diff", text: diffLines, toolName: summary });
+  notify(state);
 }
 
 export function updateLastModel(state: TUIState, text: string, stats = "", streaming = true): void {
@@ -67,5 +80,6 @@ export function updateLastModel(state: TUIState, text: string, stats = "", strea
     last.text = text;
     last.stats = stats;
     last.streaming = streaming;
+    notify(state);
   }
 }

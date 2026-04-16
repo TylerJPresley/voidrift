@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import { Box, Text, useInput, useApp } from "ink";
 import TextInput from "ink-text-input";
 import type { TUIState, TUIMessage } from "./state.js";
@@ -15,7 +15,14 @@ interface AppProps {
 
 export function App({ state, onSubmit, onEscape }: AppProps) {
   const [input, setInput] = useState("");
+  const [, forceUpdate] = useState(0);
   const { exit } = useApp();
+
+  // Subscribe to state mutations
+  useEffect(() => {
+    state._notify = () => forceUpdate(v => v + 1);
+    return () => { state._notify = undefined; };
+  }, [state]);
 
   useInput((ch, key) => {
     if (key.escape) {

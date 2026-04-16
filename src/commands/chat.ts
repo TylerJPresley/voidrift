@@ -103,6 +103,7 @@ export async function runChat(model: ModelInterface, options: ChatOptions = {}):
   // Callbacks
   agent.onToolCall = (name, args) => {
     state.thinking = true;
+    state._notify?.();
     try {
       const a = JSON.parse(args || "{}");
       const action = a.action ?? "";
@@ -193,6 +194,7 @@ export async function runChat(model: ModelInterface, options: ChatOptions = {}):
     addModel(state, "", "", true);
     state.thinking = true;
     state.busy = true;
+    state._notify?.();
 
     (async () => {
       try {
@@ -210,6 +212,7 @@ export async function runChat(model: ModelInterface, options: ChatOptions = {}):
       } finally {
         state.thinking = false;
         state.busy = false;
+        state._notify?.();
         // Dispatch pending
         if (state.pendingMessage) {
           const pending = state.pendingMessage;
