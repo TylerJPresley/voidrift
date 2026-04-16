@@ -66,6 +66,16 @@ export async function runDeploy(worker: ModelInterface, architect?: ModelInterfa
     : bump === "minor" ? `${major}.${minor + 1}.0`
     : `${major}.${minor}.${patch + 1}`;
 
+  // Operator confirmation (REQ-DPL-1)
+  process.stderr.write(`Suggested: ${bump} bump → v${newVersion}\n`);
+  if (process.stdin.isTTY) {
+    const { createInterface } = require("node:readline");
+    const rl = createInterface({ input: process.stdin, output: process.stderr });
+    const answer: string = await new Promise(resolve => rl.question("Confirm? [Y/n] ", resolve));
+    rl.close();
+    if (answer.trim().toLowerCase() === "n") { process.stderr.write("Deploy cancelled.\n"); return 0; }
+  }
+
   // Changelog (REQ-DPL-2)
   const changelogEntry = `## v${newVersion}\n\n${historyLines.map(l => `- ${l}`).join("\n")}\n`;
   const changelogPath = join(projectDir, "CHANGELOG.md");
@@ -81,6 +91,16 @@ export async function runDeploy(worker: ModelInterface, architect?: ModelInterfa
     execSync(`git tag -a v${newVersion} -m "${changelogEntry.replace(/"/g, '\\"')}"`, { cwd: projectDir, timeout: 10000 });
   } catch (e) {
     process.stderr.write(`Warning: git tag failed: ${e}\n`);
+  }
+
+  // History rotation (REQ-TM-8)
+  if (existsSync(historyPath)) {
+    const rotatedPath = join(d, "tasks", `history-v${newVersion}.log`);
+    try {
+      const { renameSync } = require("node:fs");
+      renameSync(historyPath, rotatedPath);
+      writeFileSync(historyPath, "", "utf-8"); // Create new empty history.log
+    } catch { /* */ }
   }
 
   // Optional IaC (REQ-DPL-4)

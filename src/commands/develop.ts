@@ -18,9 +18,42 @@ import { ensureVoidriftDir, bootRun, appendState, checkDiskSpace, checkRequireme
 import { getMaxTokens } from "../config.js";
 import { captureGitSnapshot, snapshotToPromptBlock, GitCheckpointManager } from "../git.js";
 import { snipOldToolResults } from "../agent/context.js";
-import { clearAbort, isAbortRequested } from "../agent/abort.js";
+import { clearAbort, isAbortRequested, requestAbort } from "../agent/abort.js";
 
 const MAX_ESCALATIONS = 5;
+
+/** Simple async mutex for git operations (REQ-D-11). */
+class AsyncMutex {
+  private _queue: Array<() => void> = [];
+  private _locked = false;
+  async acquire(): Promise<void> {
+    if (!this._locked) { this._locked = true; return; }
+    return new Promise(resolve => this._queue.push(resolve));
+  }
+  release(): void {
+    const next = this._queue.shift();
+    if (next) next(); else this._locked = false;
+  }
+}
+
+/** Run tasks with concurrency limit (REQ-D-10). */
+async function runWithConcurrency<T>(tasks: Array<() => Promise<T>>, limit: number): Promise<T[]> {
+  if (limit <= 1) {
+    const results: T[] = [];
+    for (const task of tasks) results.push(await task());
+    return results;
+  }
+  const results: T[] = new Array(tasks.length);
+  let idx = 0;
+  const run = async () => {
+    while (idx < tasks.length) {
+      const i = idx++;
+      results[i] = await tasks[i]();
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, tasks.length) }, () => run()));
+  return results;
+}
 
 export async function runDevelop(
   worker: ModelInterface,
@@ -67,25 +100,38 @@ export async function runDevelop(
   const snap = captureGitSnapshot(join(d, ".."));
   const gitContext = snap ? snapshotToPromptBlock(snap) : "";
   const checkpoints = snap ? new GitCheckpointManager(join(d, "..")) : null;
+  const gitMutex = new AsyncMutex();
+  const concurrency = worker.config.concurrency ?? 1;
 
   let escalationCount = 0;
   const allDiffStats: Array<[number, Array<{ path: string; status: string; linesAdded: number; linesRemoved: number }>]> = [];
   const archModel = architect ?? worker;
 
+  // SIGINT handler (REQ-D-13)
+  let sigintCount = 0;
+  const sigHandler = () => {
+    sigintCount++;
+    if (sigintCount >= 2) { process.exit(1); }
+    requestAbort();
+  };
+  process.on("SIGINT", sigHandler);
+  process.on("SIGTERM", sigHandler);
+
   try {
     while (mm.hasWork()) {
       const ready = mm.dispatchable();
       if (!ready.length) break;
+      if (isAbortRequested()) break;
 
-      for (const taskId of ready) {
-        if (isAbortRequested()) break;
+      const taskFns = ready.map(taskId => async () => {
+        if (isAbortRequested()) return;
         tokenBudget?.checkBefore();
 
         mm.setStatus(taskId, "in-progress");
         checkpoints?.create(taskId, taskId);
 
         const taskPath = join(d, "tasks", "active", `TASK-${taskId}.md`);
-        if (!existsSync(taskPath)) { mm.setStatus(taskId, "blocked"); continue; }
+        if (!existsSync(taskPath)) { mm.setStatus(taskId, "blocked"); return; }
         const taskText = readFileSync(taskPath, "utf-8");
 
         // Parse skills from frontmatter
@@ -144,7 +190,7 @@ export async function runDevelop(
           if (e instanceof BudgetExhaustedError) throw e;
           ctx.rollbackSnapshots();
           mm.setStatus(taskId, "planned");
-          continue;
+          return;
         }
 
         if (ctx.getWriteCount() > 0) {
@@ -174,9 +220,13 @@ export async function runDevelop(
             mm.setStatus(taskId, "blocked");
           }
         }
-      }
+      }); // end task function
+
+      await runWithConcurrency(taskFns, concurrency);
     }
   } finally {
+    process.removeListener("SIGINT", sigHandler);
+    process.removeListener("SIGTERM", sigHandler);
     try { unlinkSync(lock); } catch { /* */ }
     if (checkpoints?.checkpoints.length) checkpoints.save(join(d, "checkpoints.jsonl"));
   }

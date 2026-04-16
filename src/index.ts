@@ -145,6 +145,32 @@ program
     const files = readdirSync(logDir).filter(f => f.endsWith(".log") && (!command || f.startsWith(command))).sort();
     if (!files.length) { console.log("No matching logs."); return; }
     const latest = join(logDir, files[files.length - 1]);
+    if (opts.follow) {
+      // Follow mode — tail the file (REQ-U-3)
+      const { createReadStream } = await import("node:fs");
+      const { createInterface } = await import("node:readline");
+      const stream = createReadStream(latest, { encoding: "utf-8", start: 0 });
+      const rl = createInterface({ input: stream });
+      rl.on("line", (line: string) => console.log(line));
+      // Keep watching for new content
+      const { watchFile } = await import("node:fs");
+      let pos = (await import("node:fs")).statSync(latest).size;
+      watchFile(latest, { interval: 500 }, () => {
+        const { readFileSync: rf, statSync: ss } = require("node:fs");
+        const newSize = ss(latest).size;
+        if (newSize > pos) {
+          const buf = Buffer.alloc(newSize - pos);
+          const fd = require("node:fs").openSync(latest, "r");
+          require("node:fs").readSync(fd, buf, 0, buf.length, pos);
+          require("node:fs").closeSync(fd);
+          process.stdout.write(buf.toString("utf-8"));
+          pos = newSize;
+        }
+      });
+      // Block until Ctrl+C
+      await new Promise(() => {});
+      return;
+    }
     const content = readFileSync(latest, "utf-8");
     const lines = content.split("\n");
     console.log(lines.slice(-200).join("\n"));

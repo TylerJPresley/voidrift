@@ -219,11 +219,41 @@ export async function runPlan(model: ModelInterface, overwrite = false, ideaId?:
   const requirements = readFileSync(join(d, "REQUIREMENTS.md"), "utf-8");
   const skill = findSkill("ARCH-DESIGN") ?? "";
 
+  // Delta analysis for update mode (REQ-P-11)
+  let deltaContext = "";
+  const isUpdate = !overwrite && existsSync(join(d, "ARCHITECTURE.md")) && existsSync(join(d, "tasks", "manifest.yml"));
+  if (isUpdate) {
+    process.stderr.write("▸ Update mode — running delta analysis...\n");
+    try {
+      const projectDir = join(d, "..");
+      const { readdirSync: rd, statSync: ss } = require("node:fs");
+      const walk = (dir: string, prefix = ""): string[] => {
+        const results: string[] = [];
+        for (const e of rd(dir, { withFileTypes: true })) {
+          if (e.name.startsWith(".")) continue;
+          const rel = prefix ? `${prefix}/${e.name}` : e.name;
+          if (e.isDirectory()) results.push(...walk(join(dir, e.name), rel));
+          else results.push(rel);
+        }
+        return results;
+      };
+      const sourceFiles = walk(projectDir).filter(f => !f.startsWith(".voidrift/") && !f.includes("node_modules")).slice(0, 200);
+      const deltaPrompt = loadPrompt("plan", "PLAN-DELTA") ?? "Analyze which requirements are satisfied by existing files and which need implementation.";
+      const deltaAgent = new AgentLoop({
+        model, systemPrompt: deltaPrompt, tools: [], toolHandlers: {},
+        stream: false, maxTokens: getMaxTokens(model.config, "plan.delta"), logPath: log, showSpinner: false,
+      });
+      const existingArch = readFileSync(join(d, "ARCHITECTURE.md"), "utf-8");
+      deltaContext = await deltaAgent.send(`REQUIREMENTS:\n${requirements}\n\nARCHITECTURE:\n${existingArch}\n\nSOURCE FILES:\n${sourceFiles.join("\n")}`);
+    } catch { /* delta analysis is best-effort */ }
+  }
+
   // Stage 1: Architecture
   const archTemplate = loadTemplate("ARCHITECTURE-TEMPLATE");
-  const archPrompt = loadPrompt("plan", "PLAN-ARCH")
+  let archPrompt = loadPrompt("plan", "PLAN-ARCH")
     .replace("{requirements}", requirements)
     .replace("{arch_template}", archTemplate);
+  if (deltaContext) archPrompt += `\n\n## Delta Analysis\n\n${deltaContext}`;
   const archSystem = [skill, archPrompt].filter(Boolean).join("\n\n");
 
   const ok1 = await dispatchAgent({

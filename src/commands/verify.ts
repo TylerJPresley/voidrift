@@ -78,7 +78,8 @@ export async function runVerify(worker: ModelInterface): Promise<number> {
     for (const item of skipped) results.push({ itemId: item.itemId, status: "skip" });
 
     const [execTools, execHandlers] = buildLocalTools("verify-execute", join(d, ".."), ctx);
-    for (const item of testable) {
+    const concurrency = worker.config.concurrency ?? 1;
+    const taskFns = testable.map(item => async () => {
       const execPrompt = loadPrompt("verify", "EXECUTE");
       const execSystem = [loadPrompt("system", "CONTEXT"), skill, execPrompt].filter(Boolean).join("\n\n");
       const agent = new AgentLoop({
@@ -88,11 +89,15 @@ export async function runVerify(worker: ModelInterface): Promise<number> {
       try {
         await agent.send(item.content);
         const bugPath = join(d, "bugs", `${item.itemId}.md`);
-        results.push({ itemId: item.itemId, status: existsSync(bugPath) ? "fail" : "pass", bugPath: existsSync(bugPath) ? bugPath : undefined });
+        return { itemId: item.itemId, status: existsSync(bugPath) ? "fail" : "pass", bugPath: existsSync(bugPath) ? bugPath : undefined };
       } catch {
-        results.push({ itemId: item.itemId, status: "fail" });
+        return { itemId: item.itemId, status: "fail" as const };
       }
-    }
+    });
+
+    // Run concurrently up to model's concurrency limit (REQ-VF-15)
+    const execResults = await _runConcurrent(taskFns, concurrency);
+    results.push(...execResults);
 
     // Stage 3: Report
     results.sort((a, b) => a.itemId.localeCompare(b.itemId));
@@ -154,6 +159,15 @@ export function readArchField(dir: string, field: string): string | null {
     const fm = parseYaml(content.slice(4, end));
     return fm?.[field] ? String(fm[field]) : null;
   } catch { return null; }
+}
+
+async function _runConcurrent<T>(tasks: Array<() => Promise<T>>, limit: number): Promise<T[]> {
+  if (limit <= 1) { const r: T[] = []; for (const t of tasks) r.push(await t()); return r; }
+  const results: T[] = new Array(tasks.length);
+  let idx = 0;
+  const run = async () => { while (idx < tasks.length) { const i = idx++; results[i] = await tasks[i](); } };
+  await Promise.all(Array.from({ length: Math.min(limit, tasks.length) }, () => run()));
+  return results;
 }
 
 async function _runDocVerify(model: ModelInterface, d: string, log: string, ctx: WriteContext): Promise<void> {

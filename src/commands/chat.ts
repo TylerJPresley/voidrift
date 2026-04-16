@@ -21,7 +21,7 @@ import { captureGitSnapshot, snapshotToPromptBlock } from "../git.js";
 import { createState, addOperator, addModel, addTool, addSystem, updateLastModel, type TUIState } from "../tui/state.js";
 import { App } from "../tui/App.js";
 import { wrapCommand, handleGather, handlePlan, handleDevelop, handleVerify } from "./slashCommands.js";
-import { IdeaSession } from "./idea.js";
+import { IdeaSession, readIdea, writeIdea, nextIdeaId, buildIdeaContent } from "./idea.js";
 import { createPermissionGate, type PermCategory, type PermDecision } from "./permissions.js";
 
 interface ChatOptions {
@@ -49,17 +49,6 @@ export async function runChat(model: ModelInterface, options: ChatOptions = {}):
     if (skill) parts.push(skill);
     parts.push(loadPrompt("chat", "SYSTEM"));
 
-    // Doc context
-    if (options.doc) {
-      const docPath = join(d, options.doc);
-      if (existsSync(docPath)) {
-        const docContent = readFileSync(docPath, "utf-8");
-        parts.push(loadPrompt("chat", "DOC").replace("{doc_name}", options.doc).replace("{doc_content}", docContent));
-      } else {
-        parts.push(loadPrompt("chat", "DOC-NEW").replace(/{doc_name}/g, options.doc));
-      }
-    }
-
     // Memory index
     const memIndex = memMgr.buildIndex();
     if (memIndex) parts.push(memIndex);
@@ -69,6 +58,19 @@ export async function runChat(model: ModelInterface, options: ChatOptions = {}):
     if (snap) parts.push(snapshotToPromptBlock(snap));
 
     systemPrompt = parts.filter(Boolean).join("\n\n");
+  }
+
+  // Doc context — works in all modes including bare (REQ-U-17)
+  if (options.doc) {
+    const docPath = join(d, options.doc);
+    if (existsSync(docPath)) {
+      const docContent = readFileSync(docPath, "utf-8");
+      const docBlock = loadPrompt("chat", "DOC")?.replace("{doc_name}", options.doc).replace("{doc_content}", docContent) ?? `## ${options.doc}\n\n${docContent}`;
+      systemPrompt += "\n\n" + docBlock;
+    } else {
+      const newBlock = loadPrompt("chat", "DOC-NEW")?.replace(/{doc_name}/g, options.doc) ?? `Document ${options.doc} does not exist yet.`;
+      systemPrompt += "\n\n" + newBlock;
+    }
   }
 
   // Build tools + agent
@@ -248,6 +250,60 @@ export async function runChat(model: ModelInterface, options: ChatOptions = {}):
       wrapCommand(handleVerify, text.slice(7).trim(), model, state, defaultPromptFn, log);
       return;
     }
+
+    // /idea [id] — start or resume idea refinement (REQ-IDEA-1)
+    if (low.startsWith("/idea")) {
+      const arg = text.slice(5).trim();
+      if (ideaSession.isActive()) { addSystem(state, "Idea session already active. Type /done to finish."); return; }
+      const id = arg ? parseInt(arg, 10) : null;
+      if (id !== null && isNaN(id)) { addSystem(state, "Usage: /idea [id]"); return; }
+      if (id) {
+        const content = readIdea(projectDir, id);
+        if (!content) { addSystem(state, `IDEA-${id} not found.`); return; }
+        ideaSession.start(id);
+        state.mode = "/idea"; state._notify?.();
+        addSystem(state, `Loaded IDEA-${id}. Describe what to refine, or /done to save.`);
+        state.busy = true; state.thinking = true; state._notify?.();
+        (async () => {
+          try {
+            streamBuf = ""; addModel(state, "", "", true);
+            const r = await agent.send(`I'm resuming work on this idea:\n\n${content}\n\nSummarize the current state and ask what I'd like to refine.`);
+            updateLastModel(state, r, "", false);
+          } catch (e) { addSystem(state, `Error: ${e}`); }
+          finally { state.thinking = false; state.busy = false; state._notify?.(); }
+        })();
+      } else {
+        const newId = nextIdeaId(projectDir);
+        ideaSession.start(newId);
+        state.mode = "/idea"; state._notify?.();
+        addSystem(state, `New idea IDEA-${newId}. Describe your idea — the agent will guide you. /done to save.`);
+      }
+      return;
+    }
+
+    // /done [category] — save idea (REQ-IDEA-3)
+    if (low.startsWith("/done")) {
+      if (!ideaSession.isActive()) { addSystem(state, "No active idea session."); return; }
+      const cat = text.slice(5).trim().toLowerCase() || "now";
+      if (!["now", "next", "later"].includes(cat)) { addSystem(state, "Category: now, next, or later"); return; }
+      const id = ideaSession.ideaId ?? nextIdeaId(projectDir);
+      state.busy = true; state.thinking = true; state._notify?.();
+      (async () => {
+        try {
+          streamBuf = ""; addModel(state, "", "", true);
+          const summary = await agent.send("Produce a structured idea summary: Title, User Story, Acceptance Criteria, Affected Modules, Affected Files. Markdown format.");
+          updateLastModel(state, summary, "", false);
+          writeIdea(projectDir, id, buildIdeaContent(`IDEA-${id}`, summary, cat as "now" | "next" | "later"));
+          ideaSession.cancel();
+          state.mode = ""; addSystem(state, `Saved IDEA-${id} as "${cat}".`);
+        } catch (e) { addSystem(state, `Error: ${e}`); }
+        finally { state.thinking = false; state.busy = false; state._notify?.(); }
+      })();
+      return;
+    }
+
+    // /chat — reset mode (REQ-U-2a)
+    if (low === "/chat") { state.mode = ""; state._notify?.(); return; }
 
     // Input locking during commands
     if (state.busy && state.mode) {

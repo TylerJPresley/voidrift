@@ -300,6 +300,7 @@ export async function runGather(
   const existingReqs = existsSync(target) && !overwrite ? readFileSync(target, "utf-8") : null;
   const [log, runId] = bootRun("gather");
   const analystRole = findSkill("ANALYSIS-REQS") ?? "";
+  const startTime = Date.now();
 
   // Stage 1: Triage
   let fileTree: string;
@@ -308,28 +309,73 @@ export async function runGather(
     return 1;
   }
 
-  const categories = await runTriage(model, log, analystRole, fileTree, tokenBudget);
+  let categories: Record<string, string[]>;
+  try {
+    categories = await runTriage(model, log, analystRole, fileTree, tokenBudget);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg.includes("context length") || msg.includes("tokens exceed")) {
+      process.stderr.write(`Error: Context length exceeded during triage. Use a model with a larger context window.\n`);
+      return 1;
+    }
+    throw e;
+  }
+
   const fileCategory: Record<string, string> = {};
   for (const [cat, files] of Object.entries(categories)) {
     for (const f of files) fileCategory[f] = cat;
   }
   let sourceFiles = categories.source ?? [];
 
-  // Uncategorized assignment (REQ-G-24)
+  // Triage display (REQ-G-23)
+  for (const cat of CATEGORIES) {
+    const files = categories[cat];
+    if (!files?.length) continue;
+    process.stderr.write(`  \x1b[2m${cat}\x1b[0m\n`);
+    for (const f of files) process.stderr.write(`    ${f}\n`);
+  }
+
+  // Uncategorized check (REQ-G-22, REQ-G-24)
   const allInput = new Set(fileTree.split("\n"));
   const uncategorized = [...allInput].filter(f => !(f in fileCategory)).sort();
-  if (uncategorized.length && promptFn) {
-    assignUncategorized(uncategorized, categories, fileCategory, promptFn);
-    sourceFiles = categories.source ?? [];
+  if (uncategorized.length) {
+    process.stderr.write(`  \x1b[2muncategorized\x1b[0m\n`);
+    for (const f of uncategorized) process.stderr.write(`    ${f}\n`);
+    process.stderr.write(`⚠ ${uncategorized.length} file(s) not categorized by triage.\n`);
+    if (promptFn) {
+      assignUncategorized(uncategorized, categories, fileCategory, promptFn);
+      sourceFiles = categories.source ?? [];
+    }
   }
 
   // Stage 2: Context Build
   const readFn = (path: string) => readFileSync(join(source, path), "utf-8");
-  const contextSummaries = await runContextBuild(model, categories, readFn, log, analystRole, tokenBudget);
-  const contextBlock = buildContextBlock(contextSummaries);
+  let contextSummaries: Record<string, string>;
+  let contextBlock: string;
+  try {
+    contextSummaries = await runContextBuild(model, categories, readFn, log, analystRole, tokenBudget);
+    contextBlock = buildContextBlock(contextSummaries);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg.includes("context length") || msg.includes("tokens exceed")) {
+      process.stderr.write(`Error: Context length exceeded during context build. Use a model with a larger context window.\n`);
+      return 1;
+    }
+    throw e;
+  }
 
   // Stage 3: Source Analysis
-  const sourceReqs = await runSourceAnalysis(model, sourceFiles, source, log, contextBlock, target, tokenBudget);
+  let sourceReqs: Record<string, string>;
+  try {
+    sourceReqs = await runSourceAnalysis(model, sourceFiles, source, log, contextBlock, target, tokenBudget);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg.includes("context length") || msg.includes("tokens exceed")) {
+      process.stderr.write(`Error: Context length exceeded during source analysis. Use a model with a larger context window.\n`);
+      return 1;
+    }
+    throw e;
+  }
 
   // Write analysis index
   const analysisDir = join(d, "analysis");
@@ -346,6 +392,10 @@ export async function runGather(
   appendState("gather", model.config.alias,
     `Analyzed ${Object.keys(fileCategory).length} files (${sourceFiles.length} source). Wrote REQUIREMENTS.md.`,
     [".voidrift/REQUIREMENTS.md"]);
+
+  // Elapsed time (REQ-G-21)
+  const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+  process.stderr.write(`✓ Requirements written to .voidrift/REQUIREMENTS.md (${elapsed}s)\n`);
 
   return 0;
 }
