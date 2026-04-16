@@ -191,7 +191,7 @@ export async function runTriage(
   const system = [analystRole, prompt].filter(Boolean).join("\n\n");
   const agent = new AgentLoop({
     model, systemPrompt: system, tools: [], toolHandlers: {},
-    stream: true, maxTokens: getMaxTokens(model.config, "gather.triage"),
+    stream: false, maxTokens: getMaxTokens(model.config, "gather.triage"),
     logPath: log, showSpinner: false, tokenBudget: budget,
   });
   const response = await agent.send(fileTree);
@@ -214,7 +214,7 @@ export async function runContextBuild(
     const system = [analystRole, prompt].filter(Boolean).join("\n\n");
     const agent = new AgentLoop({
       model, systemPrompt: system, tools: [], toolHandlers: {},
-      stream: true, maxTokens: getMaxTokens(model.config, "gather.analysis"),
+      stream: false, maxTokens: getMaxTokens(model.config, "gather.analysis"),
       logPath: log, showSpinner: false, tokenBudget: budget,
     });
     summaries[cat] = await agent.send(`Category: ${cat}\n\n${contents}`);
@@ -252,7 +252,7 @@ export async function runSourceAnalysis(
           : `Analyze this file (chunk ${i + 1}/${chunks.length}):\n\n### ${fp}\n\n${chunks[i]}`;
         const chunkAgent = new AgentLoop({
           model, systemPrompt: [prompt].filter(Boolean).join("\n\n"), tools: [], toolHandlers: {},
-          stream: true, maxTokens: getMaxTokens(model.config, "gather.analysis"),
+          stream: false, maxTokens: getMaxTokens(model.config, "gather.analysis"),
           logPath: log, showSpinner: false, tokenBudget: budget,
         });
         chunkAnalyses.push(await chunkAgent.send(chunkMsg));
@@ -261,7 +261,7 @@ export async function runSourceAnalysis(
       if (chunkAnalyses.length > 1) {
         const consolAgent = new AgentLoop({
           model, systemPrompt: "Merge these partial analyses into a single unified analysis.", tools: [], toolHandlers: {},
-          stream: true, maxTokens: getMaxTokens(model.config, "gather.analysis"), logPath: log, showSpinner: false, tokenBudget: budget,
+          stream: false, maxTokens: getMaxTokens(model.config, "gather.analysis"), logPath: log, showSpinner: false, tokenBudget: budget,
         });
         const merged = await consolAgent.send(chunkAnalyses.map((a, i) => `## Chunk ${i + 1}\n\n${a}`).join("\n\n"));
         reqs[fp] = merged;
@@ -279,7 +279,7 @@ export async function runSourceAnalysis(
       : `Analyze this file:\n\n### ${fp}\n\n${content}`;
     const agent = new AgentLoop({
       model, systemPrompt: system, tools: [], toolHandlers: {},
-      stream: true, maxTokens: getMaxTokens(model.config, "gather.analysis"),
+      stream: false, maxTokens: getMaxTokens(model.config, "gather.analysis"),
       logPath: log, showSpinner: false, tokenBudget: budget,
     });
     const analysis = await agent.send(userMsg);
@@ -305,7 +305,7 @@ export async function runConsolidation(
 
   const agent = new AgentLoop({
     model, systemPrompt: system, tools: [], toolHandlers: {},
-    stream: true, maxTokens: getMaxTokens(model.config, "gather.consolidation"),
+    stream: false, maxTokens: getMaxTokens(model.config, "gather.consolidation"),
     logPath: log, showSpinner: false, tokenBudget: budget,
   });
   return agent.send(userMsg);
@@ -347,6 +347,7 @@ export async function runGather(
 
   let categories: Record<string, string[]>;
   try {
+    process.stderr.write("▸ Stage 1: Triaging files...\n");
     categories = await runTriage(model, log, analystRole, fileTree, tokenBudget);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -385,6 +386,7 @@ export async function runGather(
   }
 
   // Stage 2: Context Build
+  process.stderr.write("▸ Stage 2: Building context summaries...\n");
   const readFn = (path: string) => readFileSync(join(source, path), "utf-8");
   let contextSummaries: Record<string, string>;
   let contextBlock: string;
@@ -401,6 +403,7 @@ export async function runGather(
   }
 
   // Stage 3: Source Analysis
+  process.stderr.write(`▸ Stage 3: Analyzing ${sourceFiles.length} source files...\n`);
   let sourceReqs: Record<string, string>;
   try {
     sourceReqs = await runSourceAnalysis(model, sourceFiles, source, log, contextBlock, target, tokenBudget);
@@ -422,6 +425,7 @@ export async function runGather(
   writeFileSync(indexPath, indexLines.join("\n"), "utf-8");
 
   // Stage 4: Consolidation
+  process.stderr.write("▸ Stage 4: Consolidating requirements...\n");
   const finalResponse = await runConsolidation(model, sourceReqs, contextSummaries, existingReqs, log, tokenBudget);
   writeFileSync(target, stripPreamble(finalResponse), "utf-8");
 
