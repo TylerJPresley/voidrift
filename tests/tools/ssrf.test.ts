@@ -16,12 +16,9 @@ function resolve(ip: string) {
 describe("checkSsrf", () => {
   beforeEach(() => mockLookup.mockReset());
 
-  // NOTE: 169.254.x, 172.16.x, 192.168.x tests are skipped due to a signed
-  // overflow bug in ip4ToInt — (octet << 24) produces negative BigInt for
-  // first-octet >= 128, while cidr4 ranges are positive after masking.
-
-  it("blocks link-local 169.254.x.x", ({ skip }) => {
-    skip(); // ip4ToInt signed overflow — see note above
+  it("blocks link-local 169.254.x.x", async () => {
+    resolve("169.254.1.1");
+    await expect(checkSsrf("http://169.254.1.1/")).rejects.toThrow(SSRFError);
   });
 
   it("blocks RFC1918 10.x.x.x", async () => {
@@ -29,12 +26,14 @@ describe("checkSsrf", () => {
     await expect(checkSsrf("http://10.0.0.1/admin")).rejects.toThrow(SSRFError);
   });
 
-  it("blocks RFC1918 172.16.x.x", ({ skip }) => {
-    skip(); // ip4ToInt signed overflow — see note above
+  it("blocks RFC1918 172.16.x.x", async () => {
+    resolve("172.16.0.1");
+    await expect(checkSsrf("http://172.16.0.1/")).rejects.toThrow(SSRFError);
   });
 
-  it("blocks RFC1918 192.168.x.x", ({ skip }) => {
-    skip(); // ip4ToInt signed overflow — see note above
+  it("blocks RFC1918 192.168.x.x", async () => {
+    resolve("192.168.1.1");
+    await expect(checkSsrf("http://192.168.1.1/")).rejects.toThrow(SSRFError);
   });
 
   it("blocks CGNAT 100.64.x.x", async () => {

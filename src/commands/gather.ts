@@ -2,6 +2,10 @@
  * Gather command: reverse-engineer requirements from a codebase (REQ-G-1, REQ-G-8).
  */
 
+// OCP contract (REQ-TOOL-8, REQ-ARCH-9)
+export const AGENT_TOOLS = new Set(["file", "analyze"]);
+export const AGENT_TOOL_ACTIONS: Record<string, string[]> = { file: ["read", "list"] };
+
 import { readFileSync, writeFileSync, existsSync, readdirSync, statSync, mkdirSync } from "node:fs";
 import { join, relative } from "node:path";
 import { createHash } from "node:crypto";

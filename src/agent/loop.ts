@@ -3,6 +3,7 @@
  */
 
 import { appendFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import type { Message, ToolCall, LoopState, ProgressData, ParsedResponse } from "./types.js";
 import type { ToolDef } from "../tools/registry.js";
 import type { ModelInterface } from "../models.js";
@@ -74,6 +75,14 @@ function isConcurrentSafe(tc: ToolCall, toolDefs: ToolDef[]): boolean {
 type LogFn = (msg: string) => void;
 type Handler = (...args: unknown[]) => string;
 
+/** Inject done tool into tools + handlers for tool_choice="required" commands (REQ-ARCH-4). */
+export function injectDoneTool(tools: ToolDef[], handlers: Record<string, Handler>): void {
+  if (tools.some(t => t.function.name === "done")) return;
+  const { DOMAIN_DONE } = require("../tools/registry.js");
+  tools.push(DOMAIN_DONE);
+  if (!handlers.done) handlers.done = () => "done";
+}
+
 // ---------------------------------------------------------------------------
 // AgentLoop
 // ---------------------------------------------------------------------------
@@ -144,7 +153,7 @@ export class AgentLoop {
 
   constructor(opts: AgentLoopOptions) {
     this._model = opts.model;
-    this._adapter = (opts.model as Record<string, unknown>).adapter as ProtocolAdapter ?? getAdapter(opts.model.config.protocol);
+    this._adapter = opts.model.adapter ?? getAdapter(opts.model.config.protocol);
     this._client = this._adapter.createClient(opts.model.config);
     this._tools = opts.tools ?? [];
     this._toolHandlers = opts.toolHandlers ?? {};
@@ -162,11 +171,66 @@ export class AgentLoop {
     this._getFollowUpMessages = opts.getFollowUpMessages;
 
     this.messages = [{ role: "system", content: opts.systemPrompt }];
+    // Log prompt hash for cache debugging (REQ-ARCH-19)
+    if (opts.logPath) {
+      const hash = createHash("sha256").update(opts.systemPrompt).digest("hex").slice(0, 16);
+      this._log(`[PROMPT_HASH ${hash}]`);
+    }
   }
 
   steer(msgs: Message[]): void { this._steeringQueue.push(msgs); }
   followUp(msgs: Message[], drain = "one-at-a-time"): void {
     this._followUpQueue.push({ messages: msgs, drain });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Decomposed helpers (REQ-ARCH-20) — independently testable
+  // ---------------------------------------------------------------------------
+
+  /** Handle stall detection. Returns nudge messages to inject, or null if no stall. */
+  _handleStall(toolCalls: ToolCall[], text: string): { inject: Message[]; stripTools: boolean } | null {
+    const currentSigs = buildSigSet(toolCalls);
+    if (!detectStall(toolCalls, this._prevSigs)) {
+      this._prevSigs = currentSigs;
+      this._nudgeCount = 0;
+      return null;
+    }
+    this._nudgeCount++;
+    this._log(`[STALL nudge=${this._nudgeCount}]`);
+    this._prevSigs = currentSigs;
+
+    if (this._nudgeCount > 2) {
+      // 3rd stall: keep write tools + done only (REQ-ARCH-4)
+      const inject: Message[] = [
+        { role: "assistant", content: text, tool_calls: toolCalls },
+        { role: "user", content: "Stop repeating. Write your output now." },
+      ];
+      return { inject, stripTools: true };
+    }
+
+    const nudge = loadPrompt("system", "STALL-NUDGE");
+    const inject: Message[] = [
+      { role: "assistant", content: text, tool_calls: toolCalls },
+      ...toolCalls.map(tc => ({ role: "tool" as const, content: "Stall detected — move on.", tool_call_id: tc.id, name: tc.function.name })),
+      { role: "user" as const, content: nudge || "Move on to the next step." },
+    ];
+    return { inject, stripTools: false };
+  }
+
+  /** Drain all pending steering messages. Returns flat list. */
+  _drainSteering(state: LoopState): Message[] {
+    const msgs: Message[] = [];
+    const hookMsgs = this._getSteeringMessages?.(state) ?? [];
+    if (hookMsgs.length) msgs.push(...hookMsgs);
+    for (const batch of this._steeringQueue.splice(0)) msgs.push(...batch);
+    return msgs;
+  }
+
+  /** Drain one follow-up item. Returns messages + drain mode, or null if empty. */
+  _drainOneFollowup(state: LoopState): { messages: Message[]; drain: string } | null {
+    const hookMsgs = this._getFollowUpMessages?.(state) ?? [];
+    if (hookMsgs.length) return { messages: hookMsgs, drain: "one-at-a-time" };
+    return this._followUpQueue.shift() ?? null;
   }
 
   async send(userMessage: string): Promise<string> {
@@ -256,6 +320,10 @@ export class AgentLoop {
       this._inputTotal += parsed.usage.prompt_tokens;
       this._outputTotal += parsed.usage.completion_tokens;
       this._tokenBudget?.record(parsed.usage.prompt_tokens, parsed.usage.completion_tokens);
+      // Cache logging (REQ-ARCH-19)
+      if (parsed.usage.cache_creation_input_tokens || parsed.usage.cache_read_input_tokens) {
+        this._log(`[CACHE create=${parsed.usage.cache_creation_input_tokens ?? 0} read=${parsed.usage.cache_read_input_tokens ?? 0}]`);
+      }
       this.onProgress?.({
         prompt_tokens: parsed.usage.prompt_tokens,
         completion_tokens: parsed.usage.completion_tokens,
@@ -295,18 +363,12 @@ export class AgentLoop {
         const finalText = accumulatedText + text;
         this.messages.push({ role: "assistant", content: finalText });
 
-        // Follow-up hooks
+        // Follow-up — delegated to _drainOneFollowup
         const state = this._loopState(turnCount);
         state.toolsCalledThisTurn = [];
-        const followUp = this._getFollowUpMessages?.(state) ?? [];
-        if (followUp.length) {
-          this.messages.push(...followUp);
-          continue;
-        }
-        // Follow-up queue
-        const queued = this._followUpQueue.shift();
-        if (queued) {
-          this.messages.push(...queued.messages);
+        const followUp = this._drainOneFollowup(state);
+        if (followUp) {
+          this.messages.push(...followUp.messages);
           continue;
         }
 
@@ -319,30 +381,25 @@ export class AgentLoop {
       turnCount++;
       accumulatedText = "";
 
-      // Stall detection
-      const currentSigs = buildSigSet(parsed.toolCalls);
-      if (detectStall(parsed.toolCalls, this._prevSigs)) {
-        this._nudgeCount++;
-        this._log(`[STALL nudge=${this._nudgeCount}]`);
-        if (this._nudgeCount > 2) {
-          // Force final text call — strip to write tools only
-          this.messages.push({ role: "assistant", content: text, tool_calls: parsed.toolCalls });
-          this.messages.push({ role: "user", content: "Stop repeating. Write your output now." });
-          this._tools = [];
-          continue;
+      // Stall detection (REQ-ARCH-4) — delegated to _handleStall
+      const stallResult = this._handleStall(parsed.toolCalls, text);
+      if (stallResult) {
+        this.messages.push(...stallResult.inject);
+        if (stallResult.stripTools) {
+          // Keep only write tools + done
+          this._tools = this._tools.filter(t => {
+            const n = t.function.name;
+            if (n === "done") return true;
+            if (n === "file") {
+              const actions = t.function.parameters?.properties?.action as Record<string, unknown> | undefined;
+              const enums = (actions?.enum as string[]) ?? [];
+              return enums.includes("write") || enums.includes("edit");
+            }
+            return false;
+          });
         }
-        const nudge = loadPrompt("system", "STALL-NUDGE");
-        this.messages.push({ role: "assistant", content: text, tool_calls: parsed.toolCalls });
-        // Still need to provide tool results for the calls
-        for (const tc of parsed.toolCalls) {
-          this.messages.push({ role: "tool", content: "Stall detected — move on.", tool_call_id: tc.id, name: tc.function.name });
-        }
-        this.messages.push({ role: "user", content: nudge || "Move on to the next step." });
-        this._prevSigs = currentSigs;
         continue;
       }
-      this._prevSigs = currentSigs;
-      this._nudgeCount = 0;
 
       // Deduplicate (REQ-ARCH-16)
       const { unique, idMap } = this._dedup(parsed.toolCalls);
@@ -361,12 +418,11 @@ export class AgentLoop {
         this.messages.push({ role: "tool", content: result, tool_call_id: tc.id, name: tc.function.name });
       }
 
-      // Steering hooks
+      // Steering hooks — delegated to _drainSteering
       const state = this._loopState(turnCount);
       state.toolsCalledThisTurn = toolsCalledThisTurn;
-      const steering = this._getSteeringMessages?.(state) ?? [];
-      if (steering.length) this.messages.push(...steering);
-      for (const batch of this._steeringQueue.splice(0)) this.messages.push(...batch);
+      const steeringMsgs = this._drainSteering(state);
+      if (steeringMsgs.length) this.messages.push(...steeringMsgs);
 
       // Stop checks
       if (this._maxTurns > 0 && turnCount >= this._maxTurns) {

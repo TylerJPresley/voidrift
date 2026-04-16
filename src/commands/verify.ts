@@ -2,6 +2,12 @@
  * Verify command: requirements-driven acceptance testing (REQ-VF-3..16).
  */
 
+// OCP contract (REQ-TOOL-8, REQ-ARCH-9)
+export const AGENT_TOOLS_PLAN = new Set(["file"]);
+export const AGENT_TOOLS_EXECUTE = new Set(["file", "http", "shell", "browser", "process"]);
+export const AGENT_TOOL_ACTIONS_PLAN: Record<string, string[]> = { file: ["read", "list"] };
+export const AGENT_TOOL_ACTIONS_EXECUTE: Record<string, string[]> = { file: ["read", "write", "list"], http: ["get", "post", "put", "delete"] };
+
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { execSync } from "node:child_process";

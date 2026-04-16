@@ -111,9 +111,7 @@ export function mockConfig(overrides?: Partial<ModelConfig>): ModelConfig {
 
 export function mockModel(responses: MockResponse[], configOverrides?: Partial<ModelConfig>): { model: ModelInterface; adapter: MockAdapter } {
   const adapter = new MockAdapter(responses);
-  const model: ModelInterface = { config: mockConfig(configOverrides) };
-  // Inject adapter — the AgentLoop uses getAdapter(protocol) but we override via the model
-  (model as Record<string, unknown>).adapter = adapter;
+  const model: ModelInterface = { config: mockConfig(configOverrides), adapter };
   return { model, adapter };
 }
 

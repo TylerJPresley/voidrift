@@ -6,6 +6,10 @@ import { readFileSync, existsSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { render } from "ink";
 import React from "react";
+
+// OCP contract (REQ-TOOL-8, REQ-ARCH-9)
+export const AGENT_TOOLS = new Set(["file", "http", "shell", "skill", "memory", "session", "analyze", "ask"]);
+export const AGENT_TOOL_ACTIONS: Record<string, string[]> = { file: ["read", "write", "edit", "delete", "list"], http: ["get", "post", "put", "delete"] };
 import { AgentLoop } from "../agent/loop.js";
 import type { ModelInterface } from "../models.js";
 import { loadPrompt } from "../prompts.js";

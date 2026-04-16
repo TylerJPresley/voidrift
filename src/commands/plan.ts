@@ -2,6 +2,10 @@
  * Plan command: six-stage architecture and task breakdown (REQ-P-1).
  */
 
+// OCP contract (REQ-TOOL-8, REQ-ARCH-9)
+export const AGENT_TOOLS = new Set(["file"]);
+export const AGENT_TOOL_ACTIONS: Record<string, string[]> = { file: ["read", "write", "edit", "list"] };
+
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, unlinkSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";

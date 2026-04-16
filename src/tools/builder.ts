@@ -13,10 +13,12 @@ import { findSkill, listSkills } from "../skills.js";
 export type Handler = (...args: unknown[]) => string;
 
 // ---------------------------------------------------------------------------
-// Per-command tool sets (resolved dynamically from command modules)
+// Per-command tool sets — resolved from command module exports (REQ-TOOL-8, REQ-ARCH-9)
+// Each command module exports AGENT_TOOLS (Set<string>) and AGENT_TOOL_ACTIONS (Record<string, string[]>).
+// This fallback dict is used when dynamic import fails (e.g. in tests or circular deps).
 // ---------------------------------------------------------------------------
 
-const COMMAND_TOOLS: Record<string, Set<string>> = {
+const _FALLBACK_TOOLS: Record<string, Set<string>> = {
   gather: new Set(["file", "analyze"]),
   plan: new Set(["file"]),
   develop: new Set(["file", "shell"]),
@@ -25,7 +27,7 @@ const COMMAND_TOOLS: Record<string, Set<string>> = {
   "verify-execute": new Set(["file", "http", "shell", "browser", "process"]),
 };
 
-const COMMAND_ACTIONS: Record<string, Record<string, string[]>> = {
+const _FALLBACK_ACTIONS: Record<string, Record<string, string[]>> = {
   gather: { file: ["read", "list"] },
   plan: { file: ["read", "write", "edit", "list"] },
   develop: { file: ["read", "write", "edit", "delete", "list"] },
@@ -33,6 +35,28 @@ const COMMAND_ACTIONS: Record<string, Record<string, string[]>> = {
   "verify-plan": { file: ["read", "list"] },
   "verify-execute": { file: ["read", "write", "list"], http: ["get", "post", "put", "delete"] },
 };
+
+function resolveCommandToolSet(cmd: string): { tools: Set<string>; actions: Record<string, string[]> } {
+  // Try dynamic import from command module first
+  const cmdToModule: Record<string, [string, string?, string?]> = {
+    gather: ["../commands/gather.js"],
+    plan: ["../commands/plan.js"],
+    develop: ["../commands/develop.js"],
+    chat: ["../commands/chat.js"],
+    "verify-plan": ["../commands/verify.js", "AGENT_TOOLS_PLAN", "AGENT_TOOL_ACTIONS_PLAN"],
+    "verify-execute": ["../commands/verify.js", "AGENT_TOOLS_EXECUTE", "AGENT_TOOL_ACTIONS_EXECUTE"],
+  };
+  const entry = cmdToModule[cmd];
+  if (entry) {
+    try {
+      const mod = require(entry[0]);
+      const toolsKey = entry[1] ?? "AGENT_TOOLS";
+      const actionsKey = entry[2] ?? "AGENT_TOOL_ACTIONS";
+      if (mod[toolsKey]) return { tools: mod[toolsKey], actions: mod[actionsKey] ?? {} };
+    } catch { /* fallback */ }
+  }
+  return { tools: _FALLBACK_TOOLS[cmd] ?? new Set(), actions: _FALLBACK_ACTIONS[cmd] ?? {} };
+}
 
 // ---------------------------------------------------------------------------
 // Schema manipulation
@@ -233,8 +257,7 @@ export function buildLocalTools(
   opts?: Parameters<typeof buildDomainHandlers>[3],
 ): [ToolDef[], Record<string, Handler>] {
   const dir = projectDir ?? process.cwd();
-  const allowed = cmd ? COMMAND_TOOLS[cmd] ?? null : null;
-  const actions = cmd ? COMMAND_ACTIONS[cmd] ?? {} : {};
+  const { tools: allowed, actions } = cmd ? resolveCommandToolSet(cmd) : { tools: null as Set<string> | null, actions: {} as Record<string, string[]> };
   const handlers = buildDomainHandlers(cmd ?? null, dir, ctx, opts);
 
   let tools = filterTools(DOMAIN_TOOLS, allowed);

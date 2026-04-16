@@ -202,6 +202,16 @@ export const DOMAIN_ASK: ToolDef = {
   },
 };
 
+/** Done tool — signals task completion for tool_choice="required" (REQ-ARCH-4). */
+export const DOMAIN_DONE: ToolDef = {
+  type: "function",
+  function: {
+    name: "done",
+    description: "Signal that the task is complete. Call this when all work is finished.",
+    parameters: { type: "object", properties: {}, required: [] },
+  },
+};
+
 export const DOMAIN_TOOLS: ToolDef[] = [
   DOMAIN_FILE, DOMAIN_HTTP, DOMAIN_SHELL, DOMAIN_BROWSER, DOMAIN_PROCESS,
   DOMAIN_SKILL, DOMAIN_MEMORY, DOMAIN_SESSION, DOMAIN_ANALYZE, DOMAIN_ASK,

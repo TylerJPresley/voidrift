@@ -2,7 +2,7 @@
  * WriteContext: file operations with sandboxing, pagination, snapshots (REQ-FSZ-1..5, REQ-SEC-1).
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync, readdirSync, statSync, realpathSync } from "node:fs";
 import { join, resolve, relative, dirname } from "node:path";
 
 export class WriteContext {
@@ -10,6 +10,7 @@ export class WriteContext {
   private _maxReadLines: number;
   private _maxReadBytes: number;
   private _protectedPaths: Set<string>;
+  private _logPath?: string;
   private _sourceWriteCount = 0;
   private _writtenThisRun = new Set<string>();
   private _sessionFiles: string[] = [];
@@ -17,27 +18,43 @@ export class WriteContext {
   private _readFiles: string[] = [];
   private _snapshots: Map<string, string | null> | null = null;
 
-  constructor(opts: { projectDir: string; maxReadLines?: number; maxReadBytes?: number; protectedPaths?: string[] }) {
+  constructor(opts: { projectDir: string; maxReadLines?: number; maxReadBytes?: number; protectedPaths?: string[]; logPath?: string }) {
     this._projectDir = resolve(opts.projectDir);
     this._maxReadLines = opts.maxReadLines ?? 2000;
     this._maxReadBytes = opts.maxReadBytes ?? 524288;
     this._protectedPaths = new Set(opts.protectedPaths ?? []);
+    this._logPath = opts.logPath;
   }
 
-  // -- Sandbox checks --
+  // -- Sandbox checks (REQ-SEC-1) --
 
   private _checkSandbox(path: string, full: string, root: string): string | null {
-    const resolved = resolve(full);
+    let resolved: string;
+    try {
+      // Use realpathSync to resolve symlinks (REQ-SEC-1)
+      resolved = existsSync(full) ? realpathSync(full) : resolve(full);
+    } catch {
+      resolved = resolve(full);
+    }
     const rootResolved = resolve(root);
     if (!resolved.startsWith(rootResolved + "/") && resolved !== rootResolved) {
+      this._logBlocked(path, "outside_root");
       return `Access denied: ${path} resolves outside project root.`;
     }
     return null;
   }
 
   private _checkProtected(path: string): string | null {
-    if (this._protectedPaths.has(path)) return `Access denied: ${path} is a protected path.`;
+    if (this._protectedPaths.has(path)) {
+      this._logBlocked(path, "protected");
+      return `Access denied: ${path} is a protected path.`;
+    }
     return null;
+  }
+
+  private _logBlocked(path: string, reason: string): void {
+    if (!this._logPath) return;
+    try { require("node:fs").appendFileSync(this._logPath, `[PATH_BLOCKED path=${path} reason=${reason}]\n`); } catch { /* */ }
   }
 
   private _isFrameworkPath(path: string): boolean {

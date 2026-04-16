@@ -8,6 +8,7 @@
 import { readFileSync, existsSync } from "node:fs";
 import { parse as parseYaml } from "yaml";
 import { expandConfigRefs, getModelsFile } from "./config.js";
+import { getAdapter, type ProtocolAdapter } from "./agent/protocol.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -33,7 +34,7 @@ export interface ModelConfig {
 
 export interface ModelInterface {
   config: ModelConfig;
-  // adapter added in Phase 3 when ProtocolAdapter is implemented
+  adapter: ProtocolAdapter;
 }
 
 // ---------------------------------------------------------------------------
@@ -120,7 +121,7 @@ export function resolveModel(alias: string): ModelInterface {
     maxOutputTokens: m.max_output_tokens != null ? Number(m.max_output_tokens) : undefined,
   };
 
-  return { config };
+  return { config, adapter: getAdapter(config.protocol) };
 }
 
 export function listAliases(): string[] {

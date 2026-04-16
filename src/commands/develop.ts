@@ -2,6 +2,10 @@
  * Develop command: task execution (REQ-D-1..D-22).
  */
 
+// OCP contract (REQ-TOOL-8, REQ-ARCH-9)
+export const AGENT_TOOLS = new Set(["file", "shell"]);
+export const AGENT_TOOL_ACTIONS: Record<string, string[]> = { file: ["read", "write", "edit", "delete", "list"] };
+
 import { readFileSync, writeFileSync, existsSync, unlinkSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
