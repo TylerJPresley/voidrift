@@ -5,10 +5,10 @@
  * Results cached in process memory for the duration of the run.
  */
 
-import { readFileSync, existsSync, readdirSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, basename } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { voidriftHome } from "./config.js";
+import { voidriftHome, loadConfig } from "./config.js";
 
 // ---------------------------------------------------------------------------
 // Cache
@@ -75,6 +75,23 @@ export function findSkill(name: string, projectDir?: string): string | null {
   }
 
   cache.set(key, null);
+
+  // On-the-fly synthesis (REQ-SKL-10)
+  try {
+    const cfg = loadConfig();
+    const synthesisModel = cfg.skills?.synthesisModel;
+    if (synthesisModel) {
+      const pendingDir = join(dir, ".voidrift", "skills", "pending");
+      const pendingPath = join(pendingDir, `${upper}.md`);
+      if (!existsSync(pendingPath)) {
+        mkdirSync(pendingDir, { recursive: true });
+        const frontmatter = `---\nname: ${upper}\ndescription: Auto-synthesized skill (pending approval)\n---\n\n`;
+        writeFileSync(pendingPath, frontmatter + `# ${upper}\n\nPending synthesis. Run 'voidrift skills approve ${name.toLowerCase()}' after review.\n`, "utf-8");
+        process.stderr?.write?.(`⚠ Skill '${upper}' not found. Pending synthesis created at ${pendingPath}\n`);
+      }
+    }
+  } catch { /* synthesis is best-effort */ }
+
   return null;
 }
 

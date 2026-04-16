@@ -336,9 +336,14 @@ program
 program
 program
   .command("skills <action> [query]")
-  .description("Manage skills (list, search)")
+  .description("Manage skills (list, search, install, approve, remove)")
   .action(async (action, query) => {
     const { listSkills } = await import("./skills.js");
+    const { voidriftHome } = await import("./config.js");
+    const { existsSync, mkdirSync, writeFileSync, unlinkSync, renameSync, readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const home = voidriftHome();
+
     if (action === "list") {
       const skills = listSkills();
       if (!skills.length) { console.log("No skills found."); return; }
@@ -347,15 +352,100 @@ program
         if (s.layer !== currentLayer) { currentLayer = s.layer; console.log(`\n  ${currentLayer.toUpperCase()}`); }
         console.log(`    ${s.name}: ${s.description}`);
       }
+      // Show pending skills
+      const pendingDir = join(home, "domain-skills", "pending");
+      if (existsSync(pendingDir)) {
+        const { readdirSync } = await import("node:fs");
+        const pending = readdirSync(pendingDir).filter(f => f.endsWith(".md"));
+        if (pending.length) {
+          console.log("\n  PENDING (awaiting approval)");
+          for (const f of pending) console.log(`    ${f.replace(".md", "")}`);
+        }
+      }
       console.log("");
+
     } else if (action === "search" && query) {
+      // Search local skills
       const skills = listSkills();
       const q = query.toLowerCase();
       const matches = skills.filter(s => s.name.toLowerCase().includes(q) || s.description.toLowerCase().includes(q));
+      // Also search remote manifests (REQ-SKL-6)
+      const { loadConfig } = await import("./config.js");
+      const cfg = loadConfig();
+      const repos = cfg.skills?.repos ?? [];
+      for (const repo of repos) {
+        try {
+          const { execSync } = await import("node:child_process");
+          const manifestUrl = repo.endsWith("/") ? `${repo}skills-manifest.yml` : `${repo}/skills-manifest.yml`;
+          const raw = execSync(`curl -sL --max-time 10 '${manifestUrl}'`, { encoding: "utf-8", timeout: 15000 });
+          const { parse } = await import("yaml");
+          const manifest = parse(raw) as { skills?: Array<{ name: string; description: string; tags?: string[] }> };
+          for (const s of manifest.skills ?? []) {
+            if (s.name.toLowerCase().includes(q) || s.description?.toLowerCase().includes(q)) {
+              matches.push({ name: s.name, description: s.description ?? "", layer: "remote" as never, path: repo });
+            }
+          }
+        } catch { /* remote fetch failed — skip */ }
+      }
       if (!matches.length) { console.log(`No skills matching "${query}".`); return; }
-      for (const s of matches) console.log(`  [${s.layer}] ${s.name}: ${s.description}`);
+      for (const s of matches) console.log(`  [${(s as { layer: string }).layer}] ${s.name}: ${s.description}`);
+
+    } else if (action === "install" && query) {
+      // Synthesize and install a domain skill (REQ-SKL-5)
+      const name = query.toUpperCase();
+      const pendingDir = join(home, "domain-skills", "pending");
+      mkdirSync(pendingDir, { recursive: true });
+      const pendingPath = join(pendingDir, `${name}.md`);
+      if (existsSync(pendingPath)) { console.log(`${name} already pending. Run 'voidrift skills approve ${query}' to activate.`); return; }
+      const activeDir = join(home, "domain-skills");
+      if (existsSync(join(activeDir, `${name}.md`))) { console.log(`${name} already installed.`); return; }
+
+      const { loadConfig } = await import("./config.js");
+      const cfg = loadConfig();
+      const synthesisModel = cfg.skills?.synthesisModel;
+      if (!synthesisModel) { console.error("Error: skills.synthesis_model not configured in config.yml"); process.exit(1); }
+
+      console.log(`Synthesizing ${name}...`);
+      try {
+        const { resolveModel } = await import("./models.js");
+        const { AgentLoop } = await import("./agent/loop.js");
+        const { getMaxTokens } = await import("./config.js");
+        const { loadTemplate } = await import("./prompts.js");
+        const model = resolveModel(synthesisModel);
+        const template = loadTemplate("DOMAIN-SKILL-TEMPLATE") ?? "Write a domain skill document covering key principles, constraints, and common failure modes.";
+        const agent = new AgentLoop({
+          model, systemPrompt: template, tools: [], toolHandlers: {},
+          stream: false, maxTokens: getMaxTokens(model.config, "skills.synthesis"), showSpinner: false,
+        });
+        const content = await agent.send(`Synthesize a VoidRift domain skill for: ${name}. Focus on north-star principles, key constraints, and common failure modes. No implementation recipes.`);
+        const frontmatter = `---\nname: ${name}\ndescription: Domain skill for ${name.toLowerCase()}\n---\n\n`;
+        writeFileSync(pendingPath, frontmatter + content, "utf-8");
+        console.log(`✓ ${name} written to pending. Review with: cat ${pendingPath}`);
+        console.log(`  Approve with: voidrift skills approve ${query}`);
+      } catch (e) {
+        console.error(`Synthesis failed: ${e instanceof Error ? e.message : e}`);
+        process.exit(1);
+      }
+
+    } else if (action === "approve" && query) {
+      // Move pending skill to active (REQ-SKL-5)
+      const name = query.toUpperCase();
+      const pendingPath = join(home, "domain-skills", "pending", `${name}.md`);
+      if (!existsSync(pendingPath)) { console.error(`No pending skill '${name}'. Run 'voidrift skills install ${query}' first.`); process.exit(1); }
+      const activePath = join(home, "domain-skills", `${name}.md`);
+      renameSync(pendingPath, activePath);
+      console.log(`✓ ${name} approved and active.`);
+
+    } else if (action === "remove" && query) {
+      // Remove a domain skill (REQ-SKL-4)
+      const name = query.toUpperCase();
+      const activePath = join(home, "domain-skills", `${name}.md`);
+      if (!existsSync(activePath)) { console.error(`Domain skill '${name}' not found.`); process.exit(1); }
+      unlinkSync(activePath);
+      console.log(`✓ ${name} removed.`);
+
     } else {
-      console.error("Usage: voidrift skills list | voidrift skills search <query>");
+      console.error("Usage: voidrift skills list|search|install|approve|remove <name>");
     }
   });
 
