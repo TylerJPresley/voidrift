@@ -41,7 +41,7 @@ export function Message({ msg }: MessageProps) {
   }
 
   if (msg.role === "model") {
-    const lines = msg.text ? msg.text.split("\n") : [];
+    const lines = msg.text?.trim() ? msg.text.split("\n") : [];
     return (
       <Box flexDirection="column">
         {lines.map((line, i) => (
