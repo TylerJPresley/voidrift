@@ -1,10 +1,28 @@
 import React from "react";
-import { Text, Box } from "ink";
+import { Text, Box, Transform } from "ink";
 import type { TUIMessage } from "./state.js";
 import { ToolCall } from "./ToolCall.js";
 
 interface MessageProps {
   msg: TUIMessage;
+}
+
+/** Simple markdown → styled text. Handles **bold**, `code`, and leaves rest as-is. */
+function renderMarkdown(text: string): React.ReactNode[] {
+  const nodes: React.ReactNode[] = [];
+  // Split by **bold** and `code` patterns
+  const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
+    if (part.startsWith("**") && part.endsWith("**")) {
+      nodes.push(<Text key={i} bold>{part.slice(2, -2)}</Text>);
+    } else if (part.startsWith("`") && part.endsWith("`")) {
+      nodes.push(<Text key={i} color="#e5c07b">{part.slice(1, -1)}</Text>);
+    } else {
+      nodes.push(<Text key={i}>{part}</Text>);
+    }
+  }
+  return nodes;
 }
 
 export function Message({ msg }: MessageProps) {
@@ -17,12 +35,17 @@ export function Message({ msg }: MessageProps) {
         {msg.text.split("\n").map((line, i) => (
           <Text key={i}><Text color="#4ec9b0">┃ </Text><Text bold color="white">{line}</Text></Text>
         ))}
+        <Text> </Text>
       </Box>
     );
   }
 
   if (msg.role === "tool") {
-    return <ToolCall toolName={msg.toolName ?? ""} action={msg.toolAction} detail={msg.text} />;
+    return (
+      <Box flexDirection="column">
+        <ToolCall toolName={msg.toolName ?? ""} action={msg.toolAction} detail={msg.text} />
+      </Box>
+    );
   }
 
   if (msg.role === "diff") {
@@ -39,18 +62,25 @@ export function Message({ msg }: MessageProps) {
   }
 
   if (msg.role === "system") {
-    return <Text dimColor italic>  {msg.text}</Text>;
+    return (
+      <Box flexDirection="column">
+        <Text> </Text>
+        <Text dimColor italic>  {msg.text}</Text>
+      </Box>
+    );
   }
 
   if (msg.role === "model") {
     const lines = msg.text?.trim() ? msg.text.split("\n") : [];
     return (
       <Box flexDirection="column">
+        <Text> </Text>
         {lines.map((line, i) => (
-          <Text key={i}><Text color="#6a7ec8">┃ </Text><Text color="#d4d4d4">{line}</Text></Text>
+          <Text key={i}><Text color="#6a7ec8">┃ </Text><Text color="#d4d4d4">{renderMarkdown(line)}</Text></Text>
         ))}
         {msg.streaming && <Text><Text color="#6a7ec8">┃ </Text><Text color="#6a7ec8">█</Text></Text>}
         {!msg.streaming && msg.stats ? <Text dimColor>  · {msg.stats}</Text> : null}
+        <Text> </Text>
       </Box>
     );
   }

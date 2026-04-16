@@ -57,6 +57,8 @@ export function App({ state, onSubmit, onEscape }: AppProps) {
           <Message key={i} msg={msg} />
         ))}
         {state.thinking && <Thinking label={state.thinkingLabel} />}
+        <Text> </Text>
+        <Text> </Text>
       </Box>
 
       {/* Separator */}
