@@ -191,7 +191,6 @@ export async function runChat(model: ModelInterface, options: ChatOptions = {}):
     // Normal message → agent
     addOperator(state, text);
     session.append("user", text);
-    addModel(state, "", "", true);
     state.thinking = true;
     state.busy = true;
     state._notify?.();
@@ -199,7 +198,7 @@ export async function runChat(model: ModelInterface, options: ChatOptions = {}):
     (async () => {
       try {
         const response = await agent.send(text);
-        updateLastModel(state, response, "", false);
+        addModel(state, response, "", false);
         session.append("assistant", response);
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
