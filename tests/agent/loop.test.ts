@@ -57,9 +57,10 @@ vi.mock("../../src/agent/protocol.js", () => {
       createClient: () => mockClient,
       buildRequest,
       parseResponse,
+      call: async (_client: unknown, req: unknown) => mockCreate(req),
     }),
-    OpenAIAdapter: class { buildRequest = buildRequest; parseResponse = parseResponse; createClient = () => mockClient; },
-    AnthropicAdapter: class { buildRequest = buildRequest; parseResponse = parseResponse; createClient = () => mockClient; },
+    OpenAIAdapter: class { buildRequest = buildRequest; parseResponse = parseResponse; createClient = () => mockClient; call = async (_client: unknown, req: unknown) => mockCreate(req); },
+    AnthropicAdapter: class { buildRequest = buildRequest; parseResponse = parseResponse; createClient = () => mockClient; call = async (_client: unknown, req: unknown) => mockCreate(req); },
   };
 });
 

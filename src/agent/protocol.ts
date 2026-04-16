@@ -17,6 +17,7 @@ export interface ProtocolAdapter {
   createClient(config: ModelConfig): unknown;
   buildRequest(opts: RequestOpts): Record<string, unknown>;
   parseResponse(raw: unknown): ParsedResponse;
+  call(client: unknown, wireReq: Record<string, unknown>): Promise<unknown>;
 }
 
 export interface RequestOpts {
@@ -98,18 +99,24 @@ export class OpenAIAdapter implements ProtocolAdapter {
       },
     };
   }
-}
 
-// ---------------------------------------------------------------------------
+  async call(client: unknown, wireReq: Record<string, unknown>): Promise<unknown> {
+    const c = client as { chat: { completions: { create: (req: unknown) => Promise<unknown> } } };
+    return c.chat.completions.create(wireReq);
+  }
+}// ---------------------------------------------------------------------------
 // Anthropic Adapter
 // ---------------------------------------------------------------------------
 
 export class AnthropicAdapter implements ProtocolAdapter {
   createClient(config: ModelConfig): unknown {
     const Anthropic = require("@anthropic-ai/sdk").default;
+    // Anthropic SDK adds /v1/messages itself — strip trailing /v1 if present
+    let baseURL = config.baseUrl;
+    if (baseURL.endsWith("/v1")) baseURL = baseURL.slice(0, -3);
     return new Anthropic({
       apiKey: config.apiKey,
-      baseURL: config.baseUrl,
+      baseURL,
       timeout: 600_000,
       maxRetries: 0,
     });
@@ -239,6 +246,11 @@ export class AnthropicAdapter implements ProtocolAdapter {
     }
     flushBatch();
     return result;
+  }
+
+  async call(client: unknown, wireReq: Record<string, unknown>): Promise<unknown> {
+    const c = client as { messages: { create: (req: unknown) => Promise<unknown> } };
+    return c.messages.create(wireReq);
   }
 }
 

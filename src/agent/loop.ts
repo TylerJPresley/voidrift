@@ -415,11 +415,7 @@ export class AgentLoop {
   }
 
   private async _rawCall(wireReq: Record<string, unknown>): Promise<unknown> {
-    const client = this._client as Record<string, unknown>;
-    const chat = client.chat as Record<string, unknown>;
-    const completions = chat.completions as Record<string, unknown>;
-    const create = completions.create as (req: unknown) => Promise<unknown>;
-    return create.call(completions, wireReq);
+    return this._adapter.call(this._client, wireReq);
   }
 
   // ---------------------------------------------------------------------------

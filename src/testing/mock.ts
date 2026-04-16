@@ -49,6 +49,10 @@ export class MockAdapter implements ProtocolAdapter {
     return raw as ParsedResponse;
   }
 
+  async call(client: unknown, wireReq: Record<string, unknown>): Promise<unknown> {
+    return this._nextResponse(wireReq);
+  }
+
   /** Called by MockClient to get the next scripted response. */
   _nextResponse(req: Record<string, unknown>): ParsedResponse {
     this.calls.push({ messages: req.messages as unknown[], tools: req.tools as unknown[] });
