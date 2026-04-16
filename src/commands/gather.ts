@@ -191,7 +191,7 @@ export async function runTriage(
   const system = [analystRole, prompt].filter(Boolean).join("\n\n");
   const agent = new AgentLoop({
     model, systemPrompt: system, tools: [], toolHandlers: {},
-    stream: false, maxTokens: getMaxTokens(model.config, "gather.triage"),
+    stream: true, maxTokens: getMaxTokens(model.config, "gather.triage"),
     logPath: log, showSpinner: false, tokenBudget: budget,
   });
   const response = await agent.send(fileTree);
@@ -214,7 +214,7 @@ export async function runContextBuild(
     const system = [analystRole, prompt].filter(Boolean).join("\n\n");
     const agent = new AgentLoop({
       model, systemPrompt: system, tools: [], toolHandlers: {},
-      stream: false, maxTokens: getMaxTokens(model.config, "gather.analysis"),
+      stream: true, maxTokens: getMaxTokens(model.config, "gather.analysis"),
       logPath: log, showSpinner: false, tokenBudget: budget,
     });
     summaries[cat] = await agent.send(`Category: ${cat}\n\n${contents}`);
@@ -241,13 +241,45 @@ export async function runSourceAnalysis(
     if (cached) { reqs[fp] = cached; continue; }
 
     // Zero-tool analysis (REQ-G-19)
+    // Chunking for large files (REQ-G-13)
+    const maxChars = model.config.maxInputChars;
+    if (maxChars > 0 && content.length > maxChars) {
+      const chunks = makeChunks(content, maxChars);
+      const chunkAnalyses: string[] = [];
+      for (let i = 0; i < chunks.length; i++) {
+        const chunkMsg = contextBlock
+          ? `${contextBlock}\n\n---\n\nAnalyze this file (chunk ${i + 1}/${chunks.length}):\n\n### ${fp}\n\n${chunks[i]}`
+          : `Analyze this file (chunk ${i + 1}/${chunks.length}):\n\n### ${fp}\n\n${chunks[i]}`;
+        const chunkAgent = new AgentLoop({
+          model, systemPrompt: [prompt].filter(Boolean).join("\n\n"), tools: [], toolHandlers: {},
+          stream: true, maxTokens: getMaxTokens(model.config, "gather.analysis"),
+          logPath: log, showSpinner: false, tokenBudget: budget,
+        });
+        chunkAnalyses.push(await chunkAgent.send(chunkMsg));
+      }
+      // Consolidation agent for multi-chunk
+      if (chunkAnalyses.length > 1) {
+        const consolAgent = new AgentLoop({
+          model, systemPrompt: "Merge these partial analyses into a single unified analysis.", tools: [], toolHandlers: {},
+          stream: true, maxTokens: getMaxTokens(model.config, "gather.analysis"), logPath: log, showSpinner: false, tokenBudget: budget,
+        });
+        const merged = await consolAgent.send(chunkAnalyses.map((a, i) => `## Chunk ${i + 1}\n\n${a}`).join("\n\n"));
+        reqs[fp] = merged;
+        writeAnalysis(voidriftDir, fp, hash, merged);
+      } else {
+        reqs[fp] = chunkAnalyses[0];
+        writeAnalysis(voidriftDir, fp, hash, chunkAnalyses[0]);
+      }
+      continue;
+    }
+
     const system = [prompt].filter(Boolean).join("\n\n");
     const userMsg = contextBlock
       ? `${contextBlock}\n\n---\n\nAnalyze this file:\n\n### ${fp}\n\n${content}`
       : `Analyze this file:\n\n### ${fp}\n\n${content}`;
     const agent = new AgentLoop({
       model, systemPrompt: system, tools: [], toolHandlers: {},
-      stream: false, maxTokens: getMaxTokens(model.config, "gather.analysis"),
+      stream: true, maxTokens: getMaxTokens(model.config, "gather.analysis"),
       logPath: log, showSpinner: false, tokenBudget: budget,
     });
     const analysis = await agent.send(userMsg);
@@ -273,7 +305,7 @@ export async function runConsolidation(
 
   const agent = new AgentLoop({
     model, systemPrompt: system, tools: [], toolHandlers: {},
-    stream: false, maxTokens: getMaxTokens(model.config, "gather.consolidation"),
+    stream: true, maxTokens: getMaxTokens(model.config, "gather.consolidation"),
     logPath: log, showSpinner: false, tokenBudget: budget,
   });
   return agent.send(userMsg);

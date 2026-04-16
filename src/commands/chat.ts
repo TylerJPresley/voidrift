@@ -80,9 +80,16 @@ export async function runChat(model: ModelInterface, options: ChatOptions = {}):
   // Build tools + agent
   const ctx = new WriteContext({ projectDir, maxReadLines: model.config.maxReadLines });
   const webCache = new Map<string, string>();
+  const askFn = (question: string, options?: string[]): string => {
+    // Display question in TUI and return a default response
+    // Full TUI integration would pause and wait for input
+    addSystem(state, `❓ ${question}${options ? "\n" + options.map((o, i) => `  ${i + 1}. ${o}`).join("\n") : ""}`);
+    return options?.[0] ?? "Proceed with your best judgment.";
+  };
   const [tools, handlers] = buildLocalTools("chat", projectDir, ctx, {
     memoryManager: memMgr,
     webFetchKwargs: { model, logPath: log, webCache, allowList: [] },
+    askFn,
   });
   const agent = new AgentLoop({
     model, systemPrompt, tools, toolHandlers: handlers,
@@ -192,16 +199,16 @@ export async function runChat(model: ModelInterface, options: ChatOptions = {}):
       addSystem(state, "  /verify         run acceptance tests");
       addSystem(state, "  /idea           guided idea refinement");
       addSystem(state, "  /compact        summarize context to free space");
-      addSystem(state, "  /ask <q>        one-shot answer (no context)");
+      addSystem(state, "  /quick <q>      one-shot answer (no context)");
       addSystem(state, "  /clear          reset conversation");
       addSystem(state, "  /help           this list");
       addSystem(state, "  /quit           exit");
       return;
     }
 
-    if (low.startsWith("/ask")) {
-      const q = text.slice(4).trim();
-      if (!q) { addSystem(state, "Usage: /ask <question>"); return; }
+    if (low.startsWith("/quick")) {
+      const q = text.slice(6).trim();
+      if (!q) { addSystem(state, "Usage: /quick <question>"); return; }
       // One-shot — not added to session
       addModel(state, "", "", true);
       state.busy = true;
@@ -315,7 +322,7 @@ export async function runChat(model: ModelInterface, options: ChatOptions = {}):
 
     // Input locking during commands
     if (state.busy && state.mode) {
-      addSystem(state, "Command running — use /ask for questions.");
+      addSystem(state, "Command running — use /quick for questions.");
       return;
     }
     if (state.busy) {

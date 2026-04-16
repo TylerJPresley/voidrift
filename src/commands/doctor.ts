@@ -105,6 +105,17 @@ export function runChecks(fix = false): CheckResult[] {
     ? { name: "skills", status: "pass", message: "skills directory present" }
     : { name: "skills", status: "warn", message: "skills directory not found" });
 
+  // Optional tool dependencies (REQ-U-16a)
+  const optionalDeps: Array<[string, string]> = [
+    ["pdf-parse", "npm install pdf-parse"],
+    ["mammoth", "npm install mammoth"],
+    ["xlsx", "npm install xlsx"],
+  ];
+  for (const [pkg, installCmd] of optionalDeps) {
+    try { require(pkg); results.push({ name: `optional_dep:${pkg}`, status: "pass", message: `${pkg} available` }); }
+    catch { results.push({ name: `optional_dep:${pkg}`, status: "warn", message: `${pkg} not installed. Install with: ${installCmd}` }); }
+  }
+
   return results;
 }
 

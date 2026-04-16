@@ -421,6 +421,19 @@ export class AgentLoop {
       // Steering hooks — delegated to _drainSteering
       const state = this._loopState(turnCount);
       state.toolsCalledThisTurn = toolsCalledThisTurn;
+
+      // done() tool triggers final text-only call (REQ-ARCH-4)
+      // Only if done was actually executed (not rejected by beforeToolCall hook)
+      const doneCall = parsed.toolCalls.find(tc => tc.function.name === "done");
+      if (doneCall) {
+        const doneSig = `done:${doneCall.function.arguments}`;
+        const doneResult = results.get(doneSig) ?? "";
+        if (!doneResult.startsWith("ERROR:") && !doneResult.startsWith("Error:")) {
+          this._log(`[ITERATION turn=${turnCount} reason=done_tool tools=[${toolsCalledThisTurn.join(",")}]]`);
+          break;
+        }
+      }
+
       const steeringMsgs = this._drainSteering(state);
       if (steeringMsgs.length) this.messages.push(...steeringMsgs);
 
@@ -436,7 +449,7 @@ export class AgentLoop {
       }
       if (isAbortRequested()) throw new AbortRequested();
 
-      this._log(`[ITERATION turn=${turnCount} tools=[${toolsCalledThisTurn.join(",")}]]`);
+      this._log(`[ITERATION turn=${turnCount} reason=tool_call tools=[${toolsCalledThisTurn.join(",")}]]`);
     }
 
     // Final text-only call after stop

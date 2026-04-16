@@ -7,12 +7,23 @@ import { Command } from "commander";
 import { resolveModel, listAliases } from "./models.js";
 import { TokenBudget } from "./agent/budget.js";
 import { initSystemLog, syslog } from "./utils.js";
+import { getModelsFile } from "./config.js";
+import { existsSync } from "node:fs";
 
 const program = new Command();
 
 // Initialize system log (REQ-LOG-4)
 initSystemLog();
 syslog(`CLI invocation: ${process.argv.slice(2).join(" ")}`);
+
+/** Check models file exists before resolving (REQ-CFG-8). */
+function checkModelsFile(): void {
+  const p = getModelsFile();
+  if (!existsSync(p)) {
+    console.error(`Error: Models file not found at ${p}\nConfigure models_file in ~/.voidrift/config.yml or create the file.`);
+    process.exit(1);
+  }
+}
 
 program
   .name("voidrift")
@@ -36,7 +47,7 @@ program
       console.error("Error: specify --path <dir> or --idea <id>");
       process.exit(1);
     }
-    const mc = resolveModel(model);
+    const mc = (checkModelsFile(), resolveModel(model));
     const budget = makeBudget(opts.maxInputTokens, opts.maxOutputTokens, mc.config);
     const { runGather } = await import("./commands/gather.js");
     process.exit(await runGather(mc, opts.path, opts.idea, opts.overwrite, budget));
@@ -48,7 +59,7 @@ program
   .option("--overwrite", "Remove previous plan artifacts")
   .option("--idea <id>", "Scope to a specific idea", parseInt)
   .action(async (model, opts) => {
-    const mc = resolveModel(model);
+    const mc = (checkModelsFile(), resolveModel(model));
     const { runPlan } = await import("./commands/plan.js");
     process.exit(await runPlan(mc, opts.overwrite, opts.idea));
   });
@@ -59,7 +70,7 @@ program
   .option("--max-input-tokens <n>", "Max input tokens", parseInt)
   .option("--max-output-tokens <n>", "Max output tokens", parseInt)
   .action(async (model, architect, opts) => {
-    const mc = resolveModel(model);
+    const mc = (checkModelsFile(), resolveModel(model));
     const arch = architect ? resolveModel(architect) : undefined;
     const budget = makeBudget(opts.maxInputTokens, opts.maxOutputTokens, mc.config);
     const { runDevelop } = await import("./commands/develop.js");
@@ -70,7 +81,7 @@ program
   .command("deploy <model> [architect]")
   .description("Prepare a release (version, changelog, tag)")
   .action(async (model, architect) => {
-    const mc = resolveModel(model);
+    const mc = (checkModelsFile(), resolveModel(model));
     const arch = architect ? resolveModel(architect) : undefined;
     const { runDeploy } = await import("./commands/deploy.js");
     process.exit(await runDeploy(mc, arch));
@@ -80,7 +91,7 @@ program
   .command("verify <model>")
   .description("Run acceptance tests against requirements")
   .action(async (model) => {
-    const mc = resolveModel(model);
+    const mc = (checkModelsFile(), resolveModel(model));
     const { runVerify } = await import("./commands/verify.js");
     process.exit(await runVerify(mc));
   });
@@ -97,7 +108,7 @@ program
       console.error("Error: --system-prompt requires --bare");
       process.exit(1);
     }
-    const mc = resolveModel(model);
+    const mc = (checkModelsFile(), resolveModel(model));
     const { runChat } = await import("./commands/chat.js");
     await runChat(mc, opts);
   });

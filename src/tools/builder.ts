@@ -236,8 +236,11 @@ export function buildDomainHandlers(
     if (a === "code") {
       // Basic code analysis without tree-sitter — use regex-based extraction
       const { readFileSync: rf, existsSync: ex } = require("node:fs");
-      const { resolve } = require("node:path");
+      const { resolve, relative } = require("node:path");
       const resolved = resolve(projectDir, String(path));
+      // Path sandboxing (REQ-U-20, REQ-SEC-1)
+      const rel = relative(projectDir, resolved);
+      if (rel.startsWith("..")) return `Access denied: ${path} resolves outside project root.`;
       if (!ex(resolved)) return `File not found: ${path}`;
       const content = rf(resolved, "utf-8");
       const lines = content.split("\n");
