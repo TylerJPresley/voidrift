@@ -74,7 +74,7 @@ export async function runChat(model: ModelInterface, options: ChatOptions = {}):
   const [tools, handlers] = buildLocalTools("chat", projectDir, ctx);
   const agent = new AgentLoop({
     model, systemPrompt, tools, toolHandlers: handlers,
-    stream: true, maxTokens: getMaxTokens(model.config, "chat.session"),
+    stream: false, maxTokens: getMaxTokens(model.config, "chat.session"),
     logPath: log, showSpinner: false, toolChoice: "auto",
   });
 
@@ -101,13 +101,6 @@ export async function runChat(model: ModelInterface, options: ChatOptions = {}):
   const defaultPromptFn = (f: string, c: string[]) => "skip";
 
   // Callbacks
-  agent.onToken = (token) => {
-    const last = state.messages[state.messages.length - 1];
-    if (last?.role === "model" && last.streaming) {
-      updateLastModel(state, last.text + token, "", true);
-    }
-  };
-
   agent.onToolCall = (name, args) => {
     state.thinking = true;
     try {
