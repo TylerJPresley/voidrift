@@ -79,8 +79,23 @@ export async function runDevelop(
   mm.load();
 
   // Orphaned recovery (REQ-D-16)
-  for (const [id, t] of Object.entries(mm.tasks())) {
-    if (t.status === "in-progress") mm.setStatus(Number(id), "planned");
+  const orphaned = Object.entries(mm.tasks()).filter(([, t]) => t.status === "in-progress");
+  if (orphaned.length) {
+    if (process.stdin.isTTY) {
+      const { createInterface } = require("node:readline");
+      const rl = createInterface({ input: process.stdin, output: process.stderr });
+      for (const [id, t] of orphaned) {
+        const answer: string = await new Promise(resolve =>
+          rl.question(`  TASK-${id} (${t.module}) is in-progress. [r]eset / [s]kip / [f]ail? `, resolve));
+        const a = answer.trim().toLowerCase();
+        if (a === "f" || a === "fail") mm.setStatus(Number(id), "failed");
+        else if (a === "s" || a === "skip") { /* leave as-is */ }
+        else mm.setStatus(Number(id), "planned");
+      }
+      rl.close();
+    } else {
+      for (const [id] of orphaned) mm.setStatus(Number(id), "planned");
+    }
   }
 
   if (!mm.hasWork()) { process.stderr.write("All tasks complete.\n"); return 0; }

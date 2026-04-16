@@ -144,6 +144,36 @@ export class ManifestManager {
     this.save();
   }
 
+  /** Create a bug entity (REQ-TM-7). Returns bug ID. */
+  createBug(title: string, content: string, taskRefs: number[] = []): number {
+    const bugId = this._nextBugId++;
+    const bugDir = join(this._dir, "tasks", "active");
+    mkdirSync(bugDir, { recursive: true });
+    const frontmatter = `---\nid: BUG-${bugId}\ntitle: ${title}\ntask_refs: [${taskRefs.join(", ")}]\n---\n\n`;
+    writeFileSync(join(bugDir, `BUG-${bugId}.md`), frontmatter + content, "utf-8");
+    this.save();
+    this._appendHistory(bugId, "created" as TaskStatus);
+    return bugId;
+  }
+
+  /** Check if all tasks for an idea are verified and archive the idea (REQ-IDEA-5). */
+  checkIdeaArchival(ideaId: number): boolean {
+    const ideaTasks = Object.values(this._tasks).filter(t => t.idea === ideaId);
+    if (!ideaTasks.length) return false;
+    if (ideaTasks.every(t => t.status === "verified")) {
+      // Archive the idea
+      const ideaPath = join(this._dir, "ideas", `IDEA-${ideaId}.md`);
+      const archiveDir = join(this._dir, "ideas", "archived");
+      mkdirSync(archiveDir, { recursive: true });
+      if (existsSync(ideaPath)) {
+        renameSync(ideaPath, join(archiveDir, `IDEA-${ideaId}.md`));
+        this._appendHistory(ideaId, "done" as TaskStatus);
+        return true;
+      }
+    }
+    return false;
+  }
+
   private _appendHistory(id: number, status: TaskStatus): void {
     const historyPath = join(this._dir, "tasks", "history.log");
     const task = this._tasks[id];

@@ -223,6 +223,20 @@ export async function runPlan(model: ModelInterface, overwrite = false, ideaId?:
   const requirements = readFileSync(join(d, "REQUIREMENTS.md"), "utf-8");
   const skill = findSkill("ARCH-DESIGN") ?? "";
 
+  // Idea context injection (REQ-IDEA-5)
+  let ideaContext = "";
+  if (ideaId != null) {
+    const ideaContent = existsSync(join(d, "ideas", `IDEA-${ideaId}.md`))
+      ? readFileSync(join(d, "ideas", `IDEA-${ideaId}.md`), "utf-8") : null;
+    if (!ideaContent) { process.stderr.write(`Error: IDEA-${ideaId} not found.\n`); return 1; }
+    // Gate on missing reqs field
+    if (!ideaContent.includes("reqs:")) {
+      process.stderr.write(`Error: No requirements found for IDEA-${ideaId}. Run 'voidrift gather <model> --idea ${ideaId}' first.\n`);
+      return 1;
+    }
+    ideaContext = `\n\n## Idea Context (IDEA-${ideaId})\n\n${ideaContent}`;
+  }
+
   // Delta analysis for update mode (REQ-P-11)
   let deltaContext = "";
   const isUpdate = !overwrite && existsSync(join(d, "ARCHITECTURE.md")) && existsSync(join(d, "tasks", "manifest.yml"));
@@ -258,6 +272,7 @@ export async function runPlan(model: ModelInterface, overwrite = false, ideaId?:
     .replace("{requirements}", requirements)
     .replace("{arch_template}", archTemplate);
   if (deltaContext) archPrompt += `\n\n## Delta Analysis\n\n${deltaContext}`;
+  if (ideaContext) archPrompt += ideaContext;
   const archSystem = [skill, archPrompt].filter(Boolean).join("\n\n");
 
   const ok1 = await dispatchAgent({

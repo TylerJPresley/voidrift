@@ -228,10 +228,45 @@ export function buildDomainHandlers(
     if (a === "document") {
       const ext = String(path).split(".").pop()?.toLowerCase();
       if (!["pdf", "docx", "xlsx"].includes(ext ?? "")) return `Unsupported format '.${ext}'. Supported: .pdf, .docx, .xlsx`;
-      if (ext === "pdf") { try { require("pdf-parse"); } catch { return "Missing dependency: npm install pdf-parse"; } }
-      if (ext === "docx") { try { require("mammoth"); } catch { return "Missing dependency: npm install mammoth"; } }
-      if (ext === "xlsx") { try { require("xlsx"); } catch { return "Missing dependency: npm install xlsx"; } }
-      return `Document analysis for .${ext} files requires implementation of extraction logic.`;
+      const { resolve: rp } = require("node:path");
+      const { readFileSync: rf, existsSync: ex } = require("node:fs");
+      const resolved = rp(projectDir, String(path));
+      if (!ex(resolved)) return `File not found: ${path}`;
+      if (ext === "pdf") {
+        try {
+          const pdfParse = require("pdf-parse");
+          const buf = rf(resolved);
+          // pdf-parse is async — use sync workaround
+          const { execSync } = require("node:child_process");
+          const text = execSync(`node -e "require('pdf-parse')(require('fs').readFileSync('${resolved.replace(/'/g, "\\'")}')). then(d=>process.stdout.write(d.text))"`, { timeout: 30000, encoding: "utf-8" });
+          return text || "(No text extracted from PDF)";
+        } catch (e) { return `Missing dependency: npm install pdf-parse`; }
+      }
+      if (ext === "docx") {
+        try {
+          const mammoth = require("mammoth");
+          const { execSync } = require("node:child_process");
+          const md = execSync(`node -e "require('mammoth').convertToMarkdown({path:'${resolved.replace(/'/g, "\\'")}'}).then(r=>process.stdout.write(r.value))"`, { timeout: 30000, encoding: "utf-8" });
+          return md || "(No content extracted from DOCX)";
+        } catch { return "Missing dependency: npm install mammoth"; }
+      }
+      if (ext === "xlsx") {
+        try {
+          const XLSX = require("xlsx");
+          const wb = XLSX.readFile(resolved);
+          const sheets: string[] = [];
+          for (const name of wb.SheetNames) {
+            const csv = XLSX.utils.sheet_to_csv(wb.Sheets[name]);
+            const rows = csv.split("\n").filter((r: string) => r.trim());
+            if (!rows.length) continue;
+            const header = rows[0].split(",");
+            const mdRows = rows.slice(1).map((r: string) => `| ${r.split(",").join(" | ")} |`);
+            sheets.push(`### ${name}\n\n| ${header.join(" | ")} |\n| ${header.map(() => "---").join(" | ")} |\n${mdRows.join("\n")}`);
+          }
+          return sheets.join("\n\n") || "(No data in spreadsheet)";
+        } catch { return "Missing dependency: npm install xlsx"; }
+      }
+      return `Unsupported format: .${ext}`;
     }
     if (a === "code") {
       // Basic code analysis without tree-sitter — use regex-based extraction
