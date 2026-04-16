@@ -2,8 +2,55 @@
  * Shared utilities for the VoidRift CLI.
  */
 
-import { existsSync, mkdirSync, readFileSync, appendFileSync, statfsSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, appendFileSync, statfsSync, statSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { homedir } from "node:os";
+
+// ---------------------------------------------------------------------------
+// System log (REQ-LOG-4, REQ-LOG-5)
+// ---------------------------------------------------------------------------
+
+const SYSTEM_LOG_MAX_BYTES = 1_048_576; // 1 MB
+const SYSTEM_LOG_BACKUPS = 5;
+
+function systemLogDir(): string {
+  return join(homedir(), ".voidrift", "logs");
+}
+
+function systemLogPath(): string {
+  return join(systemLogDir(), "voidrift.log");
+}
+
+/** Initialize system log at CLI startup. */
+export function initSystemLog(): void {
+  const dir = systemLogDir();
+  mkdirSync(dir, { recursive: true });
+  const p = systemLogPath();
+  if (!existsSync(p)) writeFileSync(p, "", "utf-8");
+}
+
+/** Write a line to the system log with rotation. */
+export function syslog(message: string): void {
+  const p = systemLogPath();
+  const ts = new Date().toISOString();
+  const line = `${ts} ${message}\n`;
+  try {
+    appendFileSync(p, line, "utf-8");
+    // Rotate if over max size
+    try {
+      const size = statSync(p).size;
+      if (size > SYSTEM_LOG_MAX_BYTES) {
+        // Shift backups: .5→delete, .4→.5, ... .1→.2, current→.1
+        for (let i = SYSTEM_LOG_BACKUPS; i >= 1; i--) {
+          const src = i === 1 ? p : `${p}.${i - 1}`;
+          const dst = `${p}.${i}`;
+          if (existsSync(src)) renameSync(src, dst);
+        }
+        writeFileSync(p, "", "utf-8");
+      }
+    } catch { /* rotation is best-effort */ }
+  } catch { /* logging is non-fatal */ }
+}
 
 // ---------------------------------------------------------------------------
 // .voidrift/ directory

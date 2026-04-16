@@ -164,3 +164,22 @@ export class GitCheckpointManager {
 function git(dir: string, cmd: string): string {
   return execSync(`git ${cmd}`, { cwd: dir, timeout: 5000, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] });
 }
+
+// ---------------------------------------------------------------------------
+// Git commit helpers (REQ-GIT-1, REQ-GIT-2)
+// ---------------------------------------------------------------------------
+
+/** Stage and commit specific files. Returns true on success. */
+export function gitCommit(cwd: string, files: string[], message: string): boolean {
+  try {
+    if (!files.length) return false;
+    execSync(`git add ${files.map(f => `"${f}"`).join(" ")}`, { cwd, timeout: 10_000, stdio: "pipe" });
+    execSync(`git commit -m "${message.replace(/"/g, '\\"')}"`, { cwd, timeout: 10_000, stdio: "pipe" });
+    return true;
+  } catch { return false; }
+}
+
+/** Check if cwd is a git repo. */
+export function isGitRepo(cwd: string): boolean {
+  try { execSync("git rev-parse --is-inside-work-tree", { cwd, timeout: 5_000, stdio: "pipe" }); return true; } catch { return false; }
+}

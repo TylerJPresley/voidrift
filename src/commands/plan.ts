@@ -371,5 +371,11 @@ export async function runPlan(model: ModelInterface, overwrite = false, ideaId?:
   appendState("plan", model.config.alias, `Wrote ARCHITECTURE.md, ${taskCount} tasks, manifest.yml.`,
     [".voidrift/ARCHITECTURE.md", ".voidrift/tasks/manifest.yml"]);
 
+  // Git commit plan artifacts (REQ-GIT-1)
+  const { gitCommit, isGitRepo } = await import("../git.js");
+  if (isGitRepo(join(d, ".."))) {
+    gitCommit(join(d, ".."), [".voidrift/"], "docs: add planning artifacts");
+  }
+
   return 0;
 }

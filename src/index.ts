@@ -6,8 +6,13 @@
 import { Command } from "commander";
 import { resolveModel, listAliases } from "./models.js";
 import { TokenBudget } from "./agent/budget.js";
+import { initSystemLog, syslog } from "./utils.js";
 
 const program = new Command();
+
+// Initialize system log (REQ-LOG-4)
+initSystemLog();
+syslog(`CLI invocation: ${process.argv.slice(2).join(" ")}`);
 
 program
   .name("voidrift")
@@ -216,6 +221,67 @@ program
       if (toDelete.length) console.log(`Pruned ${toDelete.length} old log(s).`);
     }
 
+    // Prune analysis cache (REQ-U-14)
+    const analysisDir = join(d, "analysis");
+    if (existsSync(analysisDir)) {
+      const { loadConfig } = await import("./config.js");
+      const cfg = loadConfig() as Record<string, Record<string, unknown>>;
+      const cache = cfg?.cache ?? {};
+      const ttlDays = (cache.ttl_days as number) ?? 30;
+      const maxEntries = (cache.max_entries as number) ?? 500;
+      const ttlMs = (ttlDays as number) * 86400_000;
+      const now = Date.now();
+      let staleCount = 0, expiredCount = 0, lruCount = 0, freedBytes = 0;
+
+      // Collect all analysis entries
+      const entries: Array<{ path: string; mtime: number; size: number; sourceFile: string | null }> = [];
+      const walkAnalysis = (dir: string) => {
+        for (const f of readdirSync(dir, { withFileTypes: true })) {
+          const full = join(dir, f.name);
+          if (f.isDirectory()) { walkAnalysis(full); continue; }
+          if (!f.name.endsWith(".md")) continue;
+          const st = statSync(full);
+          // Parse frontmatter for source file reference
+          let sourceFile: string | null = null;
+          try {
+            const content = require("node:fs").readFileSync(full, "utf-8").slice(0, 500);
+            const m = content.match(/^file:\s*(.+)$/m);
+            if (m) sourceFile = m[1].trim();
+          } catch { /* */ }
+          entries.push({ path: full, mtime: st.mtimeMs, size: st.size, sourceFile });
+        }
+      };
+      walkAnalysis(analysisDir);
+
+      // Stage 1: Remove stale (source file no longer exists)
+      const remaining = entries.filter(e => {
+        if (e.sourceFile && !existsSync(join(d, "..", e.sourceFile))) {
+          unlinkSync(e.path); staleCount++; freedBytes += e.size; return false;
+        }
+        return true;
+      });
+
+      // Stage 2: Remove expired (older than ttl_days)
+      const afterTtl = remaining.filter(e => {
+        if (now - e.mtime > ttlMs) {
+          unlinkSync(e.path); expiredCount++; freedBytes += e.size; return false;
+        }
+        return true;
+      });
+
+      // Stage 3: LRU eviction if over max_entries
+      if (afterTtl.length > (maxEntries as number)) {
+        afterTtl.sort((a, b) => a.mtime - b.mtime);
+        const toEvict = afterTtl.slice(0, afterTtl.length - (maxEntries as number));
+        for (const e of toEvict) { unlinkSync(e.path); lruCount++; freedBytes += e.size; }
+      }
+
+      if (staleCount + expiredCount + lruCount > 0) {
+        const freedKb = (freedBytes / 1024).toFixed(1);
+        console.log(`Analysis cache: ${staleCount} stale, ${expiredCount} expired, ${lruCount} LRU evicted (${freedKb} KB freed).`);
+      }
+    }
+
     // Remove stale lock
     const lock = join(d, ".develop.lock");
     if (existsSync(lock)) { unlinkSync(lock); console.log("Removed stale lock."); }
@@ -254,6 +320,68 @@ program
     }
     if (mgr.restore(parseInt(turn, 10))) console.log(`Restored to turn ${turn}.`);
     else console.log(`Checkpoint for turn ${turn} not found.`);
+  });
+
+program
+program
+  .command("skills <action> [query]")
+  .description("Manage skills (list, search)")
+  .action(async (action, query) => {
+    const { listSkills } = await import("./skills.js");
+    if (action === "list") {
+      const skills = listSkills();
+      if (!skills.length) { console.log("No skills found."); return; }
+      let currentLayer = "";
+      for (const s of skills) {
+        if (s.layer !== currentLayer) { currentLayer = s.layer; console.log(`\n  ${currentLayer.toUpperCase()}`); }
+        console.log(`    ${s.name}: ${s.description}`);
+      }
+      console.log("");
+    } else if (action === "search" && query) {
+      const skills = listSkills();
+      const q = query.toLowerCase();
+      const matches = skills.filter(s => s.name.toLowerCase().includes(q) || s.description.toLowerCase().includes(q));
+      if (!matches.length) { console.log(`No skills matching "${query}".`); return; }
+      for (const s of matches) console.log(`  [${s.layer}] ${s.name}: ${s.description}`);
+    } else {
+      console.error("Usage: voidrift skills list | voidrift skills search <query>");
+    }
+  });
+
+program
+  .command("completions <shell>")
+  .description("Output shell completion script")
+  .action(async (shell) => {
+    const aliases = listAliases().join(" ");
+    const commands = "gather plan develop deploy verify chat status doctor log prune unlock rollback memory skills completions";
+    if (shell === "bash") {
+      console.log(`# voidrift bash completions
+_voidrift() {
+  local cur=\${COMP_WORDS[COMP_CWORD]}
+  local prev=\${COMP_WORDS[COMP_CWORD-1]}
+  if [ $COMP_CWORD -eq 1 ]; then
+    COMPREPLY=( $(compgen -W "${commands}" -- "$cur") )
+  elif [ $COMP_CWORD -eq 2 ]; then
+    case "$prev" in
+      gather|plan|develop|deploy|verify|chat) COMPREPLY=( $(compgen -W "${aliases}" -- "$cur") ) ;;
+    esac
+  fi
+}
+complete -F _voidrift voidrift`);
+    } else if (shell === "zsh") {
+      console.log(`#compdef voidrift
+_voidrift() {
+  _arguments '1:command:(${commands})' '2:model:(${aliases})'
+}
+_voidrift "$@"`);
+    } else if (shell === "fish") {
+      console.log(`# voidrift fish completions
+complete -c voidrift -n '__fish_use_subcommand' -a '${commands}'
+for model in ${aliases}; complete -c voidrift -n '__fish_seen_subcommand_from gather plan develop deploy verify chat' -a $model; end`);
+    } else {
+      console.error("Supported shells: bash, zsh, fish");
+      process.exit(1);
+    }
   });
 
 program
@@ -297,6 +425,7 @@ function makeBudget(maxInput?: number, maxOutput?: number, mc?: { maxInputTokens
 
 // Catch unhandled errors — no stack traces to user
 process.on("uncaughtException", (e) => {
+  syslog(`FATAL: ${e.message}`);
   console.error(`Error: ${e.message}`);
   process.exit(1);
 });

@@ -199,6 +199,16 @@ export async function runDevelop(
           ctx.clearSnapshots();
           mm.setStatus(taskId, "implemented");
 
+          // Per-task git commit (REQ-GIT-2)
+          const writtenFiles = ctx.getSessionFiles();
+          if (writtenFiles.length) {
+            const { gitCommit: gc, isGitRepo: igr } = require("../git.js");
+            if (igr(join(d, ".."))) {
+              await gitMutex.acquire();
+              try { gc(join(d, ".."), writtenFiles, `feat: implement TASK-${taskId}`); } finally { gitMutex.release(); }
+            }
+          }
+
           // Post-task file check (REQ-D-21)
           _checkTaskFiles(taskText, ctx);
         } else {
