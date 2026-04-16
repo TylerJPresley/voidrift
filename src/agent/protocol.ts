@@ -5,7 +5,7 @@
  * to/from wire format. No protocol branches in the loop.
  */
 
-import type { Message, ToolCall, Usage, ParsedResponse } from "./types.js";
+import type { Message, ToolCall, Usage, ParsedResponse, StreamEvent } from "./types.js";
 import type { ModelConfig } from "../models.js";
 import type { ToolDef } from "../tools/registry.js";
 
@@ -18,6 +18,7 @@ export interface ProtocolAdapter {
   buildRequest(opts: RequestOpts): Record<string, unknown>;
   parseResponse(raw: unknown): ParsedResponse;
   call(client: unknown, wireReq: Record<string, unknown>): Promise<unknown>;
+  iterStream(client: unknown, wireReq: Record<string, unknown>): AsyncIterable<StreamEvent>;
 }
 
 export interface RequestOpts {
@@ -103,6 +104,44 @@ export class OpenAIAdapter implements ProtocolAdapter {
   async call(client: unknown, wireReq: Record<string, unknown>): Promise<unknown> {
     const c = client as { chat: { completions: { create: (req: unknown) => Promise<unknown> } } };
     return c.chat.completions.create(wireReq);
+  }
+
+  async *iterStream(client: unknown, wireReq: Record<string, unknown>): AsyncIterable<StreamEvent> {
+    const c = client as { chat: { completions: { create: (req: unknown) => Promise<unknown> } } };
+    const stream = await c.chat.completions.create({ ...wireReq, stream: true }) as AsyncIterable<Record<string, unknown>>;
+    let finishReason = "stop";
+    let usage: Usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+
+    for await (const chunk of stream) {
+      // Usage chunk (final chunk with stream_options)
+      if (chunk.usage) {
+        const u = chunk.usage as Record<string, number>;
+        usage = { prompt_tokens: u.prompt_tokens ?? 0, completion_tokens: u.completion_tokens ?? 0, total_tokens: u.total_tokens ?? 0 };
+      }
+      const choices = (chunk.choices as Array<Record<string, unknown>>) ?? [];
+      if (!choices.length) continue;
+      const delta = (choices[0].delta as Record<string, unknown>) ?? {};
+      if (choices[0].finish_reason) finishReason = String(choices[0].finish_reason);
+
+      // Text delta
+      if (delta.content) yield { type: "text", text: String(delta.content) };
+
+      // Tool call deltas
+      if (delta.tool_calls && Array.isArray(delta.tool_calls)) {
+        for (const tc of delta.tool_calls as Array<Record<string, unknown>>) {
+          const fn = (tc.function as Record<string, string>) ?? {};
+          yield {
+            type: "tool_call",
+            index: Number(tc.index ?? 0),
+            id: tc.id ? String(tc.id) : undefined,
+            name: fn.name ?? undefined,
+            arguments: fn.arguments ?? undefined,
+          };
+        }
+      }
+    }
+
+    yield { type: "finish", finishReason, usage };
   }
 }// ---------------------------------------------------------------------------
 // Anthropic Adapter
@@ -251,6 +290,53 @@ export class AnthropicAdapter implements ProtocolAdapter {
   async call(client: unknown, wireReq: Record<string, unknown>): Promise<unknown> {
     const c = client as { messages: { create: (req: unknown) => Promise<unknown> } };
     return c.messages.create(wireReq);
+  }
+
+  async *iterStream(client: unknown, wireReq: Record<string, unknown>): AsyncIterable<StreamEvent> {
+    const c = client as { messages: { create: (req: unknown) => Promise<unknown> } };
+    const stream = await c.messages.create({ ...wireReq, stream: true }) as AsyncIterable<Record<string, unknown>>;
+    let finishReason = "stop";
+    let usage: Usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+    let thinkBuf = "";
+
+    for await (const event of stream) {
+      const t = String(event.type ?? "");
+
+      if (t === "message_start") {
+        const msg = (event.message as Record<string, unknown>) ?? {};
+        const u = (msg.usage as Record<string, number>) ?? {};
+        usage.prompt_tokens = u.input_tokens ?? 0;
+      } else if (t === "message_delta") {
+        const delta = (event.delta as Record<string, unknown>) ?? {};
+        if (delta.stop_reason) {
+          const sr = String(delta.stop_reason);
+          finishReason = sr === "end_turn" ? "stop" : sr === "tool_use" ? "tool_calls" : sr === "max_tokens" ? "length" : sr;
+        }
+        const u = (event.usage as Record<string, number>) ?? {};
+        if (u.output_tokens) usage.completion_tokens = u.output_tokens;
+      } else if (t === "content_block_start") {
+        const block = (event.content_block as Record<string, unknown>) ?? {};
+        if (block.type === "tool_use") {
+          yield { type: "tool_call", index: Number(event.index ?? 0), id: String(block.id ?? ""), name: String(block.name ?? "") };
+        } else if (block.type === "thinking") {
+          thinkBuf = "";
+        }
+      } else if (t === "content_block_delta") {
+        const delta = (event.delta as Record<string, unknown>) ?? {};
+        if (delta.type === "text_delta") {
+          yield { type: "text", text: String(delta.text ?? "") };
+        } else if (delta.type === "input_json_delta") {
+          yield { type: "tool_call", index: Number(event.index ?? 0), arguments: String(delta.partial_json ?? "") };
+        } else if (delta.type === "thinking_delta") {
+          thinkBuf += String(delta.thinking ?? "");
+        }
+      } else if (t === "content_block_stop") {
+        if (thinkBuf) { yield { type: "thinking", text: thinkBuf }; thinkBuf = ""; }
+      }
+    }
+
+    usage.total_tokens = usage.prompt_tokens + usage.completion_tokens;
+    yield { type: "finish", finishReason, usage };
   }
 }
 

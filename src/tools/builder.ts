@@ -84,6 +84,11 @@ export function buildDomainHandlers(
   cmd: string | null,
   projectDir: string,
   ctx?: WriteContext,
+  opts?: {
+    memoryManager?: InstanceType<typeof import("../memory.js").MemoryManager>;
+    session?: InstanceType<typeof import("../session.js").ChatSession>;
+    askFn?: (question: string, options?: string[]) => string;
+  },
 ): Record<string, Handler> {
   const writeCtx = ctx ?? new WriteContext({ projectDir });
   const handlers: Record<string, Handler> = {};
@@ -133,17 +138,86 @@ export function buildDomainHandlers(
     return `Unknown skill action: ${action}`;
   }) as Handler;
 
-  // memory (stub — full in Phase 7)
-  handlers.memory = () => "Memory tool not yet implemented.";
+  // memory (REQ-MEM-1)
+  if (opts?.memoryManager) {
+    const mm = opts.memoryManager;
+    handlers.memory = ((action: unknown, name: unknown, content: unknown, scope: unknown, description: unknown) => {
+      const a = String(action);
+      if (a === "read") return mm.read(String(name)) ?? `Memory entry '${name}' not found.`;
+      if (a === "write") { mm.write(String(name), String(content), String(description ?? ""), (scope as "project" | "global") ?? "project"); return `Saved memory entry '${name}'.`; }
+      if (a === "list") { const entries = mm.list(); return entries.length ? entries.map(e => `[${e.layer}] ${e.name}: ${e.description}`).join("\n") : "No memory entries."; }
+      if (a === "delete") { mm.delete(String(name), (scope as "project" | "global") ?? "project"); return `Deleted memory entry '${name}'.`; }
+      return `Unknown memory action: ${a}`;
+    }) as Handler;
+  } else {
+    handlers.memory = () => "Memory tool is only available in chat.";
+  }
 
-  // session (stub — full in Phase 7)
-  handlers.session = () => "Session tool not yet implemented.";
+  // session (REQ-U-18)
+  if (opts?.session) {
+    const sess = opts.session;
+    handlers.session = ((action: unknown, query: unknown, limit: unknown) => {
+      const a = String(action);
+      if (a === "search") {
+        const results = sess.searchEntries(String(query), limit ? Number(limit) : 5);
+        if (!results.length) return "No matches found.";
+        return results.map(r => `[${r.timestamp}] ${r.role}: ${r.content}`).join("\n\n");
+      }
+      return `Unknown session action: ${a}`;
+    }) as Handler;
+  } else {
+    handlers.session = () => "Session tool is only available in chat.";
+  }
 
-  // analyze (stub — full in Phase 4)
-  handlers.analyze = () => "Analyze tool not yet implemented.";
+  // analyze (REQ-U-19, REQ-U-20)
+  handlers.analyze = ((action: unknown, path: unknown) => {
+    const a = String(action);
+    if (a === "document") {
+      const ext = String(path).split(".").pop()?.toLowerCase();
+      if (!["pdf", "docx", "xlsx"].includes(ext ?? "")) return `Unsupported format '.${ext}'. Supported: .pdf, .docx, .xlsx`;
+      if (ext === "pdf") { try { require("pdf-parse"); } catch { return "Missing dependency: npm install pdf-parse"; } }
+      if (ext === "docx") { try { require("mammoth"); } catch { return "Missing dependency: npm install mammoth"; } }
+      if (ext === "xlsx") { try { require("xlsx"); } catch { return "Missing dependency: npm install xlsx"; } }
+      return `Document analysis for .${ext} files requires implementation of extraction logic.`;
+    }
+    if (a === "code") {
+      // Basic code analysis without tree-sitter — use regex-based extraction
+      const { readFileSync: rf, existsSync: ex } = require("node:fs");
+      const { resolve } = require("node:path");
+      const resolved = resolve(projectDir, String(path));
+      if (!ex(resolved)) return `File not found: ${path}`;
+      const content = rf(resolved, "utf-8");
+      const lines = content.split("\n");
+      const ext = String(path).split(".").pop()?.toLowerCase();
+      const imports = lines.filter((l: string) => /^(import |from |require\(|const .* = require)/.test(l.trim())).map((l: string) => l.trim());
+      const symbols = lines.reduce((acc: Array<{name: string; line: number}>, l: string, i: number) => {
+        const fn = l.match(/^(?:export\s+)?(?:async\s+)?function\s+(\w+)/);
+        const cls = l.match(/^(?:export\s+)?class\s+(\w+)/);
+        const cnst = l.match(/^(?:export\s+)?const\s+(\w+)/);
+        if (fn) acc.push({ name: fn[1], line: i + 1 });
+        else if (cls) acc.push({ name: cls[1], line: i + 1 });
+        else if (cnst) acc.push({ name: cnst[1], line: i + 1 });
+        return acc;
+      }, []);
+      const complexity = lines.filter((l: string) => /\b(if|for|while|try|catch|switch)\b/.test(l)).length;
+      return JSON.stringify({ language: ext, lines: lines.length, imports: imports.slice(0, 20), symbols: symbols.slice(0, 30), complexity }, null, 2);
+    }
+    return `Unknown analyze action: ${a}`;
+  }) as Handler;
 
-  // ask (stub — full in Phase 7)
-  handlers.ask = () => "Ask tool not yet implemented.";
+  // ask (REQ-U-12)
+  if (opts?.askFn) {
+    const askFn = opts.askFn;
+    handlers.ask = ((question: unknown, options: unknown) => {
+      const opts = options ? (Array.isArray(options) ? options : JSON.parse(String(options))) : undefined;
+      return askFn(String(question), opts as string[] | undefined);
+    }) as Handler;
+  } else {
+    handlers.ask = ((question: unknown) => {
+      if (!process.stdin.isTTY) return "[No operator present. Use your best judgment and document your decision in comments.]";
+      return "Ask tool is only available in interactive chat.";
+    }) as Handler;
+  }
 
   return handlers;
 }
@@ -156,11 +230,12 @@ export function buildLocalTools(
   cmd?: string | null,
   projectDir?: string,
   ctx?: WriteContext,
+  opts?: Parameters<typeof buildDomainHandlers>[3],
 ): [ToolDef[], Record<string, Handler>] {
   const dir = projectDir ?? process.cwd();
   const allowed = cmd ? COMMAND_TOOLS[cmd] ?? null : null;
   const actions = cmd ? COMMAND_ACTIONS[cmd] ?? {} : {};
-  const handlers = buildDomainHandlers(cmd ?? null, dir, ctx);
+  const handlers = buildDomainHandlers(cmd ?? null, dir, ctx, opts);
 
   let tools = filterTools(DOMAIN_TOOLS, allowed);
 

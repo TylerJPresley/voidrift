@@ -217,8 +217,36 @@ export class AgentLoop {
         // Context-length error → reactive compaction
         if (this._isContextLengthError(e) && this._compactAttempts < 2) {
           this._compactAttempts++;
-          this._log(`[REACTIVE_COMPACT attempt=${this._compactAttempts}]`);
-          this.messages = trimMessages(this.messages);
+          const systemMsg = this.messages[0];
+          const recent = this.messages.slice(-4);
+          const toSummarize = this.messages.slice(1, -4);
+          if (toSummarize.length > 0) {
+            try {
+              // Summarize via API call with no tools (REQ-ARCH-12)
+              const summaryReq = this._adapter.buildRequest({
+                model: this._model.config.modelId,
+                messages: [
+                  { role: "system", content: "Summarize the following conversation concisely, preserving key decisions and context." },
+                  { role: "user", content: toSummarize.map(m => `[${m.role}]: ${(m.content ?? "").slice(0, 300)}`).join("\n") },
+                ],
+                maxTokens: 1024,
+                stream: false,
+                provider: this._model.config.provider,
+              });
+              const raw = await this._adapter.call(this._client, summaryReq);
+              const parsed2 = this._adapter.parseResponse(raw);
+              const summary = parsed2.text || "Conversation context was compacted.";
+              this.messages = [systemMsg, { role: "assistant", content: `[Compacted context]\n${summary}` }, ...recent];
+              this._log(`[REACTIVE_COMPACT attempt=${this._compactAttempts} freed=${toSummarize.length}]`);
+            } catch {
+              // Fallback: just trim empty messages
+              this.messages = trimMessages(this.messages);
+              this._log(`[REACTIVE_COMPACT attempt=${this._compactAttempts} fallback=trim]`);
+            }
+          } else {
+            this.messages = trimMessages(this.messages);
+            this._log(`[REACTIVE_COMPACT attempt=${this._compactAttempts} nothing_to_summarize]`);
+          }
           continue;
         }
         throw e;
@@ -415,7 +443,48 @@ export class AgentLoop {
   }
 
   private async _rawCall(wireReq: Record<string, unknown>): Promise<unknown> {
-    return this._adapter.call(this._client, wireReq);
+    if (!this._stream) return this._adapter.call(this._client, wireReq);
+    // Streaming path — collect events into a ParsedResponse-shaped object
+    return this._rawCallStream(wireReq);
+  }
+
+  private async _rawCallStream(wireReq: Record<string, unknown>): Promise<unknown> {
+    let text = "";
+    const toolCallMap = new Map<number, { id: string; name: string; arguments: string }>();
+    let finishReason = "stop";
+    let usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+
+    for await (const event of this._adapter.iterStream(this._client, wireReq)) {
+      if (event.type === "text") {
+        text += event.text;
+        this.onToken?.(event.text);
+      } else if (event.type === "tool_call") {
+        const existing = toolCallMap.get(event.index);
+        if (existing) {
+          if (event.arguments) existing.arguments += event.arguments;
+        } else {
+          toolCallMap.set(event.index, { id: event.id ?? "", name: event.name ?? "", arguments: event.arguments ?? "" });
+        }
+      } else if (event.type === "thinking") {
+        this._log(`[THINKING] ${event.text}`);
+      } else if (event.type === "finish") {
+        finishReason = event.finishReason;
+        usage = event.usage;
+      }
+    }
+
+    // Build a response object that parseResponse can handle
+    // For OpenAI format (parseResponse expects this shape)
+    const toolCalls = [...toolCallMap.values()].map((tc, i) => ({
+      id: tc.id || `call_${i}`,
+      type: "function",
+      function: { name: tc.name, arguments: tc.arguments },
+    }));
+
+    return {
+      choices: [{ message: { content: text || null, tool_calls: toolCalls.length ? toolCalls : undefined }, finish_reason: finishReason }],
+      usage,
+    };
   }
 
   // ---------------------------------------------------------------------------

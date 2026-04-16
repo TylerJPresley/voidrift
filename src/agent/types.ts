@@ -47,3 +47,10 @@ export interface ParsedResponse {
   finishReason: string;
   usage: Usage;
 }
+
+/** Events yielded by adapter.iterStream(). */
+export type StreamEvent =
+  | { type: "text"; text: string }
+  | { type: "tool_call"; index: number; id?: string; name?: string; arguments?: string }
+  | { type: "thinking"; text: string }
+  | { type: "finish"; finishReason: string; usage: Usage };

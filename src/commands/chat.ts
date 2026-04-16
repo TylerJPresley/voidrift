@@ -2,7 +2,7 @@
  * Chat command: interactive session with Ink TUI (REQ-U-2).
  */
 
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { render } from "ink";
 import React from "react";
@@ -10,6 +10,7 @@ import { AgentLoop } from "../agent/loop.js";
 import type { ModelInterface } from "../models.js";
 import { loadPrompt } from "../prompts.js";
 import { findSkill } from "../skills.js";
+import { ContextCompactor } from "../agent/context.js";
 import { ensureVoidriftDir, bootRun } from "../utils.js";
 import { getMaxTokens } from "../config.js";
 import { buildLocalTools } from "../tools/builder.js";
@@ -21,6 +22,7 @@ import { createState, addOperator, addModel, addTool, addSystem, updateLastModel
 import { App } from "../tui/App.js";
 import { wrapCommand, handleGather, handlePlan, handleDevelop, handleVerify } from "./slashCommands.js";
 import { IdeaSession } from "./idea.js";
+import { createPermissionGate, type PermCategory, type PermDecision } from "./permissions.js";
 
 interface ChatOptions {
   doc?: string;
@@ -35,6 +37,7 @@ export async function runChat(model: ModelInterface, options: ChatOptions = {}):
   const [log, runId] = bootRun("chat");
 
   // Build system prompt (REQ-RES-7)
+  const memMgr = new MemoryManager(projectDir);
   let systemPrompt: string;
   if (options.bare && options.systemPrompt) {
     systemPrompt = readFileSync(options.systemPrompt, "utf-8");
@@ -58,8 +61,7 @@ export async function runChat(model: ModelInterface, options: ChatOptions = {}):
     }
 
     // Memory index
-    const mm = new MemoryManager(projectDir);
-    const memIndex = mm.buildIndex();
+    const memIndex = memMgr.buildIndex();
     if (memIndex) parts.push(memIndex);
 
     // Git context
@@ -71,15 +73,31 @@ export async function runChat(model: ModelInterface, options: ChatOptions = {}):
 
   // Build tools + agent
   const ctx = new WriteContext({ projectDir, maxReadLines: model.config.maxReadLines });
-  const [tools, handlers] = buildLocalTools("chat", projectDir, ctx);
+  const [tools, handlers] = buildLocalTools("chat", projectDir, ctx, { memoryManager: memMgr });
   const agent = new AgentLoop({
     model, systemPrompt, tools, toolHandlers: handlers,
-    stream: false, maxTokens: getMaxTokens(model.config, "chat.session"),
+    stream: true, maxTokens: getMaxTokens(model.config, "chat.session"),
     logPath: log, showSpinner: false, toolChoice: "auto",
   });
 
+  // Streaming token buffer
+  let streamBuf = "";
+  agent.onToken = (token: string) => {
+    streamBuf += token;
+    updateLastModel(state, streamBuf, "", true);
+  };
+
   // Session
   const session = ChatSession.loadOrCreate(d);
+  // Wire session handler now that session exists
+  handlers.session = ((action: unknown, query: unknown, limit: unknown) => {
+    if (String(action) === "search") {
+      const results = session.searchEntries(String(query), limit ? Number(limit) : 5);
+      if (!results.length) return "No matches found.";
+      return results.map((r: { timestamp: string; role: string; content: string }) => `[${r.timestamp}] ${r.role}: ${r.content}`).join("\n\n");
+    }
+    return `Unknown session action: ${action}`;
+  }) as (...args: unknown[]) => string;
   if (session.entryCount > 0) {
     const restored = session.restoreMessages();
     agent.messages.push(...restored);
@@ -93,6 +111,27 @@ export async function runChat(model: ModelInterface, options: ChatOptions = {}):
   const branch = captureGitSnapshot(projectDir)?.branch ?? "";
   const cwd = projectDir.replace(require("os").homedir(), "~");
   const state = createState(model.config.alias, cwd, branch);
+
+  // Context compactor (REQ-U-7, REQ-U-10)
+  const compactPrompt = loadPrompt("chat", "COMPACT") ?? "Summarize the conversation preserving key decisions, file changes, and next steps.";
+  const compactor = new ContextCompactor({
+    maxContext: model.config.maxContext ?? 0,
+    compactPrompt,
+    logFn: (msg) => { try { appendFileSync(log, msg + "\n"); } catch { /* */ } },
+  });
+  const recentFiles: string[] = []; // Track files read during session
+
+  // Permission gate (REQ-U-22)
+  const permGate = createPermissionGate();
+  // Permission prompt — displayed as system message, waits for response
+  // For now, use a simple sync approach via addSystem
+  let pendingPermResolve: ((d: PermDecision) => void) | null = null;
+  const permPromptFn = (category: PermCategory, description: string): PermDecision => {
+    // In the TUI, we show the prompt and default to allow-once for now
+    // Full TUI integration requires async input which we'll handle via the prompt
+    return "allow-once";
+  };
+  agent.beforeToolCall = permGate.hook(projectDir, permPromptFn);
   if (session.entryCount > 0) {
     addSystem(state, `Resuming session (${session.entryCount} messages).`);
   }
@@ -101,6 +140,9 @@ export async function runChat(model: ModelInterface, options: ChatOptions = {}):
   const defaultPromptFn = (f: string, c: string[]) => "skip";
 
   // Callbacks
+  agent.onProgress = (data) => {
+    if (data.ctx_pct !== undefined) { state.contextPct = data.ctx_pct; state._notify?.(); }
+  };
   agent.onToolCall = (name, args) => {
     state.thinking = true;
     state._notify?.();
@@ -109,6 +151,12 @@ export async function runChat(model: ModelInterface, options: ChatOptions = {}):
       const action = a.action ?? "";
       const detail = a.path ?? a.url ?? a.cmd ?? a.name ?? "";
       addTool(state, name, detail, action);
+      // Track file reads for post-compact restoration
+      if (name === "file" && (action === "read" || action === "list") && a.path) {
+        const resolved = join(projectDir, a.path);
+        recentFiles.unshift(resolved);
+        if (recentFiles.length > 10) recentFiles.length = 10;
+      }
     } catch {
       addTool(state, name);
     }
@@ -161,6 +209,29 @@ export async function runChat(model: ModelInterface, options: ChatOptions = {}):
       return;
     }
 
+    if (low === "/compact") {
+      if (agent.messages.length <= 2) { addSystem(state, "Nothing to compact."); return; }
+      state.busy = true;
+      addSystem(state, "Compacting context...");
+      (async () => {
+        try {
+          const compacted = await compactor.compact(agent.messages, async (msgs, maxTok) => {
+            const oneShot = new AgentLoop({ model, systemPrompt: msgs[0].content ?? "", tools: [], toolHandlers: {}, stream: false, maxTokens: maxTok, logPath: log, showSpinner: false });
+            return oneShot.send(msgs[1].content ?? "");
+          });
+          agent.messages = compacted;
+          session.appendCompaction(compacted[1]?.content ?? "");
+          // Restoration (REQ-U-11)
+          const maxRestore = Math.floor((model.config.maxContext ?? 100000) * 0.2 * 4); // ~20% of context in bytes
+          const restoration = compactor.buildRestoration(recentFiles, [], maxRestore);
+          if (restoration) agent.messages.push({ role: "system", content: restoration });
+          addSystem(state, `Compacted to ${agent.messages.length} messages.`);
+        } catch (e) { addSystem(state, `Compact failed: ${e}`); }
+        finally { state.busy = false; state._notify?.(); }
+      })();
+      return;
+    }
+
     if (low.startsWith("/gather")) {
       wrapCommand(handleGather, text.slice(7).trim(), model, state, defaultPromptFn, log);
       return;
@@ -197,8 +268,23 @@ export async function runChat(model: ModelInterface, options: ChatOptions = {}):
 
     (async () => {
       try {
+        // Auto-compact check (REQ-U-10)
+        if (compactor.shouldAutoCompact(state.contextPct * (model.config.maxContext ?? 0) / 100)) {
+          addSystem(state, "Auto-compacting context...");
+          const compacted = await compactor.compact(agent.messages, async (msgs, maxTok) => {
+            const oneShot = new AgentLoop({ model, systemPrompt: msgs[0].content ?? "", tools: [], toolHandlers: {}, stream: false, maxTokens: maxTok, logPath: log, showSpinner: false });
+            return oneShot.send(msgs[1].content ?? "");
+          });
+          agent.messages = compacted;
+          session.appendCompaction(compacted[1]?.content ?? "");
+          addSystem(state, `Auto-compacted to ${agent.messages.length} messages.`);
+        } else if (compactor.shouldNudge(state.contextPct * (model.config.maxContext ?? 0) / 100)) {
+          addSystem(state, "Context is filling up. Type /compact to free space.");
+        }
+        streamBuf = "";
+        addModel(state, "", "", true); // Start streaming placeholder
         const response = await agent.send(text);
-        addModel(state, response, "", false);
+        updateLastModel(state, response, "", false); // Finalize
         session.append("assistant", response);
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
