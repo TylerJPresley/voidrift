@@ -5,12 +5,26 @@ import { markedTerminal } from "marked-terminal";
 import type { TUIMessage } from "./state.js";
 import { ToolCall } from "./ToolCall.js";
 
+interface MessageProps {
+  msg: TUIMessage;
+}
+
 // Configure marked for terminal output
 marked.use(markedTerminal({ reflowText: true, width: (process.stdout.columns || 80) - 4 }));
 
+/** Post-process to fix inline markdown that marked-terminal misses (e.g. inside list items) */
+function fixLeftoverMd(text: string): string {
+  // Bold: **text** → ANSI bold
+  text = text.replace(/\*\*([^*]+)\*\*/g, "\x1b[1m$1\x1b[22m");
+  // Inline code: `text` → ANSI yellow
+  text = text.replace(/`([^`]+)`/g, "\x1b[33m$1\x1b[39m");
+  return text;
+}
+
 function renderMd(text: string): string {
   try {
-    return (marked.parse(text) as string).replace(/\n+$/, "");
+    const result = (marked.parse(text) as string).replace(/\n+$/, "");
+    return fixLeftoverMd(result);
   } catch {
     return text;
   }
@@ -20,10 +34,12 @@ export function Message({ msg }: MessageProps) {
   if (msg.role === "operator") {
     return (
       <Box flexDirection="column">
+        <Text> </Text>
         <Text dimColor>{"─".repeat(process.stdout.columns || 80)}</Text>
         {msg.text.split("\n").map((line, i) => (
           <Text key={i}><Text color="#4ec9b0">┃ </Text><Text bold color="white">{line}</Text></Text>
         ))}
+        <Text> </Text>
       </Box>
     );
   }
@@ -46,7 +62,12 @@ export function Message({ msg }: MessageProps) {
   }
 
   if (msg.role === "system") {
-    return <Text dimColor italic>  {msg.text}</Text>;
+    return (
+      <Box flexDirection="column">
+        <Text> </Text>
+        <Text dimColor italic>  {msg.text}</Text>
+      </Box>
+    );
   }
 
   if (msg.role === "model") {
@@ -65,8 +86,4 @@ export function Message({ msg }: MessageProps) {
   }
 
   return null;
-}
-
-interface MessageProps {
-  msg: TUIMessage;
 }
