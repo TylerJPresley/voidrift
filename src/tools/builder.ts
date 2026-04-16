@@ -120,10 +120,31 @@ export function buildDomainHandlers(
   // file
   handlers.file = makeFileHandler(writeCtx, projectDir) as Handler;
 
-  // http (stub — full in Phase 5)
-  handlers.http = (action: unknown, url: unknown, headers: unknown, body: unknown, session_id: unknown) => {
-    return JSON.stringify({ error: "HTTP tool not yet implemented." });
-  };
+  // http (REQ-VF-12)
+  handlers.http = ((action: unknown, url: unknown, headers: unknown, body: unknown, session_id: unknown) => {
+    const { httpRequest: hr } = require("./http.js");
+    // httpRequest is async — wrap for sync handler interface
+    const method = String(action ?? "get").toUpperCase();
+    // Use synchronous fetch via execSync for tool handler compatibility
+    try {
+      const { execSync } = require("node:child_process");
+      const args = ["-s", "-X", method, "-w", "\\n%{http_code}"];
+      if (headers) {
+        try {
+          const h = JSON.parse(String(headers));
+          for (const [k, v] of Object.entries(h)) args.push("-H", `${k}: ${v}`);
+        } catch { /* */ }
+      }
+      if (body && !["GET", "HEAD"].includes(method)) args.push("-d", String(body));
+      args.push(String(url));
+      const result = execSync(`curl ${args.map(a => `'${a}'`).join(" ")}`, { timeout: 30000, encoding: "utf-8" });
+      const lines = result.trim().split("\n");
+      const status = parseInt(lines.pop() ?? "0", 10);
+      return JSON.stringify({ status, body: lines.join("\n") });
+    } catch (e) {
+      return JSON.stringify({ error: `HTTP ${method} ${url} failed: ${e instanceof Error ? e.message : e}` });
+    }
+  }) as Handler;
 
   // shell
   const cmdBase = cmd?.split("-")[0] ?? "";
@@ -145,10 +166,14 @@ export function buildDomainHandlers(
     return `Unknown browser action: ${a}`;
   }) as Handler;
 
-  // process
-  handlers.process = ((action: unknown, handle_id: unknown) => {
-    if (String(action) === "read_output") return readProcessOutput(String(handle_id));
-    return `Unknown process action: ${action}`;
+  // process (REQ-VF-8..11)
+  handlers.process = ((action: unknown, handle_id: unknown, cmd: unknown, env: unknown, cwd: unknown) => {
+    const { startProcess: sp, readProcessOutput: rpo, stopProcess: stp } = require("./process.js");
+    const a = String(action);
+    if (a === "start") return sp(String(cmd), env ? JSON.parse(String(env)) : undefined, cwd ? String(cwd) : undefined);
+    if (a === "read_output") return rpo(String(handle_id));
+    if (a === "stop") return stp(String(handle_id));
+    return `Unknown process action: ${a}`;
   }) as Handler;
 
   // skill
