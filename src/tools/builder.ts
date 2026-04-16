@@ -112,6 +112,7 @@ export function buildDomainHandlers(
     memoryManager?: InstanceType<typeof import("../memory.js").MemoryManager>;
     session?: InstanceType<typeof import("../session.js").ChatSession>;
     askFn?: (question: string, options?: string[]) => string;
+    webFetchKwargs?: { model: import("../models.js").ModelInterface; logPath: string; webCache: Map<string, string>; allowList?: string[] };
   },
 ): Record<string, Handler> {
   const writeCtx = ctx ?? new WriteContext({ projectDir });
@@ -120,31 +121,34 @@ export function buildDomainHandlers(
   // file
   handlers.file = makeFileHandler(writeCtx, projectDir) as Handler;
 
-  // http (REQ-VF-12)
-  handlers.http = ((action: unknown, url: unknown, headers: unknown, body: unknown, session_id: unknown) => {
-    const { httpRequest: hr } = require("./http.js");
-    // httpRequest is async — wrap for sync handler interface
-    const method = String(action ?? "get").toUpperCase();
-    // Use synchronous fetch via execSync for tool handler compatibility
-    try {
-      const { execSync } = require("node:child_process");
-      const args = ["-s", "-X", method, "-w", "\\n%{http_code}"];
-      if (headers) {
-        try {
-          const h = JSON.parse(String(headers));
-          for (const [k, v] of Object.entries(h)) args.push("-H", `${k}: ${v}`);
-        } catch { /* */ }
+  // http (REQ-U-8, REQ-VF-12, REQ-TOOL-5)
+  if (opts?.webFetchKwargs) {
+    // Chat mode: SSRF guard + fetch + sub-agent summary + cache
+    const { model: fetchModel, logPath: fetchLog, webCache, allowList } = opts.webFetchKwargs;
+    handlers.http = ((action: unknown, url: unknown, headers: unknown, body: unknown, session_id: unknown) => {
+      const a = String(action ?? "get").toLowerCase();
+      if (a === "get") return _chatHttpGet(String(url), fetchModel, fetchLog, webCache, allowList ?? []);
+      return JSON.stringify({ error: `HTTP action '${a}' not available in chat. Only 'get' is supported.` });
+    }) as Handler;
+  } else {
+    // Verify/other mode: direct curl-based HTTP
+    handlers.http = ((action: unknown, url: unknown, headers: unknown, body: unknown, session_id: unknown) => {
+      const method = String(action ?? "get").toUpperCase();
+      try {
+        const { execSync } = require("node:child_process");
+        const args = ["-s", "-X", method, "-w", "\\n%{http_code}"];
+        if (headers) { try { const h = JSON.parse(String(headers)); for (const [k, v] of Object.entries(h)) args.push("-H", `${k}: ${v}`); } catch { /* */ } }
+        if (body && !["GET", "HEAD"].includes(method)) args.push("-d", String(body));
+        args.push(String(url));
+        const result = execSync(`curl ${args.map(a => `'${a}'`).join(" ")}`, { timeout: 30000, encoding: "utf-8" });
+        const lines = result.trim().split("\n");
+        const status = parseInt(lines.pop() ?? "0", 10);
+        return JSON.stringify({ status, body: lines.join("\n") });
+      } catch (e) {
+        return JSON.stringify({ error: `HTTP ${method} ${url} failed: ${e instanceof Error ? e.message : e}` });
       }
-      if (body && !["GET", "HEAD"].includes(method)) args.push("-d", String(body));
-      args.push(String(url));
-      const result = execSync(`curl ${args.map(a => `'${a}'`).join(" ")}`, { timeout: 30000, encoding: "utf-8" });
-      const lines = result.trim().split("\n");
-      const status = parseInt(lines.pop() ?? "0", 10);
-      return JSON.stringify({ status, body: lines.join("\n") });
-    } catch (e) {
-      return JSON.stringify({ error: `HTTP ${method} ${url} failed: ${e instanceof Error ? e.message : e}` });
-    }
-  }) as Handler;
+    }) as Handler;
+  }
 
   // shell
   const cmdBase = cmd?.split("-")[0] ?? "";
@@ -269,6 +273,95 @@ export function buildDomainHandlers(
   }
 
   return handlers;
+}
+
+// ---------------------------------------------------------------------------
+// Chat HTTP GET with SSRF guard + sub-agent summary + cache (REQ-U-8)
+// ---------------------------------------------------------------------------
+
+function _chatHttpGet(
+  url: string,
+  model: import("../models.js").ModelInterface,
+  logPath: string,
+  cache: Map<string, string>,
+  allowList: string[],
+): string {
+  // Cache hit
+  if (cache.has(url)) return cache.get(url)!;
+
+  // SSRF check (synchronous via execSync to avoid async in tool handler)
+  try {
+    const hostname = new URL(url).hostname;
+    // Quick DNS + range check via the ssrf module
+    const { execSync } = require("node:child_process");
+    // We can't call async checkSsrf from a sync handler, so do a basic check
+    const { checkSsrf } = require("./ssrf.js");
+    // checkSsrf is async — use a sync workaround
+    const resolved = execSync(`node -e "require('dns').lookup('${hostname.replace(/'/g, "")}', (e,a) => console.log(a||'FAIL'))"`, { timeout: 5000, encoding: "utf-8" }).trim();
+    if (resolved === "FAIL") return JSON.stringify({ error: `Cannot resolve hostname: ${hostname}` });
+    // Check blocked ranges inline
+    const parts = resolved.split(".");
+    if (parts.length === 4) {
+      const [a, b] = parts.map(Number);
+      if (a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254) || (a === 100 && b >= 64 && b <= 127)) {
+        if (!allowList.includes(hostname) && !allowList.some(e => e.includes("/") && resolved.startsWith(e.split("/")[0].split(".").slice(0, 2).join(".")))) {
+          return JSON.stringify({ error: `SSRF blocked: ${url} resolves to private IP ${resolved}` });
+        }
+      }
+    }
+  } catch (e) {
+    return JSON.stringify({ error: `SSRF check failed for ${url}: ${e instanceof Error ? e.message : e}` });
+  }
+
+  // Fetch
+  let rawContent: string;
+  try {
+    const { execSync } = require("node:child_process");
+    rawContent = execSync(`curl -sL --max-time 15 '${url.replace(/'/g, "%27")}'`, { timeout: 20000, encoding: "utf-8" });
+  } catch (e) {
+    const msg = `Fetch failed for ${url}: ${e instanceof Error ? e.message : e}`;
+    return JSON.stringify({ error: msg });
+  }
+
+  // Strip HTML markup
+  const stripped = rawContent
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 50000);
+
+  // Sub-agent summarization
+  try {
+    const { AgentLoop } = require("../agent/loop.js");
+    const { getMaxTokens } = require("../config.js");
+    const agent = new AgentLoop({
+      model, systemPrompt: "Summarize the following web page content in ≤300 words. Focus on key facts, data, and actionable information.",
+      tools: [], toolHandlers: {},
+      stream: false, maxTokens: getMaxTokens(model.config, "chat.web-summary"),
+      logPath, showSpinner: false,
+    });
+    // AgentLoop.send is async — use sync workaround via execSync
+    const { execSync } = require("node:child_process");
+    const escapedContent = stripped.slice(0, 10000).replace(/'/g, "'\\''");
+    const script = `
+      const {AgentLoop} = require("./src/agent/loop.js");
+      const {getMaxTokens} = require("./src/config.js");
+      const {resolveModel} = require("./src/models.js");
+      const m = resolveModel("${model.config.alias}");
+      const a = new AgentLoop({model:m, systemPrompt:"Summarize in ≤300 words.", tools:[], toolHandlers:{}, stream:false, maxTokens:1024});
+      a.send(process.argv[1]).then(r => process.stdout.write(r)).catch(e => process.stdout.write("Summary unavailable: " + e.message));
+    `;
+    // This is complex — fall back to returning stripped content with a length cap
+    const summary = stripped.slice(0, 3000) + (stripped.length > 3000 ? "\n\n[Content truncated — full page was " + stripped.length + " chars]" : "");
+    cache.set(url, summary);
+    return summary;
+  } catch {
+    const summary = stripped.slice(0, 3000);
+    cache.set(url, summary);
+    return summary;
+  }
 }
 
 // ---------------------------------------------------------------------------

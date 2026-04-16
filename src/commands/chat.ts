@@ -79,7 +79,11 @@ export async function runChat(model: ModelInterface, options: ChatOptions = {}):
 
   // Build tools + agent
   const ctx = new WriteContext({ projectDir, maxReadLines: model.config.maxReadLines });
-  const [tools, handlers] = buildLocalTools("chat", projectDir, ctx, { memoryManager: memMgr });
+  const webCache = new Map<string, string>();
+  const [tools, handlers] = buildLocalTools("chat", projectDir, ctx, {
+    memoryManager: memMgr,
+    webFetchKwargs: { model, logPath: log, webCache, allowList: [] },
+  });
   const agent = new AgentLoop({
     model, systemPrompt, tools, toolHandlers: handlers,
     stream: true, maxTokens: getMaxTokens(model.config, "chat.session"),
