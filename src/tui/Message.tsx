@@ -11,7 +11,9 @@ export function Message({ msg }: MessageProps) {
   if (msg.role === "operator") {
     return (
       <Box flexDirection="column">
-        <Text dimColor>{"─".repeat(72)}</Text>
+        <Text> </Text>
+        <Text dimColor>{"─".repeat(process.stdout.columns || 80)}</Text>
+        <Text> </Text>
         {msg.text.split("\n").map((line, i) => (
           <Text key={i}><Text color="#4ec9b0">┃ </Text><Text bold color="white">{line}</Text></Text>
         ))}

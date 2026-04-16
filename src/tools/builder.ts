@@ -124,7 +124,11 @@ export function buildDomainHandlers(
 
   // skill
   handlers.skill = ((action: unknown, name: unknown, topic: unknown) => {
-    if (String(action) === "list") return listSkills(projectDir);
+    if (String(action) === "list") {
+      const skills = listSkills(projectDir);
+      if (!skills.length) return "No skills found.";
+      return skills.map(s => `[${s.layer}] ${s.name}: ${s.description}`).join("\n");
+    }
     if (String(action) === "get") return findSkill(String(name), projectDir) ?? `Skill '${name}' not found.`;
     return `Unknown skill action: ${action}`;
   }) as Handler;

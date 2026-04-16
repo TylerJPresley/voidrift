@@ -514,7 +514,8 @@ export class AgentLoop {
       result = `Error: no handler for tool '${name}'`;
     } else {
       try {
-        result = handler(...Object.values(args));
+        const raw = handler(...Object.values(args));
+        result = typeof raw === "string" ? raw : JSON.stringify(raw);
       } catch (e: unknown) {
         result = `Error: ${e instanceof Error ? e.message : String(e)}`;
       }
