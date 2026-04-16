@@ -1,51 +1,35 @@
 import React from "react";
-import { Text, Box, Transform } from "ink";
+import { Text, Box } from "ink";
+import { marked } from "marked";
+import { markedTerminal } from "marked-terminal";
 import type { TUIMessage } from "./state.js";
 import { ToolCall } from "./ToolCall.js";
 
-interface MessageProps {
-  msg: TUIMessage;
-}
+// Configure marked for terminal output
+marked.use(markedTerminal({ reflowText: true, width: (process.stdout.columns || 80) - 4 }));
 
-/** Simple markdown → styled text. Handles **bold**, `code`, and leaves rest as-is. */
-function renderMarkdown(text: string): React.ReactNode[] {
-  const nodes: React.ReactNode[] = [];
-  // Split by **bold** and `code` patterns
-  const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
-  for (let i = 0; i < parts.length; i++) {
-    const part = parts[i];
-    if (part.startsWith("**") && part.endsWith("**")) {
-      nodes.push(<Text key={i} bold>{part.slice(2, -2)}</Text>);
-    } else if (part.startsWith("`") && part.endsWith("`")) {
-      nodes.push(<Text key={i} color="#e5c07b">{part.slice(1, -1)}</Text>);
-    } else {
-      nodes.push(<Text key={i}>{part}</Text>);
-    }
+function renderMd(text: string): string {
+  try {
+    return (marked.parse(text) as string).replace(/\n+$/, "");
+  } catch {
+    return text;
   }
-  return nodes;
 }
 
 export function Message({ msg }: MessageProps) {
   if (msg.role === "operator") {
     return (
       <Box flexDirection="column">
-        <Text> </Text>
         <Text dimColor>{"─".repeat(process.stdout.columns || 80)}</Text>
-        <Text> </Text>
         {msg.text.split("\n").map((line, i) => (
           <Text key={i}><Text color="#4ec9b0">┃ </Text><Text bold color="white">{line}</Text></Text>
         ))}
-        <Text> </Text>
       </Box>
     );
   }
 
   if (msg.role === "tool") {
-    return (
-      <Box flexDirection="column">
-        <ToolCall toolName={msg.toolName ?? ""} action={msg.toolAction} detail={msg.text} />
-      </Box>
-    );
+    return <ToolCall toolName={msg.toolName ?? ""} action={msg.toolAction} detail={msg.text} />;
   }
 
   if (msg.role === "diff") {
@@ -62,28 +46,27 @@ export function Message({ msg }: MessageProps) {
   }
 
   if (msg.role === "system") {
-    return (
-      <Box flexDirection="column">
-        <Text> </Text>
-        <Text dimColor italic>  {msg.text}</Text>
-      </Box>
-    );
+    return <Text dimColor italic>  {msg.text}</Text>;
   }
 
   if (msg.role === "model") {
-    const lines = msg.text?.trim() ? msg.text.split("\n") : [];
+    const rendered = msg.text?.trim() ? renderMd(msg.text) : "";
+    const lines = rendered ? rendered.split("\n") : [];
     return (
       <Box flexDirection="column">
         <Text> </Text>
         {lines.map((line, i) => (
-          <Text key={i}><Text color="#6a7ec8">┃ </Text><Text color="#d4d4d4">{renderMarkdown(line)}</Text></Text>
+          <Text key={i}><Text color="#6a7ec8">┃ </Text>{line}</Text>
         ))}
         {msg.streaming && <Text><Text color="#6a7ec8">┃ </Text><Text color="#6a7ec8">█</Text></Text>}
         {!msg.streaming && msg.stats ? <Text dimColor>  · {msg.stats}</Text> : null}
-        <Text> </Text>
       </Box>
     );
   }
 
   return null;
+}
+
+interface MessageProps {
+  msg: TUIMessage;
 }

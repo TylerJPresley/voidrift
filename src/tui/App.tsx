@@ -58,7 +58,6 @@ export function App({ state, onSubmit, onEscape }: AppProps) {
         ))}
         {state.thinking && <Thinking label={state.thinkingLabel} />}
         <Text> </Text>
-        <Text> </Text>
       </Box>
 
       {/* Separator */}
