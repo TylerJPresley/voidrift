@@ -121,7 +121,7 @@ async function runHeadless(): Promise<number> {
     const { listAliases } = await import("./models.js");
     const shell = args[1];
     const aliases = listAliases().join(" ");
-    const commands = "gather plan develop deploy verify status doctor help completions";
+    const commands = "gather plan develop deploy verify status doctor help";
     if (shell === "bash") {
       console.log(`_voidrift() { local cur=\${COMP_WORDS[COMP_CWORD]}; local prev=\${COMP_WORDS[COMP_CWORD-1]}; if [ $COMP_CWORD -eq 1 ]; then COMPREPLY=( $(compgen -W "${commands}" -- "$cur") ); elif [ $COMP_CWORD -eq 3 ] && [ "$prev" = "--model" ]; then COMPREPLY=( $(compgen -W "${aliases}" -- "$cur") ); fi; }; complete -F _voidrift voidrift`);
     } else if (shell === "zsh") {
