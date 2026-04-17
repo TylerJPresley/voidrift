@@ -18,9 +18,17 @@ export function InputView({ input: region, footer, onSubmit, onEscape }: InputVi
   const [value, setValue] = useState("");
   const [historyIdx, setHistoryIdx] = useState(-1);
   const [savedInput, setSavedInput] = useState("");
+  const [lastCtrlC, setLastCtrlC] = useState(0);
   const { exit } = useApp();
 
   useInput((ch, key) => {
+    // Double Ctrl+C to exit (4 second window)
+    if (ch === "c" && key.ctrl) {
+      const now = Date.now();
+      if (now - lastCtrlC < 4000) { exit(); return; }
+      setLastCtrlC(now);
+      return;
+    }
     // Panel mode — intercept keys for footer panel
     if (footer.panel) {
       if (key.escape) { footer.panel.onCancel(); footer.closePanel(); return; }
@@ -87,7 +95,10 @@ export function InputView({ input: region, footer, onSubmit, onEscape }: InputVi
   // Hidden when panel is active
   if (footer.hasPanel) return null;
 
-  const placeholder = region.busy
+  const ctrlCActive = Date.now() - lastCtrlC < 4000;
+  const placeholder = ctrlCActive
+    ? "press Ctrl+C again to exit"
+    : region.busy
     ? (region.mode ? "command running · /ask for questions" : "voidrift is working · type to queue a message")
     : "ask a question or describe a task ↵";
 
