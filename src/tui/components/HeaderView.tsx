@@ -12,6 +12,7 @@ const HEADER_ART = `  ██╗   ██╗ ██████╗ ██╗█�
 
 export function HeaderView({ region }: { region: HeaderRegion }) {
   useRegion(region);
+  if (region.interacted) return null;
   return (
     <Box flexDirection="column">
       <Text> </Text>

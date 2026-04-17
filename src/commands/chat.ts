@@ -223,6 +223,7 @@ export async function runChat(model: ModelInterface, options: ChatOptions = {}):
 
     // Normal message → agent
     content.addOperator(text);
+    header.setInteracted();
     session.append("user", text);
     content.setThinking(true);
     input.setBusy(true);
