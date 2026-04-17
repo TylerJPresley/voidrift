@@ -13,13 +13,13 @@ Given a file tree, return a JSON object with files sorted into these categories:
 - **config**: Build and project configuration (Makefiles, pyproject.toml, tsconfig, .env.example, package.json).
 - **infrastructure**: Deployment, CI/CD, IaC (Dockerfiles, docker-compose, terraform, GitHub Actions).
 - **documentation**: Human-readable docs (READMEs, ADRs, guides, changelogs, specs).
-- **assets**: Stylesheets (CSS, SCSS, LESS), images, fonts, icons, and static media files authored by humans.
-- **generated**: Build output, compiled bundles, lock files, binaries, minified files, and hashed filenames. These are not analyzed but their presence provides context clues about the toolchain.
+- **assets**: Human-authored stylesheets (CSS, SCSS, LESS), images, fonts, and icons. Only files written by a developer belong here.
+- **generated**: Files NOT written by a developer: lock files (package-lock.json, yarn.lock, Cargo.lock), compiled/bundled JS/CSS with hashes in the filename (e.g. `index-CW8_b_Xi.js`, `style-D0QbakGy.css`), minified files, build output in `dist/`, `build/`, or `static/assets/`, and binaries.
 
 Only categorize files present in the input. Return raw JSON only.
 
 Example:
-{{"source": ["src/main.py"], "tests": ["tests/test_api.py"], "config": ["pyproject.toml"], "infrastructure": ["Dockerfile"], "documentation": ["README.md"], "assets": ["src/style.css"], "generated": ["dist/bundle.min.js", "package-lock.json"]}}
+{{"source": ["src/main.py"], "tests": ["tests/test_api.py"], "config": ["pyproject.toml", "package.json"], "infrastructure": ["Dockerfile"], "documentation": ["README.md"], "assets": ["src/style.css", "logo.png"], "generated": ["dist/bundle.min.js", "package-lock.json", "static/assets/index-CW8_b_Xi.js"]}}
 
 ## TRIAGE-VALIDATION
 
