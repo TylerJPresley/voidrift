@@ -8,7 +8,7 @@ import { execSync } from "node:child_process";
 import { AgentLoop } from "../agent/loop.js";
 import type { ModelInterface } from "../models.js";
 import { loadPrompt } from "../prompts.js";
-import { ensureVoidriftDir, bootRun, appendState, checkDiskSpace, checkRequirementsExist } from "../utils.js";
+import { ensureVoidriftDir, bootRun, appendState, checkDiskSpace, checkRequirementsExist, printCommandHeader } from "../utils.js";
 import { getMaxTokens } from "../config.js";
 import { buildLocalTools } from "../tools/builder.js";
 import { readArchField } from "./verify.js";
@@ -27,6 +27,7 @@ export async function runDeploy(worker: ModelInterface, architect?: ModelInterfa
   }
 
   const [log, runId] = bootRun("deploy");
+  printCommandHeader("deploy", worker.config.alias, log);
   const projectDir = join(d, "..");
 
   // Determine last release tag

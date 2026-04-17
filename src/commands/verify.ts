@@ -18,7 +18,7 @@ import { WriteContext } from "../tools/filesystem.js";
 import { buildLocalTools } from "../tools/builder.js";
 import { findSkill } from "../skills.js";
 import { loadPrompt } from "../prompts.js";
-import { ensureVoidriftDir, bootRun, appendState, checkDiskSpace, checkRequirementsExist } from "../utils.js";
+import { ensureVoidriftDir, bootRun, appendState, checkDiskSpace, checkRequirementsExist, printCommandHeader } from "../utils.js";
 import { getMaxTokens } from "../config.js";
 import { startProcess, waitForReady, stopAll, readProcessOutput } from "../tools/process.js";
 import { clearSessions } from "../tools/http.js";
@@ -33,6 +33,7 @@ export async function runVerify(worker: ModelInterface): Promise<number> {
   }
 
   const [log, runId] = bootRun("verify");
+  printCommandHeader("verify", worker.config.alias, log);
   const ctx = new WriteContext({ projectDir: join(d, ".."), maxReadLines: worker.config.maxReadLines });
 
   try {

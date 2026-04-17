@@ -14,7 +14,7 @@ import type { ModelInterface } from "../models.js";
 import type { TokenBudget } from "../agent/budget.js";
 import { findSkill } from "../skills.js";
 import { loadPrompt, loadTemplate } from "../prompts.js";
-import { ensureVoidriftDir, bootRun, appendState, checkDiskSpace } from "../utils.js";
+import { ensureVoidriftDir, bootRun, appendState, checkDiskSpace, printCommandHeader } from "../utils.js";
 import { getMaxTokens } from "../config.js";
 import { buildLocalTools } from "../tools/builder.js";
 
@@ -337,6 +337,7 @@ export async function runGather(
   const [log, runId] = bootRun("gather");
   const analystRole = findSkill("ANALYSIS-REQS") ?? "";
   const startTime = Date.now();
+  printCommandHeader("gather", model.config.alias, log, { Path: source });
 
   // Stage 1: Triage
   let fileTree: string;

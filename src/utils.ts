@@ -182,3 +182,23 @@ export function undoCommand(cmd: string): string[] {
   }
   return deleted;
 }
+
+// ---------------------------------------------------------------------------
+// Command header (REQ-UI-2, REQ-LOG-3)
+// ---------------------------------------------------------------------------
+
+export function printCommandHeader(command: string, modelAlias: string, logPath: string, extra?: Record<string, string>): void {
+  const w = process.stdout.columns || 60;
+  const title = ` voidrift ${command} `;
+  const pad = Math.max(0, w - title.length - 4);
+  process.stderr.write(`\n╭─${title}${"─".repeat(pad)}╮\n`);
+  process.stderr.write(`│  Model:  ${modelAlias.padEnd(w - 14)}│\n`);
+  const logShort = logPath.replace(process.cwd() + "/", "");
+  process.stderr.write(`│  Log:    ${logShort.padEnd(w - 14)}│\n`);
+  if (extra) {
+    for (const [k, v] of Object.entries(extra)) {
+      process.stderr.write(`│  ${k}:${" ".repeat(Math.max(1, 7 - k.length))}${v.padEnd(w - 14)}│\n`);
+    }
+  }
+  process.stderr.write(`╰${"─".repeat(w - 2)}╯\n\n`);
+}

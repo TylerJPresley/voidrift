@@ -13,7 +13,7 @@ import { AgentLoop } from "../agent/loop.js";
 import type { ModelInterface } from "../models.js";
 import { findSkill, availableSkillsWithDesc } from "../skills.js";
 import { loadPrompt, loadTemplate } from "../prompts.js";
-import { ensureVoidriftDir, bootRun, appendState, checkDiskSpace, checkRequirementsExist, undoCommand } from "../utils.js";
+import { ensureVoidriftDir, bootRun, appendState, checkDiskSpace, checkRequirementsExist, undoCommand, printCommandHeader } from "../utils.js";
 import { getMaxTokens } from "../config.js";
 import { buildLocalTools } from "../tools/builder.js";
 
@@ -219,6 +219,7 @@ export async function runPlan(model: ModelInterface, overwrite = false, ideaId?:
   }
 
   const [log, runId] = bootRun("plan");
+  printCommandHeader("plan", model.config.alias, log);
   const [tools, handlers] = buildLocalTools("plan");
   const requirements = readFileSync(join(d, "REQUIREMENTS.md"), "utf-8");
   const skill = findSkill("ARCH-DESIGN") ?? "";

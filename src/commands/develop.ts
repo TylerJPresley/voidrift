@@ -18,7 +18,7 @@ import { WriteContext } from "../tools/filesystem.js";
 import { buildLocalTools } from "../tools/builder.js";
 import { findSkill } from "../skills.js";
 import { loadPrompt } from "../prompts.js";
-import { ensureVoidriftDir, bootRun, appendState, checkDiskSpace, checkRequirementsExist } from "../utils.js";
+import { ensureVoidriftDir, bootRun, appendState, checkDiskSpace, checkRequirementsExist, printCommandHeader } from "../utils.js";
 import { getMaxTokens } from "../config.js";
 import { captureGitSnapshot, snapshotToPromptBlock, GitCheckpointManager } from "../git.js";
 import { snipOldToolResults } from "../agent/context.js";
@@ -111,6 +111,7 @@ export async function runDevelop(
   const ctx = new WriteContext({ projectDir: join(d, ".."), maxReadLines: worker.config.maxReadLines });
   clearAbort();
   const [log, runId] = bootRun("develop");
+  printCommandHeader("develop", worker.config.alias, log);
   const [tools, handlers] = buildLocalTools("develop", join(d, ".."), ctx);
   const devPrompt = loadPrompt("develop", "TASK");
   const escPrompt = loadPrompt("develop", "ESCALATION");
