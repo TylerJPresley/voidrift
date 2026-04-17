@@ -97,6 +97,7 @@ export async function runChat(model: ModelInterface, options: ChatOptions = {}):
   footer.modelName = model.config.alias;
   footer.cwd = cwd;
   footer.branch = branch;
+  content.onContentAdded = () => header.setInteracted();
 
   // Tools + agent
   const ctx = new WriteContext({ projectDir, maxReadLines: model.config.maxReadLines });
@@ -198,6 +199,7 @@ export async function runChat(model: ModelInterface, options: ChatOptions = {}):
   // Slash command routing
   const onSubmit = (text: string) => {
     const low = text.toLowerCase().trim();
+    header.setInteracted();
 
     if (low === "/help") { new HelpCommand(chatCtx).run(); return; }
     if (low === "/clear") { new ClearCommand(chatCtx).run(); return; }
@@ -220,7 +222,6 @@ export async function runChat(model: ModelInterface, options: ChatOptions = {}):
 
     // Normal message → agent
     content.addOperator(text);
-    header.setInteracted();
     session.append("user", text);
     content.setThinking(true);
     input.setBusy(true);
