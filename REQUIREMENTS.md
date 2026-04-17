@@ -36,7 +36,7 @@
 
 - **REQ-ARCH-1:** The system SHALL consist of two components: a TypeScript CLI (`src/`) and framework reference files (`resources/`). Worker node management is provided by the external `worker-cli` project.
   - *Rationale:* Separating worker node management from command orchestration makes the CLI model-agnostic. Every model — local, cloud, or gateway — is just a base URL to the CLI.
-- **REQ-ARCH-2:** The CLI SHALL provide subcommands: `gather`, `plan`, `develop`, `deploy`, `verify`, `chat`, `status`, `log`, `unlock`, `prune`, `completions`, `skills`, `rollback`, `doctor`, `memory`. WHEN an unknown command is given, THE SYSTEM SHALL display the error and full help text (no tracebacks). No CLI command SHALL ever display a raw stack trace to the user.
+- **REQ-ARCH-2:** THE SYSTEM SHALL provide headless commands: `gather`, `plan`, `develop`, `deploy`, `verify`, `status`, `doctor`, `help`, `completions`. WHEN `voidrift` is run with no arguments, chat opens (REQ-ENTRY-1). WHEN an unknown command is given, THE SYSTEM SHALL display the error and available commands. No CLI command SHALL ever display a raw stack trace to the user. Additional functionality (skills, memory, settings, model selection, rollback) is accessed via slash commands in chat.
 - **REQ-ARCH-3:** WHEN `voidrift` is run with no arguments, THE SYSTEM SHALL launch an interactive guided flow presenting available actions, model selection, and command-specific options. WHEN presenting the model selection prompt, THE SYSTEM SHALL default to the active local model alias (read from the `active_container_file` path in `config.yml`, default `~/.worker-cli/.active-container`) if one is running, or the first alias in the configured model list otherwise. No hardcoded model alias SHALL appear as a default in any user-facing prompt or interactive flow.
   - Given a local model with alias `qwen3-coder` is active (recorded in `.active-container`), When the interactive model prompt is shown, Then the default is `qwen3-coder`.
   - Given no local model is active, When the interactive model prompt is shown, Then the default is the first alias from the configured model list.
@@ -716,6 +716,23 @@ Verify is a two-stage requirements-driven acceptance testing command. Stage 1 pr
 
 - **REQ-UI-3a:** The chat input SHALL support multi-line entry via two methods: Ctrl+J inserts a newline. Backslash (`\`) at end of line followed by Enter strips the backslash and inserts a newline instead of submitting.
 
+### 4.9a Entry Point
+
+- **REQ-ENTRY-1:** WHEN `voidrift` is run with no arguments, THE SYSTEM SHALL open the chat TUI directly. Chat is the default interactive experience. All framework commands are also accessible via slash commands within chat.
+  - Given `voidrift` is run with no arguments, When the CLI starts, Then the chat TUI opens.
+  - Given no model is configured, When chat opens, Then a message is displayed: "No model selected. Use /model to choose one."
+
+- **REQ-ENTRY-2:** WHEN `voidrift` starts, THE SYSTEM SHALL resolve the active model in order: (1) `current_model` from `config.yml`, (2) `active_container_file` for a running local model, (3) first alias in the models file. IF a model is resolved but unavailable, THE SYSTEM SHALL open chat with a warning: "Model <alias> unavailable. Use /model to select a different model." Non-model slash commands (/help, /settings, /model, /clear) remain functional.
+
+- **REQ-ENTRY-3:** WHEN `voidrift <command>` is run with arguments, THE SYSTEM SHALL execute the command directly without the TUI. Commands: `gather`, `plan`, `develop`, `deploy`, `verify`, `status`, `doctor`, `help`, `completions`. Each command accepts `--model <alias>` and command-specific flags. Output goes to stderr. Process exits with a code.
+  - Given `voidrift gather --model qwen35 --path ./src`, When run, Then gather executes headless and exits.
+  - Given `voidrift status`, When run, Then status executes without a model.
+  - Given `voidrift doctor --fix`, When run, Then doctor runs with auto-fix.
+  - Given `voidrift help`, When run, Then usage info is printed and exits.
+  - Given `voidrift completions bash`, When run, Then bash completion script is output.
+
+- **REQ-ENTRY-4:** The entry point rule: no arguments = chat TUI. Any argument = headless command execution. Both paths use the same command classes (GatherCommand, PlanCommand, etc.).
+
 ### 4.10 Model Configuration
 
 - **REQ-MC-1:** WHEN a model alias is used, THE SYSTEM SHALL resolve it to `(base_url, api_key, model_id)`. The CLI SHALL read all model definitions from a single models file. The path to this file SHALL be configurable via `models_file` in `config.yml` (default: `~/.worker-cli/models.yml`). Each model entry SHALL be self-contained: `base_url`, `api_key`, `model_id`, and optional `provider` and `max_context`. IF an alias is not found, THE SYSTEM SHALL exit with an error listing all available aliases.
@@ -771,26 +788,22 @@ Verify is a two-stage requirements-driven acceptance testing command. Stage 1 pr
 ### 4.14 Logging
 
 Two log roots, two intents:
-- **`~/.voidrift/logs/`** — framework logs. Record what the framework itself did: CLI invocations, command outcomes, tool operations. Persist across projects. Managed by RotatingFileHandler.
-- **`<project-root>/.voidrift/logs/`** — project logs. Record what the framework did *to a specific project*: full agent dialog, tool calls, tool results for each command run. Scoped to the project. Pruned by `voidrift prune`.
+- **`~/.voidrift/logs/voidrift.log`** — framework log. CLI invocations, command outcomes, tool operations. Persists across projects. Rotates at configurable size.
+- **`<project-root>/.voidrift/voidrift.log`** — project log. Full agent dialog, tool calls, tool results. Scoped to the project. Single file, rotates at configurable size.
 
-- **REQ-LOG-1:** Command run logs SHALL be written to `<project-root>/.voidrift/logs/<command>-YYYYMMDD-HHMMSS.log`. The log filename stem is the run ID (per REQ-CTX-4). Command logs are the canonical verbose record of agent interactions, tool calls, and tool results for a run.
-  - Given `voidrift gather qwen3 ./src` is run, When the command starts, Then a log file is created at `<project-root>/.voidrift/logs/gather-<timestamp>.log`.
-- **REQ-LOG-2:** Project log files SHALL accumulate until pruned by `voidrift prune`. Framework log files rotate automatically via `RotatingFileHandler`.
-- **REQ-LOG-3:** WHEN a command run displays its log path, it SHALL appear immediately after the command title line.
-- **REQ-LOG-4:** THE SYSTEM SHALL maintain a persistent system log at `~/.voidrift/logs/voidrift.log` with file rotation (max 1 MB per file, 5 backup files, UTF-8 encoding). THE SYSTEM SHALL initialize this log at CLI startup before any commands execute. The system log path is always `~/.voidrift/logs/voidrift.log` regardless of the `VOIDRIFT_HOME` environment variable — framework logs are user-global, not project-scoped. The system log SHALL record: CLI invocations (argv), command completion events (command name, exit code, elapsed time), configuration load errors, and unhandled exceptions.
-  - *Rationale:* Command logs record agent dialog at depth — they are verbose by design. A separate, compact system log answers the operational question: "what did the CLI do and did it succeed?" without tailing a 10,000-line agent log. Keeping it in `~/.voidrift/logs/` (not the project) means it persists across projects and is always accessible even when no project is active. `VOIDRIFT_HOME` controls config and resource resolution; it must not redirect framework logs into a project directory.
-  - Given `main()` is called, When the CLI starts, Then `~/.voidrift/logs/voidrift.log` exists and is writable.
-  - Given `VOIDRIFT_HOME` is set to a non-default path, When the CLI starts, Then the system log is still written to `~/.voidrift/logs/voidrift.log` (not `$VOIDRIFT_HOME/logs/`).
-  - Given a `voidrift gather qwen3` run completes, When the system log is read, Then it contains an invocation line and a completion line with exit code.
-- **REQ-LOG-5:** The `voidrift.log` system log SHALL record CLI invocations, command outcomes, and framework-level tool operations (write path and byte count, tool errors). `voidrift.log` is the single framework observability log — command logs are the per-run verbose record.
-  - Given `file(action="write", path="TASKS.md")` is called, When the write succeeds, Then `voidrift.log` contains an entry recording the path and byte count.
-  - Given a tool call raises an exception, When the exception is caught, Then `voidrift.log` contains an error entry with the tool name and exception text.
-- **REQ-LOG-6:** THE SYSTEM SHALL provide an `ErrorTracker` class that accumulates structured error events during a command run. Each event SHALL contain: category (`api`, `tool`, `filesystem`, `parse`, `timeout`, `budget`, `context`), error type, message, task ID (if applicable), and whether the error was recoverable. WHEN a command run completes with errors, THE SYSTEM SHALL display a Rich summary table grouped by category. The error summary SHALL be included in the STATE.md entry for the run. Errors SHALL also be written to a `.errors.jsonl` file alongside the command log.
-  - *Rationale:* When a gather run hits 3 context-length errors across 50 files, the operator must grep through a 10,000-line log to find them. Structured error tracking surfaces failures immediately at run end and persists them for post-mortem analysis.
-  - Given 3 context errors and 1 API error recorded, When `summary_by_category()` is called, Then it returns `{"context": 3, "api": 1}`.
-  - Given errors were recorded during a develop run, When the run completes, Then a summary table is displayed and STATE.md contains the error breakdown.
-  - Given a command run with no errors, When the run completes, Then no error table is displayed.
+- **REQ-LOG-1:** Project logs SHALL be written to a single file at `<project-root>/.voidrift/voidrift.log`. All command runs append to this file. The file SHALL rotate when it exceeds a configurable size (`log.max_size_mb` in `config.yml`, default 10 MB). Rotation renames the current file to `voidrift.log.1` and creates a new empty file. Maximum backup count is configurable (`log.max_backups`, default 3).
+  - Given a gather run starts, When the agent logs interactions, Then they are appended to `<project>/.voidrift/voidrift.log`.
+  - Given the log file exceeds 10 MB, When the next write occurs, Then the file is rotated.
+
+- **REQ-LOG-2:** *(Removed — `voidrift log` and `voidrift prune` commands removed. Logs are single rotating files.)*
+
+- **REQ-LOG-3:** *(Removed — log path shown in command header per REQ-U-32.)*
+
+- **REQ-LOG-4:** THE SYSTEM SHALL maintain a persistent framework log at `~/.voidrift/logs/voidrift.log` with file rotation (max 1 MB, 5 backups, UTF-8). Initialized at CLI startup. Records CLI invocations, command outcomes, config errors, unhandled exceptions. Path is always `~/.voidrift/logs/voidrift.log` regardless of `VOIDRIFT_HOME`.
+
+- **REQ-LOG-5:** Both log files (framework and project) SHALL record: CLI invocations, command outcomes, agent interactions, tool calls (name + arguments), tool results, and errors.
+
+- **REQ-LOG-6:** THE SYSTEM SHALL provide an `ErrorTracker` class that accumulates structured error events during a command run. Each event SHALL contain: category (`api`, `tool`, `filesystem`, `parse`, `timeout`, `budget`, `context`), error type, message, task ID (if applicable), and whether the error was recoverable. WHEN a command run completes with errors, THE SYSTEM SHALL display a summary grouped by category.
 
 ### 4.15 Interactive Terminal UI
 
