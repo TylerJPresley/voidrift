@@ -58,9 +58,15 @@ export function InputView({ input: region, footer, onSubmit, onEscape }: InputVi
 
     if (key.escape) { onEscape(); return; }
 
-    // Input history
+    // Input history / pending recall
     if (key.upArrow && !value) {
-      if (region.pendingMessage) return;
+      // Recall queued message (REQ-UI-15)
+      if (region.pendingMessage) {
+        setValue(region.pendingMessage);
+        region.setPending(null);
+        return;
+      }
+      // History cycling
       if (!region.history.length) return;
       if (historyIdx === -1) setSavedInput(value);
       const idx = Math.min(historyIdx + 1, region.history.length - 1);
@@ -85,6 +91,15 @@ export function InputView({ input: region, footer, onSubmit, onEscape }: InputVi
     }
     const text = v.trim();
     if (!text) return;
+
+    // Queue if busy and no pending message yet
+    if (region.busy && !region.pendingMessage) {
+      region.setPending(text);
+      setValue("");
+      return;
+    }
+    if (region.busy) return; // Already queued, locked
+
     setValue("");
     setHistoryIdx(-1);
     region.pushHistory(text);
@@ -96,16 +111,21 @@ export function InputView({ input: region, footer, onSubmit, onEscape }: InputVi
   if (footer.hasPanel) return null;
 
   const ctrlCActive = Date.now() - lastCtrlC < 4000;
+  const hasQueued = region.pendingMessage !== null;
+  const locked = region.busy && hasQueued; // Lock after one queued message
+
   const placeholder = ctrlCActive
     ? "press Ctrl+C again to exit"
+    : locked
+    ? "message queued — ↑ to edit"
     : region.busy
-    ? (region.mode ? "command running · /ask for questions" : "voidrift is working · type to queue a message")
+    ? "voidrift is working — type a message to queue"
     : "ask a question or describe a task ↵";
 
   return (
     <Box>
-      {value || region.busy ? null : <Text dimColor italic>{placeholder}</Text>}
-      {value || !region.busy ? <TextInput value={value} onChange={setValue} onSubmit={handleSubmit} /> : null}
+      {!value && <Text dimColor italic>{placeholder}</Text>}
+      {!locked && <TextInput value={value} onChange={setValue} onSubmit={handleSubmit} />}
     </Box>
   );
 }
