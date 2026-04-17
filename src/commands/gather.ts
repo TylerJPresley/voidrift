@@ -368,18 +368,13 @@ export async function runGather(
   let sourceFiles = categories.source ?? [];
 
   // Triage display (REQ-G-23)
-  if (onProgress) {
-    // TUI: compact format
-    for (const cat of CATEGORIES) {
-      const files = categories[cat];
-      if (!files?.length) continue;
-      emit(`  ${cat}: ${files.join(", ")}`);
-    }
-  } else {
-    // Headless: per-file format with ANSI dim category headers
-    for (const cat of CATEGORIES) {
-      const files = categories[cat];
-      if (!files?.length) continue;
+  for (const cat of CATEGORIES) {
+    const files = categories[cat];
+    if (!files?.length) continue;
+    if (onProgress) {
+      emit(`  ${cat}`);
+      for (const f of files) emit(`    ${f}`);
+    } else {
       process.stderr.write(`  \x1b[2m${cat}\x1b[0m\n`);
       for (const f of files) process.stderr.write(`    ${f}\n`);
     }

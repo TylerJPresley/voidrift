@@ -183,7 +183,7 @@ export async function runChat(model: ModelInterface | null, options: ChatOptions
   const handleGather = async (a: string, mc: ModelInterface, c: ContentRegion) => {
     const { runGather } = await import("./gather.js");
     c.addSystem(`Gathering from ${a || process.cwd()}`);
-    c.setThinking(true, "gathering...");
+    c.setThinking(true);
     const r = await runGather(mc, a || process.cwd(), undefined, false, undefined, undefined, progress);
     c.setThinking(false);
     c.addSystem(r === 0 ? "✓ Gather complete" : "✗ Gather failed");
@@ -191,7 +191,7 @@ export async function runChat(model: ModelInterface | null, options: ChatOptions
   const handlePlan = async (a: string, mc: ModelInterface, c: ContentRegion) => {
     const { runPlan } = await import("./plan.js");
     c.addSystem("Running plan...");
-    c.setThinking(true, "planning...");
+    c.setThinking(true);
     const r = await runPlan(mc, a === "overwrite", undefined, progress);
     c.setThinking(false);
     c.addSystem(r === 0 ? "✓ Plan complete" : "✗ Plan failed");
@@ -199,7 +199,7 @@ export async function runChat(model: ModelInterface | null, options: ChatOptions
   const handleDevelop = async (a: string, mc: ModelInterface, c: ContentRegion) => {
     const { runDevelop } = await import("./develop.js");
     c.addSystem("Running develop...");
-    c.setThinking(true, "developing...");
+    c.setThinking(true);
     const r = await runDevelop(mc, undefined, undefined, progress);
     c.setThinking(false);
     c.addSystem(r === 0 ? "✓ Develop complete" : "✗ Develop failed");
@@ -207,7 +207,7 @@ export async function runChat(model: ModelInterface | null, options: ChatOptions
   const handleVerify = async (a: string, mc: ModelInterface, c: ContentRegion) => {
     const { runVerify } = await import("./verify.js");
     c.addSystem("Running verify...");
-    c.setThinking(true, "verifying...");
+    c.setThinking(true);
     const r = await runVerify(mc, progress);
     c.setThinking(false);
     c.addSystem(r === 0 ? "✓ Verify complete" : "✗ Verify failed");
@@ -215,7 +215,7 @@ export async function runChat(model: ModelInterface | null, options: ChatOptions
   const handleDeploy = async (a: string, mc: ModelInterface, c: ContentRegion) => {
     const { runDeploy } = await import("./deploy.js");
     c.addSystem("Running deploy...");
-    c.setThinking(true, "deploying...");
+    c.setThinking(true);
     const r = await runDeploy(mc, undefined, progress);
     c.setThinking(false);
     c.addSystem(r === 0 ? "✓ Deploy complete" : "✗ Deploy failed");
