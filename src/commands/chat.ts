@@ -276,23 +276,22 @@ export async function runChat(model: ModelInterface | null, options: ChatOptions
     })();
   };
 
+  // Double Ctrl+C to exit (4 second window)
+  // Ink calls process.exit on Ctrl+C — we intercept it
+  let lastCtrlC = 0;
+  const origExit = process.exit;
+  process.exit = ((code?: number) => {
+    const now = Date.now();
+    if (now - lastCtrlC < 4000) return origExit(code ?? 0);
+    lastCtrlC = now;
+    content.addSystem("Press Ctrl+C again to exit.");
+  }) as never;
+
   // Render TUI
   const { waitUntilExit } = render(
     React.createElement(App, { header, content, footer, input, onSubmit, onEscape: () => input.setPending(null) }),
-    { exitOnCtrlC: false },
   );
 
-  // Double Ctrl+C to exit (4 second window)
-  let lastCtrlC = 0;
-  const stdinListener = (data: Buffer) => {
-    if (data[0] === 0x03) { // Ctrl+C byte
-      const now = Date.now();
-      if (now - lastCtrlC < 4000) { process.exit(0); }
-      lastCtrlC = now;
-      content.addSystem("Press Ctrl+C again to exit.");
-    }
-  };
-  process.stdin.on("data", stdinListener);
-
   await waitUntilExit();
+  process.exit = origExit;
 }
