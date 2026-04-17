@@ -36,18 +36,8 @@ export class SettingsCommand extends SlashCommand {
         const display = typeof val === "string" && val.includes("KEY") ? "***" : JSON.stringify(val);
         lines.push(`  ${key} = ${display}`);
       }
-      lines.push("", "  /settings get <key>          read a value");
-      lines.push("  /settings set <key> <value>  change a value");
+      lines.push("", "  /settings set <key> <value>  change a value");
       addSystem(this.ctx.state, lines.join("\n"));
-      return 0;
-    }
-
-    if (action === "get") {
-      const key = parts[1];
-      if (!key) { addSystem(this.ctx.state, "Usage: /settings get <key>"); return 1; }
-      const val = cm.get(key);
-      if (val === undefined) { addSystem(this.ctx.state, `${key} is not set.`); return 0; }
-      addSystem(this.ctx.state, `${key} = ${JSON.stringify(val)}`);
       return 0;
     }
 
@@ -66,7 +56,7 @@ export class SettingsCommand extends SlashCommand {
       return 0;
     }
 
-    addSystem(this.ctx.state, "Usage: /settings [list|get|set] [key] [value]");
+    addSystem(this.ctx.state, "Usage: /settings [set <key> <value>]");
     return 1;
   }
 }
