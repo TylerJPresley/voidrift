@@ -393,3 +393,33 @@ export async function runPlan(model: ModelInterface, overwrite = false, ideaId?:
 
   return 0;
 }
+
+// ---------------------------------------------------------------------------
+// PlanCommand class
+// ---------------------------------------------------------------------------
+
+import { BaseCommand } from "./base.js";
+
+export interface PlanOptions {
+  overwrite?: boolean;
+  ideaId?: number;
+}
+
+export class PlanCommand extends BaseCommand {
+  readonly name = "plan";
+  private opts: PlanOptions;
+
+  constructor(model: ModelInterface, opts: PlanOptions = {}) {
+    super(model);
+    this.opts = opts;
+  }
+
+  async preflight(): Promise<void> {
+    await super.preflight();
+    if (!checkRequirementsExist()) throw new Error("REQUIREMENTS.md not found. Run 'voidrift gather' first.");
+  }
+
+  async execute(): Promise<number> {
+    return runPlan(this.model, this.opts.overwrite, this.opts.ideaId);
+  }
+}

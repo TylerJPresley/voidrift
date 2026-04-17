@@ -440,3 +440,50 @@ export async function runGather(
 
   return 0;
 }
+
+// ---------------------------------------------------------------------------
+// GatherCommand class
+// ---------------------------------------------------------------------------
+
+import { BaseCommand } from "./base.js";
+
+export interface GatherOptions {
+  path?: string;
+  ideaId?: number;
+  overwrite?: boolean;
+  tokenBudget?: TokenBudget;
+  promptFn?: (filename: string, catList: string[]) => string;
+}
+
+export class GatherCommand extends BaseCommand {
+  readonly name = "gather";
+  private opts: GatherOptions;
+
+  constructor(model: ModelInterface, opts: GatherOptions = {}) {
+    super(model);
+    this.opts = opts;
+  }
+
+  protected headerExtra(): Record<string, string> {
+    return { Path: this.opts.path ?? process.cwd() };
+  }
+
+  async preflight(): Promise<void> {
+    await super.preflight();
+    const source = this.opts.path ?? process.cwd();
+    if (!statSync(source).isDirectory()) {
+      throw new Error(`${source} is not a directory`);
+    }
+  }
+
+  async execute(): Promise<number> {
+    return runGather(
+      this.model,
+      this.opts.path,
+      this.opts.ideaId,
+      this.opts.overwrite ?? false,
+      this.opts.tokenBudget,
+      this.opts.promptFn,
+    );
+  }
+}

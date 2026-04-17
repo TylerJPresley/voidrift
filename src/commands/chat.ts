@@ -10,6 +10,7 @@ import React from "react";
 // OCP contract (REQ-TOOL-8, REQ-ARCH-9)
 export const AGENT_TOOLS = new Set(["file", "http", "shell", "skill", "memory", "session", "analyze", "ask"]);
 export const AGENT_TOOL_ACTIONS: Record<string, string[]> = { file: ["read", "write", "edit", "delete", "list"], http: ["get", "post", "put", "delete"] };
+
 import { AgentLoop } from "../agent/loop.js";
 import type { ModelInterface } from "../models.js";
 import { loadPrompt } from "../prompts.js";
@@ -24,9 +25,14 @@ import { MemoryManager } from "../memory.js";
 import { captureGitSnapshot, snapshotToPromptBlock } from "../git.js";
 import { createState, addOperator, addModel, addTool, addSystem, updateLastModel, type TUIState } from "../tui/state.js";
 import { App } from "../tui/App.js";
-import { wrapCommand, handleGather, handlePlan, handleDevelop, handleVerify } from "./slashCommands.js";
-import { IdeaSession, readIdea, writeIdea, nextIdeaId, buildIdeaContent } from "./idea.js";
+import { IdeaSession } from "./idea.js";
 import { createPermissionGate, type PermCategory, type PermDecision } from "./permissions.js";
+import {
+  type ChatContext,
+  HelpCommand, ClearCommand, QuickCommand, CompactCommand,
+  IdeaStartCommand, IdeaDoneCommand,
+  wrapCommand, handleGather, handlePlan, handleDevelop, handleVerify,
+} from "./slashCommands.js";
 
 interface ChatOptions {
   doc?: string;
@@ -52,15 +58,10 @@ export async function runChat(model: ModelInterface, options: ChatOptions = {}):
     const skill = findSkill("ANALYSIS-REQS");
     if (skill) parts.push(skill);
     parts.push(loadPrompt("chat", "SYSTEM"));
-
-    // Memory index
     const memIndex = memMgr.buildIndex();
     if (memIndex) parts.push(memIndex);
-
-    // Git context
     const snap = captureGitSnapshot(projectDir);
     if (snap) parts.push(snapshotToPromptBlock(snap));
-
     systemPrompt = parts.filter(Boolean).join("\n\n");
   }
 
@@ -80,17 +81,16 @@ export async function runChat(model: ModelInterface, options: ChatOptions = {}):
   // Build tools + agent
   const ctx = new WriteContext({ projectDir, maxReadLines: model.config.maxReadLines });
   const webCache = new Map<string, string>();
-  const askFn = (question: string, options?: string[]): string => {
-    // Display question in TUI and return a default response
-    // Full TUI integration would pause and wait for input
-    addSystem(state, `❓ ${question}${options ? "\n" + options.map((o, i) => `  ${i + 1}. ${o}`).join("\n") : ""}`);
-    return options?.[0] ?? "Proceed with your best judgment.";
+  const askFn = (question: string, opts?: string[]): string => {
+    addSystem(state, `❓ ${question}${opts ? "\n" + opts.map((o, i) => `  ${i + 1}. ${o}`).join("\n") : ""}`);
+    return opts?.[0] ?? "Proceed with your best judgment.";
   };
   const [tools, handlers] = buildLocalTools("chat", projectDir, ctx, {
     memoryManager: memMgr,
     webFetchKwargs: { model, logPath: log, webCache, allowList: [] },
     askFn,
   });
+
   const agent = new AgentLoop({
     model, systemPrompt, tools, toolHandlers: handlers,
     stream: true, maxTokens: getMaxTokens(model.config, "chat.session"),
@@ -98,15 +98,14 @@ export async function runChat(model: ModelInterface, options: ChatOptions = {}):
   });
 
   // Streaming token buffer
-  let streamBuf = "";
+  const streamBuf = { value: "" };
   agent.onToken = (token: string) => {
-    streamBuf += token;
-    updateLastModel(state, streamBuf, "", true);
+    streamBuf.value += token;
+    updateLastModel(state, streamBuf.value, "", true);
   };
 
   // Session
   const session = ChatSession.loadOrCreate(d);
-  // Wire session handler now that session exists
   handlers.session = ((action: unknown, query: unknown, limit: unknown) => {
     if (String(action) === "search") {
       const results = session.searchEntries(String(query), limit ? Number(limit) : 5);
@@ -115,6 +114,7 @@ export async function runChat(model: ModelInterface, options: ChatOptions = {}):
     }
     return `Unknown session action: ${action}`;
   }) as (...args: unknown[]) => string;
+
   if (session.entryCount > 0) {
     const restored = session.restoreMessages();
     agent.messages.push(...restored);
@@ -136,226 +136,83 @@ export async function runChat(model: ModelInterface, options: ChatOptions = {}):
     compactPrompt,
     logFn: (msg) => { try { appendFileSync(log, msg + "\n"); } catch { /* */ } },
   });
-  const recentFiles: string[] = []; // Track files read during session
+  const recentFiles: string[] = [];
 
   // Permission gate (REQ-U-22)
   const permGate = createPermissionGate();
-  // Permission prompt — displayed as system message, waits for response
-  // For now, use a simple sync approach via addSystem
-  let pendingPermResolve: ((d: PermDecision) => void) | null = null;
-  const permPromptFn = (category: PermCategory, description: string): PermDecision => {
-    // In the TUI, we show the prompt and default to allow-once for now
-    // Full TUI integration requires async input which we'll handle via the prompt
-    return "allow-once";
-  };
+  const permPromptFn = (category: PermCategory, description: string): PermDecision => "allow-once";
   agent.beforeToolCall = permGate.hook(projectDir, permPromptFn);
-  if (session.entryCount > 0) {
-    addSystem(state, `Resuming session (${session.entryCount} messages).`);
-  }
+
+  if (session.entryCount > 0) addSystem(state, `Resuming session (${session.entryCount} messages).`);
 
   const ideaSession = new IdeaSession();
   const defaultPromptFn = (f: string, c: string[]) => "skip";
+
+  // Shared context for slash commands
+  const chatCtx: ChatContext = { model, agent, state, session, compactor, ideaSession, projectDir, logPath: log, recentFiles, streamBuf };
 
   // Callbacks
   agent.onProgress = (data) => {
     if (data.ctx_pct !== undefined) { state.contextPct = data.ctx_pct; state._notify?.(); }
   };
   agent.onToolCall = (name, args) => {
-    state.thinking = true;
-    state._notify?.();
+    state.thinking = true; state._notify?.();
     try {
       const a = JSON.parse(args || "{}");
       const action = a.action ?? "";
       const detail = a.path ?? a.url ?? a.cmd ?? a.name ?? "";
       addTool(state, name, detail, action);
-      // Track file reads for post-compact restoration
       if (name === "file" && (action === "read" || action === "list") && a.path) {
         const resolved = join(projectDir, a.path);
         recentFiles.unshift(resolved);
         if (recentFiles.length > 10) recentFiles.length = 10;
       }
-    } catch {
-      addTool(state, name);
-    }
+    } catch { addTool(state, name); }
   };
 
-  // Submit handler
+  // ---------------------------------------------------------------------------
+  // Slash command routing
+  // ---------------------------------------------------------------------------
+
   const onSubmit = (text: string) => {
     const low = text.toLowerCase().trim();
 
-    if (low === "/clear") {
-      session.clear();
-      agent.messages = [agent.messages[0]];
-      state.messages = [];
-      addSystem(state, "Session cleared.");
-      return;
-    }
-
-    if (low === "/help") {
-      addSystem(state, "Commands:");
-      addSystem(state, "  /gather [path]  reverse-engineer requirements");
-      addSystem(state, "  /plan           generate architecture + tasks");
-      addSystem(state, "  /develop        execute tasks from manifest");
-      addSystem(state, "  /verify         run acceptance tests");
-      addSystem(state, "  /idea           guided idea refinement");
-      addSystem(state, "  /compact        summarize context to free space");
-      addSystem(state, "  /quick <q>      one-shot answer (no context)");
-      addSystem(state, "  /clear          reset conversation");
-      addSystem(state, "  /help           this list");
-      addSystem(state, "  /quit           exit");
-      return;
-    }
-
-    if (low.startsWith("/quick")) {
-      const q = text.slice(6).trim();
-      if (!q) { addSystem(state, "Usage: /quick <question>"); return; }
-      // One-shot — not added to session
-      addModel(state, "", "", true);
-      state.busy = true;
-      (async () => {
-        try {
-          const oneShot = new AgentLoop({
-            model, systemPrompt: "Answer concisely.", tools: [], toolHandlers: {},
-            stream: false, maxTokens: getMaxTokens(model.config, "chat.quick"), logPath: log, showSpinner: false,
-          });
-          const answer = await oneShot.send(q);
-          updateLastModel(state, answer, "", false);
-        } catch (e) { addSystem(state, `Ask failed: ${e}`); }
-        finally { state.busy = false; }
-      })();
-      return;
-    }
-
-    if (low === "/compact") {
-      if (agent.messages.length <= 2) { addSystem(state, "Nothing to compact."); return; }
-      state.busy = true;
-      addSystem(state, "Compacting context...");
-      (async () => {
-        try {
-          const compacted = await compactor.compact(agent.messages, async (msgs, maxTok) => {
-            const oneShot = new AgentLoop({ model, systemPrompt: msgs[0].content ?? "", tools: [], toolHandlers: {}, stream: false, maxTokens: maxTok, logPath: log, showSpinner: false });
-            return oneShot.send(msgs[1].content ?? "");
-          });
-          agent.messages = compacted;
-          session.appendCompaction(compacted[1]?.content ?? "");
-          // Restoration (REQ-U-11)
-          const maxRestore = Math.floor((model.config.maxContext ?? 100000) * 0.2 * 4); // ~20% of context in bytes
-          const restoration = compactor.buildRestoration(recentFiles, [], maxRestore);
-          if (restoration) agent.messages.push({ role: "system", content: restoration });
-          addSystem(state, `Compacted to ${agent.messages.length} messages.`);
-        } catch (e) { addSystem(state, `Compact failed: ${e}`); }
-        finally { state.busy = false; state._notify?.(); }
-      })();
-      return;
-    }
-
-    if (low.startsWith("/gather")) {
-      wrapCommand(handleGather, text.slice(7).trim(), model, state, defaultPromptFn, log);
-      return;
-    }
-    if (low.startsWith("/plan")) {
-      wrapCommand(handlePlan, text.slice(5).trim(), model, state, (f, c) => "update", log);
-      return;
-    }
-    if (low.startsWith("/develop")) {
-      wrapCommand(handleDevelop, text.slice(8).trim(), model, state, defaultPromptFn, log);
-      return;
-    }
-    if (low.startsWith("/verify")) {
-      wrapCommand(handleVerify, text.slice(7).trim(), model, state, defaultPromptFn, log);
-      return;
-    }
-
-    // /idea [id] — start or resume idea refinement (REQ-IDEA-1)
-    if (low.startsWith("/idea")) {
-      const arg = text.slice(5).trim();
-      if (ideaSession.isActive()) { addSystem(state, "Idea session already active. Type /done to finish."); return; }
-      const id = arg ? parseInt(arg, 10) : null;
-      if (id !== null && isNaN(id)) { addSystem(state, "Usage: /idea [id]"); return; }
-      if (id) {
-        const content = readIdea(projectDir, id);
-        if (!content) { addSystem(state, `IDEA-${id} not found.`); return; }
-        ideaSession.start(id);
-        state.mode = "/idea"; state._notify?.();
-        addSystem(state, `Loaded IDEA-${id}. Describe what to refine, or /done to save.`);
-        state.busy = true; state.thinking = true; state._notify?.();
-        (async () => {
-          try {
-            streamBuf = ""; addModel(state, "", "", true);
-            const r = await agent.send(`I'm resuming work on this idea:\n\n${content}\n\nSummarize the current state and ask what I'd like to refine.`);
-            updateLastModel(state, r, "", false);
-          } catch (e) { addSystem(state, `Error: ${e}`); }
-          finally { state.thinking = false; state.busy = false; state._notify?.(); }
-        })();
-      } else {
-        const newId = nextIdeaId(projectDir);
-        ideaSession.start(newId);
-        state.mode = "/idea"; state._notify?.();
-        addSystem(state, `New idea IDEA-${newId}. Describe your idea — the agent will guide you. /done to save.`);
-      }
-      return;
-    }
-
-    // /done [category] — save idea (REQ-IDEA-3)
-    if (low.startsWith("/done")) {
-      if (!ideaSession.isActive()) { addSystem(state, "No active idea session."); return; }
-      const cat = text.slice(5).trim().toLowerCase() || "now";
-      if (!["now", "next", "later"].includes(cat)) { addSystem(state, "Category: now, next, or later"); return; }
-      const id = ideaSession.ideaId ?? nextIdeaId(projectDir);
-      state.busy = true; state.thinking = true; state._notify?.();
-      (async () => {
-        try {
-          streamBuf = ""; addModel(state, "", "", true);
-          const summary = await agent.send("Produce a structured idea summary: Title, User Story, Acceptance Criteria, Affected Modules, Affected Files. Markdown format.");
-          updateLastModel(state, summary, "", false);
-          writeIdea(projectDir, id, buildIdeaContent(`IDEA-${id}`, summary, cat as "now" | "next" | "later"));
-          ideaSession.cancel();
-          state.mode = ""; addSystem(state, `Saved IDEA-${id} as "${cat}".`);
-        } catch (e) { addSystem(state, `Error: ${e}`); }
-        finally { state.thinking = false; state.busy = false; state._notify?.(); }
-      })();
-      return;
-    }
-
-    // /chat — reset mode (REQ-U-2a)
+    // Slash command dispatch
+    if (low === "/help") { new HelpCommand(chatCtx).run(); return; }
+    if (low === "/clear") { new ClearCommand(chatCtx).run(); return; }
+    if (low.startsWith("/quick")) { new QuickCommand(chatCtx, text.slice(6).trim()).run(); return; }
+    if (low === "/compact") { new CompactCommand(chatCtx).run(); return; }
+    if (low.startsWith("/idea")) { new IdeaStartCommand(chatCtx, text.slice(5).trim()).run(); return; }
+    if (low.startsWith("/done")) { new IdeaDoneCommand(chatCtx, text.slice(5).trim().toLowerCase()).run(); return; }
     if (low === "/chat") { state.mode = ""; state._notify?.(); return; }
 
+    // Framework command dispatch (background thread via wrapCommand)
+    if (low.startsWith("/gather")) { wrapCommand(handleGather, text.slice(7).trim(), model, state, defaultPromptFn, log); return; }
+    if (low.startsWith("/plan")) { wrapCommand(handlePlan, text.slice(5).trim(), model, state, (f, c) => "update", log); return; }
+    if (low.startsWith("/develop")) { wrapCommand(handleDevelop, text.slice(8).trim(), model, state, defaultPromptFn, log); return; }
+    if (low.startsWith("/verify")) { wrapCommand(handleVerify, text.slice(7).trim(), model, state, defaultPromptFn, log); return; }
+
     // Input locking during commands
-    if (state.busy && state.mode) {
-      addSystem(state, "Command running — use /quick for questions.");
-      return;
-    }
-    if (state.busy) {
-      state.pendingMessage = text;
-      return;
-    }
+    if (state.busy && state.mode) { addSystem(state, "Command running — use /quick for questions."); return; }
+    if (state.busy) { state.pendingMessage = text; return; }
 
     // Normal message → agent
     addOperator(state, text);
     session.append("user", text);
-    state.thinking = true;
-    state.busy = true;
-    state._notify?.();
+    state.thinking = true; state.busy = true; state._notify?.();
 
     (async () => {
       try {
         // Auto-compact check (REQ-U-10)
         if (compactor.shouldAutoCompact(state.contextPct * (model.config.maxContext ?? 0) / 100)) {
           addSystem(state, "Auto-compacting context...");
-          const compacted = await compactor.compact(agent.messages, async (msgs, maxTok) => {
-            const oneShot = new AgentLoop({ model, systemPrompt: msgs[0].content ?? "", tools: [], toolHandlers: {}, stream: false, maxTokens: maxTok, logPath: log, showSpinner: false });
-            return oneShot.send(msgs[1].content ?? "");
-          });
-          agent.messages = compacted;
-          session.appendCompaction(compacted[1]?.content ?? "");
-          addSystem(state, `Auto-compacted to ${agent.messages.length} messages.`);
+          await new CompactCommand(chatCtx).execute();
         } else if (compactor.shouldNudge(state.contextPct * (model.config.maxContext ?? 0) / 100)) {
           addSystem(state, "Context is filling up. Type /compact to free space.");
         }
-        streamBuf = "";
-        addModel(state, "", "", true); // Start streaming placeholder
+        streamBuf.value = "";
+        addModel(state, "", "", true);
         const response = await agent.send(text);
-        // Empty response fallback (REQ-UI-14)
         const displayText = response.trim() ? response : "(No response from model)";
         updateLastModel(state, displayText, "", false);
         session.append("assistant", response);
@@ -368,10 +225,7 @@ export async function runChat(model: ModelInterface, options: ChatOptions = {}):
           addSystem(state, `Error: ${msg}`);
         }
       } finally {
-        state.thinking = false;
-        state.busy = false;
-        state._notify?.();
-        // Dispatch pending
+        state.thinking = false; state.busy = false; state._notify?.();
         if (state.pendingMessage) {
           const pending = state.pendingMessage;
           state.pendingMessage = null;

@@ -187,3 +187,22 @@ async function _runDocVerify(model: ModelInterface, d: string, log: string, ctx:
   });
   try { await agent.send(loadPrompt("verify", "DOC-VERIFY-USER")); } catch { /* */ }
 }
+
+// ---------------------------------------------------------------------------
+// VerifyCommand class
+// ---------------------------------------------------------------------------
+
+import { BaseCommand } from "./base.js";
+
+export class VerifyCommand extends BaseCommand {
+  readonly name = "verify";
+
+  async preflight(): Promise<void> {
+    await super.preflight();
+    if (!checkRequirementsExist()) throw new Error("REQUIREMENTS.md not found. Run 'voidrift gather' first.");
+  }
+
+  async execute(): Promise<number> {
+    return runVerify(this.model);
+  }
+}

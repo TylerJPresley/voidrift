@@ -288,3 +288,33 @@ function _checkTaskFiles(taskText: string, ctx: WriteContext): void {
     }
   } catch { /* */ }
 }
+
+// ---------------------------------------------------------------------------
+// DevelopCommand class
+// ---------------------------------------------------------------------------
+
+import { BaseCommand } from "./base.js";
+
+export interface DevelopOptions {
+  architect?: ModelInterface;
+  tokenBudget?: TokenBudget;
+}
+
+export class DevelopCommand extends BaseCommand {
+  readonly name = "develop";
+  private opts: DevelopOptions;
+
+  constructor(model: ModelInterface, opts: DevelopOptions = {}) {
+    super(model);
+    this.opts = opts;
+  }
+
+  async preflight(): Promise<void> {
+    await super.preflight();
+    if (!checkRequirementsExist()) throw new Error("REQUIREMENTS.md not found. Run 'voidrift gather' first.");
+  }
+
+  async execute(): Promise<number> {
+    return runDevelop(this.model, this.opts.architect, this.opts.tokenBudget);
+  }
+}

@@ -130,3 +130,29 @@ export async function runDeploy(worker: ModelInterface, architect?: ModelInterfa
   process.stderr.write(`✓ Tagged v${newVersion} (${bump} bump)\n`);
   return 0;
 }
+
+// ---------------------------------------------------------------------------
+// DeployCommand class
+// ---------------------------------------------------------------------------
+
+import { BaseCommand } from "./base.js";
+
+export class DeployCommand extends BaseCommand {
+  readonly name = "deploy";
+  private architect?: ModelInterface;
+
+  constructor(model: ModelInterface, architect?: ModelInterface) {
+    super(model);
+    this.architect = architect;
+  }
+
+  async preflight(): Promise<void> {
+    await super.preflight();
+    if (!checkRequirementsExist()) throw new Error("REQUIREMENTS.md not found. Run 'voidrift gather' first.");
+    if (!existsSync(join(this.voidriftDir, "ARCHITECTURE.md"))) throw new Error("ARCHITECTURE.md not found. Run 'voidrift plan' first.");
+  }
+
+  async execute(): Promise<number> {
+    return runDeploy(this.model, this.architect);
+  }
+}
