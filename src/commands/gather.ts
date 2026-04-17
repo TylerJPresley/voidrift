@@ -372,7 +372,7 @@ export async function runGather(
     const files = categories[cat];
     if (!files?.length) continue;
     if (onProgress) {
-      emit(`  ${cat}\n${files.map(f => `    ${f}`).join("\n")}`);
+      emit(`\n  ${cat}\n${files.map(f => `    ${f}`).join("\n")}`);
     } else {
       process.stderr.write(`  \x1b[2m${cat}\x1b[0m\n`);
       for (const f of files) process.stderr.write(`    ${f}\n`);
@@ -395,7 +395,7 @@ export async function runGather(
   }
 
   // Stage 2: Context Build
-  emit("▸ Stage 2: Building context summaries...");
+  emit("\n▸ Stage 2: Building context summaries...");
   const readFn = (path: string) => readFileSync(join(source, path), "utf-8");
   let contextSummaries: Record<string, string>;
   let contextBlock: string;
@@ -412,7 +412,7 @@ export async function runGather(
   }
 
   // Stage 3: Source Analysis
-  emit(`▸ Stage 3: Analyzing ${sourceFiles.length} source files...`);
+  emit(`\n▸ Stage 3: Analyzing ${sourceFiles.length} source files...`);
   let sourceReqs: Record<string, string>;
   try {
     sourceReqs = await runSourceAnalysis(model, sourceFiles, source, log, contextBlock, target, tokenBudget);
@@ -434,7 +434,7 @@ export async function runGather(
   writeFileSync(indexPath, indexLines.join("\n"), "utf-8");
 
   // Stage 4: Consolidation
-  emit("▸ Stage 4: Consolidating requirements...");
+  emit("\n▸ Stage 4: Consolidating requirements...");
   const finalResponse = await runConsolidation(model, sourceReqs, contextSummaries, existingReqs, log, tokenBudget);
   writeFileSync(target, stripPreamble(finalResponse), "utf-8");
 
@@ -444,7 +444,7 @@ export async function runGather(
 
   // Elapsed time (REQ-G-21)
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-  emit(`✓ Requirements written to .voidrift/REQUIREMENTS.md (${elapsed}s)`);
+  emit(`\n✓ Requirements written to .voidrift/REQUIREMENTS.md (${elapsed}s)`);
 
   return 0;
 }
