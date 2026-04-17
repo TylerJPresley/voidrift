@@ -372,8 +372,7 @@ export async function runGather(
     const files = categories[cat];
     if (!files?.length) continue;
     if (onProgress) {
-      emit(`  ${cat}`);
-      for (const f of files) emit(`    ${f}`);
+      emit(`  ${cat}\n${files.map(f => `    ${f}`).join("\n")}`);
     } else {
       process.stderr.write(`  \x1b[2m${cat}\x1b[0m\n`);
       for (const f of files) process.stderr.write(`    ${f}\n`);
