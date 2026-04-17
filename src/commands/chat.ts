@@ -211,21 +211,27 @@ export async function runChat(model: ModelInterface | null, options: ChatOptions
     const low = text.toLowerCase().trim();
     header.setInteracted();
 
-    if (low === "/help") { new HelpCommand(chatCtx).run(); return; }
-    if (low === "/clear") { new ClearCommand(chatCtx).run(); return; }
-    if (low.startsWith("/ask")) { new AskCommand(chatCtx, text.slice(4).trim()).run(); return; }
-    if (low === "/compact") { new CompactCommand(chatCtx).run(); return; }
-    if (low.startsWith("/settings")) { new SettingsCommand(chatCtx, text.slice(9).trim()).run(); return; }
-    if (low === "/model" || low === "/models" || low.startsWith("/model ")) { new ModelCommand(chatCtx, low === "/model" || low === "/models" ? "" : text.slice(7).trim()).run(); return; }
-    if (low.startsWith("/idea")) { new IdeaStartCommand(chatCtx, text.slice(5).trim()).run(); return; }
-    if (low.startsWith("/done")) { new IdeaDoneCommand(chatCtx, text.slice(5).trim().toLowerCase()).run(); return; }
-    if (low === "/chat") { footer.setMode(""); return; }
+    // Slash command dispatch — match exact name or name + space
+    const cmd = low.split(" ")[0];
+    const cmdArgs = text.slice(cmd.length).trim();
 
-    if (low.startsWith("/gather")) { wrapCommand(wrap(handleGather), text.slice(7).trim(), model, chatCtx, defaultPromptFn, log); return; }
-    if (low.startsWith("/plan")) { wrapCommand(wrap(handlePlan), text.slice(5).trim(), model, chatCtx, defaultPromptFn, log); return; }
-    if (low.startsWith("/develop")) { wrapCommand(wrap(handleDevelop), text.slice(8).trim(), model, chatCtx, defaultPromptFn, log); return; }
-    if (low.startsWith("/verify")) { wrapCommand(wrap(handleVerify), text.slice(7).trim(), model, chatCtx, defaultPromptFn, log); return; }
-    if (low.startsWith("/deploy")) { wrapCommand(wrap(handleDeploy), text.slice(7).trim(), model, chatCtx, defaultPromptFn, log); return; }
+    if (cmd === "/help") { new HelpCommand(chatCtx).run(); return; }
+    if (cmd === "/clear") { new ClearCommand(chatCtx).run(); return; }
+    if (cmd === "/ask") { new AskCommand(chatCtx, cmdArgs).run(); return; }
+    if (cmd === "/compact") { new CompactCommand(chatCtx).run(); return; }
+    if (cmd === "/settings") { new SettingsCommand(chatCtx, cmdArgs).run(); return; }
+    if (cmd === "/model") { new ModelCommand(chatCtx, cmdArgs).run(); return; }
+    if (cmd === "/idea") { new IdeaStartCommand(chatCtx, cmdArgs).run(); return; }
+    if (cmd === "/done") { new IdeaDoneCommand(chatCtx, cmdArgs.toLowerCase()).run(); return; }
+    if (cmd === "/chat") { footer.setMode(""); return; }
+    if (cmd === "/gather") { wrapCommand(wrap(handleGather), cmdArgs, model, chatCtx, defaultPromptFn, log); return; }
+    if (cmd === "/plan") { wrapCommand(wrap(handlePlan), cmdArgs, model, chatCtx, defaultPromptFn, log); return; }
+    if (cmd === "/develop") { wrapCommand(wrap(handleDevelop), cmdArgs, model, chatCtx, defaultPromptFn, log); return; }
+    if (cmd === "/verify") { wrapCommand(wrap(handleVerify), cmdArgs, model, chatCtx, defaultPromptFn, log); return; }
+    if (cmd === "/deploy") { wrapCommand(wrap(handleDeploy), cmdArgs, model, chatCtx, defaultPromptFn, log); return; }
+
+    // Unknown slash command
+    if (cmd.startsWith("/")) { content.addSystem(`Unknown command: ${cmd}. Type /help for available commands.`); return; }
 
     if (input.busy && footer.mode) { content.addSystem("Command running — use /ask for questions."); return; }
     if (input.busy) { input.setPending(text); return; }
