@@ -19,7 +19,7 @@ describe("wrapCommand", () => {
       resolved = true;
     }
 
-    wrapCommand(handleTest, "", {} as ModelInterface, ctx, () => "skip", "");
+    wrapCommand(handleTest, "/test", "", {} as ModelInterface, ctx, () => "skip", "");
     await new Promise(r => setTimeout(r, 50));
     expect(resolved).toBe(true);
     expect(input.busy).toBe(false);
@@ -34,13 +34,13 @@ describe("wrapCommand", () => {
 
     async function handleBoom() { throw new Error("kaboom"); }
 
-    wrapCommand(handleBoom, "", {} as ModelInterface, ctx, () => "skip", "");
+    wrapCommand(handleBoom, "/boom", "", {} as ModelInterface, ctx, () => "skip", "");
     await new Promise(r => setTimeout(r, 50));
     expect(input.busy).toBe(false);
     expect(content.messages.some(m => m.text.includes("kaboom"))).toBe(true);
   });
 
-  it("derives mode from function name", async () => {
+  it("sets mode from explicit command name", async () => {
     const content = new ContentRegion();
     const footer = new FooterRegion();
     const input = new InputRegion();
@@ -51,7 +51,7 @@ describe("wrapCommand", () => {
       capturedMode = footer.mode;
     }
 
-    wrapCommand(handleGather, "", {} as ModelInterface, ctx, () => "skip", "");
+    wrapCommand(handleGather, "/gather", "", {} as ModelInterface, ctx, () => "skip", "");
     await new Promise(r => setTimeout(r, 50));
     expect(capturedMode).toBe("/gather");
   });

@@ -120,9 +120,8 @@ export type PromptFn = (filename: string, catList: string[]) => string;
 /** Run a framework command handler in the chat shell with busy/mode management. */
 export async function wrapCommand(
   fn: (args: string, mc: ModelInterface, content: ContentRegion, footer: FooterRegion, input: InputRegion, promptFn: PromptFn, log: string) => Promise<void>,
-  args: string, mc: ModelInterface, ctx: ChatContext, promptFn: PromptFn, log: string,
+  cmdName: string, args: string, mc: ModelInterface, ctx: ChatContext, promptFn: PromptFn, log: string,
 ): Promise<void> {
-  const cmdName = fn.name.replace("handle", "/").toLowerCase();
   ctx.footer.setMode(cmdName);
   ctx.input.setBusy(true);
   try {

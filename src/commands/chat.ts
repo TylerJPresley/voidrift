@@ -243,11 +243,11 @@ export async function runChat(model: ModelInterface | null, options: ChatOptions
     if (cmd === "/idea") { new IdeaStartCommand(chatCtx, cmdArgs).run(); return; }
     if (cmd === "/done") { new IdeaDoneCommand(chatCtx, cmdArgs.toLowerCase()).run(); return; }
     if (cmd === "/chat") { footer.setMode(""); return; }
-    if (cmd === "/gather") { wrapCommand(wrap(handleGather), cmdArgs, model, chatCtx, defaultPromptFn, log); return; }
-    if (cmd === "/plan") { wrapCommand(wrap(handlePlan), cmdArgs, model, chatCtx, defaultPromptFn, log); return; }
-    if (cmd === "/develop") { wrapCommand(wrap(handleDevelop), cmdArgs, model, chatCtx, defaultPromptFn, log); return; }
-    if (cmd === "/verify") { wrapCommand(wrap(handleVerify), cmdArgs, model, chatCtx, defaultPromptFn, log); return; }
-    if (cmd === "/deploy") { wrapCommand(wrap(handleDeploy), cmdArgs, model, chatCtx, defaultPromptFn, log); return; }
+    if (cmd === "/gather") { wrapCommand(wrap(handleGather), "/gather", cmdArgs, model, chatCtx, defaultPromptFn, log); return; }
+    if (cmd === "/plan") { wrapCommand(wrap(handlePlan), "/plan", cmdArgs, model, chatCtx, defaultPromptFn, log); return; }
+    if (cmd === "/develop") { wrapCommand(wrap(handleDevelop), "/develop", cmdArgs, model, chatCtx, defaultPromptFn, log); return; }
+    if (cmd === "/verify") { wrapCommand(wrap(handleVerify), "/verify", cmdArgs, model, chatCtx, defaultPromptFn, log); return; }
+    if (cmd === "/deploy") { wrapCommand(wrap(handleDeploy), "/deploy", cmdArgs, model, chatCtx, defaultPromptFn, log); return; }
 
     // Unknown slash command
     if (cmd.startsWith("/")) { content.addSystem(`Unknown command: ${cmd}. Type /help for available commands.`); return; }
