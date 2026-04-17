@@ -38,7 +38,6 @@ export class SettingsCommand extends SlashCommand {
       }
       lines.push("", "  /settings get <key>          read a value");
       lines.push("  /settings set <key> <value>  change a value");
-      lines.push("  /settings delete <key>       remove a value");
       addSystem(this.ctx.state, lines.join("\n"));
       return 0;
     }
@@ -67,15 +66,7 @@ export class SettingsCommand extends SlashCommand {
       return 0;
     }
 
-    if (action === "delete") {
-      const key = parts[1];
-      if (!key) { addSystem(this.ctx.state, "Usage: /settings delete <key>"); return 1; }
-      cm.delete(key);
-      addSystem(this.ctx.state, `✓ ${key} deleted.`);
-      return 0;
-    }
-
-    addSystem(this.ctx.state, "Usage: /settings [list|get|set|delete] [key] [value]");
+    addSystem(this.ctx.state, "Usage: /settings [list|get|set] [key] [value]");
     return 1;
   }
 }
