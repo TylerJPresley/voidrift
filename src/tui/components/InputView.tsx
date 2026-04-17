@@ -22,9 +22,10 @@ export function InputView({ input: region, footer, onSubmit, onEscape }: InputVi
   const { exit } = useApp();
 
   useInput((ch, key) => {
-    // Double Ctrl+C to exit (4 second window)
+    // Ctrl+C: clear input first, exit on double press (REQ-UI-5)
     if (ch === "c" && key.ctrl) {
       const now = Date.now();
+      if (value) { setValue(""); return; }
       if (now - lastCtrlC < 4000) { exit(); return; }
       setLastCtrlC(now);
       return;
