@@ -16,8 +16,14 @@ export function HeaderView({ region }: { region: HeaderRegion }) {
     <Box flexDirection="column">
       <Text> </Text>
       <Text color="#c678dd">{HEADER_ART}</Text>
+      <Text dimColor italic>  Agentic Software Engineering Framework</Text>
       <Text> </Text>
-      <Text dimColor>  Model <Text color="#4ec9b0" bold>{region.modelName}</Text>  ·  <Text color="#5c8cc8">/help</Text> for commands{region.hasMessages ? "  ·  /clear to start fresh" : ""}</Text>
+      <Box flexDirection="column" borderStyle="round" borderColor="#5a6aa8" paddingX={1}>
+        <Text> </Text>
+        <Text>  Model <Text color="#4ec9b0" bold>{region.modelName}</Text>  ·  <Text color="#5c8cc8">/help</Text> for commands</Text>
+        {region.hasMessages && <Text dimColor>  Resuming previous conversation. /clear to start fresh.</Text>}
+        <Text> </Text>
+      </Box>
       <Text> </Text>
     </Box>
   );
