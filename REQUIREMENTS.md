@@ -702,6 +702,20 @@ Verify is a two-stage requirements-driven acceptance testing command. Stage 1 pr
   - *Rationale:* After tool calls, the model often returns empty text or vague responses. The operator has to check git diff to understand what changed. A post-action summary instruction ensures the model reports what it did.
   - Given the CHAT-ROLE section is examined, Then it contains an instruction to summarize actions after making changes.
 
+- **REQ-U-27:** THE SYSTEM SHALL provide a `/settings` slash command for viewing and modifying `config.yml` from within chat. `/settings` lists all settings with descriptions. `/settings set <key> <value>` validates the key exists in `CONFIG_SCHEMA` and the value type matches before writing. Unknown keys and type mismatches are rejected with an error.
+
+- **REQ-U-28:** THE SYSTEM SHALL provide a `/model` slash command for switching the active model mid-session. `/model` opens a model selector (panel or list). `/model <alias>` switches directly. The switch updates the live agent's model, adapter, and client. The footer model name updates. The selection is saved to `config.yml` as `current_model`.
+
+- **REQ-U-29:** THE SYSTEM SHALL provide a `ConfigManager` class in `config.ts` with `get(key)`, `set(key, value)`, `list()`, and `validate(key, value)` methods. `CONFIG_SCHEMA` defines every valid config key with type (`string`/`number`/`boolean`/`array`), optional constraint validator, and description. `set()` validates against the schema before writing.
+
+- **REQ-U-30:** WHEN `voidrift chat` starts with a restored session, THE SYSTEM SHALL always inject a resume instruction into the agent's message history: "Session history restored. Treat it as background context only — do not continue previous actions or reference previous conversation unless I ask about it. Wait for new instructions." No time threshold — fires on every resume.
+
+- **REQ-U-31:** The chat welcome box SHALL display on startup and disappear when any content is added to the conversation area (any slash command output, any message). The ASCII art header and tagline remain visible.
+
+- **REQ-U-32:** ALL framework commands (gather, plan, develop, deploy, verify) SHALL display a command header box on startup showing model name, log path, and command-specific context (e.g. Path for gather).
+
+- **REQ-UI-3a:** The chat input SHALL support multi-line entry via two methods: Ctrl+J inserts a newline. Backslash (`\`) at end of line followed by Enter strips the backslash and inserts a newline instead of submitting.
+
 ### 4.10 Model Configuration
 
 - **REQ-MC-1:** WHEN a model alias is used, THE SYSTEM SHALL resolve it to `(base_url, api_key, model_id)`. The CLI SHALL read all model definitions from a single models file. The path to this file SHALL be configurable via `models_file` in `config.yml` (default: `~/.worker-cli/models.yml`). Each model entry SHALL be self-contained: `base_url`, `api_key`, `model_id`, and optional `provider` and `max_context`. IF an alias is not found, THE SYSTEM SHALL exit with an error listing all available aliases.

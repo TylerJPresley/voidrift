@@ -26,30 +26,70 @@ voidrift CLI  ──reads──►  ~/.voidrift/ (config, resources)
 
 ## 2. Components
 
-### 2.1 CLI (`cli/`)
+### 2.1 CLI (`src/`)
 
-**Entry point:** `voidrift_cli.main:cli`
+**Entry point:** `src/index.ts` → Commander CLI
 
 The CLI is the orchestration layer. It owns:
 - Framework command execution (Gather → Plan → Develop → Deploy → Verify → Chat)
-- Command implementations in `commands/` sub-package: `gather.py`, `plan.py`, `develop.py`, `deploy.py`, `verify.py`, `chat.py`, `skills.py`
-- Agent loop (message routing, tool dispatch, hooks, stall detection, think-tag stripping, retry with jitter, model fallback)
-- Token budget tracking (`token_budget.py`) — shared across agents per command run
-- Model alias resolution (models file at configured path)
-- Local agent tools (`tools/` sub-package): filesystem, bash, process management, HTTP client, browser automation, security
-- Interactive UI (spinners, progress, dashboard, streaming output, `/compact`)
-- System log (`~/.voidrift/logs/voidrift.log`)
+- Command classes in `commands/`: `base.ts` (BaseCommand, SlashCommand), `gather.ts`, `plan.ts`, `develop.ts`, `deploy.ts`, `verify.ts`, `chat.ts`
+- Slash command classes: `help.ts`, `clear.ts`, `ask.ts`, `compact.ts`, `settings.ts`, `model.ts`, `idea.ts`
+- Agent loop (`agent/loop.ts`) — message routing, tool dispatch, hooks, stall detection, think-tag stripping, retry with jitter, model fallback, streaming
+- Protocol adapters (`agent/protocol.ts`) — OpenAI + Anthropic wire format translation
+- Token budget tracking (`agent/budget.ts`) — shared across agents per command run
+- Model alias resolution (`models.ts`) — `ModelInterface` bundles `ModelConfig` + `ProtocolAdapter`
+- Local agent tools (`tools/` sub-package): filesystem, shell, process management, HTTP client, browser automation, security, SSRF guard, permissions
+- Interactive TUI (`tui/`) — region-based architecture with Ink (React for terminals)
+- System log (`~/.voidrift/logs/voidrift.log`) via `utils.ts`
+- Config management (`config.ts`) — `ConfigManager` with `CONFIG_SCHEMA` validation
 
-Agent tools live in `cli/src/voidrift_cli/tools/`:
-- `filesystem.py` — `WriteContext` with path sandboxing, protected paths, snapshots, diff stats, line pagination (REQ-FSZ-1), byte guard (REQ-FSZ-5). Implements file tool handlers (`file(action="write")`, `file(action="read")`, `file(action="edit")`, `file(action="write")`, `file(action="read")`)
-- `registry.py` — All 10 domain tool schemas in OpenAI format (`DOMAIN_FILE`, `DOMAIN_HTTP`, `DOMAIN_SHELL`, `DOMAIN_BROWSER`, `DOMAIN_PROCESS`, `DOMAIN_SKILL`, `DOMAIN_MEMORY`, `DOMAIN_SESSION`, `DOMAIN_ANALYZE`, `DOMAIN_ASK`). `DOMAIN_TOOLS` concatenates all schemas. `tool_builder.py` imports schemas from here — it contains zero inline schema dicts (REQ-TOOL-3). `tool_builder.py` is decomposed into four focused functions: `build_domain_handlers(cmd, project_dir, ctx, web_fetch_kwargs, ask_fn, source_read_ctx)` creates all handler callables, `filter_tools(all_tools, allowed_names)` selects schemas by command, `validate_schema_handler_contract(tools, handlers)` verifies each handler accepts its schema-defined parameters at build time (REQ-TOOL-4), and `build_local_tools` is a thin orchestrator that composes them
-- `bash.py` — `BashConfig` dataclass and `create_run_command` factory for per-command `shell` handlers (REQ-SEC-4). Develop agents get a narrow allowlist (build, test, lint); chat agents get broader access; verify agents get full scope. Two-layer security: per-command `allowed_patterns` checked first, then global `classify_command`
-- `process_manager.py` — subprocess lifecycle (`start_process`, `stop_process`, `wait_for_ready`, `read_process_output`, `stop_all`) for verify sub-agents
-- `security.py` — `classify_command()` for shell command risk assessment (safe/warn/block)
-- `http_client.py` — stateful HTTP client (`http_request`, `clear_sessions`) with per-session cookie and auth header persistence
-- `browser.py` — Playwright-based browser automation (`browser_navigate`, `browser_screenshot`, `browser_click`, `browser_get_text`, `close_all_sessions`)
+**Command class hierarchy:**
+```
+BaseCommand (preflight → boot → execute → finish)
+├── GatherCommand, PlanCommand, DevelopCommand, DeployCommand, VerifyCommand
 
-The CLI does **not** manage containers, SSH connections, or gateway processes. Every model is just a `(base_url, api_key, model_id)` tuple.
+SlashCommand (lightweight execute-only)
+├── HelpCommand, ClearCommand, AskCommand, CompactCommand
+├── SettingsCommand, ModelCommand, IdeaStartCommand, IdeaDoneCommand
+```
+
+**TUI region architecture:**
+```
+src/tui/
+├── regions/           — state classes with subscribe/emit pattern
+│   ├── Region.ts      — base class
+│   ├── HeaderRegion   — model name, welcome state
+│   ├── ContentRegion  — messages, thinking indicator
+│   ├── FooterRegion   — status bar, panel overlay
+│   └── InputRegion    — busy, mode, pending, history
+├── panels/            — pluggable footer overlays (Panel interface)
+│   ├── Panel.ts       — interface: items, onSelect, onCancel
+│   └── ModelPanel.ts  — model selection
+├── components/        — React views (subscribe to one region via useRegion hook)
+│   ├── App.tsx        — layout wiring
+│   ├── HeaderView     — ASCII art, tagline, welcome box
+│   ├── ContentView    — message list, thinking spinner
+│   ├── FooterView     — status bar OR active panel
+│   └── InputView      — text input, history, panel key handling
+├── Message.tsx        — pure render (markdown via marked-terminal)
+├── ToolCall.tsx       — pure render (purple dot)
+├── Thinking.tsx       — braille spinner
+└── useRegion.ts       — React hook: subscribe to Region, forceUpdate on emit
+```
+
+Agent tools live in `src/tools/`:
+- `registry.ts` — All 10 domain tool schemas + DOMAIN_DONE in OpenAI format. `DOMAIN_TOOLS` exports all schemas.
+- `builder.ts` — `buildLocalTools()` resolves command tool sets via OCP dynamic import from command modules. `buildDomainHandlers()` wires handlers at build time. `narrowSchemaActions()` restricts action enums per command.
+- `filesystem.ts` — `WriteContext` with path sandboxing (realpathSync for symlinks), protected paths, snapshots, diff stats, line pagination, byte guard, mtime guard
+- `shell.ts` — `createRunCommand` factory for per-command shell handlers with two-layer security
+- `process.ts` — subprocess lifecycle (startProcess, stopProcess, waitForReady with http/port/log_pattern strategies, readProcessOutput, stopAll)
+- `security.ts` — `classifyCommand()` for shell command risk assessment (safe/warn/block)
+- `ssrf.ts` — DNS-based SSRF guard with IPv4 + IPv6 blocked ranges, allow list
+- `http.ts` — HTTP client with per-session cookie/auth persistence
+- `browser.ts` — Playwright-based browser automation
+- `permissions.ts` — Session-scoped permission gate for chat (writes/runs/reads-outside)
+
+The CLI does **not** manage containers, SSH connections, or gateway processes. Every model is just a `ModelInterface` with `(baseUrl, apiKey, modelId)` + `ProtocolAdapter`.
 
 ### 2.2 Framework Resources (`resources/`)
 
