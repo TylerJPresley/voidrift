@@ -4,7 +4,7 @@
 
 import { describe, it, expect, vi } from "vitest";
 import { ContextCompactor } from "../src/agent/context.js";
-import { createPermissionGate } from "../src/commands/permissions.js";
+import { createPermissionGate } from "../src/tools/permissions.js";
 import type { Message } from "../src/agent/types.js";
 
 // ---------------------------------------------------------------------------

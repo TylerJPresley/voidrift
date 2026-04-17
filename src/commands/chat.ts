@@ -26,7 +26,7 @@ import { captureGitSnapshot, snapshotToPromptBlock } from "../git.js";
 import { createState, addOperator, addModel, addTool, addSystem, updateLastModel, type TUIState } from "../tui/state.js";
 import { App } from "../tui/App.js";
 import { IdeaSession } from "./idea.js";
-import { createPermissionGate, type PermCategory, type PermDecision } from "./permissions.js";
+import { createPermissionGate, type PermCategory, type PermDecision } from "../tools/permissions.js";
 import {
   type ChatContext,
   HelpCommand, ClearCommand, AskCommand, CompactCommand,
