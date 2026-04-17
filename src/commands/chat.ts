@@ -284,12 +284,15 @@ export async function runChat(model: ModelInterface | null, options: ChatOptions
 
   // Double Ctrl+C to exit (4 second window)
   let lastCtrlC = 0;
-  process.on("SIGINT", () => {
-    const now = Date.now();
-    if (now - lastCtrlC < 4000) { process.exit(0); }
-    lastCtrlC = now;
-    content.addSystem("Press Ctrl+C again to exit.");
-  });
+  const stdinListener = (data: Buffer) => {
+    if (data[0] === 0x03) { // Ctrl+C byte
+      const now = Date.now();
+      if (now - lastCtrlC < 4000) { process.exit(0); }
+      lastCtrlC = now;
+      content.addSystem("Press Ctrl+C again to exit.");
+    }
+  };
+  process.stdin.on("data", stdinListener);
 
   await waitUntilExit();
 }
