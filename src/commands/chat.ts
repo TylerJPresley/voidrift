@@ -51,7 +51,7 @@ interface ChatOptions {
   systemPrompt?: string;
 }
 
-export async function runChat(model: ModelInterface, options: ChatOptions = {}): Promise<void> {
+export async function runChat(model: ModelInterface | null, options: ChatOptions = {}): Promise<void> {
   const d = ensureVoidriftDir();
   const projectDir = join(d, "..");
   const [log, runId] = bootRun("chat");
@@ -93,80 +93,90 @@ export async function runChat(model: ModelInterface, options: ChatOptions = {}):
 
   const branch = captureGitSnapshot(projectDir)?.branch ?? "";
   const cwd = projectDir.replace(require("os").homedir(), "~");
-  header.modelName = model.config.alias;
-  footer.modelName = model.config.alias;
+  header.modelName = model?.config.alias ?? "none";
+  footer.modelName = model?.config.alias ?? "none";
   footer.cwd = cwd;
   footer.branch = branch;
   content.onContentAdded = () => header.setInteracted();
 
-  // Tools + agent
-  const ctx = new WriteContext({ projectDir, maxReadLines: model.config.maxReadLines });
-  const webCache = new Map<string, string>();
-  const askFn = (question: string, opts?: string[]): string => {
-    content.addSystem(`❓ ${question}${opts ? "\n" + opts.map((o, i) => `  ${i + 1}. ${o}`).join("\n") : ""}`);
-    return opts?.[0] ?? "Proceed with your best judgment.";
-  };
-  const [tools, handlers] = buildLocalTools("chat", projectDir, ctx, {
-    memoryManager: memMgr, webFetchKwargs: { model, logPath: log, webCache, allowList: [] }, askFn,
-  });
-
-  const agent = new AgentLoop({
-    model, systemPrompt, tools, toolHandlers: handlers,
-    stream: true, maxTokens: getMaxTokens(model.config, "chat.session"),
-    logPath: log, showSpinner: false, toolChoice: "auto",
-  });
-
-  // Streaming
+  // Tools + agent (null if no model)
+  let agent: AgentLoop | null = null;
   const streamBuf = { value: "" };
-  agent.onToken = (token: string) => { streamBuf.value += token; content.updateLastModel(streamBuf.value, "", true); };
-  agent.onProgress = (data) => { if (data.ctx_pct !== undefined) footer.setContext(data.ctx_pct); };
-  agent.onToolCall = (name, args) => {
-    content.setThinking(true);
-    try {
-      const a = JSON.parse(args || "{}");
-      content.addTool(name, a.path ?? a.url ?? a.cmd ?? a.name ?? "", a.action ?? "");
-      if (name === "file" && (a.action === "read" || a.action === "list") && a.path) {
-        recentFiles.unshift(join(projectDir, a.path));
-        if (recentFiles.length > 10) recentFiles.length = 10;
-      }
-    } catch { content.addTool(name); }
-  };
+  const webCache = new Map<string, string>();
+  const recentFiles: string[] = [];
+  let handlers: Record<string, (...args: unknown[]) => string> = {};
+
+  if (model) {
+    const ctx = new WriteContext({ projectDir, maxReadLines: model.config.maxReadLines });
+    const askFn = (question: string, opts?: string[]): string => {
+      content.addSystem(`❓ ${question}${opts ? "\n" + opts.map((o, i) => `  ${i + 1}. ${o}`).join("\n") : ""}`);
+      return opts?.[0] ?? "Proceed with your best judgment.";
+    };
+    const [tools, h] = buildLocalTools("chat", projectDir, ctx, {
+      memoryManager: memMgr, webFetchKwargs: { model, logPath: log, webCache, allowList: [] }, askFn,
+    });
+    handlers = h;
+
+    agent = new AgentLoop({
+      model, systemPrompt, tools, toolHandlers: handlers,
+      stream: true, maxTokens: getMaxTokens(model.config, "chat.session"),
+      logPath: log, showSpinner: false, toolChoice: "auto",
+    });
+
+    agent.onToken = (token: string) => { streamBuf.value += token; content.updateLastModel(streamBuf.value, "", true); };
+    agent.onProgress = (data) => { if (data.ctx_pct !== undefined) footer.setContext(data.ctx_pct); };
+    agent.onToolCall = (name, args) => {
+      content.setThinking(true);
+      try {
+        const a = JSON.parse(args || "{}");
+        content.addTool(name, a.path ?? a.url ?? a.cmd ?? a.name ?? "", a.action ?? "");
+        if (name === "file" && (a.action === "read" || a.action === "list") && a.path) {
+          recentFiles.unshift(join(projectDir, a.path));
+          if (recentFiles.length > 10) recentFiles.length = 10;
+        }
+      } catch { content.addTool(name); }
+    };
+  } else {
+    content.addSystem("No model selected. Use /model to choose one.");
+  }
 
   // Session
   const session = ChatSession.loadOrCreate(d);
-  handlers.session = ((action: unknown, query: unknown, limit: unknown) => {
-    if (String(action) === "search") {
-      const results = session.searchEntries(String(query), limit ? Number(limit) : 5);
-      if (!results.length) return "No matches found.";
-      return results.map((r: { timestamp: string; role: string; content: string }) => `[${r.timestamp}] ${r.role}: ${r.content}`).join("\n\n");
-    }
-    return `Unknown session action: ${action}`;
-  }) as (...args: unknown[]) => string;
+  if (agent) {
+    handlers.session = ((action: unknown, query: unknown, limit: unknown) => {
+      if (String(action) === "search") {
+        const results = session.searchEntries(String(query), limit ? Number(limit) : 5);
+        if (!results.length) return "No matches found.";
+        return results.map((r: { timestamp: string; role: string; content: string }) => `[${r.timestamp}] ${r.role}: ${r.content}`).join("\n\n");
+      }
+      return `Unknown session action: ${action}`;
+    }) as (...args: unknown[]) => string;
 
-  if (session.entryCount > 0) {
-    agent.messages.push(...session.restoreMessages());
-    agent.messages.push({ role: "user", content: "Session history restored. Treat it as background context only — do not continue previous actions or reference previous conversation unless I ask about it. Wait for new instructions." });
-    agent.messages.push({ role: "assistant", content: "Understood. What would you like to work on?" });
-    header.setHasMessages(true);
+    if (session.entryCount > 0) {
+      agent.messages.push(...session.restoreMessages());
+      agent.messages.push({ role: "user", content: "Session history restored. Treat it as background context only — do not continue previous actions or reference previous conversation unless I ask about it. Wait for new instructions." });
+      agent.messages.push({ role: "assistant", content: "Understood. What would you like to work on?" });
+      header.setHasMessages(true);
+    }
   }
 
   // Context compactor
   const compactPrompt = loadPrompt("chat", "COMPACT") ?? "Summarize the conversation preserving key decisions, file changes, and next steps.";
   const compactor = new ContextCompactor({
-    maxContext: model.config.maxContext ?? 0, compactPrompt,
+    maxContext: model?.config.maxContext ?? 0, compactPrompt,
     logFn: (msg) => { try { appendFileSync(log, msg + "\n"); } catch { /* */ } },
   });
-  const recentFiles: string[] = [];
-
   // Permission gate
-  const permGate = createPermissionGate();
-  agent.beforeToolCall = permGate.hook(projectDir, () => "allow-once");
+  if (agent) {
+    const permGate = createPermissionGate();
+    agent.beforeToolCall = permGate.hook(projectDir, () => "allow-once");
+  }
 
   const ideaSession = new IdeaSession();
   const defaultPromptFn: PromptFn = () => "skip";
 
   // Chat context for slash commands
-  const chatCtx: ChatContext = { model, agent, header, content, footer, input, session, compactor, ideaSession, projectDir, logPath: log, recentFiles, streamBuf };
+  const chatCtx: ChatContext = { model: model!, agent: agent!, header, content, footer, input, session, compactor, ideaSession, projectDir, logPath: log, recentFiles, streamBuf };
 
   // Framework command handlers
   const handleGather = async (a: string, mc: ModelInterface, c: ContentRegion) => {
@@ -219,6 +229,7 @@ export async function runChat(model: ModelInterface, options: ChatOptions = {}):
 
     if (input.busy && footer.mode) { content.addSystem("Command running — use /ask for questions."); return; }
     if (input.busy) { input.setPending(text); return; }
+    if (!agent) { content.addSystem("No model selected. Use /model to choose one."); return; }
 
     // Normal message → agent
     content.addOperator(text);
@@ -228,10 +239,10 @@ export async function runChat(model: ModelInterface, options: ChatOptions = {}):
 
     (async () => {
       try {
-        if (compactor.shouldAutoCompact(footer.contextPct * (model.config.maxContext ?? 0) / 100)) {
+        if (model && compactor.shouldAutoCompact(footer.contextPct * (model.config.maxContext ?? 0) / 100)) {
           content.addSystem("Auto-compacting context...");
           await new CompactCommand(chatCtx).execute();
-        } else if (compactor.shouldNudge(footer.contextPct * (model.config.maxContext ?? 0) / 100)) {
+        } else if (model && compactor.shouldNudge(footer.contextPct * (model.config.maxContext ?? 0) / 100)) {
           content.addSystem("Context is filling up. Type /compact to free space.");
         }
         streamBuf.value = "";
@@ -243,7 +254,7 @@ export async function runChat(model: ModelInterface, options: ChatOptions = {}):
         const msg = e instanceof Error ? e.message : String(e);
         const name = (e as Record<string, unknown>)?.constructor?.name ?? "";
         if (name === "APIConnectionError" || msg.includes("Connection error")) {
-          content.addSystem(`Cannot connect to ${model.config.baseUrl} — is the model/gateway running?`);
+          content.addSystem(`Cannot connect to ${model?.config.baseUrl ?? "model"} — is the model/gateway running?`);
         } else {
           content.addSystem(`Error: ${msg}`);
         }

@@ -44,13 +44,13 @@ describe("bootRun", () => {
     const [logPath, runId] = bootRun("gather");
     expect(existsSync(logPath)).toBe(true);
     expect(runId).toMatch(/^gather-\d{8}-\d{6}$/);
-    expect(logPath).toContain(runId);
+    expect(logPath).toContain("voidrift.log");
   });
 
-  it("log path is under .voidrift/logs/", () => {
+  it("log path is under .voidrift/", () => {
     const [logPath] = bootRun("plan");
-    expect(logPath).toContain(join(".voidrift", "logs"));
-    expect(logPath).toContain("plan-");
+    expect(logPath).toContain(".voidrift");
+    expect(logPath).toMatch(/voidrift\.log$/);
     expect(logPath).toMatch(/\.log$/);
   });
 });

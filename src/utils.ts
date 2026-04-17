@@ -78,12 +78,24 @@ function timestamp(): string {
 
 export function bootRun(command: string): [logPath: string, runId: string] {
   const d = ensureVoidriftDir();
-  const logDir = join(d, "logs");
-  mkdirSync(logDir, { recursive: true });
+  const logPath = join(d, "voidrift.log");
   const ts = timestamp();
   const runId = `${command}-${ts}`;
-  const logPath = join(logDir, `${runId}.log`);
-  appendFileSync(logPath, "");
+  // Rotate if over max size (REQ-LOG-1)
+  try {
+    if (existsSync(logPath)) {
+      const size = statSync(logPath).size;
+      const maxBytes = 10 * 1024 * 1024; // 10 MB default
+      if (size > maxBytes) {
+        for (let i = 3; i >= 1; i--) {
+          const src = i === 1 ? logPath : `${logPath}.${i - 1}`;
+          if (existsSync(src)) renameSync(src, `${logPath}.${i}`);
+        }
+        writeFileSync(logPath, "", "utf-8");
+      }
+    }
+  } catch { /* rotation is best-effort */ }
+  appendFileSync(logPath, `\n--- ${runId} ${new Date().toISOString()} ---\n`);
   return [logPath, runId];
 }
 
