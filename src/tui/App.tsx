@@ -102,11 +102,9 @@ export function App({ state, onSubmit, onEscape }: AppProps) {
           <Message key={i} msg={msg} />
         ))}
         {state.thinking && <Thinking label={state.thinkingLabel} />}
+        {state.panel ? <Panel panel={state.panel} /> : null}
         <Text> </Text>
       </Box>
-
-      {/* Panel (collapsible) */}
-      {state.panel ? <Panel panel={state.panel} /> : null}
 
       {/* Separator */}
       <Text dimColor>{"─".repeat(process.stdout.columns || 80)}</Text>
