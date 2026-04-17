@@ -147,7 +147,6 @@ export async function runChat(model: ModelInterface, options: ChatOptions = {}):
     agent.messages.push({ role: "user", content: "Session history restored. Treat it as background context only — do not continue previous actions or reference previous conversation unless I ask about it. Wait for new instructions." });
     agent.messages.push({ role: "assistant", content: "Understood. What would you like to work on?" });
     header.setHasMessages(true);
-    content.addSystem(`Resuming session (${session.entryCount} messages).`);
   }
 
   // Context compactor
