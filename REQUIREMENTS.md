@@ -724,14 +724,17 @@ Verify is a two-stage requirements-driven acceptance testing command. Stage 1 pr
 
 - **REQ-ENTRY-2:** WHEN `voidrift` starts, THE SYSTEM SHALL resolve the active model in order: (1) `current_model` from `config.yml`, (2) `active_container_file` for a running local model, (3) first alias in the models file. IF a model is resolved but unavailable, THE SYSTEM SHALL open chat with a warning: "Model <alias> unavailable. Use /model to select a different model." Non-model slash commands (/help, /settings, /model, /clear) remain functional.
 
-- **REQ-ENTRY-3:** WHEN `voidrift <command>` is run with arguments, THE SYSTEM SHALL execute the command directly without the TUI. Commands: `gather`, `plan`, `develop`, `deploy`, `verify`, `status`, `doctor`, `help`, `completions`. Each command accepts `--model <alias>` and command-specific flags. Output goes to stderr. Process exits with a code.
+- **REQ-ENTRY-3:** WHEN `voidrift <command>` is run with arguments, THE SYSTEM SHALL execute the command directly without the TUI. Commands: `gather`, `plan`, `develop`, `deploy`, `verify`, `status`, `doctor`, `models`, `help`, `completions`. Each command accepts `--model <alias>` and command-specific flags. Output goes to stderr. Process exits with a code.
   - Given `voidrift gather --model qwen35 --path ./src`, When run, Then gather executes headless and exits.
   - Given `voidrift status`, When run, Then status executes without a model.
   - Given `voidrift doctor --fix`, When run, Then doctor runs with auto-fix.
   - Given `voidrift help`, When run, Then usage info is printed and exits.
   - Given `voidrift completions bash`, When run, Then bash completion script is output.
+  - Given `voidrift models`, When run, Then all available model aliases are listed.
 
 - **REQ-ENTRY-4:** The entry point rule: no arguments = chat TUI. Any argument = headless command execution. Both paths use the same command classes (GatherCommand, PlanCommand, etc.).
+
+- **REQ-ENTRY-5:** Slash commands in chat SHALL be parsed by splitting on the first space: the command name is the first word, arguments are the rest. WHEN the first word starts with `/` but does not match any known slash command, THE SYSTEM SHALL display "Unknown command: <cmd>. Type /help for available commands." Known slash commands: `/help`, `/clear`, `/ask`, `/compact`, `/settings`, `/model`, `/idea`, `/done`, `/chat`, `/gather`, `/plan`, `/develop`, `/verify`, `/deploy`.
 
 ### 4.10 Model Configuration
 
