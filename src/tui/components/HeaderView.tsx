@@ -14,6 +14,7 @@ export function HeaderView({ region }: { region: HeaderRegion }) {
   useRegion(region);
   return (
     <Box flexDirection="column">
+      <Text> </Text>
       <Text color="#c678dd">{HEADER_ART}</Text>
       <Text dimColor italic>  Agentic Software Engineering Framework</Text>
       <Text> </Text>
