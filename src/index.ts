@@ -6,6 +6,10 @@
  * voidrift <command>    → headless execution
  */
 
+// Ensure chalk (used by marked-terminal) emits ANSI inside Ink's render cycle.
+// Must be set before the dynamic import of chat.ts loads marked-terminal → chalk.
+process.env.FORCE_COLOR = process.env.FORCE_COLOR ?? "1";
+
 import { existsSync, readFileSync } from "node:fs";
 import { initSystemLog, syslog } from "./utils.js";
 import { TokenBudget } from "./agent/budget.js";

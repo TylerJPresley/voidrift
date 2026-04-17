@@ -197,12 +197,13 @@ function appendLog(log: string, content: string): void {
 // Main entry point
 // ---------------------------------------------------------------------------
 
-export async function runPlan(model: ModelInterface, overwrite = false, ideaId?: number): Promise<number> {
+export async function runPlan(model: ModelInterface, overwrite = false, ideaId?: number, onProgress?: (msg: string) => void): Promise<number> {
+  const emit = onProgress ?? ((msg: string) => process.stderr.write(msg + "\n"));
   checkDiskSpace();
   const d = ensureVoidriftDir();
 
   if (!checkRequirementsExist()) {
-    process.stderr.write("Error: REQUIREMENTS.md not found. Run 'voidrift gather' first.\n");
+    emit("Error: REQUIREMENTS.md not found. Run 'voidrift gather' first.");
     return 1;
   }
 
@@ -219,7 +220,7 @@ export async function runPlan(model: ModelInterface, overwrite = false, ideaId?:
   }
 
   const [log, runId] = bootRun("plan");
-  printCommandHeader("plan", model.config.alias, log);
+  if (!onProgress) printCommandHeader("plan", model.config.alias, log);
   const [tools, handlers] = buildLocalTools("plan");
   const requirements = readFileSync(join(d, "REQUIREMENTS.md"), "utf-8");
   const skill = findSkill("ARCH-DESIGN") ?? "";
@@ -229,10 +230,10 @@ export async function runPlan(model: ModelInterface, overwrite = false, ideaId?:
   if (ideaId != null) {
     const ideaContent = existsSync(join(d, "ideas", `IDEA-${ideaId}.md`))
       ? readFileSync(join(d, "ideas", `IDEA-${ideaId}.md`), "utf-8") : null;
-    if (!ideaContent) { process.stderr.write(`Error: IDEA-${ideaId} not found.\n`); return 1; }
+    if (!ideaContent) { emit(`Error: IDEA-${ideaId} not found.`); return 1; }
     // Gate on missing reqs field
     if (!ideaContent.includes("reqs:")) {
-      process.stderr.write(`Error: No requirements found for IDEA-${ideaId}. Run 'voidrift gather <model> --idea ${ideaId}' first.\n`);
+      emit(`Error: No requirements found for IDEA-${ideaId}. Run 'voidrift gather <model> --idea ${ideaId}' first.`);
       return 1;
     }
     ideaContext = `\n\n## Idea Context (IDEA-${ideaId})\n\n${ideaContent}`;
@@ -242,7 +243,7 @@ export async function runPlan(model: ModelInterface, overwrite = false, ideaId?:
   let deltaContext = "";
   const isUpdate = !overwrite && existsSync(join(d, "ARCHITECTURE.md")) && existsSync(join(d, "tasks", "manifest.yml"));
   if (isUpdate) {
-    process.stderr.write("▸ Update mode — running delta analysis...\n");
+    emit("▸ Update mode — running delta analysis...");
     try {
       const projectDir = join(d, "..");
       const { readdirSync: rd, statSync: ss } = require("node:fs");
@@ -283,11 +284,11 @@ export async function runPlan(model: ModelInterface, overwrite = false, ideaId?:
     checkFn: () => existsSync(join(d, "ARCHITECTURE.md")),
     stageLabel: "architecture", stageKey: "plan.architecture",
   });
-  if (!ok1) { process.stderr.write("Error: Stage 1 failed.\n"); return 1; }
+  if (!ok1) { emit("Error: Stage 1 failed."); return 1; }
 
   const archText = readFileSync(join(d, "ARCHITECTURE.md"), "utf-8");
   const modules = extractModules(archText, d);
-  if (!modules.length) { process.stderr.write("Error: No modules found.\n"); return 1; }
+  if (!modules.length) { emit("Error: No modules found."); return 1; }
 
   // Stage 2: Module arch
   const aSummary = archSummary(archText);

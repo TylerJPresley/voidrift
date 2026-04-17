@@ -13,21 +13,22 @@ import { getMaxTokens } from "../config.js";
 import { buildLocalTools } from "../tools/builder.js";
 import { readArchField } from "./verify.js";
 
-export async function runDeploy(worker: ModelInterface, architect?: ModelInterface): Promise<number> {
+export async function runDeploy(worker: ModelInterface, architect?: ModelInterface, onProgress?: (msg: string) => void): Promise<number> {
+  const emit = onProgress ?? ((msg: string) => process.stderr.write(msg + "\n"));
   checkDiskSpace();
   const d = ensureVoidriftDir();
 
   if (!checkRequirementsExist()) {
-    process.stderr.write("Error: REQUIREMENTS.md not found. Run 'voidrift gather' first.\n");
+    emit("Error: REQUIREMENTS.md not found. Run 'voidrift gather' first.");
     return 1;
   }
   if (!existsSync(join(d, "ARCHITECTURE.md"))) {
-    process.stderr.write("Error: ARCHITECTURE.md not found. Run 'voidrift plan' first.\n");
+    emit("Error: ARCHITECTURE.md not found. Run 'voidrift plan' first.");
     return 1;
   }
 
   const [log, runId] = bootRun("deploy");
-  printCommandHeader("deploy", worker.config.alias, log);
+  if (!onProgress) printCommandHeader("deploy", worker.config.alias, log);
   const projectDir = join(d, "..");
 
   // Determine last release tag
@@ -42,7 +43,7 @@ export async function runDeploy(worker: ModelInterface, architect?: ModelInterfa
     historyLines = readFileSync(historyPath, "utf-8").trim().split("\n").filter(Boolean);
   }
   if (!historyLines.length) {
-    process.stderr.write("Nothing to deploy — no task history since last release.\n");
+    emit("Nothing to deploy — no task history since last release.");
     return 0;
   }
 
@@ -68,13 +69,13 @@ export async function runDeploy(worker: ModelInterface, architect?: ModelInterfa
     : `${major}.${minor}.${patch + 1}`;
 
   // Operator confirmation (REQ-DPL-1)
-  process.stderr.write(`Suggested: ${bump} bump → v${newVersion}\n`);
+  emit(`Suggested: ${bump} bump → v${newVersion}`);
   if (process.stdin.isTTY) {
     const { createInterface } = require("node:readline");
     const rl = createInterface({ input: process.stdin, output: process.stderr });
     const answer: string = await new Promise(resolve => rl.question("Confirm? [Y/n] ", resolve));
     rl.close();
-    if (answer.trim().toLowerCase() === "n") { process.stderr.write("Deploy cancelled.\n"); return 0; }
+    if (answer.trim().toLowerCase() === "n") { emit("Deploy cancelled."); return 0; }
   }
 
   // Changelog (REQ-DPL-2)
@@ -91,7 +92,7 @@ export async function runDeploy(worker: ModelInterface, architect?: ModelInterfa
   try {
     execSync(`git tag -a v${newVersion} -m "${changelogEntry.replace(/"/g, '\\"')}"`, { cwd: projectDir, timeout: 10000 });
   } catch (e) {
-    process.stderr.write(`Warning: git tag failed: ${e}\n`);
+    emit(`Warning: git tag failed: ${e}`);
   }
 
   // History rotation (REQ-TM-8)
@@ -123,11 +124,11 @@ export async function runDeploy(worker: ModelInterface, architect?: ModelInterfa
   if (postDeploy) {
     try {
       execSync(postDeploy, { cwd: projectDir, timeout: 120_000, env: { ...process.env, VERSION: newVersion } });
-    } catch { process.stderr.write("Warning: post_deploy hook failed.\n"); }
+    } catch { emit("Warning: post_deploy hook failed."); }
   }
 
   appendState("deploy", worker.config.alias, `v${newVersion} (${bump})`, [`CHANGELOG.md`]);
-  process.stderr.write(`✓ Tagged v${newVersion} (${bump} bump)\n`);
+  emit(`✓ Tagged v${newVersion} (${bump} bump)`);
   return 0;
 }
 

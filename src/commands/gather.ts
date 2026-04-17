@@ -322,14 +322,16 @@ export async function runGather(
   overwrite = false,
   tokenBudget?: TokenBudget,
   promptFn?: (filename: string, catList: string[]) => string,
+  onProgress?: (msg: string) => void,
 ): Promise<number> {
+  const emit = onProgress ?? ((msg: string) => process.stderr.write(msg + "\n"));
   checkDiskSpace();
   const d = ensureVoidriftDir();
   const target = join(d, "REQUIREMENTS.md");
   const source = fromPath ?? process.cwd();
 
   if (!statSync(source).isDirectory()) {
-    process.stderr.write(`Error: ${source} is not a directory\n`);
+    emit(`Error: ${source} is not a directory`);
     return 1;
   }
 
@@ -337,23 +339,23 @@ export async function runGather(
   const [log, runId] = bootRun("gather");
   const analystRole = findSkill("ANALYSIS-REQS") ?? "";
   const startTime = Date.now();
-  printCommandHeader("gather", model.config.alias, log, { Path: source });
+  if (!onProgress) printCommandHeader("gather", model.config.alias, log, { Path: source });
 
   // Stage 1: Triage
   let fileTree: string;
   try { fileTree = buildFileTree(source); } catch (e) {
-    process.stderr.write(`Error: ${e instanceof Error ? e.message : e}\n`);
+    emit(`Error: ${e instanceof Error ? e.message : e}`);
     return 1;
   }
 
   let categories: Record<string, string[]>;
   try {
-    process.stderr.write("▸ Stage 1: Triaging files...\n");
+    emit("▸ Stage 1: Triaging files...");
     categories = await runTriage(model, log, analystRole, fileTree, tokenBudget);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     if (msg.includes("context length") || msg.includes("tokens exceed")) {
-      process.stderr.write(`Error: Context length exceeded during triage. Use a model with a larger context window.\n`);
+      emit("Error: Context length exceeded during triage. Use a model with a larger context window.");
       return 1;
     }
     throw e;
@@ -366,20 +368,32 @@ export async function runGather(
   let sourceFiles = categories.source ?? [];
 
   // Triage display (REQ-G-23)
-  for (const cat of CATEGORIES) {
-    const files = categories[cat];
-    if (!files?.length) continue;
-    process.stderr.write(`  \x1b[2m${cat}\x1b[0m\n`);
-    for (const f of files) process.stderr.write(`    ${f}\n`);
+  if (onProgress) {
+    // TUI: compact format
+    for (const cat of CATEGORIES) {
+      const files = categories[cat];
+      if (!files?.length) continue;
+      emit(`  ${cat}: ${files.join(", ")}`);
+    }
+  } else {
+    // Headless: per-file format with ANSI dim category headers
+    for (const cat of CATEGORIES) {
+      const files = categories[cat];
+      if (!files?.length) continue;
+      process.stderr.write(`  \x1b[2m${cat}\x1b[0m\n`);
+      for (const f of files) process.stderr.write(`    ${f}\n`);
+    }
   }
 
   // Uncategorized check (REQ-G-22, REQ-G-24)
   const allInput = new Set(fileTree.split("\n"));
   const uncategorized = [...allInput].filter(f => !(f in fileCategory)).sort();
   if (uncategorized.length) {
-    process.stderr.write(`  \x1b[2muncategorized\x1b[0m\n`);
-    for (const f of uncategorized) process.stderr.write(`    ${f}\n`);
-    process.stderr.write(`⚠ ${uncategorized.length} file(s) not categorized by triage.\n`);
+    if (!onProgress) {
+      process.stderr.write(`  \x1b[2muncategorized\x1b[0m\n`);
+      for (const f of uncategorized) process.stderr.write(`    ${f}\n`);
+    }
+    emit(`⚠ ${uncategorized.length} file(s) not categorized by triage.`);
     if (promptFn) {
       assignUncategorized(uncategorized, categories, fileCategory, promptFn);
       sourceFiles = categories.source ?? [];
@@ -387,7 +401,7 @@ export async function runGather(
   }
 
   // Stage 2: Context Build
-  process.stderr.write("▸ Stage 2: Building context summaries...\n");
+  emit("▸ Stage 2: Building context summaries...");
   const readFn = (path: string) => readFileSync(join(source, path), "utf-8");
   let contextSummaries: Record<string, string>;
   let contextBlock: string;
@@ -397,21 +411,21 @@ export async function runGather(
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     if (msg.includes("context length") || msg.includes("tokens exceed")) {
-      process.stderr.write(`Error: Context length exceeded during context build. Use a model with a larger context window.\n`);
+      emit("Error: Context length exceeded during context build. Use a model with a larger context window.");
       return 1;
     }
     throw e;
   }
 
   // Stage 3: Source Analysis
-  process.stderr.write(`▸ Stage 3: Analyzing ${sourceFiles.length} source files...\n`);
+  emit(`▸ Stage 3: Analyzing ${sourceFiles.length} source files...`);
   let sourceReqs: Record<string, string>;
   try {
     sourceReqs = await runSourceAnalysis(model, sourceFiles, source, log, contextBlock, target, tokenBudget);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     if (msg.includes("context length") || msg.includes("tokens exceed")) {
-      process.stderr.write(`Error: Context length exceeded during source analysis. Use a model with a larger context window.\n`);
+      emit("Error: Context length exceeded during source analysis. Use a model with a larger context window.");
       return 1;
     }
     throw e;
@@ -426,7 +440,7 @@ export async function runGather(
   writeFileSync(indexPath, indexLines.join("\n"), "utf-8");
 
   // Stage 4: Consolidation
-  process.stderr.write("▸ Stage 4: Consolidating requirements...\n");
+  emit("▸ Stage 4: Consolidating requirements...");
   const finalResponse = await runConsolidation(model, sourceReqs, contextSummaries, existingReqs, log, tokenBudget);
   writeFileSync(target, stripPreamble(finalResponse), "utf-8");
 
@@ -436,7 +450,7 @@ export async function runGather(
 
   // Elapsed time (REQ-G-21)
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-  process.stderr.write(`✓ Requirements written to .voidrift/REQUIREMENTS.md (${elapsed}s)\n`);
+  emit(`✓ Requirements written to .voidrift/REQUIREMENTS.md (${elapsed}s)`);
 
   return 0;
 }

@@ -63,17 +63,19 @@ export async function runDevelop(
   worker: ModelInterface,
   architect?: ModelInterface,
   tokenBudget?: TokenBudget,
+  onProgress?: (msg: string) => void,
 ): Promise<number> {
+  const emit = onProgress ?? ((msg: string) => process.stderr.write(msg + "\n"));
   checkDiskSpace();
   const d = ensureVoidriftDir();
   if (!checkRequirementsExist()) {
-    process.stderr.write("Error: REQUIREMENTS.md not found. Run 'voidrift gather' first.\n");
+    emit("Error: REQUIREMENTS.md not found. Run 'voidrift gather' first.");
     return 1;
   }
 
   const mm = new ManifestManager();
   if (!mm.exists()) {
-    process.stderr.write("Error: No task manifest. Run 'voidrift plan' first.\n");
+    emit("Error: No task manifest. Run 'voidrift plan' first.");
     return 1;
   }
   mm.load();
@@ -98,20 +100,20 @@ export async function runDevelop(
     }
   }
 
-  if (!mm.hasWork()) { process.stderr.write("All tasks complete.\n"); return 0; }
+  if (!mm.hasWork()) { emit("All tasks complete."); return 0; }
 
   // Lock file (REQ-D-3)
   const lock = join(d, ".develop.lock");
   if (existsSync(lock)) {
     const pid = parseInt(readFileSync(lock, "utf-8").split("\n")[0], 10);
-    try { process.kill(pid, 0); process.stderr.write(`Develop session running (PID ${pid})\n`); return 1; } catch { unlinkSync(lock); }
+    try { process.kill(pid, 0); emit(`Develop session running (PID ${pid})`); return 1; } catch { unlinkSync(lock); }
   }
   writeFileSync(lock, `${process.pid}\n${new Date().toISOString()}`);
 
   const ctx = new WriteContext({ projectDir: join(d, ".."), maxReadLines: worker.config.maxReadLines });
   clearAbort();
   const [log, runId] = bootRun("develop");
-  printCommandHeader("develop", worker.config.alias, log);
+  if (!onProgress) printCommandHeader("develop", worker.config.alias, log);
   const [tools, handlers] = buildLocalTools("develop", join(d, ".."), ctx);
   const devPrompt = loadPrompt("develop", "TASK");
   const escPrompt = loadPrompt("develop", "ESCALATION");
@@ -265,7 +267,7 @@ export async function runDevelop(
   for (const [tid, stats] of allDiffStats) {
     const added = stats.reduce((s, x) => s + x.linesAdded, 0);
     const removed = stats.reduce((s, x) => s + x.linesRemoved, 0);
-    process.stderr.write(`  TASK-${tid}: +${added} -${removed} (${stats.length} files)\n`);
+    emit(`  TASK-${tid}: +${added} -${removed} (${stats.length} files)`);
   }
 
   appendState("develop", worker.config.alias, "completed", ctx.getSessionFiles().length ? ctx.getSessionFiles() : undefined);

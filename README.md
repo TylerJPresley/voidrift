@@ -235,6 +235,14 @@ Three categories are gated independently: **writes** (any file write or edit), *
 
 **Output styles:** `--style verbose` (default) shows each tool call. `--style terse` hides individual calls, shows a summary count per round. `--style raw` disables Rich formatting for piping.
 
+**Framework commands in chat:** Run any framework command as a slash command without leaving the chat session. Progress appears as system messages in the conversation area with a thinking spinner.
+
+- `/gather [path]` — reverse-engineer requirements from codebase
+- `/plan [overwrite]` — generate architecture + tasks
+- `/develop` — execute tasks from manifest
+- `/verify` — run acceptance tests
+- `/deploy` — prepare release (version, tag)
+
 **Example workflow — new project:**
 ```bash
 voidrift gather --model <model> --path ./src         # reverse-engineer requirements

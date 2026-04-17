@@ -10,7 +10,7 @@ interface MessageProps {
 }
 
 // Configure marked for terminal output
-marked.use(markedTerminal({ reflowText: true, width: (process.stdout.columns || 80) - 4 }));
+marked.use(markedTerminal({ reflowText: true, showSectionPrefix: false, width: (process.stdout.columns || 80) - 4 }));
 
 /** Post-process to fix inline markdown that marked-terminal misses (e.g. inside list items) */
 function fixLeftoverMd(text: string): string {

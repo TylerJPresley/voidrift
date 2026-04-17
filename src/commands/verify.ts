@@ -24,16 +24,17 @@ import { startProcess, waitForReady, stopAll, readProcessOutput } from "../tools
 import { clearSessions } from "../tools/http.js";
 import { closeAllSessions } from "../tools/browser.js";
 
-export async function runVerify(worker: ModelInterface): Promise<number> {
+export async function runVerify(worker: ModelInterface, onProgress?: (msg: string) => void): Promise<number> {
+  const emit = onProgress ?? ((msg: string) => process.stderr.write(msg + "\n"));
   checkDiskSpace();
   const d = ensureVoidriftDir();
   if (!checkRequirementsExist()) {
-    process.stderr.write("Error: REQUIREMENTS.md not found. Run 'voidrift gather' first.\n");
+    emit("Error: REQUIREMENTS.md not found. Run 'voidrift gather' first.");
     return 1;
   }
 
   const [log, runId] = bootRun("verify");
-  printCommandHeader("verify", worker.config.alias, log);
+  if (!onProgress) printCommandHeader("verify", worker.config.alias, log);
   const ctx = new WriteContext({ projectDir: join(d, ".."), maxReadLines: worker.config.maxReadLines });
 
   try {
@@ -56,7 +57,7 @@ export async function runVerify(worker: ModelInterface): Promise<number> {
 
     const verifyPlanPath = join(d, "VERIFY-PLAN.md");
     if (!existsSync(verifyPlanPath)) {
-      process.stderr.write("Error: VERIFY-PLAN.md not produced.\n");
+      emit("Error: VERIFY-PLAN.md not produced.");
       return 1;
     }
 

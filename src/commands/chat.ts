@@ -179,27 +179,46 @@ export async function runChat(model: ModelInterface | null, options: ChatOptions
   const chatCtx: ChatContext = { model: model!, agent: agent!, header, content, footer, input, session, compactor, ideaSession, projectDir, logPath: log, recentFiles, streamBuf };
 
   // Framework command handlers
+  const progress = (msg: string) => content.addSystem(msg);
   const handleGather = async (a: string, mc: ModelInterface, c: ContentRegion) => {
     const { runGather } = await import("./gather.js");
     c.addSystem(`Gathering from ${a || process.cwd()}`);
-    const r = await runGather(mc, a || process.cwd());
+    c.setThinking(true, "gathering...");
+    const r = await runGather(mc, a || process.cwd(), undefined, false, undefined, undefined, progress);
+    c.setThinking(false);
     c.addSystem(r === 0 ? "✓ Gather complete" : "✗ Gather failed");
   };
   const handlePlan = async (a: string, mc: ModelInterface, c: ContentRegion) => {
     const { runPlan } = await import("./plan.js");
-    c.addSystem("Running plan..."); const r = await runPlan(mc, a === "overwrite"); c.addSystem(r === 0 ? "✓ Plan complete" : "✗ Plan failed");
+    c.addSystem("Running plan...");
+    c.setThinking(true, "planning...");
+    const r = await runPlan(mc, a === "overwrite", undefined, progress);
+    c.setThinking(false);
+    c.addSystem(r === 0 ? "✓ Plan complete" : "✗ Plan failed");
   };
   const handleDevelop = async (a: string, mc: ModelInterface, c: ContentRegion) => {
     const { runDevelop } = await import("./develop.js");
-    c.addSystem("Running develop..."); const r = await runDevelop(mc); c.addSystem(r === 0 ? "✓ Develop complete" : "✗ Develop failed");
+    c.addSystem("Running develop...");
+    c.setThinking(true, "developing...");
+    const r = await runDevelop(mc, undefined, undefined, progress);
+    c.setThinking(false);
+    c.addSystem(r === 0 ? "✓ Develop complete" : "✗ Develop failed");
   };
   const handleVerify = async (a: string, mc: ModelInterface, c: ContentRegion) => {
     const { runVerify } = await import("./verify.js");
-    c.addSystem("Running verify..."); const r = await runVerify(mc); c.addSystem(r === 0 ? "✓ Verify complete" : "✗ Verify failed");
+    c.addSystem("Running verify...");
+    c.setThinking(true, "verifying...");
+    const r = await runVerify(mc, progress);
+    c.setThinking(false);
+    c.addSystem(r === 0 ? "✓ Verify complete" : "✗ Verify failed");
   };
   const handleDeploy = async (a: string, mc: ModelInterface, c: ContentRegion) => {
     const { runDeploy } = await import("./deploy.js");
-    c.addSystem("Running deploy..."); const r = await runDeploy(mc); c.addSystem(r === 0 ? "✓ Deploy complete" : "✗ Deploy failed");
+    c.addSystem("Running deploy...");
+    c.setThinking(true, "deploying...");
+    const r = await runDeploy(mc, undefined, progress);
+    c.setThinking(false);
+    c.addSystem(r === 0 ? "✓ Deploy complete" : "✗ Deploy failed");
   };
 
   // Wrap framework handlers to match wrapCommand signature

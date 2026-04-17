@@ -77,6 +77,9 @@ src/tui/
 └── useRegion.ts       — React hook: subscribe to Region, forceUpdate on emit
 ```
 
+**Slash command → framework command integration (REQ-U-2f):**
+Framework commands (`runGather`, `runPlan`, `runDevelop`, `runVerify`, `runDeploy`) accept an optional `onProgress?: (msg: string) => void` callback as their last parameter. When provided (chat mode), `printCommandHeader` is suppressed and all progress messages route through the callback to `content.addSystem()`. When absent (headless mode), messages go to `process.stderr.write` with the original format (ANSI dim codes, per-file triage lines, `▸` stage markers). The `wrapCommand` harness in `base.ts` manages `footer.setMode()` and `input.setBusy()` around execution. Chat handlers in `chat.ts` also call `content.setThinking(true, label)` for spinner display during command execution.
+
 Agent tools live in `src/tools/`:
 - `registry.ts` — All 10 domain tool schemas + DOMAIN_DONE in OpenAI format. `DOMAIN_TOOLS` exports all schemas.
 - `builder.ts` — `buildLocalTools()` resolves command tool sets via OCP dynamic import from command modules. `buildDomainHandlers()` wires handlers at build time. `narrowSchemaActions()` restricts action enums per command.
