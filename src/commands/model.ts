@@ -43,6 +43,11 @@ export class ModelCommand extends SlashCommand {
     }
     try {
       const newModel = resolveModel(alias);
+
+      // Persist first — before anything that might fail
+      new ConfigManager().set("current_model", alias);
+
+      // Update live session
       this.ctx.model = newModel;
       if (this.ctx.agent) {
         const agent = this.ctx.agent as unknown as Record<string, unknown>;
@@ -52,8 +57,6 @@ export class ModelCommand extends SlashCommand {
       }
       this.ctx.footer.setModel(alias);
       this.ctx.header.setModel(alias);
-      const cm = new ConfigManager();
-      cm.set("current_model", alias);
       this.ctx.content.addSystem(`✓ Switched to ${alias}`);
     } catch (e) {
       this.ctx.content.addSystem(`Failed: ${e instanceof Error ? e.message : e}`);
