@@ -1,7 +1,6 @@
 import { SlashCommand, type ChatContext } from "./base.js";
 import { listAliases, resolveModel } from "../models.js";
 import { ConfigManager, CONFIG_SCHEMA } from "../config.js";
-import { ModelPanel } from "../tui/panels/ModelPanel.js";
 
 CONFIG_SCHEMA["current_model"] = { type: "string", description: "Currently selected model alias" };
 
@@ -14,11 +13,15 @@ export class ModelCommand extends SlashCommand {
 
   async execute(): Promise<number> {
     const aliases = listAliases();
-    const current = this.ctx.model.config.alias;
+    const current = this.ctx.model?.config?.alias ?? "none";
 
     if (!this.alias) {
-      const panel = new ModelPanel(aliases, current, (alias) => this._switchTo(alias));
-      this.ctx.footer.showPanel(panel);
+      const lines = [`Models (current: ${current})`, ""];
+      for (const a of aliases) {
+        lines.push(a === current ? `  ${a}  ◀` : `  ${a}`);
+      }
+      lines.push("", "  /model <alias>  switch model");
+      this.ctx.content.addSystem(lines.join("\n"));
       return 0;
     }
 
@@ -34,10 +37,12 @@ export class ModelCommand extends SlashCommand {
     try {
       const newModel = resolveModel(alias);
       this.ctx.model = newModel;
-      const agent = this.ctx.agent as unknown as Record<string, unknown>;
-      agent._model = newModel;
-      agent._adapter = newModel.adapter;
-      agent._client = newModel.adapter.createClient(newModel.config);
+      if (this.ctx.agent) {
+        const agent = this.ctx.agent as unknown as Record<string, unknown>;
+        agent._model = newModel;
+        agent._adapter = newModel.adapter;
+        agent._client = newModel.adapter.createClient(newModel.config);
+      }
       this.ctx.footer.setModel(alias);
       this.ctx.header.setModel(alias);
       new ConfigManager().set("current_model", alias);
