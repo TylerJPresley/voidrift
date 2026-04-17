@@ -216,7 +216,7 @@ export async function runChat(model: ModelInterface | null, options: ChatOptions
     if (low.startsWith("/ask")) { new AskCommand(chatCtx, text.slice(4).trim()).run(); return; }
     if (low === "/compact") { new CompactCommand(chatCtx).run(); return; }
     if (low.startsWith("/settings")) { new SettingsCommand(chatCtx, text.slice(9).trim()).run(); return; }
-    if (low.startsWith("/model")) { new ModelCommand(chatCtx, text.slice(6).trim()).run(); return; }
+    if (low === "/model" || low === "/models" || low.startsWith("/model ")) { new ModelCommand(chatCtx, low === "/model" || low === "/models" ? "" : text.slice(7).trim()).run(); return; }
     if (low.startsWith("/idea")) { new IdeaStartCommand(chatCtx, text.slice(5).trim()).run(); return; }
     if (low.startsWith("/done")) { new IdeaDoneCommand(chatCtx, text.slice(5).trim().toLowerCase()).run(); return; }
     if (low === "/chat") { footer.setMode(""); return; }
