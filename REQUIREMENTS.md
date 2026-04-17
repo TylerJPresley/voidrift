@@ -831,6 +831,7 @@ Two log roots, two intents:
   - **Operator** — teal `┃` bar (`#4ec9b0`), bold white text. Preceded by a blank line and a dim horizontal rule (`─`) spanning the usable width.
   - **Model** — blue `┃` bar (`#6a7ec8`), light gray text (`#d4d4d4`). A streaming cursor (`█`, same blue) SHALL appear on the last line while tokens are arriving.
   - **Tool calls** — purple dot `●` (`#c678dd` bold) followed by tool name in blue (`#61afef`) and optional detail in dim gray.
+  - **System** — gray `┃` bar (`#555555`), dim text. Multi-line content supported.
   - **Stats** — dim gray (`#555555`), preceded by a blank line, format per REQ-UI-10.
   All colors SHALL be explicit hex values in a `Style.from_dict()` — no theme system. Automated commands (gather, plan, develop, deploy, verify) SHALL continue to use the existing Rich console output with prefix characters (`▸`, `✓`, `⚠`, `✗`) — the TUI layout applies to the chat command only.
   - Given an operator message, When rendered, Then a teal `┃` bar appears on the left of each line.

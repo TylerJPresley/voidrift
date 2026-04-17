@@ -61,10 +61,13 @@ export function Message({ msg }: MessageProps) {
   }
 
   if (msg.role === "system") {
+    const lines = msg.text.split("\n");
     return (
       <Box flexDirection="column">
         <Text> </Text>
-        <Text dimColor italic>  {msg.text}</Text>
+        {lines.map((line, i) => (
+          <Text key={i}><Text color="#555555">┃ </Text><Text dimColor>{line}</Text></Text>
+        ))}
       </Box>
     );
   }
