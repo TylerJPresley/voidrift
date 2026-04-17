@@ -31,11 +31,14 @@ export class SettingsCommand extends SlashCommand {
     if (action === "list" || !this.args) {
       const entries = cm.list();
       if (!entries.length) { addSystem(this.ctx.state, "No settings configured."); return 0; }
-      const lines = ["Settings:"];
+      const lines = ["Settings:", ""];
       for (const [key, val] of entries) {
         const display = typeof val === "string" && val.includes("KEY") ? "***" : JSON.stringify(val);
         lines.push(`  ${key} = ${display}`);
       }
+      lines.push("", "  /settings get <key>          read a value");
+      lines.push("  /settings set <key> <value>  change a value");
+      lines.push("  /settings delete <key>       remove a value");
       addSystem(this.ctx.state, lines.join("\n"));
       return 0;
     }
