@@ -440,43 +440,32 @@ Two modes: `--path <path>` (reverse-engineer from codebase) and `--idea <id>` (g
 
 | File | Contents |
 |------|----------|
-| `commands/gather.py` | `run_gather`, `_gather_from`, `_gather_from_idea`, `_build_file_tree`, public helpers |
-| `commands/_gather_pipeline.py` | Stage functions + shared constants and cache helpers |
+| `commands/gather.ts` | `runGather`, `runTriage`, `runFileAnalysis`, `runGeneratedAnalysis`, `runConsolidation`, cache helpers |
 
-Each of the four stage functions is independently callable and unit-testable without running the full pipeline (REQ-G-8 stage isolation):
+Each stage function is independently callable and unit-testable:
 
 | Function | Stage | Returns |
 |----------|-------|---------|
-| `_run_triage()` | 1 — categorise files | `dict[str, list[str]]` (category → file list) |
-| `_run_context_build()` | 2 — summarise non-source categories | `dict[str, str]` (category → summary) |
-| `_run_source_analysis()` | 3 — parallel source analysis | `dict[str, str]` (filepath → analysis) |
-| `_run_consolidation()` | 4 — consolidate into REQUIREMENTS.md | `str` (final markdown) |
+| `runTriage()` | 1 — categorise files | `Record<string, string[]>` (category → file list) |
+| `runFileAnalysis()` | 2 — per-file analysis (all categories) | `Record<string, string>` (filepath → analysis) |
+| `runGeneratedAnalysis()` | 2 — filename-only analysis | `string` (toolchain context) |
+| `runConsolidation()` | 3 — consolidate into REQUIREMENTS.md | `string` (final markdown) |
 
-`_gather_from()` is a pure orchestrator: it calls these four functions in sequence and handles all persistence (ANALYSIS.md index, analysis cache, STATE.md entry). No stage logic lives in `_gather_from()`.
-
-**--path mode** (four-stage pipeline):
+**--path mode** (three-stage pipeline):
 ```
-CLI: build file tree → _run_triage (categorize) → validation pass (prune bad entries)
+Stage 1 — runTriage:
+  CLI: build file tree → triage agent → JSON categories (source, tests, config, infrastructure, docs, assets, generated)
 
-Stage 2 — _run_context_build (non-source categories: tests, config, infrastructure, docs, assets):
-  for each non-source category with files:
-    CLI: concatenate all files in category → context agent → direct response text (≤10 bullets)
-    CLI: store in context_summaries[cat]
-  CLI: build "Project Context" block from context_summaries
+Stage 2 — runFileAnalysis + runGeneratedAnalysis:
+  for each non-generated file (all categories):
+    CLI: check analysis cache (hash-based) → hit: skip, miss: fresh agent
+    agent receives: category-aware system prompt + single file content → returns analysis bullets
+    CLI: write analysis/<file>.md with hash frontmatter
+  for generated files (single call):
+    agent receives: list of filenames only → infers toolchain context from names/patterns
 
-Stage 3 — _run_source_analysis (concurrent):
-  for each source file:
-    if file > input_limit → split into overlapping chunks → analyze each chunk separately (direct response)
-                         → consolidate chunk analyses (if >1 chunk)
-    else → file content injected directly into user message (zero tools) → returns requirements as direct response text
-  CLI: store in source_requirements[filepath]
-
-CLI: write .voidrift/ANALYSIS.md (index) + .voidrift/analysis/<file>.md (per-file) ← operator review
-
-Stage 4 — _run_consolidation:
-  CLI: pre-fetch REQUIREMENTS-TEMPLATE (Python call, no model tool)
-  CLI: send source_requirements + context_summaries in user message to final agent (no tools)
-  model: returns complete REQUIREMENTS.md content as direct response text
+Stage 3 — runConsolidation:
+  CLI: send all per-file analyses + generated context + existing REQUIREMENTS.md → agent → REQUIREMENTS.md
   CLI: strip preamble, write .voidrift/REQUIREMENTS.md
 ```
 

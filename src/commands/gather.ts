@@ -22,8 +22,8 @@ import { buildLocalTools } from "../tools/builder.js";
 // Constants
 // ---------------------------------------------------------------------------
 
-export const CATEGORIES = ["source", "tests", "config", "infrastructure", "documentation", "assets"] as const;
-export const NON_SOURCE = ["tests", "config", "infrastructure", "documentation", "assets"] as const;
+export const CATEGORIES = ["source", "tests", "config", "infrastructure", "documentation", "assets", "generated"] as const;
+export const NON_SOURCE = ["tests", "config", "infrastructure", "documentation", "assets", "generated"] as const;
 
 // ---------------------------------------------------------------------------
 // File tree (REQ-G-8 stage 1 input)
@@ -198,109 +198,100 @@ export async function runTriage(
   return parseTriage(response);
 }
 
-export async function runContextBuild(
-  model: ModelInterface, categories: Record<string, string[]>,
-  readFn: (path: string) => string, log: string, analystRole: string,
-  budget?: TokenBudget, extra?: unknown, inputLimit?: number,
+export async function runFileAnalysis(
+  model: ModelInterface, files: string[], fileCategory: Record<string, string>,
+  fromPath: string, log: string, budget?: TokenBudget,
 ): Promise<Record<string, string>> {
-  const summaries: Record<string, string> = {};
-  const prompt = loadPrompt("gather", "CONTEXT");
-  for (const cat of NON_SOURCE) {
-    const files = categories[cat];
-    if (!files?.length) continue;
-    const contents = files.map(f => {
-      try { return `### ${f}\n\n${readFn(f)}`; } catch { return `### ${f}\n\n[read error]`; }
-    }).join("\n\n");
-    const system = [analystRole, prompt].filter(Boolean).join("\n\n");
-    const agent = new AgentLoop({
-      model, systemPrompt: system, tools: [], toolHandlers: {},
-      stream: false, maxTokens: getMaxTokens(model.config, "gather.analysis"),
-      logPath: log, showSpinner: false, tokenBudget: budget,
-    });
-    summaries[cat] = await agent.send(`Category: ${cat}\n\n${contents}`);
-  }
-  return summaries;
-}
-
-export async function runSourceAnalysis(
-  model: ModelInterface, sourceFiles: string[], fromPath: string, log: string,
-  contextBlock: string, target: string, budget?: TokenBudget,
-  extra?: unknown, concurrency = 1,
-): Promise<Record<string, string>> {
-  const reqs: Record<string, string> = {};
+  const results: Record<string, string> = {};
   const voidriftDir = join(fromPath, "..", ".voidrift");
-  const prompt = loadPrompt("gather", "ANALYSIS");
+  const promptTemplate = loadPrompt("gather", "ANALYSIS");
 
-  for (const fp of sourceFiles) {
-    // Cache check (REQ-CTX-5)
+  for (const fp of files) {
+    const cat = fileCategory[fp] ?? "source";
+
+    // Generated files: filename-only analysis (REQ-G-27)
+    if (cat === "generated") continue; // handled separately
+
     const fullPath = join(fromPath, fp);
     if (!existsSync(fullPath)) continue;
     const content = readFileSync(fullPath, "utf-8");
     const hash = fileHash(content);
     const cached = loadCachedAnalysis(voidriftDir, fp, hash);
-    if (cached) { reqs[fp] = cached; continue; }
+    if (cached) { results[fp] = cached; continue; }
 
-    // Zero-tool analysis (REQ-G-19)
+    const prompt = promptTemplate.replace(/{category}/g, cat);
+    const userTemplate = loadPrompt("gather", "ANALYSIS-USER");
+    const userMsg = userTemplate.replace("{filepath}", fp).replace("{file_content}", content).replace(/{category}/g, cat);
+
     // Chunking for large files (REQ-G-13)
     const maxChars = model.config.maxInputChars;
     if (maxChars > 0 && content.length > maxChars) {
       const chunks = makeChunks(content, maxChars);
       const chunkAnalyses: string[] = [];
       for (let i = 0; i < chunks.length; i++) {
-        const chunkMsg = contextBlock
-          ? `${contextBlock}\n\n---\n\nAnalyze this file (chunk ${i + 1}/${chunks.length}):\n\n### ${fp}\n\n${chunks[i]}`
-          : `Analyze this file (chunk ${i + 1}/${chunks.length}):\n\n### ${fp}\n\n${chunks[i]}`;
         const chunkAgent = new AgentLoop({
-          model, systemPrompt: [prompt].filter(Boolean).join("\n\n"), tools: [], toolHandlers: {},
+          model, systemPrompt: prompt, tools: [], toolHandlers: {},
           stream: false, maxTokens: getMaxTokens(model.config, "gather.analysis"),
           logPath: log, showSpinner: false, tokenBudget: budget,
         });
-        chunkAnalyses.push(await chunkAgent.send(chunkMsg));
+        chunkAnalyses.push(await chunkAgent.send(
+          `Analyze this **${cat}** file (chunk ${i + 1}/${chunks.length}): \`${fp}\`\n\n\`\`\`\n${chunks[i]}\n\`\`\``
+        ));
       }
-      // Consolidation agent for multi-chunk
       if (chunkAnalyses.length > 1) {
         const consolAgent = new AgentLoop({
           model, systemPrompt: "Merge these partial analyses into a single unified analysis.", tools: [], toolHandlers: {},
           stream: false, maxTokens: getMaxTokens(model.config, "gather.analysis"), logPath: log, showSpinner: false, tokenBudget: budget,
         });
         const merged = await consolAgent.send(chunkAnalyses.map((a, i) => `## Chunk ${i + 1}\n\n${a}`).join("\n\n"));
-        reqs[fp] = merged;
+        results[fp] = merged;
         writeAnalysis(voidriftDir, fp, hash, merged);
       } else {
-        reqs[fp] = chunkAnalyses[0];
+        results[fp] = chunkAnalyses[0];
         writeAnalysis(voidriftDir, fp, hash, chunkAnalyses[0]);
       }
       continue;
     }
 
-    const system = [prompt].filter(Boolean).join("\n\n");
-    const userMsg = contextBlock
-      ? `${contextBlock}\n\n---\n\nAnalyze this file:\n\n### ${fp}\n\n${content}`
-      : `Analyze this file:\n\n### ${fp}\n\n${content}`;
     const agent = new AgentLoop({
-      model, systemPrompt: system, tools: [], toolHandlers: {},
+      model, systemPrompt: prompt, tools: [], toolHandlers: {},
       stream: false, maxTokens: getMaxTokens(model.config, "gather.analysis"),
       logPath: log, showSpinner: false, tokenBudget: budget,
     });
     const analysis = await agent.send(userMsg);
-    reqs[fp] = analysis;
+    results[fp] = analysis;
     writeAnalysis(voidriftDir, fp, hash, analysis);
   }
-  return reqs;
+  return results;
+}
+
+export async function runGeneratedAnalysis(
+  model: ModelInterface, generatedFiles: string[], log: string, budget?: TokenBudget,
+): Promise<string> {
+  if (!generatedFiles.length) return "";
+  const prompt = loadPrompt("gather", "ANALYSIS-GENERATED");
+  const userTemplate = loadPrompt("gather", "GENERATED-USER");
+  const userMsg = userTemplate.replace("{file_list}", generatedFiles.join("\n"));
+  const agent = new AgentLoop({
+    model, systemPrompt: prompt, tools: [], toolHandlers: {},
+    stream: false, maxTokens: getMaxTokens(model.config, "gather.analysis"),
+    logPath: log, showSpinner: false, tokenBudget: budget,
+  });
+  return agent.send(userMsg);
 }
 
 export async function runConsolidation(
-  model: ModelInterface, sourceReqs: Record<string, string>,
-  contextSummaries: Record<string, string>, existingReqs: string | null,
-  log: string, budget?: TokenBudget, extra?: unknown,
+  model: ModelInterface, allAnalyses: Record<string, string>,
+  generatedAnalysis: string, existingReqs: string | null,
+  log: string, budget?: TokenBudget,
 ): Promise<string> {
   const template = loadTemplate("REQUIREMENTS-TEMPLATE");
   const prompt = loadPrompt("gather", "CONSOLIDATION");
   const system = [prompt, template ? `\n\nREQUIREMENTS TEMPLATE:\n\n${template}` : ""].join("");
 
-  const allReqs = Object.entries(sourceReqs).map(([fp, r]) => `### ${fp}\n\n${r}`).join("\n\n");
-  const ctx = buildContextBlock(contextSummaries);
-  let userMsg = `${ctx}\n\n## Source Requirements\n\n${allReqs}`;
+  const allReqs = Object.entries(allAnalyses).map(([fp, r]) => `### ${fp}\n\n${r}`).join("\n\n");
+  let userMsg = `## File Analyses\n\n${allReqs}`;
+  if (generatedAnalysis) userMsg += `\n\n## Generated Files Context\n\n${generatedAnalysis}`;
   if (existingReqs) userMsg += `\n\n## Existing Requirements (merge, do not replace)\n\n${existingReqs}`;
 
   const agent = new AgentLoop({
@@ -365,8 +356,6 @@ export async function runGather(
   for (const [cat, files] of Object.entries(categories)) {
     for (const f of files) fileCategory[f] = cat;
   }
-  let sourceFiles = categories.source ?? [];
-
   // Triage display (REQ-G-23)
   for (const cat of CATEGORIES) {
     const files = categories[cat];
@@ -390,36 +379,24 @@ export async function runGather(
     emit(`⚠ ${uncategorized.length} file(s) not categorized by triage.`);
     if (promptFn) {
       assignUncategorized(uncategorized, categories, fileCategory, promptFn);
-      sourceFiles = categories.source ?? [];
     }
   }
 
-  // Stage 2: Context Build
-  emit("\n▸ Stage 2: Building context summaries...");
-  const readFn = (path: string) => readFileSync(join(source, path), "utf-8");
-  let contextSummaries: Record<string, string>;
-  let contextBlock: string;
+  // Stage 2: File Analysis (REQ-G-25, REQ-G-26, REQ-G-27)
+  const allFiles = Object.keys(fileCategory).filter(f => fileCategory[f] !== "generated");
+  const generatedFiles = categories.generated ?? [];
+  emit(`\n▸ Stage 2: Analyzing ${allFiles.length} files...`);
+  let allAnalyses: Record<string, string>;
+  let generatedAnalysis = "";
   try {
-    contextSummaries = await runContextBuild(model, categories, readFn, log, analystRole, tokenBudget);
-    contextBlock = buildContextBlock(contextSummaries);
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    if (msg.includes("context length") || msg.includes("tokens exceed")) {
-      emit("Error: Context length exceeded during context build. Use a model with a larger context window.");
-      return 1;
+    allAnalyses = await runFileAnalysis(model, allFiles, fileCategory, source, log, tokenBudget);
+    if (generatedFiles.length) {
+      generatedAnalysis = await runGeneratedAnalysis(model, generatedFiles, log, tokenBudget);
     }
-    throw e;
-  }
-
-  // Stage 3: Source Analysis
-  emit(`\n▸ Stage 3: Analyzing ${sourceFiles.length} source files...`);
-  let sourceReqs: Record<string, string>;
-  try {
-    sourceReqs = await runSourceAnalysis(model, sourceFiles, source, log, contextBlock, target, tokenBudget);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     if (msg.includes("context length") || msg.includes("tokens exceed")) {
-      emit("Error: Context length exceeded during source analysis. Use a model with a larger context window.");
+      emit("Error: Context length exceeded during file analysis. Use a model with a larger context window.");
       return 1;
     }
     throw e;
@@ -429,17 +406,26 @@ export async function runGather(
   const analysisDir = join(d, "analysis");
   mkdirSync(analysisDir, { recursive: true });
   const indexPath = join(d, "ANALYSIS.md");
-  const indexLines = [`# Gather Analysis\n\nSource: \`${source}\`\n\n${Object.keys(sourceReqs).length} source files analyzed.\n\n## Source\n`];
-  for (const fp of Object.keys(sourceReqs).sort()) indexLines.push(`- [${fp}](analysis/${fp}.md)`);
+  const indexLines = [`# Gather Analysis\n\nSource: \`${source}\`\n\n${Object.keys(allAnalyses).length} files analyzed.\n`];
+  for (const cat of CATEGORIES) {
+    const files = Object.keys(allAnalyses).filter(f => fileCategory[f] === cat).sort();
+    if (!files.length) continue;
+    indexLines.push(`\n## ${cat.charAt(0).toUpperCase() + cat.slice(1)}\n`);
+    for (const fp of files) indexLines.push(`- [${fp}](analysis/${fp}.md)`);
+  }
+  if (generatedFiles.length) {
+    indexLines.push(`\n## Generated\n`);
+    for (const fp of generatedFiles) indexLines.push(`- ${fp}`);
+  }
   writeFileSync(indexPath, indexLines.join("\n"), "utf-8");
 
-  // Stage 4: Consolidation
-  emit("\n▸ Stage 4: Consolidating requirements...");
-  const finalResponse = await runConsolidation(model, sourceReqs, contextSummaries, existingReqs, log, tokenBudget);
+  // Stage 3: Consolidation (REQ-G-28)
+  emit("\n▸ Stage 3: Consolidating requirements...");
+  const finalResponse = await runConsolidation(model, allAnalyses, generatedAnalysis, existingReqs, log, tokenBudget);
   writeFileSync(target, stripPreamble(finalResponse), "utf-8");
 
   appendState("gather", model.config.alias,
-    `Analyzed ${Object.keys(fileCategory).length} files (${sourceFiles.length} source). Wrote REQUIREMENTS.md.`,
+    `Analyzed ${Object.keys(allAnalyses).length} files. Wrote REQUIREMENTS.md.`,
     [".voidrift/REQUIREMENTS.md"]);
 
   // Elapsed time (REQ-G-21)

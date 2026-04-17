@@ -289,6 +289,20 @@
   - Given prompt_fn returns "skip-all" for the first file, When assignment runs, Then no files are assigned.
   - Given prompt_fn returns "skip" for file 1 and "tests" for file 2, When assignment runs, Then only file 2 appears in `categories["tests"]`.
   - Given a mock prompt_fn, When `_assign_uncategorized` is called, Then it is independently testable with no I/O dependency.
+- **REQ-G-25:** WHEN the gather pipeline runs Stage 2 (file analysis), THE SYSTEM SHALL analyze each categorized file individually with a fresh agent. Each agent receives only the system prompt and that file's content. Results are cached in `analysis/<file>.md` with a content hash. The `runContextBuild` function is removed; all categories use the same per-file analysis pattern.
+  - *Rationale:* The previous context build stage dumped all files in a category into one agent call, which blows context windows on projects with many config/doc files. Per-file analysis keeps each call small and cacheable.
+  - Given a project with 5 config files and 3 source files, When gather runs, Then 8 separate agent calls are made (one per file).
+  - Given a file was previously analyzed and its content hash matches, When gather runs, Then the cached analysis is returned without an agent call.
+- **REQ-G-26:** THE SYSTEM SHALL pass the file's triage category to the analysis prompt via a `{category}` variable so the agent asks category-appropriate questions. Source files focus on functional requirements (EARS notation). Config files focus on configuration facts and constraints. Documentation files focus on stated intent and specifications. Infrastructure files focus on deployment topology. Tests files focus on validated behaviors.
+  - *Rationale:* A config file and a source file need different analytical lenses. Category-aware prompts produce more relevant analysis per file.
+  - Given a config file `pyproject.toml`, When analyzed, Then the prompt instructs the agent to extract configuration facts and constraints.
+  - Given a source file `main.py`, When analyzed, Then the prompt instructs the agent to extract functional requirements using EARS notation.
+- **REQ-G-27:** WHEN a file is categorized as `generated`, THE SYSTEM SHALL analyze it by filename and path only — file contents are not read. The agent infers toolchain context from the filename pattern (e.g., hashed bundles indicate a bundler, lock files indicate a package manager). All generated files are analyzed in a single agent call.
+  - *Rationale:* Generated files are large and low-signal for content analysis, but their existence reveals toolchain choices that inform requirements.
+  - Given `backend/static/assets/index-CW8_b_Xi.js` is categorized as generated, When analyzed, Then the agent receives only the filename, not the file contents.
+- **REQ-G-28:** THE SYSTEM SHALL pass all per-file analyses (from all categories) plus the generated file analysis to the consolidation stage. The context block intermediate is removed.
+  - *Rationale:* With per-file analysis, there is no need for a separate context summary — each file's analysis already captures its contribution. Consolidation merges all analyses directly.
+  - Given 10 per-file analyses and a generated analysis exist, When consolidation runs, Then all are included in the consolidation input.
 
 ### 4.5 Command: Plan
 
