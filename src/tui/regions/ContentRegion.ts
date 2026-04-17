@@ -1,4 +1,5 @@
 import { Region } from "./Region.js";
+import { randomLabel } from "../Thinking.js";
 
 export interface TUIMessage {
   role: "operator" | "model" | "tool" | "system" | "diff";
@@ -33,7 +34,7 @@ export class ContentRegion extends Region {
 
   setThinking(on: boolean, label?: string): void {
     this.thinking = on;
-    if (label) this.thinkingLabel = label;
+    this.thinkingLabel = on ? (label ?? randomLabel()) : "thinking...";
     this.emit();
   }
 
