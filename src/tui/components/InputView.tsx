@@ -42,6 +42,12 @@ export function InputView({ input: region, footer, onSubmit, onEscape }: InputVi
       return;
     }
 
+    // Ctrl+J — insert newline (REQ-UI-3)
+    if (ch === "\x0A" || (ch === "j" && key.ctrl)) {
+      setValue(v => v + "\n");
+      return;
+    }
+
     if (key.escape) { onEscape(); return; }
 
     // Input history
@@ -64,6 +70,11 @@ export function InputView({ input: region, footer, onSubmit, onEscape }: InputVi
   });
 
   const handleSubmit = useCallback((v: string) => {
+    // Backslash at end of line = insert newline, don't submit (REQ-UI-3)
+    if (v.endsWith("\\")) {
+      setValue(v.slice(0, -1) + "\n");
+      return;
+    }
     const text = v.trim();
     if (!text) return;
     setValue("");
