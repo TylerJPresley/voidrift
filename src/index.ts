@@ -108,6 +108,7 @@ async function runHeadless(): Promise<number> {
     verify   --model <m>                Run acceptance tests
     status                              Show task status
     doctor   [--fix]                    Run diagnostic checks
+    models                              List available models
     help                                This message
     completions <shell>                 Output shell completion script
 
@@ -117,11 +118,21 @@ async function runHeadless(): Promise<number> {
     return 0;
   }
 
+  if (command === "models") {
+    const { listAliases } = await import("./models.js");
+    const aliases = listAliases();
+    if (!aliases.length) { console.log("No models configured."); return 0; }
+    console.log("\n  Available models:\n");
+    for (const a of aliases) console.log(`    ${a}`);
+    console.log("");
+    return 0;
+  }
+
   if (command === "completions") {
     const { listAliases } = await import("./models.js");
     const shell = args[1];
     const aliases = listAliases().join(" ");
-    const commands = "gather plan develop deploy verify status doctor help";
+    const commands = "gather plan develop deploy verify status doctor models help";
     if (shell === "bash") {
       console.log(`_voidrift() { local cur=\${COMP_WORDS[COMP_CWORD]}; local prev=\${COMP_WORDS[COMP_CWORD-1]}; if [ $COMP_CWORD -eq 1 ]; then COMPREPLY=( $(compgen -W "${commands}" -- "$cur") ); elif [ $COMP_CWORD -eq 3 ] && [ "$prev" = "--model" ]; then COMPREPLY=( $(compgen -W "${aliases}" -- "$cur") ); fi; }; complete -F _voidrift voidrift`);
     } else if (shell === "zsh") {
