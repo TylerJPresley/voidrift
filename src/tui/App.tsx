@@ -6,6 +6,7 @@ import { Header } from "./Header.js";
 import { Footer } from "./Footer.js";
 import { Message } from "./Message.js";
 import { Thinking } from "./Thinking.js";
+import { closePanel } from "./state.js";
 
 interface AppProps {
   state: TUIState;
@@ -27,6 +28,27 @@ export function App({ state, onSubmit, onEscape }: AppProps) {
   }, [state]);
 
   useInput((ch, key) => {
+    // Panel mode — intercept all keys
+    if (state.panel) {
+      if (key.escape) { state.panel.onCancel?.(); closePanel(state); return; }
+      if (key.leftArrow || key.upArrow) {
+        state.panel.selectedIndex = Math.max(0, state.panel.selectedIndex - 1);
+        state._notify?.();
+        return;
+      }
+      if (key.rightArrow || key.downArrow) {
+        state.panel.selectedIndex = Math.min(state.panel.items.length - 1, state.panel.selectedIndex + 1);
+        state._notify?.();
+        return;
+      }
+      if (key.return) {
+        const item = state.panel.items[state.panel.selectedIndex];
+        if (item) { state.panel.onSelect?.(item); closePanel(state); }
+        return;
+      }
+      return;
+    }
+
     if (key.escape) {
       onEscape?.();
       return;
@@ -92,18 +114,21 @@ export function App({ state, onSubmit, onEscape }: AppProps) {
         mode={state.mode}
         cwd={state.cwd}
         branch={state.branch}
+        panel={state.panel}
       />
 
       {/* Spacer */}
       <Text> </Text>
 
-      {/* Input */}
-      <Box>
-        {input || state.busy ? null : <Text dimColor italic>{placeholder}</Text>}
-        {input || !state.busy ? (
-          <TextInput value={input} onChange={setInput} onSubmit={handleSubmit} />
-        ) : null}
-      </Box>
+      {/* Input — hidden when panel is open */}
+      {state.panel ? null : (
+        <Box>
+          {input || state.busy ? null : <Text dimColor italic>{placeholder}</Text>}
+          {input || !state.busy ? (
+            <TextInput value={input} onChange={setInput} onSubmit={handleSubmit} />
+          ) : null}
+        </Box>
+      )}
     </Box>
   );
 }
