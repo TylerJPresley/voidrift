@@ -279,6 +279,7 @@ export async function runChat(model: ModelInterface | null, options: ChatOptions
   // Render TUI
   const { waitUntilExit } = render(
     React.createElement(App, { header, content, footer, input, onSubmit, onEscape: () => input.setPending(null) }),
+    { exitOnCtrlC: false },
   );
   await waitUntilExit();
 }
