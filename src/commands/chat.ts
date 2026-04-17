@@ -281,5 +281,15 @@ export async function runChat(model: ModelInterface | null, options: ChatOptions
     React.createElement(App, { header, content, footer, input, onSubmit, onEscape: () => input.setPending(null) }),
     { exitOnCtrlC: false },
   );
+
+  // Double Ctrl+C to exit (4 second window)
+  let lastCtrlC = 0;
+  process.on("SIGINT", () => {
+    const now = Date.now();
+    if (now - lastCtrlC < 4000) { process.exit(0); }
+    lastCtrlC = now;
+    content.addSystem("Press Ctrl+C again to exit.");
+  });
+
   await waitUntilExit();
 }
