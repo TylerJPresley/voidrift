@@ -102,9 +102,15 @@ export function App({ state, onSubmit, onEscape }: AppProps) {
           <Message key={i} msg={msg} />
         ))}
         {state.thinking && <Thinking label={state.thinkingLabel} />}
-        {state.panel ? <Panel panel={state.panel} /> : null}
         <Text> </Text>
       </Box>
+
+      {/* Panel (collapsible) — outside overflow:hidden */}
+      {state.panel ? (
+        <Box flexDirection="column" flexShrink={0} marginBottom={0}>
+          <Panel panel={state.panel} />
+        </Box>
+      ) : null}
 
       {/* Separator */}
       <Text dimColor>{"─".repeat(process.stdout.columns || 80)}</Text>
