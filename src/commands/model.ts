@@ -1,7 +1,7 @@
 /**
- * /model — select active model via collapsible panel.
+ * /model — select active model.
  *
- * /model         — open model selection panel
+ * /model         — show model list (panel)
  * /model <alias> — switch directly
  */
 
@@ -28,19 +28,18 @@ export class ModelCommand extends SlashCommand {
     // Direct switch if alias provided
     if (this.alias) return this._switchTo(this.alias, aliases);
 
-    // Open panel for selection
+    // Open panel
     const items: PanelItem[] = aliases.map(a => ({
       label: a,
       value: a,
       marker: a === current ? "◀" : undefined,
     }));
-    const currentIdx = aliases.indexOf(current);
 
     openPanel(this.ctx.state, {
       type: "model",
       title: "Model",
       items,
-      selectedIndex: currentIdx >= 0 ? currentIdx : 0,
+      selectedIndex: Math.max(0, aliases.indexOf(current)),
       hint: "↑↓ navigate · enter select · esc cancel",
       onSelect: (item) => { this._switchTo(item.value, aliases); },
       onCancel: () => {},
@@ -56,9 +55,10 @@ export class ModelCommand extends SlashCommand {
     try {
       const newModel = resolveModel(alias);
       this.ctx.model = newModel;
-      (this.ctx.agent as unknown as Record<string, unknown>)._model = newModel;
-      (this.ctx.agent as unknown as Record<string, unknown>)._adapter = newModel.adapter;
-      (this.ctx.agent as unknown as Record<string, unknown>)._client = newModel.adapter.createClient(newModel.config);
+      const agent = this.ctx.agent as unknown as Record<string, unknown>;
+      agent._model = newModel;
+      agent._adapter = newModel.adapter;
+      agent._client = newModel.adapter.createClient(newModel.config);
       this.ctx.state.modelName = alias;
       this.ctx.state._notify?.();
       new ConfigManager().set("current_model", alias);
