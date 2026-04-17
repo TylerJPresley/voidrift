@@ -8,7 +8,7 @@
 
 import { SlashCommand, type ChatContext } from "./base.js";
 import { addSystem } from "../tui/state.js";
-import { ConfigManager } from "../config.js";
+import { ConfigManager, CONFIG_SCHEMA } from "../config.js";
 
 export class SettingsCommand extends SlashCommand {
   readonly name = "settings";
@@ -28,11 +28,12 @@ export class SettingsCommand extends SlashCommand {
 
     if (action === "list" || !this.args) {
       const entries = cm.list();
-      if (!entries.length) { addSystem(this.ctx.state, "No settings configured."); return 0; }
       const lines = ["Settings:", ""];
       for (const [key, val] of entries) {
+        const schema = CONFIG_SCHEMA[key];
         const display = typeof val === "string" && val.includes("KEY") ? "***" : JSON.stringify(val);
-        lines.push(`  ${key} = ${display}`);
+        const desc = schema ? ` — ${schema.description}` : "";
+        lines.push(`  ${key} = ${display}${desc}`);
       }
       lines.push("", "  /settings set <key> <value>  change a value");
       addSystem(this.ctx.state, lines.join("\n"));
@@ -44,15 +45,6 @@ export class SettingsCommand extends SlashCommand {
       const rawVal = parts.slice(2).join(" ");
       if (!key || !rawVal) { addSystem(this.ctx.state, "Usage: /settings set <key> <value>"); return 1; }
 
-      // Validate key exists
-      const existing = cm.get(key);
-      if (existing === undefined) {
-        const allKeys = cm.list().map(([k]) => k);
-        const suggestion = allKeys.find(k => k.includes(key) || key.includes(k));
-        addSystem(this.ctx.state, `Unknown setting: ${key}${suggestion ? `. Did you mean '${suggestion}'?` : ""}`);
-        return 1;
-      }
-
       // Parse value
       let val: unknown = rawVal;
       if (rawVal === "true") val = true;
@@ -60,13 +52,9 @@ export class SettingsCommand extends SlashCommand {
       else if (/^\d+$/.test(rawVal)) val = parseInt(rawVal, 10);
       else if (rawVal.startsWith("[")) { try { val = JSON.parse(rawVal); } catch { /* keep as string */ } }
 
-      // Validate type matches existing value
-      const existingType = Array.isArray(existing) ? "array" : typeof existing;
-      const newType = Array.isArray(val) ? "array" : typeof val;
-      if (existing !== null && existingType !== newType) {
-        addSystem(this.ctx.state, `Type mismatch: ${key} is ${existingType}, got ${newType}. Value must be a ${existingType}.`);
-        return 1;
-      }
+      // Validate against schema
+      const err = cm.validate(key, val);
+      if (err) { addSystem(this.ctx.state, `✗ ${err}`); return 1; }
 
       cm.set(key, val);
       addSystem(this.ctx.state, `✓ ${key} = ${JSON.stringify(val)}`);

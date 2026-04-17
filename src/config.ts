@@ -205,6 +205,39 @@ export function getBashConfig(command: string): BashConfig {
 // ConfigManager — read/write config from CLI (REQ-CFG-1)
 // ---------------------------------------------------------------------------
 
+type Validator = (v: unknown) => string | null;
+const gt0: Validator = v => typeof v === "number" && v > 0 ? null : "must be a positive number";
+const gte0: Validator = v => typeof v === "number" && v >= 0 ? null : "must be a non-negative number";
+
+/** Schema for all valid config keys — type + optional constraint. */
+export const CONFIG_SCHEMA: Record<string, { type: "string" | "number" | "boolean" | "array"; validate?: Validator; description: string }> = {
+  "models_file":                  { type: "string",  description: "Path to models YAML file" },
+  "active_container_file":        { type: "string",  description: "Path to active container marker" },
+  "protected_paths":              { type: "array",   description: "Files blocked from agent writes" },
+  "allowed_commands":             { type: "array",   description: "Shell commands that bypass security classification" },
+  "ssrf_allow_list":              { type: "array",   description: "Hostnames/CIDRs that bypass SSRF blocking" },
+  "git.max_diff_lines":           { type: "number",  validate: gt0, description: "Max total lines in git diff output" },
+  "git.max_diff_files":           { type: "number",  validate: gt0, description: "Max files in git diff" },
+  "git.max_file_diff_lines":      { type: "number",  validate: gt0, description: "Max lines per file in diff" },
+  "retention.project":            { type: "number",  validate: gt0, description: "Number of recent project logs to keep" },
+  "retention.global":             { type: "number",  validate: gt0, description: "Days of global framework logs to keep" },
+  "cache.max_entries":            { type: "number",  validate: gt0, description: "Max analysis cache entries before LRU eviction" },
+  "cache.ttl_days":               { type: "number",  validate: gt0, description: "Analysis entries older than this are pruned" },
+  "skills.synthesis_model":       { type: "string",  description: "Model alias for skill synthesis" },
+  "skills.repos":                 { type: "array",   description: "Skill manifest repo URLs" },
+  "bash.timeout":                 { type: "number",  validate: gt0, description: "Default shell timeout (seconds)" },
+  "bash.max_output_lines":        { type: "number",  validate: gt0, description: "Max shell output lines before truncation" },
+  "bash.develop.enabled":         { type: "boolean", description: "Enable shell in develop command" },
+  "bash.develop.timeout":         { type: "number",  validate: gt0, description: "Develop shell timeout" },
+  "bash.develop.allowed_patterns": { type: "array",  description: "Develop shell command patterns" },
+  "bash.chat.enabled":            { type: "boolean", description: "Enable shell in chat command" },
+  "bash.chat.timeout":            { type: "number",  validate: gt0, description: "Chat shell timeout" },
+  "bash.chat.allowed_patterns":   { type: "array",   description: "Chat shell command patterns" },
+  "bash.verify.enabled":          { type: "boolean", description: "Enable shell in verify command" },
+  "bash.verify.timeout":          { type: "number",  validate: gt0, description: "Verify shell timeout" },
+  "bash.verify.allowed_patterns": { type: "array",   description: "Verify shell command patterns" },
+};
+
 export class ConfigManager {
   private _path: string;
 
@@ -259,6 +292,22 @@ export class ConfigManager {
     }
     delete obj[parts[parts.length - 1]];
     this._write(data);
+  }
+
+  /** Validate a key and value against CONFIG_SCHEMA. Returns error message or null. */
+  validate(key: string, value: unknown): string | null {
+    const schema = CONFIG_SCHEMA[key];
+    if (!schema) return `Unknown setting '${key}'. Use /settings to see valid keys.`;
+
+    const actualType = Array.isArray(value) ? "array" : typeof value;
+    if (actualType !== schema.type) return `${key} must be ${schema.type}, got ${actualType}.`;
+
+    if (schema.validate) {
+      const err = schema.validate(value);
+      if (err) return `${key}: ${err}.`;
+    }
+
+    return null;
   }
 
   /** List all config as flat dot-notation key-value pairs. */
