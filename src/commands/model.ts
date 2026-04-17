@@ -2,7 +2,7 @@
  * /model — select active model.
  *
  * /model         — show model list
- * /model <alias> — switch directly
+ * /model <alias> — switch directly (removes list if shown)
  */
 
 import { SlashCommand, type ChatContext } from "./base.js";
@@ -11,6 +11,9 @@ import { listAliases, resolveModel } from "../models.js";
 import { ConfigManager, CONFIG_SCHEMA } from "../config.js";
 
 CONFIG_SCHEMA["current_model"] = { type: "string", description: "Currently selected model alias" };
+
+// Track the index of the last model list message so we can remove it
+let _lastListIdx = -1;
 
 export class ModelCommand extends SlashCommand {
   readonly name = "model";
@@ -34,7 +37,14 @@ export class ModelCommand extends SlashCommand {
       }
       lines.push("", "  /model <alias>  switch model");
       addSystem(this.ctx.state, lines.join("\n"));
+      _lastListIdx = this.ctx.state.messages.length - 1;
       return 0;
+    }
+
+    // Remove the model list message if it exists
+    if (_lastListIdx >= 0 && _lastListIdx < this.ctx.state.messages.length) {
+      this.ctx.state.messages.splice(_lastListIdx, 1);
+      _lastListIdx = -1;
     }
 
     if (!aliases.includes(this.alias)) {
