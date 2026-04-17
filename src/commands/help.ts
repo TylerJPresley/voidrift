@@ -21,6 +21,7 @@ export class HelpCommand extends SlashCommand {
     addSystem(this.ctx.state, "  /compact        summarize context to free space");
     addSystem(this.ctx.state, "  /ask <q>        one-shot answer (no context)");
     addSystem(this.ctx.state, "  /clear          reset conversation");
+    addSystem(this.ctx.state, "  /settings       view/modify config");
     addSystem(this.ctx.state, "  /help           this list");
     addSystem(this.ctx.state, "  /quit           exit");
     return 0;

@@ -5,10 +5,11 @@
  * Operational limits live on each model entry in the models file.
  */
 
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, writeFileSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { parse as parseYaml } from "yaml";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+
 
 // ---------------------------------------------------------------------------
 // Types
@@ -198,4 +199,81 @@ export function getBashConfig(command: string): BashConfig {
     timeout: Number(cmd?.["timeout"] ?? timeout),
     maxOutputLines: Number(cmd?.["max_output_lines"] ?? maxOutputLines),
   };
+}
+
+// ---------------------------------------------------------------------------
+// ConfigManager — read/write config from CLI (REQ-CFG-1)
+// ---------------------------------------------------------------------------
+
+export class ConfigManager {
+  private _path: string;
+
+  constructor(home?: string) {
+    this._path = join(home ?? voidriftHome(), "config.yml");
+  }
+
+  /** Read raw config (no env expansion) for editing. */
+  private _readRaw(): Record<string, unknown> {
+    if (!existsSync(this._path)) return {};
+    return (parseYaml(readFileSync(this._path, "utf-8")) ?? {}) as Record<string, unknown>;
+  }
+
+  private _write(data: Record<string, unknown>): void {
+    mkdirSync(join(this._path, ".."), { recursive: true });
+    writeFileSync(this._path, stringifyYaml(data), "utf-8");
+    clearConfigCache();
+  }
+
+  /** Get a value by dot-notation key (e.g. "skills.synthesis_model"). */
+  get(key: string): unknown {
+    const parts = key.split(".");
+    let obj: unknown = this._readRaw();
+    for (const p of parts) {
+      if (obj === null || typeof obj !== "object") return undefined;
+      obj = (obj as Record<string, unknown>)[p];
+    }
+    return obj;
+  }
+
+  /** Set a value by dot-notation key. Creates intermediate objects as needed. */
+  set(key: string, value: unknown): void {
+    const data = this._readRaw();
+    const parts = key.split(".");
+    let obj = data;
+    for (let i = 0; i < parts.length - 1; i++) {
+      if (!(parts[i] in obj) || typeof obj[parts[i]] !== "object") obj[parts[i]] = {};
+      obj = obj[parts[i]] as Record<string, unknown>;
+    }
+    obj[parts[parts.length - 1]] = value;
+    this._write(data);
+  }
+
+  /** Delete a key. */
+  delete(key: string): void {
+    const data = this._readRaw();
+    const parts = key.split(".");
+    let obj = data;
+    for (let i = 0; i < parts.length - 1; i++) {
+      if (!(parts[i] in obj)) return;
+      obj = obj[parts[i]] as Record<string, unknown>;
+    }
+    delete obj[parts[parts.length - 1]];
+    this._write(data);
+  }
+
+  /** List all config as flat dot-notation key-value pairs. */
+  list(): Array<[string, unknown]> {
+    const results: Array<[string, unknown]> = [];
+    const walk = (obj: unknown, prefix: string) => {
+      if (obj === null || typeof obj !== "object" || Array.isArray(obj)) {
+        results.push([prefix, obj]);
+        return;
+      }
+      for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
+        walk(v, prefix ? `${prefix}.${k}` : k);
+      }
+    };
+    walk(this._readRaw(), "");
+    return results;
+  }
 }
