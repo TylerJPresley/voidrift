@@ -1,17 +1,14 @@
 import React from "react";
 import { Text, Box } from "ink";
-import type { PanelState } from "./state.js";
+import type { TUIState } from "./state.js";
 
 interface FooterProps {
-  modelName: string;
-  contextPct: number;
-  mode: string;
-  cwd: string;
-  branch: string;
-  panel?: PanelState | null;
+  state: TUIState;
 }
 
-export function Footer({ modelName, contextPct, mode, cwd, branch, panel }: FooterProps) {
+export function Footer({ state }: FooterProps) {
+  const { panel } = state;
+
   // Panel mode — replace footer content
   if (panel) {
     return (
@@ -26,12 +23,13 @@ export function Footer({ modelName, contextPct, mode, cwd, branch, panel }: Foot
           );
         })}
         <Box flexGrow={1} />
-        <Text dimColor>←→ navigate · enter select · esc cancel</Text>
+        <Text dimColor>←→ · enter · esc</Text>
       </Box>
     );
   }
 
   // Normal footer
+  const { modelName, contextPct, mode, cwd, branch } = state;
   const ctxColor = contextPct <= 60 ? "#4ec9b0" : contextPct <= 80 ? "#e5c07b" : "#e06c75";
 
   return (

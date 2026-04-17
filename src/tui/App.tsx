@@ -108,14 +108,7 @@ export function App({ state, onSubmit, onEscape }: AppProps) {
       <Text dimColor>{"─".repeat(process.stdout.columns || 80)}</Text>
 
       {/* Footer */}
-      <Footer
-        modelName={state.modelName}
-        contextPct={state.contextPct}
-        mode={state.mode}
-        cwd={state.cwd}
-        branch={state.branch}
-        panel={state.panel}
-      />
+      <Footer state={state} />
 
       {/* Spacer */}
       <Text> </Text>
