@@ -19,6 +19,11 @@ export class ContentRegion extends Region {
   addModel(text: string, stats = "", streaming = false): void { this.messages.push({ role: "model", text, stats, streaming }); this.onContentAdded?.(); this.emit(); }
   addTool(toolName: string, detail = "", action = ""): void { this.messages.push({ role: "tool", text: detail, toolName, toolAction: action }); this.onContentAdded?.(); this.emit(); }
   addSystem(text: string): void { this.messages.push({ role: "system", text }); this.onContentAdded?.(); this.emit(); }
+  appendSystem(text: string): void {
+    const last = this.messages[this.messages.length - 1];
+    if (last?.role === "system") { last.text += "\n" + text; this.emit(); }
+    else this.addSystem(text);
+  }
   addDiff(summary: string, diffLines: string): void { this.messages.push({ role: "diff", text: diffLines, toolName: summary }); this.onContentAdded?.(); this.emit(); }
 
   updateLastModel(text: string, stats = "", streaming = true): void {
