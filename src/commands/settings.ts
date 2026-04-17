@@ -3,9 +3,7 @@
  *
  * Usage:
  *   /settings                 — list all settings
- *   /settings get <key>       — show a specific value
  *   /settings set <key> <val> — change a value
- *   /settings delete <key>    — remove a value
  */
 
 import { SlashCommand, type ChatContext } from "./base.js";
@@ -45,12 +43,31 @@ export class SettingsCommand extends SlashCommand {
       const key = parts[1];
       const rawVal = parts.slice(2).join(" ");
       if (!key || !rawVal) { addSystem(this.ctx.state, "Usage: /settings set <key> <value>"); return 1; }
-      // Parse value: try number, boolean, then string
+
+      // Validate key exists
+      const existing = cm.get(key);
+      if (existing === undefined) {
+        const allKeys = cm.list().map(([k]) => k);
+        const suggestion = allKeys.find(k => k.includes(key) || key.includes(k));
+        addSystem(this.ctx.state, `Unknown setting: ${key}${suggestion ? `. Did you mean '${suggestion}'?` : ""}`);
+        return 1;
+      }
+
+      // Parse value
       let val: unknown = rawVal;
       if (rawVal === "true") val = true;
       else if (rawVal === "false") val = false;
       else if (/^\d+$/.test(rawVal)) val = parseInt(rawVal, 10);
       else if (rawVal.startsWith("[")) { try { val = JSON.parse(rawVal); } catch { /* keep as string */ } }
+
+      // Validate type matches existing value
+      const existingType = Array.isArray(existing) ? "array" : typeof existing;
+      const newType = Array.isArray(val) ? "array" : typeof val;
+      if (existing !== null && existingType !== newType) {
+        addSystem(this.ctx.state, `Type mismatch: ${key} is ${existingType}, got ${newType}. Value must be a ${existingType}.`);
+        return 1;
+      }
+
       cm.set(key, val);
       addSystem(this.ctx.state, `✓ ${key} = ${JSON.stringify(val)}`);
       return 0;
