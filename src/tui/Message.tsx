@@ -39,7 +39,6 @@ export function Message({ msg }: MessageProps) {
         {msg.text.split("\n").map((line, i) => (
           <Text key={i}><Text color="#4ec9b0">┃ </Text><Text bold color="white">{line}</Text></Text>
         ))}
-        <Text> </Text>
       </Box>
     );
   }
