@@ -1,14 +1,16 @@
 /**
  * /model — select active model.
  *
- * /model         — show model list (panel)
+ * /model         — show model list
  * /model <alias> — switch directly
  */
 
 import { SlashCommand, type ChatContext } from "./base.js";
-import { addSystem, openPanel, type PanelItem } from "../tui/state.js";
+import { addSystem } from "../tui/state.js";
 import { listAliases, resolveModel } from "../models.js";
-import { ConfigManager } from "../config.js";
+import { ConfigManager, CONFIG_SCHEMA } from "../config.js";
+
+CONFIG_SCHEMA["current_model"] = { type: "string", description: "Currently selected model alias" };
 
 export class ModelCommand extends SlashCommand {
   readonly name = "model";
@@ -25,44 +27,32 @@ export class ModelCommand extends SlashCommand {
     const aliases = listAliases();
     const current = this.ctx.model.config.alias;
 
-    // Direct switch if alias provided
-    if (this.alias) return this._switchTo(this.alias, aliases);
+    if (!this.alias) {
+      const lines = [`Models (current: ${current})`, ""];
+      for (const a of aliases) {
+        lines.push(a === current ? `  ${a}  ◀` : `  ${a}`);
+      }
+      lines.push("", "  /model <alias>  switch model");
+      addSystem(this.ctx.state, lines.join("\n"));
+      return 0;
+    }
 
-    // Open panel
-    const items: PanelItem[] = aliases.map(a => ({
-      label: a,
-      value: a,
-      marker: a === current ? "◀" : undefined,
-    }));
-
-    openPanel(this.ctx.state, {
-      type: "model",
-      title: "Model",
-      items,
-      selectedIndex: Math.max(0, aliases.indexOf(current)),
-      hint: "↑↓ navigate · enter select · esc cancel",
-      onSelect: (item) => { this._switchTo(item.value, aliases); },
-      onCancel: () => {},
-    });
-    return 0;
-  }
-
-  private _switchTo(alias: string, aliases: string[]): number {
-    if (!aliases.includes(alias)) {
-      addSystem(this.ctx.state, `Unknown model '${alias}'. Available: ${aliases.join(", ")}`);
+    if (!aliases.includes(this.alias)) {
+      addSystem(this.ctx.state, `Unknown model '${this.alias}'. Available: ${aliases.join(", ")}`);
       return 1;
     }
+
     try {
-      const newModel = resolveModel(alias);
+      const newModel = resolveModel(this.alias);
       this.ctx.model = newModel;
       const agent = this.ctx.agent as unknown as Record<string, unknown>;
       agent._model = newModel;
       agent._adapter = newModel.adapter;
       agent._client = newModel.adapter.createClient(newModel.config);
-      this.ctx.state.modelName = alias;
+      this.ctx.state.modelName = this.alias;
       this.ctx.state._notify?.();
-      new ConfigManager().set("current_model", alias);
-      addSystem(this.ctx.state, `✓ Switched to ${alias}`);
+      new ConfigManager().set("current_model", this.alias);
+      addSystem(this.ctx.state, `✓ Switched to ${this.alias}`);
     } catch (e) {
       addSystem(this.ctx.state, `Failed: ${e instanceof Error ? e.message : e}`);
       return 1;

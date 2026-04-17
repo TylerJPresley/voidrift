@@ -6,8 +6,6 @@ import { Header } from "./Header.js";
 import { Footer } from "./Footer.js";
 import { Message } from "./Message.js";
 import { Thinking } from "./Thinking.js";
-import { Panel } from "./Panel.js";
-import { closePanel } from "./state.js";
 
 interface AppProps {
   state: TUIState;
@@ -29,27 +27,6 @@ export function App({ state, onSubmit, onEscape }: AppProps) {
   }, [state]);
 
   useInput((ch, key) => {
-    // Panel key handling — intercept when panel is open
-    if (state.panel) {
-      if (key.escape) { state.panel.onCancel?.(); closePanel(state); return; }
-      if (key.upArrow) {
-        state.panel.selectedIndex = Math.max(0, state.panel.selectedIndex - 1);
-        state._notify?.();
-        return;
-      }
-      if (key.downArrow) {
-        state.panel.selectedIndex = Math.min(state.panel.items.length - 1, state.panel.selectedIndex + 1);
-        state._notify?.();
-        return;
-      }
-      if (key.return) {
-        const item = state.panel.items[state.panel.selectedIndex];
-        if (item) { state.panel.onSelect?.(item); closePanel(state); }
-        return;
-      }
-      return; // Swallow all other keys while panel is open
-    }
-
     if (key.escape) {
       onEscape?.();
       return;
@@ -104,13 +81,6 @@ export function App({ state, onSubmit, onEscape }: AppProps) {
         {state.thinking && <Thinking label={state.thinkingLabel} />}
         <Text> </Text>
       </Box>
-
-      {/* Panel (collapsible) — outside overflow:hidden */}
-      {state.panel ? (
-        <Box flexDirection="column" flexShrink={0} marginBottom={0}>
-          <Panel panel={state.panel} />
-        </Box>
-      ) : null}
 
       {/* Separator */}
       <Text dimColor>{"─".repeat(process.stdout.columns || 80)}</Text>
