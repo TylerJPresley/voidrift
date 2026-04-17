@@ -42,7 +42,7 @@ export class ModelCommand extends SlashCommand {
       items,
       selectedIndex: currentIdx >= 0 ? currentIdx : 0,
       hint: "↑↓ navigate · enter select · esc cancel",
-      onSelect: (item) => this._switchTo(item.value, aliases),
+      onSelect: (item) => { this._switchTo(item.value, aliases); },
       onCancel: () => {},
     });
     return 0;
