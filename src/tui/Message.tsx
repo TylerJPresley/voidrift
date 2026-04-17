@@ -71,7 +71,7 @@ export function Message({ msg }: MessageProps) {
   }
 
   if (msg.role === "model") {
-    const rendered = msg.text?.trim() ? renderMd(msg.text) : "";
+    const rendered = msg.text?.trim() ? renderMd(msg.text.trim()) : "";
     const lines = rendered ? rendered.split("\n") : [];
     return (
       <Box flexDirection="column">
