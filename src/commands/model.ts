@@ -25,6 +25,13 @@ export class ModelCommand extends SlashCommand {
       return 0;
     }
 
+    // Remove the model list message if it's the last system message
+    const msgs = this.ctx.content.messages;
+    const lastIdx = msgs.length - 1;
+    if (lastIdx >= 0 && msgs[lastIdx].role === "system" && msgs[lastIdx].text.startsWith("Models (current:")) {
+      msgs.splice(lastIdx, 1);
+    }
+
     return this._switchTo(this.alias);
   }
 
@@ -45,7 +52,8 @@ export class ModelCommand extends SlashCommand {
       }
       this.ctx.footer.setModel(alias);
       this.ctx.header.setModel(alias);
-      new ConfigManager().set("current_model", alias);
+      const cm = new ConfigManager();
+      cm.set("current_model", alias);
       this.ctx.content.addSystem(`✓ Switched to ${alias}`);
     } catch (e) {
       this.ctx.content.addSystem(`Failed: ${e instanceof Error ? e.message : e}`);
