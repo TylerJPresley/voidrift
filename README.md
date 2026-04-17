@@ -192,12 +192,10 @@ All commands write artifacts to `<project>/.voidrift/`. Run commands from your p
 ### Chat
 
 ```bash
-voidrift chat <model>
-voidrift chat <model> --doc REQUIREMENTS.md    # scope to a .voidrift/ artifact
-voidrift chat <model> --doc new-feature.md     # create a new artifact
-voidrift chat <model> --style terse            # minimal output (verbose/terse/raw)
-voidrift chat <model> --bare                   # no skills, git, or project state — just the model
-voidrift chat <model> --bare --system-prompt p.md  # fully custom system prompt
+voidrift                                       # open chat (default)
+voidrift --doc REQUIREMENTS.md                 # scope to a .voidrift/ artifact
+voidrift --bare                                # no skills, git, or project state
+voidrift --bare --system-prompt p.md           # fully custom system prompt
 ```
 
 Interactive session with full tool access — the central command for iterating on any `.voidrift/` artifact. Review requirements before running plan, refine architecture after plan, debug issues, explore ideas.
@@ -239,21 +237,21 @@ Three categories are gated independently: **writes** (any file write or edit), *
 
 **Example workflow — new project:**
 ```bash
-voidrift gather <model> --path ./src         # reverse-engineer requirements
+voidrift gather --model <model> --path ./src         # reverse-engineer requirements
 voidrift chat <model> --doc REQUIREMENTS.md  # review and refine
-voidrift plan <model>                 # generate architecture + tasks
+voidrift plan --model <model>                 # generate architecture + tasks
 voidrift chat <model> --doc ARCHITECTURE.md  # review architecture
-voidrift develop <model>              # implement tasks
-voidrift verify <model>               # acceptance testing
+voidrift develop --model <model>              # implement tasks
+voidrift verify --model <model>               # acceptance testing
 ```
 
 **Example workflow — new feature on existing project:**
 ```bash
 voidrift chat <model>                        # /idea to capture and refine
-voidrift gather <model> --idea 3             # generate requirements from idea
-voidrift plan <model> --idea 3               # plan tasks scoped to idea
-voidrift develop <model>                     # implement
-voidrift verify <model>                      # validate
+voidrift gather --model <model> --idea 3             # generate requirements from idea
+voidrift plan --model <model> --idea 3               # plan tasks scoped to idea
+voidrift develop --model <model>                     # implement
+voidrift verify --model <model>                      # validate
 ```
 
 ### Gather
@@ -270,10 +268,10 @@ flowchart LR
 ```
 
 ```bash
-voidrift gather <model> --path <path>        # reverse-engineer requirements from codebase
-voidrift gather <model> --idea <id>          # generate requirements from a refined idea
-voidrift gather <model> --path <path> --overwrite  # remove previous gather artifacts and start fresh
-voidrift gather <model> --path <path> --max-output-tokens 50000  # cap total output tokens
+voidrift gather --model <model> --path <path>        # reverse-engineer requirements from codebase
+voidrift gather --model <model> --idea <id>          # generate requirements from a refined idea
+voidrift gather --model <model> --path <path> --overwrite  # remove previous gather artifacts and start fresh
+voidrift gather --model <model> --path <path> --max-output-tokens 50000  # cap total output tokens
 ```
 
 Produces: `REQUIREMENTS.md`, `ANALYSIS.md` (index), `analysis/<file>.md` (per-file)
@@ -287,9 +285,9 @@ Re-running gather updates requirements in place: the existing `REQUIREMENTS.md` 
 Generates architecture and task breakdown from requirements:
 
 ```bash
-voidrift plan <model>             # update mode if artifacts exist, fresh plan if not
-voidrift plan <model> --idea <id> # scope planning to a specific idea (requires reqs)
-voidrift plan <model> --overwrite # remove previous plan artifacts and start fresh
+voidrift plan --model <model>             # update mode if artifacts exist, fresh plan if not
+voidrift plan --model <model> --idea <id> # scope planning to a specific idea (requires reqs)
+voidrift plan --model <model> --overwrite # remove previous plan artifacts and start fresh
 ```
 
 Produces: `ARCHITECTURE.md`, `README.md`, `tasks/manifest.yml`, `tasks/active/TASK-*.md`, `arch/<module>.md`
@@ -301,10 +299,10 @@ Re-running plan when artifacts already exist triggers update mode: a delta analy
 Executes tasks from the manifest. Each task gets a fresh agent with the task file as its prompt — self-contained with user story, context, and acceptance criteria.
 
 ```bash
-voidrift develop <model>                  # single model for tasks and escalation
-voidrift develop <model> <architect>      # separate model for escalation
-voidrift develop <model> --max-output-tokens 50000  # cap total output tokens
-voidrift develop <model> --max-input-tokens 200000  # cap total input tokens
+voidrift develop --model <model>                  # single model for tasks and escalation
+voidrift develop --model <model> <architect>      # separate model for escalation
+voidrift develop --model <model> --max-output-tokens 50000  # cap total output tokens
+voidrift develop --model <model> --max-input-tokens 200000  # cap total input tokens
 ```
 
 ```mermaid
@@ -330,7 +328,7 @@ Ready tasks from any module are dispatched concurrently up to the model's `concu
 Two-stage requirements-driven acceptance testing:
 
 ```bash
-voidrift verify <model>
+voidrift verify --model <model>
 ```
 
 **Stage 1 — Plan agent:** Reads all project documentation (REQUIREMENTS.md, ARCHITECTURE.md, arch/*.md, task files) and writes `.voidrift/VERIFY-PLAN.md` — one self-contained test case per testable requirement. Each test case embeds the requirement, scenario steps, credentials, and evidence collection instructions.
@@ -346,8 +344,8 @@ Verify never modifies source files. Failures become tasks for Develop.
 Prepares verified code for release:
 
 ```bash
-voidrift deploy <model>
-voidrift deploy <model> <architect>
+voidrift deploy --model <model>
+voidrift deploy --model <model> <architect>
 ```
 
 Determines version bump (major/minor/patch) from verified tasks since the last release tag. Generates a changelog entry from history.log. Creates an annotated git tag locking the changeset. Optionally generates IaC when ARCHITECTURE.md indicates infrastructure requirements.
