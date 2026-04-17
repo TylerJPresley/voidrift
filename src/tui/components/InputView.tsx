@@ -124,8 +124,14 @@ export function InputView({ input: region, footer, onSubmit, onEscape }: InputVi
 
   return (
     <Box>
-      {!value && <Text dimColor italic>{placeholder}</Text>}
-      {!locked && <TextInput value={value} onChange={setValue} onSubmit={handleSubmit} />}
+      {locked ? (
+        <Text><Text color="#e5c07b">↑ </Text><Text dimColor>{region.pendingMessage}</Text></Text>
+      ) : (
+        <>
+          {!value && <Text dimColor italic>{placeholder}</Text>}
+          <TextInput value={value} onChange={setValue} onSubmit={handleSubmit} />
+        </>
+      )}
     </Box>
   );
 }
