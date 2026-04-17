@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createState } from "../../src/tui/state.js";
-import { wrapCommand } from "../../src/commands/slashCommands.js";
+import { wrapCommand } from "../../src/commands/base.js";
 import type { ModelInterface } from "../../src/models.js";
 
 describe("wrapCommand", () => {

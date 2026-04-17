@@ -26,13 +26,13 @@ import { captureGitSnapshot, snapshotToPromptBlock } from "../git.js";
 import { createState, addOperator, addModel, addTool, addSystem, updateLastModel, type TUIState } from "../tui/state.js";
 import { App } from "../tui/App.js";
 import { IdeaSession } from "./idea.js";
+import { IdeaStartCommand, IdeaDoneCommand } from "./idea.js";
 import { createPermissionGate, type PermCategory, type PermDecision } from "../tools/permissions.js";
-import {
-  type ChatContext,
-  HelpCommand, ClearCommand, AskCommand, CompactCommand,
-  IdeaStartCommand, IdeaDoneCommand,
-  wrapCommand, handleGather, handlePlan, handleDevelop, handleVerify, handleDeploy,
-} from "./slashCommands.js";
+import { type ChatContext, wrapCommand, type PromptFn } from "./base.js";
+import { HelpCommand } from "./help.js";
+import { ClearCommand } from "./clear.js";
+import { AskCommand } from "./ask.js";
+import { CompactCommand } from "./compact.js";
 
 interface ChatOptions {
   doc?: string;
@@ -168,6 +168,33 @@ export async function runChat(model: ModelInterface, options: ChatOptions = {}):
         if (recentFiles.length > 10) recentFiles.length = 10;
       }
     } catch { addTool(state, name); }
+  };
+
+  // ---------------------------------------------------------------------------
+  // Framework command handlers (run via wrapCommand)
+  // ---------------------------------------------------------------------------
+
+  const handleGather = async (args: string, mc: ModelInterface, st: TUIState, pf: PromptFn, lg: string) => {
+    const { runGather } = await import("./gather.js");
+    addSystem(st, `Gathering from ${args || process.cwd()}`);
+    const r = await runGather(mc, args || process.cwd(), undefined, false, undefined, (f, c) => pf(f, c));
+    addSystem(st, r === 0 ? "✓ Gather complete" : "✗ Gather failed");
+  };
+  const handlePlan = async (args: string, mc: ModelInterface, st: TUIState, pf: PromptFn, lg: string) => {
+    const { runPlan } = await import("./plan.js");
+    addSystem(st, "Running plan..."); const r = await runPlan(mc, args === "overwrite"); addSystem(st, r === 0 ? "✓ Plan complete" : "✗ Plan failed");
+  };
+  const handleDevelop = async (args: string, mc: ModelInterface, st: TUIState, pf: PromptFn, lg: string) => {
+    const { runDevelop } = await import("./develop.js");
+    addSystem(st, "Running develop..."); const r = await runDevelop(mc); addSystem(st, r === 0 ? "✓ Develop complete" : "✗ Develop failed");
+  };
+  const handleVerify = async (args: string, mc: ModelInterface, st: TUIState, pf: PromptFn, lg: string) => {
+    const { runVerify } = await import("./verify.js");
+    addSystem(st, "Running verify..."); const r = await runVerify(mc); addSystem(st, r === 0 ? "✓ Verify complete" : "✗ Verify failed");
+  };
+  const handleDeploy = async (args: string, mc: ModelInterface, st: TUIState, pf: PromptFn, lg: string) => {
+    const { runDeploy } = await import("./deploy.js");
+    addSystem(st, "Running deploy..."); const r = await runDeploy(mc); addSystem(st, r === 0 ? "✓ Deploy complete" : "✗ Deploy failed");
   };
 
   // ---------------------------------------------------------------------------

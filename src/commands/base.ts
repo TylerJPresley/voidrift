@@ -84,3 +84,50 @@ export abstract class SlashCommand {
     }
   }
 }
+
+// ---------------------------------------------------------------------------
+// Shared chat context for slash commands
+// ---------------------------------------------------------------------------
+
+import type { AgentLoop } from "../agent/loop.js";
+import type { ChatSession } from "../session.js";
+import type { ContextCompactor } from "../agent/context.js";
+import type { IdeaSession } from "./idea.js";
+import type { TUIState } from "../tui/state.js";
+import { addSystem } from "../tui/state.js";
+
+/** Shared context passed from ChatCommand to each slash command. */
+export interface ChatContext {
+  model: ModelInterface;
+  agent: AgentLoop;
+  state: TUIState;
+  session: ChatSession;
+  compactor: ContextCompactor;
+  ideaSession: IdeaSession;
+  projectDir: string;
+  logPath: string;
+  recentFiles: string[];
+  streamBuf: { value: string };
+}
+
+export type PromptFn = (filename: string, catList: string[]) => string;
+
+/** Run a framework command handler in the chat shell with busy/mode management. */
+export async function wrapCommand(
+  fn: (args: string, mc: ModelInterface, state: TUIState, promptFn: PromptFn, log: string) => Promise<void>,
+  args: string, mc: ModelInterface, state: TUIState, promptFn: PromptFn, log: string,
+): Promise<void> {
+  const cmdName = fn.name.replace("handle", "/").toLowerCase();
+  state.mode = cmdName;
+  state.busy = true;
+  state._notify?.();
+  try {
+    await fn(args, mc, state, promptFn, log);
+  } catch (e) {
+    addSystem(state, `Error: ${e instanceof Error ? e.message : e}`);
+  } finally {
+    state.mode = "";
+    state.busy = false;
+    state._notify?.();
+  }
+}
