@@ -1,9 +1,4 @@
-/**
- * /help — display available commands.
- */
-
 import { SlashCommand, type ChatContext } from "./base.js";
-import { addSystem } from "../tui/state.js";
 
 export class HelpCommand extends SlashCommand {
   readonly name = "help";
@@ -11,7 +6,7 @@ export class HelpCommand extends SlashCommand {
   constructor(ctx: ChatContext) { super(); this.ctx = ctx; }
 
   async execute(): Promise<number> {
-    addSystem(this.ctx.state, [
+    this.ctx.content.addSystem([
       "Commands:",
       "  /gather [path]  reverse-engineer requirements",
       "  /plan           generate architecture + tasks",

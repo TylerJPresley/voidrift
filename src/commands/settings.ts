@@ -1,13 +1,4 @@
-/**
- * /settings — view and modify config from within chat.
- *
- * Usage:
- *   /settings                 — list all settings
- *   /settings set <key> <val> — change a value
- */
-
 import { SlashCommand, type ChatContext } from "./base.js";
-import { addSystem } from "../tui/state.js";
 import { ConfigManager, CONFIG_SCHEMA } from "../config.js";
 
 export class SettingsCommand extends SlashCommand {
@@ -15,11 +6,7 @@ export class SettingsCommand extends SlashCommand {
   private ctx: ChatContext;
   private args: string;
 
-  constructor(ctx: ChatContext, args: string) {
-    super();
-    this.ctx = ctx;
-    this.args = args.trim();
-  }
+  constructor(ctx: ChatContext, args: string) { super(); this.ctx = ctx; this.args = args.trim(); }
 
   async execute(): Promise<number> {
     const cm = new ConfigManager();
@@ -36,32 +23,27 @@ export class SettingsCommand extends SlashCommand {
         lines.push(`  ${key} = ${display}${desc}`);
       }
       lines.push("", "  /settings set <key> <value>  change a value");
-      addSystem(this.ctx.state, lines.join("\n"));
+      this.ctx.content.addSystem(lines.join("\n"));
       return 0;
     }
 
     if (action === "set") {
       const key = parts[1];
       const rawVal = parts.slice(2).join(" ");
-      if (!key || !rawVal) { addSystem(this.ctx.state, "Usage: /settings set <key> <value>"); return 1; }
-
-      // Parse value
+      if (!key || !rawVal) { this.ctx.content.addSystem("Usage: /settings set <key> <value>"); return 1; }
       let val: unknown = rawVal;
       if (rawVal === "true") val = true;
       else if (rawVal === "false") val = false;
       else if (/^\d+$/.test(rawVal)) val = parseInt(rawVal, 10);
-      else if (rawVal.startsWith("[")) { try { val = JSON.parse(rawVal); } catch { /* keep as string */ } }
-
-      // Validate against schema
+      else if (rawVal.startsWith("[")) { try { val = JSON.parse(rawVal); } catch { /* */ } }
       const err = cm.validate(key, val);
-      if (err) { addSystem(this.ctx.state, `✗ ${err}`); return 1; }
-
+      if (err) { this.ctx.content.addSystem(`✗ ${err}`); return 1; }
       cm.set(key, val);
-      addSystem(this.ctx.state, `✓ ${key} = ${JSON.stringify(val)}`);
+      this.ctx.content.addSystem(`✓ ${key} = ${JSON.stringify(val)}`);
       return 0;
     }
 
-    addSystem(this.ctx.state, "Usage: /settings [set <key> <value>]");
+    this.ctx.content.addSystem("Usage: /settings [set <key> <value>]");
     return 1;
   }
 }

@@ -92,7 +92,6 @@ export function buildIdeaContent(title: string, body: string, category: IdeaCate
 // ---------------------------------------------------------------------------
 
 import { SlashCommand, type ChatContext } from "./base.js";
-import { addSystem, addModel, updateLastModel } from "../tui/state.js";
 
 export class IdeaStartCommand extends SlashCommand {
   readonly name = "idea";
@@ -101,28 +100,28 @@ export class IdeaStartCommand extends SlashCommand {
   constructor(ctx: ChatContext, arg: string) { super(); this.ctx = ctx; this.arg = arg; }
 
   async execute(): Promise<number> {
-    if (this.ctx.ideaSession.isActive()) { addSystem(this.ctx.state, "Idea session already active. Type /done to finish."); return 1; }
+    if (this.ctx.ideaSession.isActive()) { this.ctx.content.addSystem("Idea session already active. Type /done to finish."); return 1; }
     const id = this.arg ? parseInt(this.arg, 10) : null;
-    if (id !== null && isNaN(id)) { addSystem(this.ctx.state, "Usage: /idea [id]"); return 1; }
+    if (id !== null && isNaN(id)) { this.ctx.content.addSystem("Usage: /idea [id]"); return 1; }
 
     if (id) {
       const content = readIdea(this.ctx.projectDir, id);
-      if (!content) { addSystem(this.ctx.state, `IDEA-${id} not found.`); return 1; }
+      if (!content) { this.ctx.content.addSystem(`IDEA-${id} not found.`); return 1; }
       this.ctx.ideaSession.start(id);
-      this.ctx.state.mode = "/idea"; this.ctx.state._notify?.();
-      addSystem(this.ctx.state, `Loaded IDEA-${id}. Describe what to refine, or /done to save.`);
-      this.ctx.state.busy = true; this.ctx.state.thinking = true; this.ctx.state._notify?.();
+      this.ctx.footer.setMode("/idea");
+      this.ctx.content.addSystem(`Loaded IDEA-${id}. Describe what to refine, or /done to save.`);
+      this.ctx.input.setBusy(true); this.ctx.content.setThinking(true);
       try {
-        this.ctx.streamBuf.value = ""; addModel(this.ctx.state, "", "", true);
+        this.ctx.streamBuf.value = ""; this.ctx.content.addModel("", "", true);
         const r = await this.ctx.agent.send(`I'm resuming work on this idea:\n\n${content}\n\nSummarize the current state and ask what I'd like to refine.`);
-        updateLastModel(this.ctx.state, r, "", false);
-      } catch (e) { addSystem(this.ctx.state, `Error: ${e}`); }
-      finally { this.ctx.state.thinking = false; this.ctx.state.busy = false; this.ctx.state._notify?.(); }
+        this.ctx.content.updateLastModel(r, "", false);
+      } catch (e) { this.ctx.content.addSystem(`Error: ${e}`); }
+      finally { this.ctx.content.setThinking(false); this.ctx.input.setBusy(false); }
     } else {
       const newId = nextIdeaId(this.ctx.projectDir);
       this.ctx.ideaSession.start(newId);
-      this.ctx.state.mode = "/idea"; this.ctx.state._notify?.();
-      addSystem(this.ctx.state, `New idea IDEA-${newId}. Describe your idea — the agent will guide you. /done to save.`);
+      this.ctx.footer.setMode("/idea");
+      this.ctx.content.addSystem(`New idea IDEA-${newId}. Describe your idea — the agent will guide you. /done to save.`);
     }
     return 0;
   }
@@ -135,20 +134,21 @@ export class IdeaDoneCommand extends SlashCommand {
   constructor(ctx: ChatContext, category: string) { super(); this.ctx = ctx; this.category = category; }
 
   async execute(): Promise<number> {
-    if (!this.ctx.ideaSession.isActive()) { addSystem(this.ctx.state, "No active idea session."); return 1; }
+    if (!this.ctx.ideaSession.isActive()) { this.ctx.content.addSystem("No active idea session."); return 1; }
     const cat = this.category || "now";
-    if (!["now", "next", "later"].includes(cat)) { addSystem(this.ctx.state, "Category: now, next, or later"); return 1; }
+    if (!["now", "next", "later"].includes(cat)) { this.ctx.content.addSystem("Category: now, next, or later"); return 1; }
     const id = this.ctx.ideaSession.ideaId ?? nextIdeaId(this.ctx.projectDir);
-    this.ctx.state.busy = true; this.ctx.state.thinking = true; this.ctx.state._notify?.();
+    this.ctx.input.setBusy(true); this.ctx.content.setThinking(true);
     try {
-      this.ctx.streamBuf.value = ""; addModel(this.ctx.state, "", "", true);
+      this.ctx.streamBuf.value = ""; this.ctx.content.addModel("", "", true);
       const summary = await this.ctx.agent.send("Produce a structured idea summary: Title, User Story, Acceptance Criteria, Affected Modules, Affected Files. Markdown format.");
-      updateLastModel(this.ctx.state, summary, "", false);
+      this.ctx.content.updateLastModel(summary, "", false);
       writeIdea(this.ctx.projectDir, id, buildIdeaContent(`IDEA-${id}`, summary, cat as "now" | "next" | "later"));
       this.ctx.ideaSession.cancel();
-      this.ctx.state.mode = ""; addSystem(this.ctx.state, `Saved IDEA-${id} as "${cat}".`);
-    } catch (e) { addSystem(this.ctx.state, `Error: ${e}`); }
-    finally { this.ctx.state.thinking = false; this.ctx.state.busy = false; this.ctx.state._notify?.(); }
+      this.ctx.footer.setMode("");
+      this.ctx.content.addSystem(`Saved IDEA-${id} as "${cat}".`);
+    } catch (e) { this.ctx.content.addSystem(`Error: ${e}`); }
+    finally { this.ctx.content.setThinking(false); this.ctx.input.setBusy(false); }
     return 0;
   }
 }

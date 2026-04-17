@@ -93,14 +93,19 @@ import type { AgentLoop } from "../agent/loop.js";
 import type { ChatSession } from "../session.js";
 import type { ContextCompactor } from "../agent/context.js";
 import type { IdeaSession } from "./idea.js";
-import type { TUIState } from "../tui/state.js";
-import { addSystem } from "../tui/state.js";
+import type { ContentRegion } from "../tui/regions/ContentRegion.js";
+import type { FooterRegion } from "../tui/regions/FooterRegion.js";
+import type { InputRegion } from "../tui/regions/InputRegion.js";
+import type { HeaderRegion } from "../tui/regions/HeaderRegion.js";
 
 /** Shared context passed from ChatCommand to each slash command. */
 export interface ChatContext {
   model: ModelInterface;
   agent: AgentLoop;
-  state: TUIState;
+  header: HeaderRegion;
+  content: ContentRegion;
+  footer: FooterRegion;
+  input: InputRegion;
   session: ChatSession;
   compactor: ContextCompactor;
   ideaSession: IdeaSession;
@@ -114,20 +119,18 @@ export type PromptFn = (filename: string, catList: string[]) => string;
 
 /** Run a framework command handler in the chat shell with busy/mode management. */
 export async function wrapCommand(
-  fn: (args: string, mc: ModelInterface, state: TUIState, promptFn: PromptFn, log: string) => Promise<void>,
-  args: string, mc: ModelInterface, state: TUIState, promptFn: PromptFn, log: string,
+  fn: (args: string, mc: ModelInterface, content: ContentRegion, footer: FooterRegion, input: InputRegion, promptFn: PromptFn, log: string) => Promise<void>,
+  args: string, mc: ModelInterface, ctx: ChatContext, promptFn: PromptFn, log: string,
 ): Promise<void> {
   const cmdName = fn.name.replace("handle", "/").toLowerCase();
-  state.mode = cmdName;
-  state.busy = true;
-  state._notify?.();
+  ctx.footer.setMode(cmdName);
+  ctx.input.setBusy(true);
   try {
-    await fn(args, mc, state, promptFn, log);
+    await fn(args, mc, ctx.content, ctx.footer, ctx.input, promptFn, log);
   } catch (e) {
-    addSystem(state, `Error: ${e instanceof Error ? e.message : e}`);
+    ctx.content.addSystem(`Error: ${e instanceof Error ? e.message : e}`);
   } finally {
-    state.mode = "";
-    state.busy = false;
-    state._notify?.();
+    ctx.footer.setMode("");
+    ctx.input.setBusy(false);
   }
 }

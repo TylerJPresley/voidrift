@@ -23,18 +23,26 @@ import { WriteContext } from "../tools/filesystem.js";
 import { ChatSession } from "../session.js";
 import { MemoryManager } from "../memory.js";
 import { captureGitSnapshot, snapshotToPromptBlock } from "../git.js";
-import { createState, addOperator, addModel, addTool, addSystem, updateLastModel, type TUIState } from "../tui/state.js";
-import { App } from "../tui/App.js";
 import { IdeaSession } from "./idea.js";
-import { IdeaStartCommand, IdeaDoneCommand } from "./idea.js";
 import { createPermissionGate, type PermCategory, type PermDecision } from "../tools/permissions.js";
 import { type ChatContext, wrapCommand, type PromptFn } from "./base.js";
+
+// Regions
+import { HeaderRegion } from "../tui/regions/HeaderRegion.js";
+import { ContentRegion } from "../tui/regions/ContentRegion.js";
+import { FooterRegion } from "../tui/regions/FooterRegion.js";
+import { InputRegion } from "../tui/regions/InputRegion.js";
+
+// Commands
 import { HelpCommand } from "./help.js";
 import { ClearCommand } from "./clear.js";
 import { AskCommand } from "./ask.js";
 import { CompactCommand } from "./compact.js";
 import { SettingsCommand } from "./settings.js";
 import { ModelCommand } from "./model.js";
+import { IdeaStartCommand, IdeaDoneCommand } from "./idea.js";
+
+import { App } from "../tui/App.js";
 
 interface ChatOptions {
   doc?: string;
@@ -67,30 +75,38 @@ export async function runChat(model: ModelInterface, options: ChatOptions = {}):
     systemPrompt = parts.filter(Boolean).join("\n\n");
   }
 
-  // Doc context — works in all modes including bare (REQ-U-17)
   if (options.doc) {
     const docPath = join(d, options.doc);
     if (existsSync(docPath)) {
       const docContent = readFileSync(docPath, "utf-8");
-      const docBlock = loadPrompt("chat", "DOC")?.replace("{doc_name}", options.doc).replace("{doc_content}", docContent) ?? `## ${options.doc}\n\n${docContent}`;
-      systemPrompt += "\n\n" + docBlock;
+      systemPrompt += "\n\n" + (loadPrompt("chat", "DOC")?.replace("{doc_name}", options.doc).replace("{doc_content}", docContent) ?? docContent);
     } else {
-      const newBlock = loadPrompt("chat", "DOC-NEW")?.replace(/{doc_name}/g, options.doc) ?? `Document ${options.doc} does not exist yet.`;
-      systemPrompt += "\n\n" + newBlock;
+      systemPrompt += "\n\n" + (loadPrompt("chat", "DOC-NEW")?.replace(/{doc_name}/g, options.doc) ?? `Document ${options.doc} does not exist yet.`);
     }
   }
 
-  // Build tools + agent
+  // Regions
+  const header = new HeaderRegion();
+  const content = new ContentRegion();
+  const footer = new FooterRegion();
+  const input = new InputRegion();
+
+  const branch = captureGitSnapshot(projectDir)?.branch ?? "";
+  const cwd = projectDir.replace(require("os").homedir(), "~");
+  header.modelName = model.config.alias;
+  footer.modelName = model.config.alias;
+  footer.cwd = cwd;
+  footer.branch = branch;
+
+  // Tools + agent
   const ctx = new WriteContext({ projectDir, maxReadLines: model.config.maxReadLines });
   const webCache = new Map<string, string>();
   const askFn = (question: string, opts?: string[]): string => {
-    addSystem(state, `❓ ${question}${opts ? "\n" + opts.map((o, i) => `  ${i + 1}. ${o}`).join("\n") : ""}`);
+    content.addSystem(`❓ ${question}${opts ? "\n" + opts.map((o, i) => `  ${i + 1}. ${o}`).join("\n") : ""}`);
     return opts?.[0] ?? "Proceed with your best judgment.";
   };
   const [tools, handlers] = buildLocalTools("chat", projectDir, ctx, {
-    memoryManager: memMgr,
-    webFetchKwargs: { model, logPath: log, webCache, allowList: [] },
-    askFn,
+    memoryManager: memMgr, webFetchKwargs: { model, logPath: log, webCache, allowList: [] }, askFn,
   });
 
   const agent = new AgentLoop({
@@ -99,11 +115,20 @@ export async function runChat(model: ModelInterface, options: ChatOptions = {}):
     logPath: log, showSpinner: false, toolChoice: "auto",
   });
 
-  // Streaming token buffer
+  // Streaming
   const streamBuf = { value: "" };
-  agent.onToken = (token: string) => {
-    streamBuf.value += token;
-    updateLastModel(state, streamBuf.value, "", true);
+  agent.onToken = (token: string) => { streamBuf.value += token; content.updateLastModel(streamBuf.value, "", true); };
+  agent.onProgress = (data) => { if (data.ctx_pct !== undefined) footer.setContext(data.ctx_pct); };
+  agent.onToolCall = (name, args) => {
+    content.setThinking(true);
+    try {
+      const a = JSON.parse(args || "{}");
+      content.addTool(name, a.path ?? a.url ?? a.cmd ?? a.name ?? "", a.action ?? "");
+      if (name === "file" && (a.action === "read" || a.action === "list") && a.path) {
+        recentFiles.unshift(join(projectDir, a.path));
+        if (recentFiles.length > 10) recentFiles.length = 10;
+      }
+    } catch { content.addTool(name); }
   };
 
   // Session
@@ -118,95 +143,65 @@ export async function runChat(model: ModelInterface, options: ChatOptions = {}):
   }) as (...args: unknown[]) => string;
 
   if (session.entryCount > 0) {
-    const restored = session.restoreMessages();
-    agent.messages.push(...restored);
+    agent.messages.push(...session.restoreMessages());
     if (session.shouldInjectGapMarker()) {
       agent.messages.push({ role: "user", content: "Session resumed. Do not continue previous actions — wait for new instructions." });
       agent.messages.push({ role: "assistant", content: "Understood. What would you like to work on?" });
     }
+    header.setHasMessages(true);
+    content.addSystem(`Resuming session (${session.entryCount} messages).`);
   }
 
-  // TUI state
-  const branch = captureGitSnapshot(projectDir)?.branch ?? "";
-  const cwd = projectDir.replace(require("os").homedir(), "~");
-  const state = createState(model.config.alias, cwd, branch);
-
-  // Context compactor (REQ-U-7, REQ-U-10)
+  // Context compactor
   const compactPrompt = loadPrompt("chat", "COMPACT") ?? "Summarize the conversation preserving key decisions, file changes, and next steps.";
   const compactor = new ContextCompactor({
-    maxContext: model.config.maxContext ?? 0,
-    compactPrompt,
+    maxContext: model.config.maxContext ?? 0, compactPrompt,
     logFn: (msg) => { try { appendFileSync(log, msg + "\n"); } catch { /* */ } },
   });
   const recentFiles: string[] = [];
 
-  // Permission gate (REQ-U-22)
+  // Permission gate
   const permGate = createPermissionGate();
-  const permPromptFn = (category: PermCategory, description: string): PermDecision => "allow-once";
-  agent.beforeToolCall = permGate.hook(projectDir, permPromptFn);
-
-  if (session.entryCount > 0) addSystem(state, `Resuming session (${session.entryCount} messages).`);
+  agent.beforeToolCall = permGate.hook(projectDir, () => "allow-once");
 
   const ideaSession = new IdeaSession();
-  const defaultPromptFn = (f: string, c: string[]) => "skip";
+  const defaultPromptFn: PromptFn = () => "skip";
 
-  // Shared context for slash commands
-  const chatCtx: ChatContext = { model, agent, state, session, compactor, ideaSession, projectDir, logPath: log, recentFiles, streamBuf };
+  // Chat context for slash commands
+  const chatCtx: ChatContext = { model, agent, header, content, footer, input, session, compactor, ideaSession, projectDir, logPath: log, recentFiles, streamBuf };
 
-  // Callbacks
-  agent.onProgress = (data) => {
-    if (data.ctx_pct !== undefined) { state.contextPct = data.ctx_pct; state._notify?.(); }
-  };
-  agent.onToolCall = (name, args) => {
-    state.thinking = true; state._notify?.();
-    try {
-      const a = JSON.parse(args || "{}");
-      const action = a.action ?? "";
-      const detail = a.path ?? a.url ?? a.cmd ?? a.name ?? "";
-      addTool(state, name, detail, action);
-      if (name === "file" && (action === "read" || action === "list") && a.path) {
-        const resolved = join(projectDir, a.path);
-        recentFiles.unshift(resolved);
-        if (recentFiles.length > 10) recentFiles.length = 10;
-      }
-    } catch { addTool(state, name); }
-  };
-
-  // ---------------------------------------------------------------------------
-  // Framework command handlers (run via wrapCommand)
-  // ---------------------------------------------------------------------------
-
-  const handleGather = async (args: string, mc: ModelInterface, st: TUIState, pf: PromptFn, lg: string) => {
+  // Framework command handlers
+  const handleGather = async (a: string, mc: ModelInterface, c: ContentRegion) => {
     const { runGather } = await import("./gather.js");
-    addSystem(st, `Gathering from ${args || process.cwd()}`);
-    const r = await runGather(mc, args || process.cwd(), undefined, false, undefined, (f, c) => pf(f, c));
-    addSystem(st, r === 0 ? "✓ Gather complete" : "✗ Gather failed");
+    c.addSystem(`Gathering from ${a || process.cwd()}`);
+    const r = await runGather(mc, a || process.cwd());
+    c.addSystem(r === 0 ? "✓ Gather complete" : "✗ Gather failed");
   };
-  const handlePlan = async (args: string, mc: ModelInterface, st: TUIState, pf: PromptFn, lg: string) => {
+  const handlePlan = async (a: string, mc: ModelInterface, c: ContentRegion) => {
     const { runPlan } = await import("./plan.js");
-    addSystem(st, "Running plan..."); const r = await runPlan(mc, args === "overwrite"); addSystem(st, r === 0 ? "✓ Plan complete" : "✗ Plan failed");
+    c.addSystem("Running plan..."); const r = await runPlan(mc, a === "overwrite"); c.addSystem(r === 0 ? "✓ Plan complete" : "✗ Plan failed");
   };
-  const handleDevelop = async (args: string, mc: ModelInterface, st: TUIState, pf: PromptFn, lg: string) => {
+  const handleDevelop = async (a: string, mc: ModelInterface, c: ContentRegion) => {
     const { runDevelop } = await import("./develop.js");
-    addSystem(st, "Running develop..."); const r = await runDevelop(mc); addSystem(st, r === 0 ? "✓ Develop complete" : "✗ Develop failed");
+    c.addSystem("Running develop..."); const r = await runDevelop(mc); c.addSystem(r === 0 ? "✓ Develop complete" : "✗ Develop failed");
   };
-  const handleVerify = async (args: string, mc: ModelInterface, st: TUIState, pf: PromptFn, lg: string) => {
+  const handleVerify = async (a: string, mc: ModelInterface, c: ContentRegion) => {
     const { runVerify } = await import("./verify.js");
-    addSystem(st, "Running verify..."); const r = await runVerify(mc); addSystem(st, r === 0 ? "✓ Verify complete" : "✗ Verify failed");
+    c.addSystem("Running verify..."); const r = await runVerify(mc); c.addSystem(r === 0 ? "✓ Verify complete" : "✗ Verify failed");
   };
-  const handleDeploy = async (args: string, mc: ModelInterface, st: TUIState, pf: PromptFn, lg: string) => {
+  const handleDeploy = async (a: string, mc: ModelInterface, c: ContentRegion) => {
     const { runDeploy } = await import("./deploy.js");
-    addSystem(st, "Running deploy..."); const r = await runDeploy(mc); addSystem(st, r === 0 ? "✓ Deploy complete" : "✗ Deploy failed");
+    c.addSystem("Running deploy..."); const r = await runDeploy(mc); c.addSystem(r === 0 ? "✓ Deploy complete" : "✗ Deploy failed");
   };
 
-  // ---------------------------------------------------------------------------
-  // Slash command routing
-  // ---------------------------------------------------------------------------
+  // Wrap framework handlers to match wrapCommand signature
+  const wrap = (fn: (a: string, mc: ModelInterface, c: ContentRegion) => Promise<void>) =>
+    async (args: string, mc: ModelInterface, c: ContentRegion, f: FooterRegion, i: InputRegion, pf: PromptFn, l: string) => fn(args, mc, c);
 
+  // Slash command routing
   const onSubmit = (text: string) => {
     const low = text.toLowerCase().trim();
 
-    // Slash command dispatch
     if (low === "/help") { new HelpCommand(chatCtx).run(); return; }
     if (low === "/clear") { new ClearCommand(chatCtx).run(); return; }
     if (low.startsWith("/ask")) { new AskCommand(chatCtx, text.slice(4).trim()).run(); return; }
@@ -215,52 +210,50 @@ export async function runChat(model: ModelInterface, options: ChatOptions = {}):
     if (low.startsWith("/model")) { new ModelCommand(chatCtx, text.slice(6).trim()).run(); return; }
     if (low.startsWith("/idea")) { new IdeaStartCommand(chatCtx, text.slice(5).trim()).run(); return; }
     if (low.startsWith("/done")) { new IdeaDoneCommand(chatCtx, text.slice(5).trim().toLowerCase()).run(); return; }
-    if (low === "/chat") { state.mode = ""; state._notify?.(); return; }
+    if (low === "/chat") { footer.setMode(""); return; }
 
-    // Framework command dispatch (background thread via wrapCommand)
-    if (low.startsWith("/gather")) { wrapCommand(handleGather, text.slice(7).trim(), model, state, defaultPromptFn, log); return; }
-    if (low.startsWith("/plan")) { wrapCommand(handlePlan, text.slice(5).trim(), model, state, (f, c) => "update", log); return; }
-    if (low.startsWith("/develop")) { wrapCommand(handleDevelop, text.slice(8).trim(), model, state, defaultPromptFn, log); return; }
-    if (low.startsWith("/verify")) { wrapCommand(handleVerify, text.slice(7).trim(), model, state, defaultPromptFn, log); return; }
-    if (low.startsWith("/deploy")) { wrapCommand(handleDeploy, text.slice(7).trim(), model, state, defaultPromptFn, log); return; }
+    if (low.startsWith("/gather")) { wrapCommand(wrap(handleGather), text.slice(7).trim(), model, chatCtx, defaultPromptFn, log); return; }
+    if (low.startsWith("/plan")) { wrapCommand(wrap(handlePlan), text.slice(5).trim(), model, chatCtx, defaultPromptFn, log); return; }
+    if (low.startsWith("/develop")) { wrapCommand(wrap(handleDevelop), text.slice(8).trim(), model, chatCtx, defaultPromptFn, log); return; }
+    if (low.startsWith("/verify")) { wrapCommand(wrap(handleVerify), text.slice(7).trim(), model, chatCtx, defaultPromptFn, log); return; }
+    if (low.startsWith("/deploy")) { wrapCommand(wrap(handleDeploy), text.slice(7).trim(), model, chatCtx, defaultPromptFn, log); return; }
 
-    // Input locking during commands
-    if (state.busy && state.mode) { addSystem(state, "Command running — use /ask for questions."); return; }
-    if (state.busy) { state.pendingMessage = text; return; }
+    if (input.busy && footer.mode) { content.addSystem("Command running — use /ask for questions."); return; }
+    if (input.busy) { input.setPending(text); return; }
 
     // Normal message → agent
-    addOperator(state, text);
+    content.addOperator(text);
     session.append("user", text);
-    state.thinking = true; state.busy = true; state._notify?.();
+    content.setThinking(true);
+    input.setBusy(true);
 
     (async () => {
       try {
-        // Auto-compact check (REQ-U-10)
-        if (compactor.shouldAutoCompact(state.contextPct * (model.config.maxContext ?? 0) / 100)) {
-          addSystem(state, "Auto-compacting context...");
+        if (compactor.shouldAutoCompact(footer.contextPct * (model.config.maxContext ?? 0) / 100)) {
+          content.addSystem("Auto-compacting context...");
           await new CompactCommand(chatCtx).execute();
-        } else if (compactor.shouldNudge(state.contextPct * (model.config.maxContext ?? 0) / 100)) {
-          addSystem(state, "Context is filling up. Type /compact to free space.");
+        } else if (compactor.shouldNudge(footer.contextPct * (model.config.maxContext ?? 0) / 100)) {
+          content.addSystem("Context is filling up. Type /compact to free space.");
         }
         streamBuf.value = "";
-        addModel(state, "", "", true);
+        content.addModel("", "", true);
         const response = await agent.send(text);
-        const displayText = response.trim() ? response : "(No response from model)";
-        updateLastModel(state, displayText, "", false);
+        content.updateLastModel(response.trim() ? response : "(No response from model)", "", false);
         session.append("assistant", response);
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         const name = (e as Record<string, unknown>)?.constructor?.name ?? "";
         if (name === "APIConnectionError" || msg.includes("Connection error")) {
-          addSystem(state, `Cannot connect to ${model.config.baseUrl} — is the model/gateway running?`);
+          content.addSystem(`Cannot connect to ${model.config.baseUrl} — is the model/gateway running?`);
         } else {
-          addSystem(state, `Error: ${msg}`);
+          content.addSystem(`Error: ${msg}`);
         }
       } finally {
-        state.thinking = false; state.busy = false; state._notify?.();
-        if (state.pendingMessage) {
-          const pending = state.pendingMessage;
-          state.pendingMessage = null;
+        content.setThinking(false);
+        input.setBusy(false);
+        if (input.pendingMessage) {
+          const pending = input.pendingMessage;
+          input.setPending(null);
           onSubmit(pending);
         }
       }
@@ -269,7 +262,7 @@ export async function runChat(model: ModelInterface, options: ChatOptions = {}):
 
   // Render TUI
   const { waitUntilExit } = render(
-    React.createElement(App, { state, onSubmit, onEscape: () => { state.pendingMessage = null; } }),
+    React.createElement(App, { header, content, footer, input, onSubmit, onEscape: () => input.setPending(null) }),
   );
   await waitUntilExit();
 }

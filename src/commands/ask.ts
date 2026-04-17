@@ -1,9 +1,4 @@
-/**
- * /ask — one-shot question without affecting session context (REQ-U-15).
- */
-
 import { SlashCommand, type ChatContext } from "./base.js";
-import { addSystem, addModel, updateLastModel } from "../tui/state.js";
 
 export class AskCommand extends SlashCommand {
   readonly name = "ask";
@@ -12,9 +7,9 @@ export class AskCommand extends SlashCommand {
   constructor(ctx: ChatContext, question: string) { super(); this.ctx = ctx; this.question = question; }
 
   async execute(): Promise<number> {
-    if (!this.question) { addSystem(this.ctx.state, "Usage: /ask <question>"); return 1; }
-    addModel(this.ctx.state, "", "", true);
-    this.ctx.state.busy = true;
+    if (!this.question) { this.ctx.content.addSystem("Usage: /ask <question>"); return 1; }
+    this.ctx.content.addModel("", "", true);
+    this.ctx.input.setBusy(true);
     try {
       const { AgentLoop } = await import("../agent/loop.js");
       const { getMaxTokens } = await import("../config.js");
@@ -24,9 +19,9 @@ export class AskCommand extends SlashCommand {
         logPath: this.ctx.logPath, showSpinner: false,
       });
       const answer = await oneShot.send(this.question);
-      updateLastModel(this.ctx.state, answer, "", false);
-    } catch (e) { addSystem(this.ctx.state, `Ask failed: ${e}`); }
-    finally { this.ctx.state.busy = false; }
+      this.ctx.content.updateLastModel(answer, "", false);
+    } catch (e) { this.ctx.content.addSystem(`Ask failed: ${e}`); }
+    finally { this.ctx.input.setBusy(false); }
     return 0;
   }
 }

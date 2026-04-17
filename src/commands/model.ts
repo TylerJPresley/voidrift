@@ -1,14 +1,7 @@
-/**
- * /model — select active model via footer panel.
- *
- * /model         — open model selector in footer
- * /model <alias> — switch directly
- */
-
 import { SlashCommand, type ChatContext } from "./base.js";
-import { addSystem, openPanel, type PanelItem } from "../tui/state.js";
 import { listAliases, resolveModel } from "../models.js";
 import { ConfigManager, CONFIG_SCHEMA } from "../config.js";
+import { ModelPanel } from "../tui/panels/ModelPanel.js";
 
 CONFIG_SCHEMA["current_model"] = { type: "string", description: "Currently selected model alias" };
 
@@ -17,31 +10,15 @@ export class ModelCommand extends SlashCommand {
   private ctx: ChatContext;
   private alias: string;
 
-  constructor(ctx: ChatContext, alias: string) {
-    super();
-    this.ctx = ctx;
-    this.alias = alias.trim();
-  }
+  constructor(ctx: ChatContext, alias: string) { super(); this.ctx = ctx; this.alias = alias.trim(); }
 
   async execute(): Promise<number> {
     const aliases = listAliases();
     const current = this.ctx.model.config.alias;
 
     if (!this.alias) {
-      const items: PanelItem[] = aliases.map(a => ({
-        label: a,
-        value: a,
-        marker: a === current ? "◀" : undefined,
-      }));
-      openPanel(this.ctx.state, {
-        type: "model",
-        title: "Model",
-        items,
-        selectedIndex: Math.max(0, aliases.indexOf(current)),
-        hint: "",
-        onSelect: (item) => this._switchTo(item.value),
-        onCancel: () => {},
-      });
+      const panel = new ModelPanel(aliases, current, (alias) => this._switchTo(alias));
+      this.ctx.footer.showPanel(panel);
       return 0;
     }
 
@@ -51,7 +28,7 @@ export class ModelCommand extends SlashCommand {
   private _switchTo(alias: string): number {
     const aliases = listAliases();
     if (!aliases.includes(alias)) {
-      addSystem(this.ctx.state, `Unknown model '${alias}'. Available: ${aliases.join(", ")}`);
+      this.ctx.content.addSystem(`Unknown model '${alias}'. Available: ${aliases.join(", ")}`);
       return 1;
     }
     try {
@@ -61,12 +38,12 @@ export class ModelCommand extends SlashCommand {
       agent._model = newModel;
       agent._adapter = newModel.adapter;
       agent._client = newModel.adapter.createClient(newModel.config);
-      this.ctx.state.modelName = alias;
-      this.ctx.state._notify?.();
+      this.ctx.footer.setModel(alias);
+      this.ctx.header.setModel(alias);
       new ConfigManager().set("current_model", alias);
-      addSystem(this.ctx.state, `✓ Switched to ${alias}`);
+      this.ctx.content.addSystem(`✓ Switched to ${alias}`);
     } catch (e) {
-      addSystem(this.ctx.state, `Failed: ${e instanceof Error ? e.message : e}`);
+      this.ctx.content.addSystem(`Failed: ${e instanceof Error ? e.message : e}`);
       return 1;
     }
     return 0;
