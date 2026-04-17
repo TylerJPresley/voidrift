@@ -31,7 +31,7 @@ import {
   type ChatContext,
   HelpCommand, ClearCommand, QuickCommand, CompactCommand,
   IdeaStartCommand, IdeaDoneCommand,
-  wrapCommand, handleGather, handlePlan, handleDevelop, handleVerify,
+  wrapCommand, handleGather, handlePlan, handleDevelop, handleVerify, handleDeploy,
 } from "./slashCommands.js";
 
 interface ChatOptions {
@@ -191,6 +191,7 @@ export async function runChat(model: ModelInterface, options: ChatOptions = {}):
     if (low.startsWith("/plan")) { wrapCommand(handlePlan, text.slice(5).trim(), model, state, (f, c) => "update", log); return; }
     if (low.startsWith("/develop")) { wrapCommand(handleDevelop, text.slice(8).trim(), model, state, defaultPromptFn, log); return; }
     if (low.startsWith("/verify")) { wrapCommand(handleVerify, text.slice(7).trim(), model, state, defaultPromptFn, log); return; }
+    if (low.startsWith("/deploy")) { wrapCommand(handleDeploy, text.slice(7).trim(), model, state, defaultPromptFn, log); return; }
 
     // Input locking during commands
     if (state.busy && state.mode) { addSystem(state, "Command running — use /quick for questions."); return; }

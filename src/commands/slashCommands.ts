@@ -40,6 +40,7 @@ export class HelpCommand extends SlashCommand {
     addSystem(this.state, "  /gather [path]  reverse-engineer requirements");
     addSystem(this.state, "  /plan           generate architecture + tasks");
     addSystem(this.state, "  /develop        execute tasks from manifest");
+    addSystem(this.state, "  /deploy         prepare release (version, tag)");
     addSystem(this.state, "  /verify         run acceptance tests");
     addSystem(this.state, "  /idea           guided idea refinement");
     addSystem(this.state, "  /compact        summarize context to free space");
@@ -254,4 +255,11 @@ export async function handleVerify(args: string, mc: ModelInterface, state: TUIS
   addSystem(state, "Running verify...");
   const result = await runVerify(mc);
   addSystem(state, result === 0 ? "✓ Verify complete" : "✗ Verify failed");
+}
+
+export async function handleDeploy(args: string, mc: ModelInterface, state: TUIState, promptFn: PromptFn, log: string): Promise<void> {
+  const { runDeploy } = await import("./deploy.js");
+  addSystem(state, "Running deploy...");
+  const result = await runDeploy(mc);
+  addSystem(state, result === 0 ? "✓ Deploy complete" : "✗ Deploy failed");
 }
