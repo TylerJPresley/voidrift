@@ -34,6 +34,7 @@ import { ClearCommand } from "./clear.js";
 import { AskCommand } from "./ask.js";
 import { CompactCommand } from "./compact.js";
 import { SettingsCommand } from "./settings.js";
+import { ModelCommand } from "./model.js";
 
 interface ChatOptions {
   doc?: string;
@@ -211,6 +212,7 @@ export async function runChat(model: ModelInterface, options: ChatOptions = {}):
     if (low.startsWith("/ask")) { new AskCommand(chatCtx, text.slice(4).trim()).run(); return; }
     if (low === "/compact") { new CompactCommand(chatCtx).run(); return; }
     if (low.startsWith("/settings")) { new SettingsCommand(chatCtx, text.slice(9).trim()).run(); return; }
+    if (low.startsWith("/model")) { new ModelCommand(chatCtx, text.slice(6).trim()).run(); return; }
     if (low.startsWith("/idea")) { new IdeaStartCommand(chatCtx, text.slice(5).trim()).run(); return; }
     if (low.startsWith("/done")) { new IdeaDoneCommand(chatCtx, text.slice(5).trim().toLowerCase()).run(); return; }
     if (low === "/chat") { state.mode = ""; state._notify?.(); return; }

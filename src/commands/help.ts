@@ -23,6 +23,7 @@ export class HelpCommand extends SlashCommand {
       "  /ask <q>        one-shot answer (no context)",
       "  /clear          reset conversation",
       "  /settings       view/modify config",
+      "  /model [alias]  switch model",
       "  /help           this list",
       "  /quit           exit",
     ].join("\n"));
