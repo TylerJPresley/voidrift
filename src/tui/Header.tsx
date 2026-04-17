@@ -29,7 +29,7 @@ export function Header({ modelName, hasMessages }: HeaderProps) {
         <Text> </Text>
         <Text>  <Text color="#5c8cc8" bold>/help</Text><Text dimColor>     list commands</Text></Text>
         <Text>  <Text color="#5c8cc8" bold>/clear</Text><Text dimColor>    reset conversation</Text></Text>
-        <Text>  <Text color="#5c8cc8" bold>/quick</Text><Text dimColor>    {"<question>"}  fast one-shot answer</Text></Text>
+        <Text>  <Text color="#5c8cc8" bold>/ask</Text><Text dimColor>      {"<question>"}  fast one-shot answer</Text></Text>
         <Text>  <Text color="#5c8cc8" bold>/plan · /develop · /verify</Text><Text dimColor>  workflow commands</Text></Text>
         {hasMessages && (
           <>

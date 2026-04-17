@@ -29,7 +29,7 @@ import { IdeaSession } from "./idea.js";
 import { createPermissionGate, type PermCategory, type PermDecision } from "./permissions.js";
 import {
   type ChatContext,
-  HelpCommand, ClearCommand, QuickCommand, CompactCommand,
+  HelpCommand, ClearCommand, AskCommand, CompactCommand,
   IdeaStartCommand, IdeaDoneCommand,
   wrapCommand, handleGather, handlePlan, handleDevelop, handleVerify, handleDeploy,
 } from "./slashCommands.js";
@@ -180,7 +180,7 @@ export async function runChat(model: ModelInterface, options: ChatOptions = {}):
     // Slash command dispatch
     if (low === "/help") { new HelpCommand(chatCtx).run(); return; }
     if (low === "/clear") { new ClearCommand(chatCtx).run(); return; }
-    if (low.startsWith("/quick")) { new QuickCommand(chatCtx, text.slice(6).trim()).run(); return; }
+    if (low.startsWith("/ask")) { new AskCommand(chatCtx, text.slice(4).trim()).run(); return; }
     if (low === "/compact") { new CompactCommand(chatCtx).run(); return; }
     if (low.startsWith("/idea")) { new IdeaStartCommand(chatCtx, text.slice(5).trim()).run(); return; }
     if (low.startsWith("/done")) { new IdeaDoneCommand(chatCtx, text.slice(5).trim().toLowerCase()).run(); return; }
@@ -194,7 +194,7 @@ export async function runChat(model: ModelInterface, options: ChatOptions = {}):
     if (low.startsWith("/deploy")) { wrapCommand(handleDeploy, text.slice(7).trim(), model, state, defaultPromptFn, log); return; }
 
     // Input locking during commands
-    if (state.busy && state.mode) { addSystem(state, "Command running — use /quick for questions."); return; }
+    if (state.busy && state.mode) { addSystem(state, "Command running — use /ask for questions."); return; }
     if (state.busy) { state.pendingMessage = text; return; }
 
     // Normal message → agent

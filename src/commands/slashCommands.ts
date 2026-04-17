@@ -44,7 +44,7 @@ export class HelpCommand extends SlashCommand {
     addSystem(this.state, "  /verify         run acceptance tests");
     addSystem(this.state, "  /idea           guided idea refinement");
     addSystem(this.state, "  /compact        summarize context to free space");
-    addSystem(this.state, "  /quick <q>      one-shot answer (no context)");
+    addSystem(this.state, "  /ask <q>        one-shot answer (no context)");
     addSystem(this.state, "  /clear          reset conversation");
     addSystem(this.state, "  /help           this list");
     addSystem(this.state, "  /quit           exit");
@@ -71,17 +71,17 @@ export class ClearCommand extends SlashCommand {
 }
 
 // ---------------------------------------------------------------------------
-// /quick <question>
+// /ask <question>
 // ---------------------------------------------------------------------------
 
-export class QuickCommand extends SlashCommand {
-  readonly name = "quick";
+export class AskCommand extends SlashCommand {
+  readonly name = "ask";
   private ctx: ChatContext;
   private question: string;
   constructor(ctx: ChatContext, question: string) { super(); this.ctx = ctx; this.question = question; }
 
   async execute(): Promise<number> {
-    if (!this.question) { addSystem(this.ctx.state, "Usage: /quick <question>"); return 1; }
+    if (!this.question) { addSystem(this.ctx.state, "Usage: /ask <question>"); return 1; }
     addModel(this.ctx.state, "", "", true);
     this.ctx.state.busy = true;
     try {
@@ -94,7 +94,7 @@ export class QuickCommand extends SlashCommand {
       });
       const answer = await oneShot.send(this.question);
       updateLastModel(this.ctx.state, answer, "", false);
-    } catch (e) { addSystem(this.ctx.state, `Quick failed: ${e}`); }
+    } catch (e) { addSystem(this.ctx.state, `Ask failed: ${e}`); }
     finally { this.ctx.state.busy = false; }
     return 0;
   }

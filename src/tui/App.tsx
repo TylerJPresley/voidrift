@@ -67,7 +67,7 @@ export function App({ state, onSubmit, onEscape }: AppProps) {
   }, [onSubmit, exit]);
 
   const placeholder = state.busy
-    ? (state.mode ? "command running · /quick for questions" : "voidrift is working · type to queue a message")
+    ? (state.mode ? "command running · /ask for questions" : "voidrift is working · type to queue a message")
     : "ask a question or describe a task ↵";
 
   return (
