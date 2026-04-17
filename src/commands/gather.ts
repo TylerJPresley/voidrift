@@ -17,6 +17,7 @@ import { loadPrompt, loadTemplate } from "../prompts.js";
 import { ensureVoidriftDir, bootRun, appendState, checkDiskSpace, printCommandHeader } from "../utils.js";
 import { getMaxTokens } from "../config.js";
 import { buildLocalTools } from "../tools/builder.js";
+import { trackAgent, formatAgentProgress } from "./progress.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -185,7 +186,7 @@ export function stripPreamble(response: string): string {
 
 export async function runTriage(
   model: ModelInterface, log: string, analystRole: string, fileTree: string,
-  budget?: TokenBudget, extra?: unknown,
+  budget?: TokenBudget, emit?: (msg: string) => void,
 ): Promise<Record<string, string[]>> {
   const prompt = loadPrompt("gather", "TRIAGE");
   const system = [analystRole, prompt].filter(Boolean).join("\n\n");
@@ -194,30 +195,31 @@ export async function runTriage(
     stream: false, maxTokens: getMaxTokens(model.config, "gather.triage"),
     logPath: log, showSpinner: false, tokenBudget: budget,
   });
-  const response = await agent.send(fileTree);
+  const progress = emit ?? (() => {});
+  const response = await trackAgent(agent, fileTree, "triage", progress);
   return parseTriage(response);
 }
 
 export async function runFileAnalysis(
   model: ModelInterface, files: string[], fileCategory: Record<string, string>,
   fromPath: string, log: string, budget?: TokenBudget,
+  emit?: (msg: string) => void,
 ): Promise<Record<string, string>> {
   const results: Record<string, string> = {};
   const voidriftDir = join(fromPath, "..", ".voidrift");
   const promptTemplate = loadPrompt("gather", "ANALYSIS");
+  const progress = emit ?? (() => {});
 
   for (const fp of files) {
     const cat = fileCategory[fp] ?? "source";
-
-    // Generated files: filename-only analysis (REQ-G-27)
-    if (cat === "generated") continue; // handled separately
+    if (cat === "generated") continue;
 
     const fullPath = join(fromPath, fp);
     if (!existsSync(fullPath)) continue;
     const content = readFileSync(fullPath, "utf-8");
     const hash = fileHash(content);
     const cached = loadCachedAnalysis(voidriftDir, fp, hash);
-    if (cached) { results[fp] = cached; continue; }
+    if (cached) { results[fp] = cached; progress(formatAgentProgress({ label: fp, elapsed: 0, tokensIn: 0, tokensOut: 0, status: "cached" })); continue; }
 
     const prompt = promptTemplate.replace(/{category}/g, cat);
     const userTemplate = loadPrompt("gather", "ANALYSIS-USER");
@@ -234,16 +236,16 @@ export async function runFileAnalysis(
           stream: false, maxTokens: getMaxTokens(model.config, "gather.analysis"),
           logPath: log, showSpinner: false, tokenBudget: budget,
         });
-        chunkAnalyses.push(await chunkAgent.send(
-          `Analyze this **${cat}** file (chunk ${i + 1}/${chunks.length}): \`${fp}\`\n\n\`\`\`\n${chunks[i]}\n\`\`\``
-        ));
+        chunkAnalyses.push(await trackAgent(chunkAgent,
+          `Analyze this **${cat}** file (chunk ${i + 1}/${chunks.length}): \`${fp}\`\n\n\`\`\`\n${chunks[i]}\n\`\`\``,
+          `${fp} (chunk ${i + 1}/${chunks.length})`, progress));
       }
       if (chunkAnalyses.length > 1) {
         const consolAgent = new AgentLoop({
           model, systemPrompt: "Merge these partial analyses into a single unified analysis.", tools: [], toolHandlers: {},
           stream: false, maxTokens: getMaxTokens(model.config, "gather.analysis"), logPath: log, showSpinner: false, tokenBudget: budget,
         });
-        const merged = await consolAgent.send(chunkAnalyses.map((a, i) => `## Chunk ${i + 1}\n\n${a}`).join("\n\n"));
+        const merged = await trackAgent(consolAgent, chunkAnalyses.map((a, i) => `## Chunk ${i + 1}\n\n${a}`).join("\n\n"), `${fp} (merge)`, progress);
         results[fp] = merged;
         writeAnalysis(voidriftDir, fp, hash, merged);
       } else {
@@ -258,7 +260,7 @@ export async function runFileAnalysis(
       stream: false, maxTokens: getMaxTokens(model.config, "gather.analysis"),
       logPath: log, showSpinner: false, tokenBudget: budget,
     });
-    const analysis = await agent.send(userMsg);
+    const analysis = await trackAgent(agent, userMsg, fp, progress);
     results[fp] = analysis;
     writeAnalysis(voidriftDir, fp, hash, analysis);
   }
@@ -267,6 +269,7 @@ export async function runFileAnalysis(
 
 export async function runGeneratedAnalysis(
   model: ModelInterface, generatedFiles: string[], log: string, budget?: TokenBudget,
+  emit?: (msg: string) => void,
 ): Promise<string> {
   if (!generatedFiles.length) return "";
   const prompt = loadPrompt("gather", "ANALYSIS-GENERATED");
@@ -277,13 +280,14 @@ export async function runGeneratedAnalysis(
     stream: false, maxTokens: getMaxTokens(model.config, "gather.analysis"),
     logPath: log, showSpinner: false, tokenBudget: budget,
   });
-  return agent.send(userMsg);
+  const progress = emit ?? (() => {});
+  return trackAgent(agent, userMsg, "generated files", progress);
 }
 
 export async function runConsolidation(
   model: ModelInterface, allAnalyses: Record<string, string>,
   generatedAnalysis: string, existingReqs: string | null,
-  log: string, budget?: TokenBudget,
+  log: string, budget?: TokenBudget, emit?: (msg: string) => void,
 ): Promise<string> {
   const template = loadTemplate("REQUIREMENTS-TEMPLATE");
   const prompt = loadPrompt("gather", "CONSOLIDATION");
@@ -299,7 +303,8 @@ export async function runConsolidation(
     stream: false, maxTokens: getMaxTokens(model.config, "gather.consolidation"),
     logPath: log, showSpinner: false, tokenBudget: budget,
   });
-  return agent.send(userMsg);
+  const progress = emit ?? (() => {});
+  return trackAgent(agent, userMsg, "consolidation", progress);
 }
 
 // ---------------------------------------------------------------------------
@@ -342,7 +347,7 @@ export async function runGather(
   let categories: Record<string, string[]>;
   try {
     emit("▸ Stage 1: Triaging files...");
-    categories = await runTriage(model, log, analystRole, fileTree, tokenBudget);
+    categories = await runTriage(model, log, analystRole, fileTree, tokenBudget, onProgress ? emit : undefined);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     if (msg.includes("context length") || msg.includes("tokens exceed")) {
@@ -389,9 +394,9 @@ export async function runGather(
   let allAnalyses: Record<string, string>;
   let generatedAnalysis = "";
   try {
-    allAnalyses = await runFileAnalysis(model, allFiles, fileCategory, source, log, tokenBudget);
+    allAnalyses = await runFileAnalysis(model, allFiles, fileCategory, source, log, tokenBudget, onProgress ? emit : undefined);
     if (generatedFiles.length) {
-      generatedAnalysis = await runGeneratedAnalysis(model, generatedFiles, log, tokenBudget);
+      generatedAnalysis = await runGeneratedAnalysis(model, generatedFiles, log, tokenBudget, onProgress ? emit : undefined);
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -421,7 +426,7 @@ export async function runGather(
 
   // Stage 3: Consolidation (REQ-G-28)
   emit("\n▸ Stage 3: Consolidating requirements...");
-  const finalResponse = await runConsolidation(model, allAnalyses, generatedAnalysis, existingReqs, log, tokenBudget);
+  const finalResponse = await runConsolidation(model, allAnalyses, generatedAnalysis, existingReqs, log, tokenBudget, onProgress ? emit : undefined);
   writeFileSync(target, stripPreamble(finalResponse), "utf-8");
 
   appendState("gather", model.config.alias,

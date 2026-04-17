@@ -942,6 +942,11 @@ Two log roots, two intents:
   - Given 3 previous inputs and empty input, When Up is pressed, Then the most recent input appears.
   - Given history mode is active, When Down is pressed past the newest entry, Then the saved input is restored.
   - Given a pending message exists, When Up is pressed, Then pending is recalled (not history).
+- **REQ-UI-17:** WHEN a framework command invokes an agent, THE SYSTEM SHALL display a progress line for that agent showing: elapsed time, token counts (input/output), context utilization percentage, and status. WHEN the agent completes, the line SHALL show the operation name with `✓ complete` and final stats. WHEN the agent fails, the line SHALL show `⚠ failed`. WHEN a cached result is used, the line SHALL show `(cached)`. Format: `  ▸ <label> (<elapsed> · tkns: ↓ Nk - ↑ Nk · ctx N% · <status>)`. Fields with no data SHALL be omitted. The `trackAgent` helper wraps `agent.send()` with progress tracking and is used by all gather stage functions.
+  - *Rationale:* Per-agent progress gives the operator visibility into what the framework is doing — which file is being analyzed, how long it's taking, and how much of the model's context is consumed.
+  - Given a gather file analysis agent completes, When the progress line renders, Then it shows the filename, elapsed time, token counts, and ✓ complete.
+  - Given a cached analysis is found, When the progress line renders, Then it shows the filename and (cached).
+  - Given an agent fails, When the progress line renders, Then it shows ⚠ failed with stats.
 
 ### 4.16 Framework Configuration
 
