@@ -14,12 +14,12 @@ Given a file tree, return a JSON object with files sorted into these categories:
 - **infrastructure**: Deployment, CI/CD, IaC (Dockerfiles, docker-compose, terraform, GitHub Actions).
 - **documentation**: Human-readable docs (READMEs, ADRs, guides, changelogs, specs).
 - **assets**: Human-authored stylesheets (CSS, SCSS, LESS), images, fonts, and icons. Only files written by a developer belong here.
-- **generated**: Files NOT written by a developer: lock files (package-lock.json, yarn.lock, Cargo.lock), compiled/bundled JS/CSS with hashes in the filename (e.g. `index-CW8_b_Xi.js`, `style-D0QbakGy.css`), minified files, build output in `dist/`, `build/`, or `static/assets/`, and binaries.
+- **generated**: Files produced by tools, not written by a developer: lock files (package-lock.json, yarn.lock, Cargo.lock, go.sum), bundled or compiled output with hashes or fingerprints in the filename, minified files, and binaries.
 
 Only categorize files present in the input. Return raw JSON only.
 
 Example:
-{{"source": ["src/main.py"], "tests": ["tests/test_api.py"], "config": ["pyproject.toml", "package.json"], "infrastructure": ["Dockerfile"], "documentation": ["README.md"], "assets": ["src/style.css", "logo.png"], "generated": ["dist/bundle.min.js", "package-lock.json", "static/assets/index-CW8_b_Xi.js"]}}
+{{"source": ["src/main.py"], "tests": ["tests/test_api.py"], "config": ["pyproject.toml", "package.json"], "infrastructure": ["Dockerfile"], "documentation": ["README.md"], "assets": ["src/style.css", "logo.png"], "generated": ["package-lock.json", "assets/index-a1b2c3.js"]}}
 
 ## TRIAGE-VALIDATION
 
