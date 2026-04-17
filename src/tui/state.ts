@@ -11,11 +11,27 @@ export interface TUIMessage {
   streaming?: boolean;
 }
 
+export interface PanelItem {
+  label: string;
+  value: string;
+  marker?: string;  // e.g. "◀" for current
+}
+
+export interface PanelState {
+  type: "model" | "settings" | "permission";
+  title: string;
+  items: PanelItem[];
+  selectedIndex: number;
+  hint: string;
+  onSelect?: (item: PanelItem) => void;
+  onCancel?: () => void;
+}
+
 export interface TUIState {
   messages: TUIMessage[];
   modelName: string;
   contextPct: number;
-  mode: string;           // empty = default, "/gather" etc during commands
+  mode: string;
   cwd: string;
   branch: string;
   thinking: boolean;
@@ -23,6 +39,7 @@ export interface TUIState {
   busy: boolean;
   pendingMessage: string | null;
   inputHistory: string[];
+  panel: PanelState | null;
   _version: number;
   _notify?: () => void;
 }
@@ -40,6 +57,7 @@ export function createState(modelName: string, cwd: string, branch: string): TUI
     busy: false,
     pendingMessage: null,
     inputHistory: [],
+    panel: null,
     _version: 0,
   };
 }
@@ -82,4 +100,14 @@ export function updateLastModel(state: TUIState, text: string, stats = "", strea
     last.streaming = streaming;
     notify(state);
   }
+}
+
+export function openPanel(state: TUIState, panel: PanelState): void {
+  state.panel = panel;
+  notify(state);
+}
+
+export function closePanel(state: TUIState): void {
+  state.panel = null;
+  notify(state);
 }
