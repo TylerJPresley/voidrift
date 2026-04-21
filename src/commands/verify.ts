@@ -5,8 +5,10 @@
 // OCP contract (REQ-TOOL-8, REQ-ARCH-9)
 export const AGENT_TOOLS_PLAN = new Set(["file"]);
 export const AGENT_TOOLS_EXECUTE = new Set(["file", "http", "shell", "browser", "process"]);
+export const AGENT_TOOLS_DOC = new Set(["file"]);
 export const AGENT_TOOL_ACTIONS_PLAN: Record<string, string[]> = { file: ["read", "list"] };
 export const AGENT_TOOL_ACTIONS_EXECUTE: Record<string, string[]> = { file: ["read", "write", "list"], http: ["get", "post", "put", "delete"] };
+export const AGENT_TOOL_ACTIONS_DOC: Record<string, string[]> = { file: ["read", "write", "list"] };
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from "node:fs";
 import { join } from "node:path";
@@ -17,16 +19,19 @@ import type { ModelInterface } from "../models.js";
 import { WriteContext } from "../tools/filesystem.js";
 import { buildLocalTools } from "../tools/builder.js";
 import { findSkill } from "../skills.js";
-import { loadPrompt } from "../prompts.js";
+import { loadPrompt, buildSystemPrompt } from "../prompts.js";
 import { ensureVoidriftDir, bootRun, appendState, checkDiskSpace, checkRequirementsExist, printCommandHeader } from "../utils.js";
 import { getMaxTokens } from "../config.js";
 import { startProcess, waitForReady, stopAll, readProcessOutput } from "../tools/process.js";
 import { clearSessions } from "../tools/http.js";
 import { closeAllSessions } from "../tools/browser.js";
+import { trackAgentWithStats, elapsedStr } from "./progress.js";
+import { resetSharedTracker, displayErrorSummary } from "../errors.js";
 
 export async function runVerify(worker: ModelInterface, onProgress?: (msg: string) => void): Promise<number> {
   const emit = onProgress ?? ((msg: string) => process.stderr.write(msg + "\n"));
   checkDiskSpace();
+  resetSharedTracker();
   const d = ensureVoidriftDir();
   if (!checkRequirementsExist()) {
     emit("Error: REQUIREMENTS.md not found. Run 'voidrift gather' first.");
@@ -35,12 +40,14 @@ export async function runVerify(worker: ModelInterface, onProgress?: (msg: strin
 
   const [log, runId] = bootRun("verify");
   if (!onProgress) printCommandHeader("verify", worker.config.alias, log);
+  const startTime = Date.now();
   const ctx = new WriteContext({ projectDir: join(d, ".."), maxReadLines: worker.config.maxReadLines });
+  const frameworkContext = loadPrompt("system", "CONTEXT");
 
   try {
     // Stage 0: Doc verification (REQ-VF-17)
     const bugsBefore = existsSync(join(d, "bugs")) ? new Set(readdirSync(join(d, "bugs")).filter(f => f.startsWith("DOC-"))) : new Set<string>();
-    await _runDocVerify(worker, d, log, ctx);
+    await _runDocVerify(frameworkContext, worker, d, log, ctx);
     const bugsAfter = existsSync(join(d, "bugs")) ? new Set(readdirSync(join(d, "bugs")).filter(f => f.startsWith("DOC-"))) : new Set<string>();
     const docBugCount = [...bugsAfter].filter(f => !bugsBefore.has(f)).length;
 
@@ -48,12 +55,13 @@ export async function runVerify(worker: ModelInterface, onProgress?: (msg: strin
     const [planTools, planHandlers] = buildLocalTools("verify-plan", join(d, ".."), ctx);
     const skill = findSkill("QUALITY-QA") ?? "";
     const planPrompt = loadPrompt("verify", "PLAN");
-    const planSystem = [loadPrompt("system", "CONTEXT"), skill, planPrompt].filter(Boolean).join("\n\n");
+    const planSystem = buildSystemPrompt(frameworkContext, skill, planPrompt);
+    emit("▸ Stage 1: Planning test cases...");
     const planAgent = new AgentLoop({
       model: worker, systemPrompt: planSystem, tools: planTools, toolHandlers: planHandlers,
       stream: false, maxTokens: getMaxTokens(worker.config, "verify.plan"), logPath: log, showSpinner: false,
     });
-    await planAgent.send(loadPrompt("verify", "PLAN-USER"));
+    await trackAgentWithStats(planAgent, loadPrompt("verify", "PLAN-USER"), "  verify plan");
 
     const verifyPlanPath = join(d, "VERIFY-PLAN.md");
     if (!existsSync(verifyPlanPath)) {
@@ -85,17 +93,18 @@ export async function runVerify(worker: ModelInterface, onProgress?: (msg: strin
     const results: Array<{ itemId: string; status: string; bugPath?: string }> = [];
     for (const item of skipped) results.push({ itemId: item.itemId, status: "skip" });
 
+    emit(`▸ Stage 2: Executing ${testable.length} test cases...`);
     const [execTools, execHandlers] = buildLocalTools("verify-execute", join(d, ".."), ctx);
     const concurrency = worker.config.concurrency ?? 1;
     const taskFns = testable.map(item => async () => {
       const execPrompt = loadPrompt("verify", "EXECUTE");
-      const execSystem = [loadPrompt("system", "CONTEXT"), skill, execPrompt].filter(Boolean).join("\n\n");
+      const execSystem = buildSystemPrompt(frameworkContext, skill, execPrompt);
       const agent = new AgentLoop({
         model: worker, systemPrompt: execSystem, tools: execTools, toolHandlers: execHandlers,
         stream: false, maxTokens: getMaxTokens(worker.config, "verify.execute"), logPath: log, showSpinner: false,
       });
       try {
-        await agent.send(item.content);
+        await trackAgentWithStats(agent, item.content, `  ${item.itemId}`);
         const bugPath = join(d, "bugs", `${item.itemId}.md`);
         return { itemId: item.itemId, status: existsSync(bugPath) ? "fail" : "pass", bugPath: existsSync(bugPath) ? bugPath : undefined };
       } catch {
@@ -127,6 +136,8 @@ export async function runVerify(worker: ModelInterface, onProgress?: (msg: strin
       `Verdict: ${verdict} — ${passed} passed, ${failed} failed, ${skipCount} skipped`,
       [".voidrift/VERIFY.md"]);
 
+    emit(`\n✓ Verify complete — ${verdict} (${passed} passed, ${failed} failed, ${skipCount} skipped) (${elapsedStr((Date.now() - startTime) / 1000)})`);
+    displayErrorSummary(emit);
     return verdict === "PASS" ? 0 : 1;
   } finally {
     stopAll();
@@ -178,15 +189,15 @@ async function _runConcurrent<T>(tasks: Array<() => Promise<T>>, limit: number):
   return results;
 }
 
-async function _runDocVerify(model: ModelInterface, d: string, log: string, ctx: WriteContext): Promise<void> {
-  const [tools, handlers] = buildLocalTools("verify-plan", join(d, ".."), ctx);
+async function _runDocVerify(frameworkContext: string, model: ModelInterface, d: string, log: string, ctx: WriteContext): Promise<void> {
+  const [tools, handlers] = buildLocalTools("verify-doc", join(d, ".."), ctx);
   const prompt = loadPrompt("verify", "DOC-VERIFY");
-  const system = [loadPrompt("system", "CONTEXT"), prompt].filter(Boolean).join("\n\n");
+  const system = buildSystemPrompt(frameworkContext, undefined, prompt);
   const agent = new AgentLoop({
     model, systemPrompt: system, tools, toolHandlers: handlers,
     stream: false, maxTokens: getMaxTokens(model.config, "verify.execute"), logPath: log, showSpinner: false,
   });
-  try { await agent.send(loadPrompt("verify", "DOC-VERIFY-USER")); } catch { /* */ }
+  try { await trackAgentWithStats(agent, loadPrompt("verify", "DOC-VERIFY-USER"), "  doc verification"); } catch { /* */ }
 }
 
 // ---------------------------------------------------------------------------

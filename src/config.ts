@@ -24,7 +24,6 @@ export interface BashConfig {
 
 export interface Config {
   modelsFile: string;
-  activeContainerFile: string;
   apiKeys: Record<string, string>;
   protectedPaths: string[];
   allowedCommands: string[];
@@ -81,6 +80,32 @@ function expandRecursive(obj: unknown): unknown {
   return obj;
 }
 
+function expandCrossRefs(config: unknown): unknown {
+  const root = config as Record<string, unknown>;
+  function resolve(obj: unknown): unknown {
+    if (typeof obj === "string" && obj.includes("${")) {
+      return obj.replace(/\$\{([^}]+)}/g, (match, expr: string) => {
+        if (expr.includes(".") && !expr.includes(":-")) {
+          const [section, key] = expr.split(".", 2);
+          const s = root[section];
+          if (s && typeof s === "object" && key in (s as Record<string, unknown>)) {
+            return String((s as Record<string, unknown>)[key]);
+          }
+        }
+        return match; // leave unresolved (already expanded env vars)
+      });
+    }
+    if (Array.isArray(obj)) return obj.map(resolve);
+    if (obj !== null && typeof obj === "object") {
+      const out: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(obj as Record<string, unknown>)) out[k] = resolve(v);
+      return out;
+    }
+    return obj;
+  }
+  return resolve(config);
+}
+
 export function loadConfig(home?: string): Config {
   if (_cached) return _cached;
   const h = home ?? voidriftHome();
@@ -90,7 +115,9 @@ export function loadConfig(home?: string): Config {
     return _cached;
   }
   const raw = parseYaml(readFileSync(p, "utf-8")) ?? {};
-  _cached = expandRecursive(raw) as Config;
+  const expanded = expandRecursive(raw) as Config;
+  // Second pass: resolve ${section.key} cross-references (REQ-CFG-3)
+  _cached = expandCrossRefs(expanded) as Config;
   return _cached;
 }
 
@@ -176,6 +203,7 @@ const STAGE_MAX_TOKENS: Record<string, number> = {
   "chat.quick": 2048,
   "deploy.version": 4096,
   "deploy.iac": 8192,
+  "internal.summary": 1024,
 };
 
 export function getMaxTokens(model: { maxTokens: number }, stage: string): number {
@@ -212,7 +240,6 @@ const gte0: Validator = v => typeof v === "number" && v >= 0 ? null : "must be a
 /** Schema for all valid config keys — type + optional constraint. */
 export const CONFIG_SCHEMA: Record<string, { type: "string" | "number" | "boolean" | "array"; validate?: Validator; description: string }> = {
   "models_file":                  { type: "string",  description: "Path to models YAML file" },
-  "active_container_file":        { type: "string",  description: "Path to active container marker" },
   "protected_paths":              { type: "array",   description: "Files blocked from agent writes" },
   "allowed_commands":             { type: "array",   description: "Shell commands that bypass security classification" },
   "ssrf_allow_list":              { type: "array",   description: "Hostnames/CIDRs that bypass SSRF blocking" },
@@ -236,6 +263,7 @@ export const CONFIG_SCHEMA: Record<string, { type: "string" | "number" | "boolea
   "bash.verify.enabled":          { type: "boolean", description: "Enable shell in verify command" },
   "bash.verify.timeout":          { type: "number",  validate: gt0, description: "Verify shell timeout" },
   "bash.verify.allowed_patterns": { type: "array",   description: "Verify shell command patterns" },
+  "governance_max_tokens":         { type: "number",  validate: gt0, description: "Max tokens for governance layer (default 6144)" },
 };
 
 export class ConfigManager {

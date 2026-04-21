@@ -13,6 +13,7 @@ import { TokenBudget, BudgetExhaustedError } from "./budget.js";
 import { isAbortRequested, registerLoop, unregisterLoop, abortAwareSleep, AbortRequested } from "./abort.js";
 import { stripThinkTags } from "./think.js";
 import { detectStall, buildSigSet } from "./stall.js";
+import { getMaxTokens } from "../config.js";
 import { snipOldToolResults, trimMessages } from "./context.js";
 import { loadPrompt } from "../prompts.js";
 
@@ -98,6 +99,8 @@ export interface AgentLoopOptions {
   showSpinner?: boolean;
   toolChoice?: "required" | "auto";
   tokenBudget?: TokenBudget;
+  errorTracker?: import("../errors.js").ErrorTracker;
+  skillAllowedTools?: { skill: string; tools: string[] };
   // Hooks
   maxTurns?: number;
   stopCheck?: (state: LoopState) => string | null;
@@ -150,6 +153,8 @@ export class AgentLoop {
 
   // Reactive compact counter
   private _compactAttempts = 0;
+  private _errorTracker?: import("../errors.js").ErrorTracker;
+  private _skillAllowedTools?: { skill: string; tools: string[] };
 
   constructor(opts: AgentLoopOptions) {
     this._model = opts.model;
@@ -169,6 +174,8 @@ export class AgentLoop {
     this.afterToolCall = opts.afterToolCall;
     this._getSteeringMessages = opts.getSteeringMessages;
     this._getFollowUpMessages = opts.getFollowUpMessages;
+    try { this._errorTracker = opts.errorTracker ?? require("../errors.js").getSharedTracker(); } catch { /* */ }
+    this._skillAllowedTools = opts.skillAllowedTools;
 
     this.messages = [{ role: "system", content: opts.systemPrompt }];
     // Log prompt hash for cache debugging (REQ-ARCH-19)
@@ -281,6 +288,7 @@ export class AgentLoop {
         // Context-length error → reactive compaction
         if (this._isContextLengthError(e) && this._compactAttempts < 2) {
           this._compactAttempts++;
+          this._errorTracker?.record("context", "context_length", e instanceof Error ? e.message : String(e), { recoverable: true });
           const systemMsg = this.messages[0];
           const recent = this.messages.slice(-4);
           const toSummarize = this.messages.slice(1, -4);
@@ -293,7 +301,7 @@ export class AgentLoop {
                   { role: "system", content: "Summarize the following conversation concisely, preserving key decisions and context." },
                   { role: "user", content: toSummarize.map(m => `[${m.role}]: ${(m.content ?? "").slice(0, 300)}`).join("\n") },
                 ],
-                maxTokens: 1024,
+                maxTokens: getMaxTokens(this._model.config, "internal.summary"),
                 stream: false,
                 provider: this._model.config.provider,
               });
@@ -343,6 +351,7 @@ export class AgentLoop {
           this.messages.push({ role: "assistant", content: text || null });
           const resume = loadPrompt("system", "MAX-TOKENS-TOOL-RESUME");
           this.messages.push({ role: "user", content: resume || "Re-emit your tool calls." });
+          this._log(`[ITERATION turn=${turnCount} reason=truncation_recovery]`);
           continue;
         }
         if (maxTokensRecoveries < 2) {
@@ -352,6 +361,7 @@ export class AgentLoop {
           const resume = loadPrompt("system", "MAX-TOKENS-RESUME");
           this.messages.push({ role: "user", content: resume || "Continue from where you stopped." });
           this._log(`[MAX_TOKENS_RECOVERY attempt=${maxTokensRecoveries}]`);
+          this._log(`[ITERATION turn=${turnCount} reason=truncation_recovery]`);
           continue;
         }
         this._log("[MAX_TOKENS_EXHAUSTED]");
@@ -369,6 +379,7 @@ export class AgentLoop {
         const followUp = this._drainOneFollowup(state);
         if (followUp) {
           this.messages.push(...followUp.messages);
+          this._log(`[ITERATION turn=${turnCount} reason=follow_up]`);
           continue;
         }
 
@@ -398,6 +409,7 @@ export class AgentLoop {
             return false;
           });
         }
+        this._log(`[ITERATION turn=${turnCount} reason=stall_recovery]`);
         continue;
       }
 
@@ -490,6 +502,7 @@ export class AgentLoop {
         delay = jitter(delay);
 
         this._log(`[RETRY attempt=${attempt} delay=${delay.toFixed(1)}s reason=${this._errorReason(e)}]`);
+        this._errorTracker?.record("api", this._errorReason(e), e instanceof Error ? e.message : String(e), { recoverable: true });
         await abortAwareSleep(delay);
       }
     }
@@ -638,6 +651,12 @@ export class AgentLoop {
     toolsCalledThisTurn.push(name);
 
     // Before hook
+    // Skill tool restriction (REQ-SKL-2)
+    if (this._skillAllowedTools && !this._skillAllowedTools.tools.includes(name)) {
+      const msg = `Error: Tool '${name}' blocked by skill '${this._skillAllowedTools.skill}'. Allowed tools: ${this._skillAllowedTools.tools.join(", ") || "none"}`;
+      this.onToolResult?.(name, msg);
+      return msg;
+    }
     if (this.beforeToolCall) {
       const intercepted = this.beforeToolCall(name, JSON.stringify(args));
       if (intercepted !== null && intercepted !== undefined) {
@@ -650,12 +669,14 @@ export class AgentLoop {
     let result: string;
     if (!handler) {
       result = `Error: no handler for tool '${name}'`;
+      this._errorTracker?.record("tool", "no_handler", `No handler for tool '${name}'`, { recoverable: true });
     } else {
       try {
         const raw = handler(...Object.values(args));
         result = typeof raw === "string" ? raw : JSON.stringify(raw);
       } catch (e: unknown) {
         result = `Error: ${e instanceof Error ? e.message : String(e)}`;
+        this._errorTracker?.record("tool", "execution", e instanceof Error ? e.message : String(e), { recoverable: true });
       }
     }
 

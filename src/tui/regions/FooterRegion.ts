@@ -7,6 +7,8 @@ export class FooterRegion extends Region {
   mode = "";
   cwd = "";
   branch = "";
+  governanceTokens = 0;
+  governanceMax = 0;
   panel: Panel | null = null;
 
   setModel(name: string): void { this.modelName = name; this.emit(); }
@@ -14,6 +16,7 @@ export class FooterRegion extends Region {
   setMode(mode: string): void { this.mode = mode; this.emit(); }
   setCwd(cwd: string): void { this.cwd = cwd; this.emit(); }
   setBranch(branch: string): void { this.branch = branch; this.emit(); }
+  setGovernance(tokens: number, max: number): void { this.governanceTokens = tokens; this.governanceMax = max; this.emit(); }
 
   showPanel(panel: Panel): void { this.panel = panel; this.emit(); }
   closePanel(): void { this.panel = null; this.emit(); }

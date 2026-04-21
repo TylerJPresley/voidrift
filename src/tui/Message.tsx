@@ -82,7 +82,7 @@ export function Message({ msg }: MessageProps) {
           <Text key={i}><Text color="#6a7ec8">┃ </Text>{line}</Text>
         ))}
         {msg.streaming && <Text><Text color="#6a7ec8">┃ </Text><Text color="#6a7ec8">█</Text></Text>}
-        {!msg.streaming && msg.stats ? <Text dimColor>  · {msg.stats}</Text> : null}
+        {!msg.streaming && msg.stats ? <><Text> </Text><Text dimColor>  ▸ {msg.stats}</Text></> : null}
       </Box>
     );
   }

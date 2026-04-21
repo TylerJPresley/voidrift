@@ -16,7 +16,7 @@ import { TokenBudget } from "./agent/budget.js";
 
 // Initialize system log (REQ-LOG-4)
 initSystemLog();
-syslog(`CLI invocation: ${process.argv.slice(2).join(" ")}`);
+const _startTime = Date.now();
 
 // ---------------------------------------------------------------------------
 // Model resolution (REQ-ENTRY-2)
@@ -34,16 +34,7 @@ function resolveDefaultModel(): import("./models.js").ModelInterface | null {
       try { return resolveModel(currentModel); } catch { /* unavailable */ }
     }
 
-    // 2. active_container_file
-    const containerFile = cfg.activeContainerFile ?? (cfg as Record<string, unknown>)["active_container_file"];
-    if (containerFile && existsSync(String(containerFile))) {
-      try {
-        const alias = readFileSync(String(containerFile), "utf-8").trim();
-        if (alias) return resolveModel(alias);
-      } catch { /* */ }
-    }
-
-    // 3. first alias
+    // 2. first alias
     const aliases = listAliases();
     if (aliases.length) {
       try { return resolveModel(aliases[0]); } catch { /* */ }
@@ -58,6 +49,13 @@ function resolveDefaultModel(): import("./models.js").ModelInterface | null {
 
 const args = process.argv.slice(2);
 const command = args[0] && !args[0].startsWith("-") ? args[0] : null;
+
+// Log invocation with metadata (REQ-LOG-2)
+{
+  const mi = args.indexOf("--model");
+  const m = mi >= 0 && mi + 1 < args.length ? args[mi + 1] : "-";
+  syslog(`[${command ?? "chat"}] cwd=${process.cwd()} model=${m} args=${args.join(" ")}`);
+}
 
 function getFlag(name: string): string | undefined {
   const idx = args.indexOf(`--${name}`);
@@ -88,6 +86,37 @@ async function runHeadless(): Promise<number> {
     return 0;
   }
 
+  if (command === "unlock") {
+    const { runUnlock } = await import("./commands/unlock.js");
+    return runUnlock();
+  }
+
+  if (command === "prune") {
+    const { runPrune } = await import("./commands/prune.js");
+    return runPrune({ all: hasFlag("all"), global: hasFlag("global") });
+  }
+
+  if (command === "skills") {
+    const { runSkills } = await import("./commands/skills-cli.js");
+    return runSkills(args[1], args[2]);
+  }
+
+  if (command === "rollback") {
+    const { runRollback } = await import("./commands/rollback.js");
+    const turn = args[1] ? parseInt(args[1], 10) : undefined;
+    return runRollback(turn);
+  }
+
+  if (command === "log") {
+    const { runLog } = await import("./commands/log.js");
+    return runLog({
+      command: args[1] && !args[1].startsWith("-") ? args[1] : undefined,
+      follow: hasFlag("follow") || args.includes("-f"),
+      prune: hasFlag("prune"),
+      global: hasFlag("global"),
+    });
+  }
+
   if (command === "doctor") {
     const { runChecks, formatResults } = await import("./commands/doctor.js");
     const results = runChecks(hasFlag("fix"));
@@ -105,19 +134,27 @@ async function runHeadless(): Promise<number> {
     voidrift <command> --model <alias> [flags]  Run command headless
 
   Commands:
-    gather   --model <m> --path <dir>   Reverse-engineer requirements
+    gather   --model <m> --import <dir>  Reverse-engineer requirements
+             --model <m> --idea <id>    Requirements from idea
+             --model <m> --ref <dir>    Load codebase as chat context
     plan     --model <m>                Generate architecture + tasks
     develop  --model <m>                Execute tasks from manifest
     deploy   --model <m>                Prepare release (version, tag)
     verify   --model <m>                Run acceptance tests
     status                              Show task status
+    log [command] [-f] [--prune] [--global]  View/manage logs
+    unlock                              Remove develop lock
+    prune [--all] [--global]            Remove ephemeral data
+    skills [list|search|install|approve|remove|review]  Manage skills
+    rollback [turn]                     List/restore checkpoints
     doctor   [--fix]                    Run diagnostic checks
     models                              List available models
     help                                This message
     completions <shell>                 Output shell completion script
 
-  Chat slash commands: /help, /model, /settings, /gather, /plan,
-    /develop, /deploy, /verify, /ask, /idea, /compact, /clear
+  Chat slash commands: /help, /model, /settings, /chat, /gather, /plan,
+    /develop, /deploy, /verify, /ask, /idea, /done, /bare, /exec,
+    /compact, /clear
 `);
     return 0;
   }
@@ -167,10 +204,17 @@ async function runHeadless(): Promise<number> {
   const budget = makeBudget(mc.config);
 
   if (command === "gather") {
-    const path = getFlag("path");
-    if (!path) { console.error("Error: --path required for gather"); return 1; }
+    const path = getFlag("import");
+    const ideaId = getFlag("idea") ? parseInt(getFlag("idea")!, 10) : undefined;
+    const ref = getFlag("ref");
+    if (!path && !ideaId && !ref) { console.error("Error: --import, --idea, or --ref required for gather"); return 1; }
+    if (ref) {
+      // --ref: open chat with external codebase as context (REQ-G-1)
+      const { runChat } = await import("./commands/chat.js");
+      return runChat(mc, { ref }) as Promise<number>;
+    }
     const { runGather } = await import("./commands/gather.js");
-    return runGather(mc, path, undefined, hasFlag("overwrite"), budget);
+    return runGather(mc, path, ideaId, hasFlag("overwrite"), budget);
   }
 
   if (command === "plan") {
@@ -207,6 +251,7 @@ async function main(): Promise<void> {
   if (command) {
     // Headless command
     const code = await runHeadless();
+    syslog(`[${command}] exit=${code} elapsed=${((Date.now() - _startTime) / 1000).toFixed(1)}s`);
     process.exit(code);
   }
 
@@ -215,15 +260,15 @@ async function main(): Promise<void> {
   const { runChat } = await import("./commands/chat.js");
   await runChat(model, {
     doc: getFlag("doc"),
-    style: getFlag("style") as "verbose" | "terse" | "raw" | undefined,
     bare: hasFlag("bare"),
     systemPrompt: getFlag("system-prompt"),
   });
+  syslog(`[chat] exit=0 elapsed=${((Date.now() - _startTime) / 1000).toFixed(1)}s`);
 }
 
 // Error handling — no stack traces
 process.on("uncaughtException", (e) => {
-  syslog(`FATAL: ${e.message}`);
+  syslog(`[${command ?? "chat"}] FATAL: ${e.message} elapsed=${((Date.now() - _startTime) / 1000).toFixed(1)}s`);
   console.error(`Error: ${e.message}`);
   process.exit(1);
 });

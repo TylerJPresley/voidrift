@@ -7,15 +7,18 @@ import { join } from "node:path";
 import { execSync } from "node:child_process";
 import { AgentLoop } from "../agent/loop.js";
 import type { ModelInterface } from "../models.js";
-import { loadPrompt } from "../prompts.js";
+import { loadPrompt, buildSystemPrompt } from "../prompts.js";
 import { ensureVoidriftDir, bootRun, appendState, checkDiskSpace, checkRequirementsExist, printCommandHeader } from "../utils.js";
 import { getMaxTokens } from "../config.js";
 import { buildLocalTools } from "../tools/builder.js";
 import { readArchField } from "./verify.js";
+import { trackAgentWithStats, elapsedStr } from "./progress.js";
+import { resetSharedTracker, displayErrorSummary } from "../errors.js";
 
 export async function runDeploy(worker: ModelInterface, architect?: ModelInterface, onProgress?: (msg: string) => void): Promise<number> {
   const emit = onProgress ?? ((msg: string) => process.stderr.write(msg + "\n"));
   checkDiskSpace();
+  resetSharedTracker();
   const d = ensureVoidriftDir();
 
   if (!checkRequirementsExist()) {
@@ -29,6 +32,7 @@ export async function runDeploy(worker: ModelInterface, architect?: ModelInterfa
 
   const [log, runId] = bootRun("deploy");
   if (!onProgress) printCommandHeader("deploy", worker.config.alias, log);
+  const startTime = Date.now();
   const projectDir = join(d, "..");
 
   // Determine last release tag
@@ -48,6 +52,7 @@ export async function runDeploy(worker: ModelInterface, architect?: ModelInterfa
   }
 
   // Version classification (REQ-DPL-1)
+  const frameworkContext = loadPrompt("system", "CONTEXT");
   const requirements = readFileSync(join(d, "REQUIREMENTS.md"), "utf-8");
   const versionPrompt = loadPrompt("deploy", "VERSION-CLASSIFY");
   const versionUser = loadPrompt("deploy", "VERSION-USER")
@@ -56,10 +61,11 @@ export async function runDeploy(worker: ModelInterface, architect?: ModelInterfa
     .replace("{requirements}", requirements);
 
   const agent = new AgentLoop({
-    model: worker, systemPrompt: versionPrompt, tools: [], toolHandlers: {},
+    model: worker, systemPrompt: buildSystemPrompt(frameworkContext, undefined, versionPrompt), tools: [], toolHandlers: {},
     stream: false, maxTokens: getMaxTokens(worker.config, "deploy.version"), logPath: log, showSpinner: false,
   });
-  const bumpResponse = (await agent.send(versionUser)).trim().toLowerCase();
+  const { result: bumpResult } = await trackAgentWithStats(agent, versionUser, "version classification");
+  const bumpResponse = bumpResult.trim().toLowerCase();
   const bump = ["major", "minor", "patch"].includes(bumpResponse) ? bumpResponse : "patch";
 
   // Compute new version
@@ -113,10 +119,10 @@ export async function runDeploy(worker: ModelInterface, architect?: ModelInterfa
       .replace("{iac_mode}", existsSync(join(projectDir, "infra")) ? "review" : "generate")
       .replace("{architecture}", archText);
     const iacAgent = new AgentLoop({
-      model: worker, systemPrompt: iacPrompt, tools: iacTools, toolHandlers: iacHandlers,
+      model: worker, systemPrompt: buildSystemPrompt(frameworkContext, undefined, iacPrompt), tools: iacTools, toolHandlers: iacHandlers,
       stream: false, maxTokens: getMaxTokens(worker.config, "deploy.iac"), logPath: log, showSpinner: false,
     });
-    try { await iacAgent.send(loadPrompt("deploy", "IAC-USER")); } catch { /* */ }
+    try { await trackAgentWithStats(iacAgent, loadPrompt("deploy", "IAC-USER"), "IaC generation"); } catch { /* */ }
   }
 
   // Post-deploy hook (REQ-DPL-5)
@@ -128,7 +134,8 @@ export async function runDeploy(worker: ModelInterface, architect?: ModelInterfa
   }
 
   appendState("deploy", worker.config.alias, `v${newVersion} (${bump})`, [`CHANGELOG.md`]);
-  emit(`✓ Tagged v${newVersion} (${bump} bump)`);
+  emit(`✓ Tagged v${newVersion} (${bump} bump) (${elapsedStr((Date.now() - startTime) / 1000)})`);
+  displayErrorSummary(emit);
   return 0;
 }
 

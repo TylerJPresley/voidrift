@@ -20,8 +20,9 @@ export class CompactCommand extends SlashCommand {
       });
       this.ctx.agent.messages = compacted;
       this.ctx.session.appendCompaction(compacted[1]?.content ?? "");
-      const maxRestore = Math.floor((this.ctx.model.config.maxContext ?? 100000) * 0.2 * 4);
-      const restoration = this.ctx.compactor.buildRestoration(this.ctx.recentFiles, [], maxRestore);
+      const wb = this.ctx.compactor.workBudget || (this.ctx.model.config.maxContext ?? 100000);
+      const maxRestore = Math.floor(wb * 0.2 * 4);
+      const restoration = this.ctx.compactor.buildRestoration(this.ctx.recentFiles, this.ctx.loadedSkills, maxRestore);
       if (restoration) this.ctx.agent.messages.push({ role: "system", content: restoration });
       this.ctx.content.addSystem(`Compacted to ${this.ctx.agent.messages.length} messages.`);
     } catch (e) { this.ctx.content.addSystem(`Compact failed: ${e}`); }

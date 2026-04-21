@@ -105,23 +105,50 @@ export class IdeaStartCommand extends SlashCommand {
     if (id !== null && isNaN(id)) { this.ctx.content.addSystem("Usage: /idea [id]"); return 1; }
 
     if (id) {
-      const content = readIdea(this.ctx.projectDir, id);
-      if (!content) { this.ctx.content.addSystem(`IDEA-${id} not found.`); return 1; }
+      const existing = readIdea(this.ctx.projectDir, id);
       this.ctx.ideaSession.start(id);
-      this.ctx.footer.setMode("/idea");
-      this.ctx.content.addSystem(`Loaded IDEA-${id}. Describe what to refine, or /done to save.`);
-      this.ctx.input.setBusy(true); this.ctx.content.setThinking(true);
-      try {
-        this.ctx.streamBuf.value = ""; this.ctx.content.addModel("", "", true);
-        const r = await this.ctx.agent.send(`I'm resuming work on this idea:\n\n${content}\n\nSummarize the current state and ask what I'd like to refine.`);
-        this.ctx.content.updateLastModel(r, "", false);
-      } catch (e) { this.ctx.content.addSystem(`Error: ${e}`); }
-      finally { this.ctx.content.setThinking(false); this.ctx.input.setBusy(false); }
+
+      if (existing) {
+        // Resume existing idea
+        this.ctx.content.addSystem(`Loaded IDEA-${id}. Describe what to refine, or /done to save.`);
+        this.ctx.input.setBusy(true); this.ctx.content.setThinking(true);
+        try {
+          this.ctx.streamBuf.value = ""; this.ctx.content.addModel("", "", true);
+          const r = await this.ctx.agent.send(`I'm resuming work on this idea:\n\n${existing}\n\nSummarize the current state and ask what I'd like to refine.`);
+          this.ctx.content.updateLastModel(r, "", false);
+        } catch (e) { this.ctx.content.addSystem(`Error: ${e}`); }
+        finally { this.ctx.content.setThinking(false); this.ctx.input.setBusy(false); }
+      } else {
+        // New idea — start Intake stage (REQ-CHAT-12)
+        this.ctx.content.addSystem(`New idea IDEA-${id}. The agent will guide you through refinement. /done to save.`);
+        this.ctx.input.setBusy(true); this.ctx.content.setThinking(true);
+        try {
+          this.ctx.streamBuf.value = ""; this.ctx.content.addModel("", "", true);
+          const r = await this.ctx.agent.send("A new idea is being created. Start with Stage 1 — Intake: ask the operator to describe the idea at a high level.");
+          this.ctx.content.updateLastModel(r, "", false);
+        } catch (e) { this.ctx.content.addSystem(`Error: ${e}`); }
+        finally { this.ctx.content.setThinking(false); this.ctx.input.setBusy(false); }
+      }
     } else {
+      // List existing ideas and prompt to create or load (REQ-CHAT-11)
+      const dir = ideasDir(this.ctx.projectDir);
+      const existing: string[] = [];
+      if (existsSync(dir)) {
+        const { readdirSync } = require("node:fs");
+        const files = readdirSync(dir).filter((f: string) => /^IDEA-\d+\.md$/.test(f)).sort();
+        for (const f of files) {
+          const idNum = f.match(/IDEA-(\d+)/)?.[1];
+          const content = readFileSync(join(dir, f), "utf-8");
+          const titleMatch = content.match(/^title:\s*(.+)$/m);
+          const catMatch = content.match(/^category:\s*(.+)$/m);
+          existing.push(`  ${idNum}. ${titleMatch?.[1] ?? f} (${catMatch?.[1] ?? "draft"})`);
+        }
+      }
       const newId = nextIdeaId(this.ctx.projectDir);
-      this.ctx.ideaSession.start(newId);
-      this.ctx.footer.setMode("/idea");
-      this.ctx.content.addSystem(`New idea IDEA-${newId}. Describe your idea — the agent will guide you. /done to save.`);
+      const lines = ["Idea mode. Choose an option:"];
+      if (existing.length) { lines.push("", "Existing ideas:", ...existing); }
+      lines.push("", `Type /idea ${newId} to start a new idea, or /idea <id> to resume one.`);
+      this.ctx.content.addSystem(lines.join("\n"));
     }
     return 0;
   }
@@ -145,8 +172,10 @@ export class IdeaDoneCommand extends SlashCommand {
       this.ctx.content.updateLastModel(summary, "", false);
       writeIdea(this.ctx.projectDir, id, buildIdeaContent(`IDEA-${id}`, summary, cat as "now" | "next" | "later"));
       this.ctx.ideaSession.cancel();
-      this.ctx.footer.setMode("");
       this.ctx.content.addSystem(`Saved IDEA-${id} as "${cat}".`);
+      // Restore previous mode's governance (REQ-CHAT-11)
+      if (this.ctx.restoreMode) { this.ctx.restoreMode(); this.ctx.restoreMode = undefined; }
+      else { this.ctx.footer.setMode(""); }
     } catch (e) { this.ctx.content.addSystem(`Error: ${e}`); }
     finally { this.ctx.content.setThinking(false); this.ctx.input.setBusy(false); }
     return 0;

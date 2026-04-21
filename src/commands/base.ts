@@ -112,7 +112,10 @@ export interface ChatContext {
   projectDir: string;
   logPath: string;
   recentFiles: string[];
+  loadedSkills: string[];
   streamBuf: { value: string };
+  /** Callback to restore the mode that was active before /idea. Set by /idea handler. */
+  restoreMode?: () => void;
 }
 
 export type PromptFn = (filename: string, catList: string[]) => string;

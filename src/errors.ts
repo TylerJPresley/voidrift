@@ -54,11 +54,38 @@ export class ErrorTracker {
   /** Format summary for terminal display. */
   formatSummary(): string {
     if (!this._events.length) return "";
-    const cats = this.summaryByCategory();
+    const cats: Record<string, { total: number; recoverable: number }> = {};
+    for (const e of this._events) {
+      const c = cats[e.category] ??= { total: 0, recoverable: 0 };
+      c.total++;
+      if (e.recoverable) c.recoverable++;
+    }
     const lines = ["⚠ Errors during run:"];
-    for (const [cat, count] of Object.entries(cats).sort()) {
-      lines.push(`  ${cat}: ${count}`);
+    for (const [cat, { total, recoverable }] of Object.entries(cats).sort()) {
+      const fatal = total - recoverable;
+      const label = fatal ? `${total} (${fatal} fatal)` : `${total} (recoverable)`;
+      lines.push(`  ${cat}: ${label}`);
     }
     return lines.join("\n");
   }
+}
+
+let _shared: ErrorTracker | null = null;
+
+/** Get or create the shared ErrorTracker for the current command run. */
+export function getSharedTracker(): ErrorTracker {
+  if (!_shared) _shared = new ErrorTracker();
+  return _shared;
+}
+
+/** Reset the shared tracker (call at command start). */
+export function resetSharedTracker(): void {
+  _shared = new ErrorTracker();
+}
+
+/** Display error summary if any errors occurred, then reset. */
+export function displayErrorSummary(emit?: (msg: string) => void): void {
+  if (!_shared || !_shared.count) return;
+  const summary = _shared.formatSummary();
+  if (summary) (emit ?? ((m: string) => process.stderr.write(m + "\n")))(summary);
 }

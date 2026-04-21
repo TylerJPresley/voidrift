@@ -91,6 +91,108 @@ describe("ContextCompactor", () => {
     const c = new ContextCompactor({ maxContext: 100000, compactPrompt: "summarize" });
     expect(c.buildRestoration([], [], 10000)).toBeNull();
   });
+
+  // --- Fix 1: shouldAutoCompact/shouldNudge accept raw prompt_tokens ---
+
+  it("shouldAutoCompact uses raw prompt_tokens (not reverse-calculated %)", () => {
+    const c = new ContextCompactor({ maxContext: 100000, compactPrompt: "summarize" });
+    // 79999 tokens of 100000 = 79.999% → should NOT trigger
+    expect(c.shouldAutoCompact(79999)).toBe(false);
+    // 80000 tokens of 100000 = 80% → should trigger
+    expect(c.shouldAutoCompact(80000)).toBe(true);
+  });
+
+  it("shouldNudge uses raw prompt_tokens", () => {
+    const c = new ContextCompactor({ maxContext: 100000, compactPrompt: "summarize" });
+    expect(c.shouldNudge(69999)).toBe(false);
+    expect(c.shouldNudge(70000)).toBe(true);
+  });
+
+  // --- Fix 2: 10% ceiling check after compaction ---
+
+  it("compact drops recent messages when result exceeds 10% ceiling", async () => {
+    // maxContext=1000 → ceiling = 100 tokens = ~400 chars
+    const c = new ContextCompactor({ maxContext: 1000, compactPrompt: "summarize" });
+    const messages: Message[] = [
+      { role: "system", content: "System prompt." },
+      { role: "user", content: "Old message" },
+      { role: "assistant", content: "Old reply" },
+      { role: "user", content: "Old message 2" },
+      { role: "assistant", content: "Old reply 2" },
+      // Recent 4 messages — each 200 chars to blow past the 400-char ceiling
+      { role: "user", content: "A".repeat(200) },
+      { role: "assistant", content: "B".repeat(200) },
+      { role: "user", content: "C".repeat(200) },
+      { role: "assistant", content: "D".repeat(200) },
+    ];
+    const callFn = vi.fn().mockResolvedValue("Short summary");
+    const result = await c.compact(messages, callFn);
+    // Should have dropped recent messages: only system + summary remain
+    expect(result.length).toBe(2);
+    expect(result[0].role).toBe("system");
+    expect(result[1].content).toContain("Short summary");
+  });
+
+  it("compact keeps recent messages when result is within 10% ceiling", async () => {
+    // maxContext=100000 → ceiling = 10000 tokens = ~40000 chars — plenty of room
+    const c = new ContextCompactor({ maxContext: 100000, compactPrompt: "summarize" });
+    const messages: Message[] = [
+      { role: "system", content: "System prompt." },
+      { role: "user", content: "Old message" },
+      { role: "assistant", content: "Old reply" },
+      { role: "user", content: "Old message 2" },
+      { role: "assistant", content: "Old reply 2" },
+      { role: "user", content: "Recent 1" },
+      { role: "assistant", content: "Recent 2" },
+      { role: "user", content: "Recent 3" },
+      { role: "assistant", content: "Recent 4" },
+    ];
+    const callFn = vi.fn().mockResolvedValue("Summary");
+    const result = await c.compact(messages, callFn);
+    // system + summary + 4 recent = 6
+    expect(result.length).toBe(6);
+    expect(result[0].role).toBe("system");
+    expect(result[1].content).toContain("Summary");
+  });
+
+  it("compact ceiling check logs when triggered", async () => {
+    const logs: string[] = [];
+    const c = new ContextCompactor({ maxContext: 1000, compactPrompt: "summarize", logFn: (m) => logs.push(m) });
+    const messages: Message[] = [
+      { role: "system", content: "sys" },
+      { role: "user", content: "old" },
+      { role: "assistant", content: "old" },
+      { role: "user", content: "old2" },
+      { role: "assistant", content: "old2" },
+      { role: "user", content: "X".repeat(500) },
+      { role: "assistant", content: "Y".repeat(500) },
+      { role: "user", content: "Z".repeat(500) },
+      { role: "assistant", content: "W".repeat(500) },
+    ];
+    const callFn = vi.fn().mockResolvedValue("Short");
+    await c.compact(messages, callFn);
+    expect(logs.some(l => l.includes("COMPACT_CEILING"))).toBe(true);
+  });
+
+  // --- Fix 3: buildRestoration accepts skills ---
+
+  it("buildRestoration includes skill content", () => {
+    const c = new ContextCompactor({ maxContext: 100000, compactPrompt: "summarize" });
+    const skills = ["# ANALYSIS-REQS\nUse EARS notation for requirements."];
+    const result = c.buildRestoration([], skills, 10000);
+    expect(result).toContain("ANALYSIS-REQS");
+    expect(result).toContain("EARS notation");
+  });
+
+  it("buildRestoration respects maxBytes for skills", () => {
+    const c = new ContextCompactor({ maxContext: 100000, compactPrompt: "summarize" });
+    const bigSkill = "X".repeat(5000);
+    const smallSkill = "Small skill content";
+    // maxBytes=100 — big skill won't fit, small skill will
+    const result = c.buildRestoration([], [smallSkill, bigSkill], 100);
+    expect(result).toContain("Small skill content");
+    expect(result).not.toContain("XXXXX");
+  });
 });
 
 // ---------------------------------------------------------------------------

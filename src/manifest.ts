@@ -97,6 +97,8 @@ export class ManifestManager {
       this.save();
     }
     this._appendHistory(id, status);
+    // Auto-archive idea when all its tasks are verified (REQ-P-8)
+    if (status === "verified" && task.idea) this.checkIdeaArchival(task.idea);
   }
 
   hasWork(): boolean {

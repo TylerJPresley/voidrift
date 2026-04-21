@@ -12,10 +12,13 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { AgentLoop } from "../agent/loop.js";
 import type { ModelInterface } from "../models.js";
 import { findSkill, availableSkillsWithDesc } from "../skills.js";
-import { loadPrompt, loadTemplate } from "../prompts.js";
+import { loadPrompt, loadTemplate, buildSystemPrompt } from "../prompts.js";
 import { ensureVoidriftDir, bootRun, appendState, checkDiskSpace, checkRequirementsExist, undoCommand, printCommandHeader } from "../utils.js";
 import { getMaxTokens } from "../config.js";
 import { buildLocalTools } from "../tools/builder.js";
+import { trackAgentWithStats, formatAgentProgress, elapsedStr } from "./progress.js";
+import type { AgentProgress } from "./progress.js";
+import { resetSharedTracker, displayErrorSummary } from "../errors.js";
 
 // ---------------------------------------------------------------------------
 // Pipeline helpers
@@ -25,6 +28,7 @@ export async function dispatchAgent(opts: {
   model: ModelInterface; tools: unknown[]; handlers: Record<string, unknown>;
   log: string; systemPrompt: string; userMessage: string; retryMessage?: string;
   checkFn: () => boolean; stageLabel: string; stageKey: string; quiet?: boolean;
+  onProgress?: (p: AgentProgress) => void;
 }): Promise<boolean> {
   const agent = new AgentLoop({
     model: opts.model, systemPrompt: opts.systemPrompt,
@@ -33,7 +37,7 @@ export async function dispatchAgent(opts: {
     logPath: opts.log, showSpinner: false,
   });
   try {
-    const response = await agent.send(opts.userMessage);
+    const { result: response } = await trackAgentWithStats(agent, opts.userMessage, opts.stageLabel, opts.onProgress);
     try { appendLog(opts.log, response); } catch { /* */ }
   } catch { return false; }
 
@@ -42,7 +46,7 @@ export async function dispatchAgent(opts: {
 
   // Retry once
   try {
-    await agent.send(opts.retryMessage);
+    await trackAgentWithStats(agent, opts.retryMessage, `${opts.stageLabel} (retry)`, opts.onProgress);
   } catch { return false; }
   return opts.checkFn();
 }
@@ -172,6 +176,98 @@ export function buildTaskFiles(dir: string, requirements: string, archText: stri
   return taskFiles.length;
 }
 
+// Vague-AC detector: lines with no quoted strings, numbers, backtick code, or identifiers with dots/parens
+const SPECIFIC_VALUE = /`[^`]+`|"[^"]+"|'[^']+'|\b\d+\b|\w+\.\w+|\w+\(|:\s*\w+/;
+
+export function validateTaskACs(dir: string): number {
+  const activeDir = join(dir, "tasks", "active");
+  if (!existsSync(activeDir)) return 0;
+  let warnings = 0;
+  for (const f of readdirSync(activeDir).filter(f => f.startsWith("TASK-") && f.endsWith(".md"))) {
+    const content = readFileSync(join(activeDir, f), "utf-8");
+    const taskId = f.match(/TASK-(\d+)/)?.[1] ?? f;
+
+    // Extract files from frontmatter
+    let taskFiles: string[] = [];
+    if (content.startsWith("---\n")) {
+      const end = content.indexOf("\n---\n", 4);
+      if (end !== -1) {
+        try {
+          const fm = parseYaml(content.slice(4, end));
+          taskFiles = (Array.isArray(fm?.files) ? fm.files : []).map((f: string) => f.replace(/\s*\(.*\)$/, ""));
+        } catch { /* */ }
+      }
+    }
+
+    // Extract AC section
+    const acMatch = content.match(/## Acceptance Criteria\n([\s\S]*?)(?=\n## |\n---|\Z)/);
+    if (!acMatch) continue;
+    const acLines = acMatch[1].split("\n").filter(l => l.trim().startsWith("- "));
+
+    for (const ac of acLines) {
+      // Scope check: file paths in AC not in task files
+      const pathRefs = ac.match(/[\w/.-]+\.\w{1,5}/g) ?? [];
+      for (const ref of pathRefs) {
+        if (ref.includes("/") && !taskFiles.some(tf => tf.includes(ref))) {
+          process.stderr.write(`⚠ TASK-${taskId}: AC references file outside task scope: ${ref}\n`);
+          warnings++;
+        }
+      }
+      // Specificity check
+      if (!SPECIFIC_VALUE.test(ac)) {
+        process.stderr.write(`⚠ TASK-${taskId}: AC may be vague (no specific values): ${ac.trim().slice(2)}\n`);
+        warnings++;
+      }
+    }
+  }
+  return warnings;
+}
+
+const REQUIRED_SECTIONS = ["## User Story", "## Acceptance Criteria", "## Context"];
+const SHELL_PATTERN = /^\s*(\$\s|```(?:bash|sh)|sh -c|npm run |make |pip install )/m;
+
+export function validateTaskSelfContainment(dir: string): number {
+  const activeDir = join(dir, "tasks", "active");
+  if (!existsSync(activeDir)) return 0;
+  let warnings = 0;
+  for (const f of readdirSync(activeDir).filter(f => f.startsWith("TASK-") && f.endsWith(".md"))) {
+    const content = readFileSync(join(activeDir, f), "utf-8");
+    const taskId = f.match(/TASK-(\d+)/)?.[1] ?? f;
+
+    // Required sections (REQ-P-5 AC1/AC2)
+    for (const section of REQUIRED_SECTIONS) {
+      if (!content.includes(section)) {
+        process.stderr.write(`⚠ TASK-${taskId}: missing required section: ${section}\n`);
+        warnings++;
+      }
+    }
+
+    // No shell commands in task body (REQ-P-5 AC3)
+    const body = content.startsWith("---\n") ? content.slice(content.indexOf("\n---\n", 4) + 5) : content;
+    if (SHELL_PATTERN.test(body)) {
+      process.stderr.write(`⚠ TASK-${taskId}: task body contains shell commands\n`);
+      warnings++;
+    }
+
+    // No .voidrift/ paths in files frontmatter (REQ-P-5 AC4)
+    if (content.startsWith("---\n")) {
+      const end = content.indexOf("\n---\n", 4);
+      if (end !== -1) {
+        try {
+          const fm = parseYaml(content.slice(4, end));
+          for (const fp of (Array.isArray(fm?.files) ? fm.files : [])) {
+            if (String(fp).replace(/\s*\(.*\)$/, "").startsWith(".voidrift/")) {
+              process.stderr.write(`⚠ TASK-${taskId}: targets .voidrift/ path: ${fp}\n`);
+              warnings++;
+            }
+          }
+        } catch { /* */ }
+      }
+    }
+  }
+  return warnings;
+}
+
 function sourceFileListing(projectDir: string): string {
   const lines: string[] = [];
   const walk = (d: string) => {
@@ -200,6 +296,7 @@ function appendLog(log: string, content: string): void {
 export async function runPlan(model: ModelInterface, overwrite = false, ideaId?: number, onProgress?: (msg: string) => void): Promise<number> {
   const emit = onProgress ?? ((msg: string) => process.stderr.write(msg + "\n"));
   checkDiskSpace();
+  resetSharedTracker();
   const d = ensureVoidriftDir();
 
   if (!checkRequirementsExist()) {
@@ -224,6 +321,9 @@ export async function runPlan(model: ModelInterface, overwrite = false, ideaId?:
   const [tools, handlers] = buildLocalTools("plan");
   const requirements = readFileSync(join(d, "REQUIREMENTS.md"), "utf-8");
   const skill = findSkill("ARCH-DESIGN") ?? "";
+  const frameworkContext = loadPrompt("system", "CONTEXT");
+  const startTime = Date.now();
+  const emitProgress = (p: AgentProgress) => emit(formatAgentProgress(p));
 
   // Idea context injection (REQ-IDEA-5)
   let ideaContext = "";
@@ -260,11 +360,14 @@ export async function runPlan(model: ModelInterface, overwrite = false, ideaId?:
       const sourceFiles = walk(projectDir).filter(f => !f.startsWith(".voidrift/") && !f.includes("node_modules")).slice(0, 200);
       const deltaPrompt = loadPrompt("plan", "PLAN-DELTA") ?? "Analyze which requirements are satisfied by existing files and which need implementation.";
       const deltaAgent = new AgentLoop({
-        model, systemPrompt: deltaPrompt, tools: [], toolHandlers: {},
+        model, systemPrompt: buildSystemPrompt(frameworkContext, undefined, deltaPrompt), tools: [], toolHandlers: {},
         stream: false, maxTokens: getMaxTokens(model.config, "plan.delta"), logPath: log, showSpinner: false,
       });
       const existingArch = readFileSync(join(d, "ARCHITECTURE.md"), "utf-8");
-      deltaContext = await deltaAgent.send(`REQUIREMENTS:\n${requirements}\n\nARCHITECTURE:\n${existingArch}\n\nSOURCE FILES:\n${sourceFiles.join("\n")}`);
+      const { result: deltaResult } = await trackAgentWithStats(deltaAgent,
+        `REQUIREMENTS:\n${requirements}\n\nARCHITECTURE:\n${existingArch}\n\nSOURCE FILES:\n${sourceFiles.join("\n")}`,
+        "▸ Delta analysis", emitProgress);
+      deltaContext = deltaResult;
     } catch { /* delta analysis is best-effort */ }
   }
 
@@ -275,14 +378,16 @@ export async function runPlan(model: ModelInterface, overwrite = false, ideaId?:
     .replace("{arch_template}", archTemplate);
   if (deltaContext) archPrompt += `\n\n## Delta Analysis\n\n${deltaContext}`;
   if (ideaContext) archPrompt += ideaContext;
-  const archSystem = [skill, archPrompt].filter(Boolean).join("\n\n");
+  const archSystem = buildSystemPrompt(frameworkContext, skill, archPrompt);
 
+  emit("▸ Stage 1: Architecture");
   const ok1 = await dispatchAgent({
     model, tools, handlers, log, systemPrompt: archSystem,
     userMessage: loadPrompt("plan", "ARCH-USER"),
     retryMessage: loadPrompt("plan", "ARCH-RETRY"),
     checkFn: () => existsSync(join(d, "ARCHITECTURE.md")),
-    stageLabel: "architecture", stageKey: "plan.architecture",
+    stageLabel: "  architecture", stageKey: "plan.architecture",
+    onProgress: emitProgress,
   });
   if (!ok1) { emit("Error: Stage 1 failed."); return 1; }
 
@@ -291,21 +396,24 @@ export async function runPlan(model: ModelInterface, overwrite = false, ideaId?:
   if (!modules.length) { emit("Error: No modules found."); return 1; }
 
   // Stage 2: Module arch
+  emit(`▸ Stage 2: Module architecture (${modules.length} modules)`);
   const aSummary = archSummary(archText);
   for (const mod of modules) {
     const modPrompt = loadPrompt("plan", "PLAN-MODULE").replace("{module}", mod).replace("{architecture}", aSummary);
-    const modSystem = [skill, modPrompt].filter(Boolean).join("\n\n");
+    const modSystem = buildSystemPrompt(frameworkContext, skill, modPrompt);
     const ok = await dispatchAgent({
       model, tools, handlers, log, systemPrompt: modSystem,
       userMessage: loadPrompt("plan", "MODULE-USER").replace("{module}", mod),
       retryMessage: loadPrompt("plan", "MODULE-RETRY").replace("{module}", mod),
       checkFn: () => existsSync(join(d, "arch", `${mod}.md`)),
-      stageLabel: mod, stageKey: "plan.module-arch",
+      stageLabel: `  ${mod}`, stageKey: "plan.module-arch",
+      onProgress: emitProgress,
     });
     if (!ok) return 1;
   }
 
   // Stage 3: Task outlines
+  emit(`▸ Stage 3: Task outlines (${modules.length} modules)`);
   mkdirSync(join(d, "tasks", "outline"), { recursive: true });
   let idOffset = 1;
   for (const mod of modules) {
@@ -313,14 +421,15 @@ export async function runPlan(model: ModelInterface, overwrite = false, ideaId?:
     const outlinePrompt = loadPrompt("plan", "PLAN-OUTLINE")
       .replace(/{module}/g, mod).replace("{id_offset}", String(idOffset))
       .replace("{architecture}", archText).replace("{module_arch}", modArch);
-    const outlineSystem = [skill, outlinePrompt].filter(Boolean).join("\n\n");
+    const outlineSystem = buildSystemPrompt(frameworkContext, skill, outlinePrompt);
     const outlinePath = join(d, "tasks", "outline", `${mod}.md`);
     const ok = await dispatchAgent({
       model, tools, handlers, log, systemPrompt: outlineSystem,
       userMessage: loadPrompt("plan", "OUTLINE-USER").replace("{module}", mod),
       retryMessage: loadPrompt("plan", "OUTLINE-RETRY").replace("{module}", mod),
       checkFn: () => existsSync(outlinePath),
-      stageLabel: mod, stageKey: "plan.outline",
+      stageLabel: `  ${mod}`, stageKey: "plan.outline",
+      onProgress: emitProgress,
     });
     if (!ok) return 1;
     const [, tasksInMod] = parseOutlineTasks(outlinePath);
@@ -329,14 +438,16 @@ export async function runPlan(model: ModelInterface, overwrite = false, ideaId?:
 
   // Stage 4: Dependency resolution (multi-module only)
   if (modules.length > 1) {
+    emit("▸ Stage 4: Dependency resolution");
     const outlines = modules.map(m => `### ${m}\n\n${readFileSync(join(d, "tasks", "outline", `${m}.md`), "utf-8")}`).join("\n\n");
     const depsPrompt = loadPrompt("plan", "PLAN-DEPS").replace("{outlines}", outlines);
     await dispatchAgent({
-      model, tools, handlers, log, systemPrompt: depsPrompt,
+      model, tools, handlers, log, systemPrompt: buildSystemPrompt(frameworkContext, undefined, depsPrompt),
       userMessage: loadPrompt("plan", "DEPS-USER"),
       retryMessage: loadPrompt("plan", "DEPS-RETRY"),
       checkFn: () => existsSync(join(d, "tasks", "outline", "deps.yml")),
-      stageLabel: "dependencies", stageKey: "plan.deps",
+      stageLabel: "  dependencies", stageKey: "plan.deps",
+      onProgress: emitProgress,
     });
   }
 
@@ -350,6 +461,7 @@ export async function runPlan(model: ModelInterface, overwrite = false, ideaId?:
   }
 
   mkdirSync(join(d, "tasks", "active"), { recursive: true });
+  emit(`▸ Stage 5: Task files (${allTasks.length} tasks)`);
   for (let i = 0; i < allTasks.length; i++) {
     const [mod, task] = allTasks[i];
     const taskId = task.id || i + 1;
@@ -360,29 +472,34 @@ export async function runPlan(model: ModelInterface, overwrite = false, ideaId?:
       .replace("{valid_skills}", validSkillsStr)
       .replace("{task_outline}", taskOutline).replace("{module_arch}", modArch);
     await dispatchAgent({
-      model, tools, handlers, log, systemPrompt: taskPrompt,
+      model, tools, handlers, log, systemPrompt: buildSystemPrompt(frameworkContext, undefined, taskPrompt),
       userMessage: loadPrompt("plan", "TASK-USER").replace("{task_id}", String(taskId)),
       retryMessage: loadPrompt("plan", "TASK-RETRY").replace("{task_id}", String(taskId)),
       checkFn: () => existsSync(join(d, "tasks", "active", `TASK-${taskId}.md`)),
-      stageLabel: `TASK-${taskId}`, stageKey: "plan.task",
+      stageLabel: `  TASK-${taskId}`, stageKey: "plan.task",
+      onProgress: emitProgress,
     });
   }
 
   // Post-processing
   const taskCount = buildTaskFiles(d, requirements, archText, ideaId);
   checkReqCoverage(d, requirements);
+  validateTaskACs(d);
+  validateTaskSelfContainment(d);
 
   // Stage 6: README
+  emit("▸ Stage 6: README");
   const readmeTemplate = loadTemplate("README-TEMPLATE");
   const readmePrompt = loadPrompt("plan", "PLAN-README")
     .replace("{readme_template}", readmeTemplate)
     .replace("{requirements}", requirements).replace("{architecture}", archText);
   await dispatchAgent({
-    model, tools, handlers, log, systemPrompt: readmePrompt,
+    model, tools, handlers, log, systemPrompt: buildSystemPrompt(frameworkContext, undefined, readmePrompt),
     userMessage: loadPrompt("plan", "README-USER"),
     retryMessage: loadPrompt("plan", "README-RETRY"),
     checkFn: () => existsSync(join(d, "README.md")),
-    stageLabel: "README", stageKey: "plan.readme",
+    stageLabel: "  README", stageKey: "plan.readme",
+    onProgress: emitProgress,
   });
 
   // Cleanup outlines
@@ -392,6 +509,8 @@ export async function runPlan(model: ModelInterface, overwrite = false, ideaId?:
   appendState("plan", model.config.alias, `Wrote ARCHITECTURE.md, ${taskCount} tasks, manifest.yml.`,
     [".voidrift/ARCHITECTURE.md", ".voidrift/tasks/manifest.yml"]);
 
+  emit(`\n✓ Plan complete — ARCHITECTURE.md, ${taskCount} tasks, manifest.yml (${elapsedStr((Date.now() - startTime) / 1000)})`);
+  displayErrorSummary(emit);
   return 0;
 }
 

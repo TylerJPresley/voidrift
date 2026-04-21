@@ -72,12 +72,15 @@ export function trimMessages(messages: Message[]): Message[] {
 export interface CompactOpts {
   maxContext: number;
   compactPrompt: string;
+  /** Estimated token count of the governance layer (system prompt). */
+  governanceTokens?: number;
   logFn?: (msg: string) => void;
 }
 
 export class ContextCompactor {
   private _maxContext: number;
   private _compactPrompt: string;
+  private _governanceTokens: number;
   private _logFn: (msg: string) => void;
   private _failCount = 0;
   private _disabled = false;
@@ -86,21 +89,45 @@ export class ContextCompactor {
   constructor(opts: CompactOpts) {
     this._maxContext = opts.maxContext;
     this._compactPrompt = opts.compactPrompt;
+    this._governanceTokens = opts.governanceTokens ?? 0;
     this._logFn = opts.logFn ?? (() => {});
   }
 
   get disabled(): boolean { return this._disabled; }
 
-  /** Check if auto-compact should trigger (80% utilization). */
-  shouldAutoCompact(promptTokens: number): boolean {
-    if (this._disabled || !this._maxContext) return false;
-    return (promptTokens / this._maxContext) >= 0.8;
+  /** Work budget = maxContext minus governance layer tokens (REQ-CHAT-14). */
+  get workBudget(): number {
+    return this._maxContext - this._governanceTokens;
   }
 
-  /** Check if a nudge should be shown (70% utilization, one-time). */
+  /** Update governance token count (e.g. after mode switch rebuilds governance). */
+  setGovernanceTokens(tokens: number): void {
+    this._governanceTokens = tokens;
+  }
+
+  /**
+   * Check if auto-compact should trigger (80% work utilization).
+   * promptTokens is the raw prompt_tokens from the API response (includes governance).
+   * Work utilization = (promptTokens - governanceTokens) / workBudget (REQ-CHAT-14).
+   */
+  shouldAutoCompact(promptTokens: number): boolean {
+    if (this._disabled) return false;
+    const wb = this.workBudget;
+    if (wb <= 0) return false;
+    const workTokens = promptTokens - this._governanceTokens;
+    return (workTokens / wb) >= 0.8;
+  }
+
+  /**
+   * Check if a nudge should be shown (70% work utilization, one-time).
+   * Uses work budget, not total context (REQ-CHAT-14).
+   */
   shouldNudge(promptTokens: number): boolean {
-    if (this._nudgeSent || this._disabled || !this._maxContext) return false;
-    if ((promptTokens / this._maxContext) >= 0.7) {
+    if (this._nudgeSent || this._disabled) return false;
+    const wb = this.workBudget;
+    if (wb <= 0) return false;
+    const workTokens = promptTokens - this._governanceTokens;
+    if ((workTokens / wb) >= 0.7) {
       this._nudgeSent = true;
       return true;
     }
@@ -110,6 +137,8 @@ export class ContextCompactor {
   /**
    * Compact messages by summarizing via an API call.
    * Returns the new message list (system prompt + summary + recent).
+   * The resulting work layer SHALL NOT exceed 10% of work budget (REQ-CHAT-14).
+   * The governance layer (system prompt, messages[0]) is always preserved.
    */
   async compact(
     messages: Message[],
@@ -130,9 +159,19 @@ export class ContextCompactor {
         1024,
       );
 
-      const result = [systemMsg, { role: "assistant" as const, content: `[Conversation summary]\n${summary}` }, ...recent];
+      let result = [systemMsg, { role: "assistant" as const, content: `[Conversation summary]\n${summary}` }, ...recent];
 
-      // Check if result is within 10% of context
+      // 10% ceiling check against work budget (REQ-CHAT-14)
+      const ceiling = this.workBudget > 0 ? this.workBudget * 0.1 : this._maxContext * 0.1;
+      if (ceiling > 0) {
+        const historyChars = result.slice(1).reduce((n, m) => n + (m.content?.length ?? 0), 0);
+        const estimatedTokens = historyChars / 4; // ~4 chars per token
+        if (estimatedTokens > ceiling) {
+          this._logFn(`[COMPACT_CEILING estimated=${Math.round(estimatedTokens)} ceiling=${Math.round(ceiling)}, dropping recent messages]`);
+          result = [systemMsg, { role: "assistant" as const, content: `[Conversation summary]\n${summary}` }];
+        }
+      }
+
       this._failCount = 0;
       this._logFn(`[COMPACT freed=${toSummarize.length} messages]`);
       return result;

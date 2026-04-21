@@ -1,6 +1,7 @@
 import React from "react";
 import { Text, Box } from "ink";
 import type { TUIState } from "./state.js";
+import { ctxIcon, ctxColor as getCtxColor } from "../commands/progress.js";
 
 interface FooterProps {
   state: TUIState;
@@ -30,7 +31,6 @@ export function Footer({ state }: FooterProps) {
 
   // Normal footer
   const { modelName, contextPct, mode, cwd, branch } = state;
-  const ctxColor = contextPct <= 60 ? "#4ec9b0" : contextPct <= 80 ? "#e5c07b" : "#e06c75";
 
   return (
     <Box>
@@ -38,7 +38,7 @@ export function Footer({ state }: FooterProps) {
       <Text dimColor> · </Text>
       <Text color="#4ec9b0">{modelName}</Text>
       <Text dimColor> · </Text>
-      <Text color={ctxColor}>◎ {contextPct}%</Text>
+      <Text color={getCtxColor(contextPct)}>{ctxIcon(contextPct)} {contextPct}%</Text>
       {mode ? (
         <>
           <Text dimColor> · </Text>

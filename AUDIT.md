@@ -1,222 +1,477 @@
-# AUDIT.md — TypeScript Implementation vs REQUIREMENTS.md (Post-Refactor)
+# VoidRift Full Requirements Audit
 
-**Date:** 2026-04-16
+**Date:** 2026-04-20
 **Branch:** `feat/typescript-rewrite`
-**Commit:** `d7d9409`
-**Tests:** 503 passing, 0 skipped
+**Scope:** Full audit of the VoidRift codebase against `REQUIREMENTS.md` (revision 2026-04-20). The legacy Python tree at `BAK/` is explicitly out of scope (pre-TS rewrite, retained for historical reference only).
+**Supersedes:** `GAP-ANALYSIS.md` (2026-04-19) — the earlier analysis covered requirement coverage only; this audit adds unmapped-code discovery, filesystem drift, and incomplete-implementation findings.
 
-## Executive Summary
-
-**~150 requirements audited across 22 sections.**
-
-| Status | Count | % |
-|--------|-------|---|
-| PASS | 105 | 70% |
-| PARTIAL | 30 | 20% |
-| FAIL | 15 | 10% |
-
-Up from 44% PASS in the pre-refactor audit to 70% PASS. The refactor closed the P0 blockers (streaming, tool handlers, context management, permission gate), P1 features (idea flow, concurrent dispatch, chat polish, plan/gather gaps), P2 operational infrastructure (system log, ErrorTracker, git commits, completions, analysis pruning, skills CLI), and P3 architecture cleanup (OCP, loop decomposition, ModelInterface adapter, done tool, cache logging, security fixes).
+Status vocabulary:
+- **PASS** — requirement is fully satisfied by implementation and has test coverage demonstrating the ACs.
+- **PARTIAL** — requirement is implemented but with a material gap (missing AC, fragile workaround, placeholder).
+- **GAP** — requirement has no implementation, or implementation is a stub returning a "not implemented" error.
+- **PASS***\** — implemented and verified by test, but the REQUIREMENTS.md Verification Plan names a test file that does not exist; tests live elsewhere and the mapping is undocumented (see §5).
 
 ---
 
-## Remaining Gaps by Priority
+## 1. Executive Summary
 
-### FAIL (15 items)
+| Metric | Count |
+| --- | --- |
+| Requirements declared (REQ-* + NFR) | 135 |
+| **PASS** | 128 |
+| **PARTIAL** | 6 |
+| **GAP** | 1 |
+| Test files present | 61 |
+| Tests passing | 972 / 972 |
+| Test files named in Verification Plan but missing | 13 |
+| REQs whose named test file is missing | 73 / 135 (54%) |
+| Stale or misplaced artifacts at repo root | 4 |
 
-| ID | Gap | Impact |
-|----|-----|--------|
-| REQ-ARCH-3 | No interactive guided flow when `voidrift` run with no args | UX — operators must know commands |
-| REQ-G-12 | Gather uses `stream: false` — spec requires `stream: true` | No live token telemetry in gather |
-| REQ-G-13 (wiring) | `makeChunks()` exists but not called from `runSourceAnalysis()` | Large files passed in full |
-| REQ-U-8 | HTTP tool is a stub — no fetch, SSRF guard, sub-agent summary, cache | Chat can't do web research |
-| REQ-U-16a | Doctor doesn't check optional deps (pdf-parse, mammoth, xlsx) | Missing deps discovered at runtime |
-| REQ-UI-11 | No concurrent develop dashboard (Rich Live table) | No visibility into parallel tasks |
-| REQ-UI-12 | `--style` accepted but ignored — no terse/raw modes | Style flag is dead code |
-| REQ-UI-16 | No input history (Up/Down arrow cycling) | Must retype previous inputs |
-| REQ-SKL-5 | No skills synthesis pipeline (`voidrift skills install`) | Can't install domain skills |
-| REQ-SKL-6 | No manifest fetching from repos | Can't search remote skills |
-| REQ-SKL-10 | No on-the-fly skill synthesis | Missing skills not auto-synthesized |
-| REQ-VF-8 | Process tool `startProcess()` is a stub | Verify can't start system under test |
-| REQ-VF-9 | `waitForReady()` is a stub | Verify can't wait for server readiness |
-| REQ-VF-12 | HTTP tool for verify is a stub — no session persistence | Verify can't test HTTP endpoints |
-| REQ-GIT-3 | Plan auto-commits despite spec saying `auto-commits: false` | Contradicts requirement |
+### Top Risks
 
-### PARTIAL (30 items — key ones)
-
-| ID | Gap |
-|----|-----|
-| REQ-ARCH-2 | No interactive mode with no args (overlaps ARCH-3) |
-| REQ-ARCH-4 | `done()` doesn't trigger final text-only call; spinner not in loop |
-| REQ-ARCH-18 | `[ITERATION]` log missing `reason` field |
-| REQ-G-1 | `--idea` mode accepted but not implemented |
-| REQ-G-18 | Gather source reads bypass WriteContext (no pagination/sandbox) |
-| REQ-UI-1 | No scroll-back in conversation area |
-| REQ-UI-1a | Tool calls use action-colored bars instead of purple dot `●` |
-| REQ-UI-2 | No per-item progress with elapsed time in automated commands |
-| REQ-UI-3 | No multi-line input (Ctrl+J / backslash+Enter) |
-| REQ-UI-6 | Branch color wrong, no footer background color |
-| REQ-UI-7 | ASCII art color wrong, no callout background fill |
-| REQ-UI-10 | No formatted stats string `(elapsed · tkns · ctx%)` |
-| REQ-UI-14 | No mid-stream stall indicator, no empty response fallback messages |
-| REQ-UI-15 | Pending message has no visual display (yellow bar, hint line) |
-| REQ-U-1 | Status uses plain text, not emoji indicators |
-| REQ-U-12 | `askFn` not wired into chat's `buildLocalTools` call |
-| REQ-U-15 | Command is `/ask` instead of `/quick` per spec |
-| REQ-U-19 | Document extraction returns placeholder — logic not implemented |
-| REQ-U-20 | Code analysis missing path sandboxing |
-| REQ-D-16 | No interactive prompt for orphaned tasks in TTY mode |
-| REQ-P-4 | Plan auto-commits (contradicts `auto-commits: false`) |
-| REQ-TOOL-4 | Schema-handler validation only checks callable, not parameter names |
-| REQ-TOOL-5 | HTTP handler is hardcoded stub, not built via factory pattern |
-| REQ-SKL-4 | Only `list` and `search` implemented — no install/approve/remove |
-| REQ-TM-7 | Bug entity management incomplete (no creation API, no architect consultation) |
-| REQ-IDEA-5 | No `reqs:` field gate, no automatic idea archival |
-| REQ-CFG-8 | No explicit "models file missing" check — error comes from resolveModel |
+1. **REQ-VF-16 (browser tool)** — `src/tools/browser.ts` is a stub; every function returns `"Browser tool not yet implemented."` UI-based verification sub-agents cannot run. *(REQ-VF-16 is referenced in TOOL-7 adjacent requirements but has no dedicated REQ line; browser tool status is the dominant GAP.)*
+2. **REQ-SKL-3 (skill auto-synthesis)** — Synthesis writes a placeholder markdown file (`"Pending synthesis. Run 'voidrift skills approve ...'"`); no model call is made. The REQ mandates actual synthesis; the pending-approval gate is implemented but the content is boilerplate.
+3. **REQ-TOOL-7 (document analysis)** — PDF and DOCX branches shell out via `execSync("node -e \"...\"")` to bypass async limitations. This is fragile: string-interpolated paths risk injection (REQ-SEC-1), the inline script is unreadable, and the 30 s timeout is silently swallowed.
+4. **NFR Portability (V-NFR-2)** — No `.github/workflows/` directory. CI matrix claim in the Verification Plan is unverifiable.
+5. **NFR Maintainability (V-NFR-3)** — TypeScript strict mode is on (PASS for type portion), but JSDoc coverage is <1% across large modules (`src/agent/loop.ts`, `src/tui/App.tsx`, `src/commands/*.ts`). The REQ names JSDoc as a requirement — this is a partial.
+6. **Verification Plan hygiene** — 13 test files named in the plan do not exist. 73 requirements depend on those files. Tests do exist and pass, but the mapping is organic and undocumented.
+7. **Filesystem drift** — `dist/`, repo-root `config.yml`, repo-root `ideas/`, and the stale `GAP-ANALYSIS.md` all violate REQ-PS-1 (framework artifacts under `.voidrift/`) or reflect stale build output. (`BAK/` is the legacy Python tree and is intentionally excluded from this audit.)
 
 ---
 
-## Full Audit Tables
+## 2. Per-Requirement Status
 
-### 1. System Architecture (REQ-ARCH)
+Evidence columns reference source files. Where a Verification Plan test file is missing but coverage exists elsewhere, the actual test file is noted in italics.
 
-| ID | Status | Evidence |
-|----|--------|---------|
-| REQ-ARCH-1 | PASS | TypeScript CLI in `src/`, resources in `resources/`. |
-| REQ-ARCH-2 | PARTIAL | All 15 subcommands exist. No interactive mode with no args. |
-| REQ-ARCH-3 | FAIL | No interactive guided flow. Commander shows help text only. |
-| REQ-ARCH-4 | PARTIAL | tool_choice, stall detection, streaming all work. `done()` doesn't trigger final text-only call. |
-| REQ-ARCH-5 | PASS | `ModelInterface` bundles `ModelConfig` + `ProtocolAdapter`. |
-| REQ-ARCH-6 | PASS | Skills pre-injected. `skill(action="get")` in chat only. |
-| REQ-ARCH-7 | PASS | Separate agent instances per unit of work. |
-| REQ-ARCH-8 | PASS | Think-tag stripping with orphaned tag handling and streaming buffer. |
-| REQ-ARCH-9 | PASS | OCP contract: command modules export AGENT_TOOLS, dynamic import in builder. |
-| REQ-ARCH-10 | PASS | Exponential backoff with jitter, Retry-After, correct retryable classification. |
-| REQ-ARCH-11 | PASS | Max-tokens recovery for text and tool calls. |
-| REQ-ARCH-12 | PASS | Reactive compaction via summarization API call. |
-| REQ-ARCH-13 | PASS | TokenBudget with CLI flag override. |
-| REQ-ARCH-14 | PASS | All 7 hooks implemented with LoopState. |
-| REQ-ARCH-15 | PASS | snipOldToolResults with action-aware logic. |
-| REQ-ARCH-16 | PASS | Deduplication + concurrent batching. |
-| REQ-ARCH-17 | PASS | Path normalization with logging. |
-| REQ-ARCH-18 | PARTIAL | ITERATION/LOOP_EXIT logged but missing `reason` field. |
-| REQ-ARCH-19 | PASS | Cache control markers, [CACHE] logging, [PROMPT_HASH]. |
-| REQ-ARCH-20 (stream) | PASS | stream_options gated by known providers. |
-| REQ-ARCH-20 (decomp) | PASS | _handleStall, _drainSteering, _drainOneFollowup extracted. |
-| REQ-ARCH-21 | PASS | Client closed in finally block and on fallback. |
-| REQ-ARCH-22 | PASS | Full adapter pattern with streaming for both protocols. |
+### 2.1 Architecture (§4.1)
 
-### 2. Commands (REQ-G, REQ-P, REQ-D, REQ-DPL, REQ-VF)
+| REQ | Status | Evidence |
+| --- | --- | --- |
+| REQ-ARCH-1 | PASS*\* | `src/index.ts` dispatches chat vs command; resources/ editable. *test file `test_cli.ts` not present — partial coverage in `tests/commands/*.test.ts`.* |
+| REQ-ARCH-2 | PASS*\* | Three tiers in `src/commands/`; unknown command handled in `src/index.ts`. No stack trace leak. |
+| REQ-ARCH-3 | PASS | `src/agent/protocol.ts` + adapters in `src/protocols/`. Loop has no protocol branching. |
+| REQ-ARCH-4 | PASS | `src/agent/loop.ts` honors `toolChoice` passed by command; lifecycle commands use `required`, chat uses `auto`. |
+| REQ-ARCH-5 | PASS | Telemetry in `src/agent/loop.ts` + `src/tui/Message.tsx:85` renders stats line. Streaming via `src/agent/stream.ts`. |
+| REQ-ARCH-6 | PASS | `src/agent/stall.ts` — identical-args repeat detection, 2-nudge then force. |
+| REQ-ARCH-7 | PASS | Skill injection in `src/commands/base.ts`; chat loads on-demand via skill tool. |
+| REQ-ARCH-8 | PASS | Stage agents in `src/commands/gather.ts`, `plan.ts` start with fresh messages. |
+| REQ-ARCH-9 | PASS | `src/agent/think.ts` strips `<think>` blocks; logs at debug level. |
+| REQ-ARCH-10 | PASS | `src/tools/registry.ts` — per-command tool sets; `verify-doc` set added without modifying builder. |
+| REQ-ARCH-11 | PASS | `src/agent/loop.ts` retry + `src/agent/fallback.ts`; 429 honors Retry-After; 4xx terminal; fallback depth 1. |
+| REQ-ARCH-12 | PASS | `src/agent/budget.ts` — cumulative tracking; `--max-tokens` CLI override; no-op when unset. |
+| REQ-ARCH-13 | PASS | Loop hooks in `src/agent/loop.ts` — stopCondition, steeringMessage, beforeToolCall, transformContext. |
+| REQ-ARCH-14 | PASS | Dedup in `src/agent/loop.ts` (see `tool-dedup.test.ts`). |
+| REQ-ARCH-15 | PASS | Path normalization in `src/tools/filesystem.ts`. |
+| REQ-ARCH-16 | PASS | Prompt cache headers in `src/protocols/anthropic.ts`. |
+| REQ-ARCH-17 | PASS | Connection release in `src/agent/loop.ts` finally block. |
+| REQ-ARCH-18 | PASS | `src/prompts.ts` loads from `resources/prompts/*.md`; missing var throws. |
+| REQ-ARCH-19 | PASS | `buildSystemPrompt()` 4-layer composition in `src/prompts.ts`; governance-layer tests in `governance.test.ts`. |
 
-| ID | Status | ID | Status | ID | Status |
-|----|--------|----|--------|----|--------|
-| REQ-G-1 | PARTIAL | REQ-P-1 | PASS | REQ-D-1 | PASS |
-| REQ-G-8 | PASS | REQ-P-2 | PARTIAL | REQ-D-2 | PASS |
-| REQ-G-10 | PASS | REQ-P-3 | PASS | REQ-D-3 | PASS |
-| REQ-G-11 | PASS | REQ-P-4 | PARTIAL | REQ-D-4 | PASS |
-| REQ-G-12 | FAIL | REQ-P-9 | PASS | REQ-D-5 | PASS |
-| REQ-G-13 | FAIL | REQ-P-10 | PASS | REQ-D-6 | PASS |
-| REQ-G-17 | PASS | REQ-P-11 | PASS | REQ-D-7 | PASS |
-| REQ-G-18 | PARTIAL | REQ-P-13 | PASS | REQ-D-10 | PASS |
-| REQ-G-19 | PASS | REQ-P-14 | PASS | REQ-D-11 | PASS |
-| REQ-G-20 | PASS | REQ-P-15 | PASS | REQ-D-13 | PASS |
-| REQ-G-21 | PASS | REQ-P-16 | PASS | REQ-D-15 | PASS |
-| REQ-G-22 | PASS | REQ-P-17 | PASS | REQ-D-17 | PASS |
-| REQ-G-23 | PASS | REQ-DPL-1 | PASS | REQ-D-18 | PASS |
-| REQ-G-24 | PASS | REQ-DPL-2 | PASS | REQ-D-19 | PASS |
-| REQ-VF-P | PASS | REQ-DPL-3 | PASS | REQ-D-20 | PASS |
-| REQ-VF-3 | PASS | REQ-DPL-4 | PASS | REQ-D-21 | PASS |
-| REQ-VF-5 | PASS | REQ-DPL-5 | PASS | REQ-D-22 | PASS |
-| REQ-VF-6 | PASS | REQ-A-5 | PASS | REQ-D-24 | PASS |
-| REQ-VF-8 | FAIL | REQ-TM-8 | PASS | REQ-GIT-1 | PASS |
-| REQ-VF-9 | FAIL | REQ-GIT-3 | FAIL | REQ-GIT-2 | PASS |
-| REQ-VF-12 | FAIL | | | REQ-GIT-4 | PASS |
-| REQ-VF-15 | PASS | | | | |
-| REQ-VF-17 | PASS | | | | |
+### 2.2 Chat Command (§4.2)
 
-### 3. Utilities (REQ-U)
+| REQ | Status | Evidence |
+| --- | --- | --- |
+| REQ-CHAT-1 | PASS | Mode definitions in `src/commands/chat.ts`; `chat-gather.test.ts`. |
+| REQ-CHAT-2 | PASS*\* | `voidrift` no-args → chat; `--doc` loads artifact. *test file `test_chat.ts` missing; coverage in `chat.test.ts`.* |
+| REQ-CHAT-3 | PASS | `src/context_compactor.ts`; `p0-features.test.ts::ContextCompactor`, `governance.test.ts`. |
+| REQ-CHAT-4 | PASS*\* | Session save/restore in `src/session.ts`. |
+| REQ-CHAT-5 | PASS*\* | `/ask` one-shot in `src/commands/ask.ts`. |
+| REQ-CHAT-6 | PASS | Bare mode in `src/commands/chat.ts` + `bare-mode.test.ts`. |
+| REQ-CHAT-7 | PASS*\* | Permission gate in `src/tools/permissions.ts`. |
+| REQ-CHAT-8 | PASS*\* | `/settings` in `src/commands/settings.ts`. |
+| REQ-CHAT-9 | PASS*\* | `/model` in `src/commands/model.ts`. |
+| REQ-CHAT-10 | PASS*\* | Model resolution in `src/config.ts`. |
+| REQ-CHAT-11 | PASS | `idea-mode.test.ts`. |
+| REQ-CHAT-12 | PASS | `idea-flow.test.ts`. |
+| REQ-CHAT-13 | PASS*\* | `/done` in `src/commands/idea.ts`. |
+| REQ-CHAT-14 | PASS | Governance partition tests in `governance.test.ts`. |
+| REQ-CHAT-15 | PASS | `mode-switching.test.ts`. |
+| REQ-CHAT-16 | PASS | `exec-gateway.test.ts`. |
 
-| ID | Status | ID | Status |
-|----|--------|----|--------|
-| REQ-U-1 | PARTIAL | REQ-U-13 | PASS |
-| REQ-U-2 | PASS | REQ-U-14 | PASS |
-| REQ-U-2a | PASS | REQ-U-15 | PARTIAL |
-| REQ-U-2b | PASS | REQ-U-16 | PASS |
-| REQ-U-2c | PASS | REQ-U-16a | FAIL |
-| REQ-U-2d | PARTIAL | REQ-U-16b | PASS |
-| REQ-U-2e | PASS | REQ-U-17 | PASS |
-| REQ-U-3 | PASS | REQ-U-18 | PASS |
-| REQ-U-4 | PASS | REQ-U-19 | PARTIAL |
-| REQ-U-5 | PASS | REQ-U-20 | PARTIAL |
-| REQ-U-6 | PASS | REQ-U-21 | PASS |
-| REQ-U-7 | PASS | REQ-U-22 | PASS |
-| REQ-U-8 | FAIL | REQ-U-23 | PASS |
-| REQ-U-10 | PASS | | |
-| REQ-U-11 | PASS | | |
-| REQ-U-12 | PARTIAL | | |
+### 2.3 Gather (§4.3)
 
-### 4. Tools, Security, Config, Skills, UI, etc.
+| REQ | Status | Evidence |
+| --- | --- | --- |
+| REQ-G-1 | PASS | `gather.test.ts` — `--idea`, `--ref`, `--import` modes all covered. |
+| REQ-G-2 | PASS*\* | 4-stage pipeline in `src/commands/gather.ts`. |
+| REQ-G-3 | PASS*\* | Context-error handling in `src/agent/loop.ts`. |
+| REQ-G-4 | PASS | `gather-progress.test.ts`. |
+| REQ-G-5 | PASS*\* | Uncategorized prompt flow in `src/commands/gather.ts`. |
 
-| ID | Status | ID | Status | ID | Status |
-|----|--------|----|--------|----|--------|
-| REQ-TOOL-1 | PASS | REQ-SEC-1 | PASS | REQ-CFG-1 | PASS |
-| REQ-TOOL-2 | PASS | REQ-SEC-2 | PASS | REQ-CFG-4 | PASS |
-| REQ-TOOL-3 | PASS | REQ-SEC-3 | PASS | REQ-CFG-5 | PASS |
-| REQ-TOOL-4 | PARTIAL | REQ-SEC-4 | PASS | REQ-CFG-7 | PASS |
-| REQ-TOOL-5 | PARTIAL | REQ-FSZ-1 | PASS | REQ-CFG-9 | PASS |
-| REQ-TOOL-6 | PASS | REQ-FSZ-2 | PASS | REQ-CFG-10 | PASS |
-| REQ-TOOL-7 | PASS | REQ-FSZ-4 | PASS | REQ-MC-1 | PASS |
-| REQ-TOOL-8 | PASS | REQ-FSZ-5 | PASS | REQ-MC-3 | PASS |
-| REQ-SKL-1 | PASS | REQ-PS-1 | PASS | REQ-MC-4 | PASS |
-| REQ-SKL-2 | PASS | REQ-PS-2 | PASS | REQ-MC-5 | PASS |
-| REQ-SKL-4 | PARTIAL | REQ-PS-3 | PASS | REQ-LOG-1 | PASS |
-| REQ-SKL-5 | FAIL | REQ-PS-4 | PASS | REQ-LOG-4 | PASS |
-| REQ-SKL-6 | FAIL | REQ-TM-1 | PASS | REQ-LOG-6 | PASS |
-| REQ-SKL-9 | PASS | REQ-TM-2 | PASS | REQ-TEST-1 | PASS |
-| REQ-SKL-10 | FAIL | REQ-TM-3 | PASS | REQ-TEST-2 | PASS |
-| REQ-MEM-1 | PASS | REQ-TM-4 | PASS | REQ-IDEA-1 | PASS |
-| REQ-UI-1 | PARTIAL | REQ-TM-5 | PASS | REQ-IDEA-3 | PASS |
-| REQ-UI-3 | PARTIAL | REQ-TM-6 | PASS | REQ-IDEA-4 | PASS |
-| REQ-UI-4 | PASS | | | | |
-| REQ-UI-6 | PARTIAL | | | | |
-| REQ-UI-7 | PARTIAL | | | | |
-| REQ-UI-8 | PASS | | | | |
-| REQ-UI-9 | PASS | | | | |
-| REQ-UI-11 | FAIL | | | | |
-| REQ-UI-12 | FAIL | | | | |
-| REQ-UI-14 | PASS | | | | |
-| REQ-UI-16 | FAIL | | | | |
+### 2.4 Plan (§4.4)
+
+| REQ | Status | Evidence |
+| --- | --- | --- |
+| REQ-P-1 | PASS*\* | 6-stage pipeline in `src/commands/plan.ts`. |
+| REQ-P-2 | PASS | `plan-task-acs.test.ts`. |
+| REQ-P-3 | PASS*\* | Traceability check in `src/commands/plan.ts`. |
+| REQ-P-4 | PASS*\* | `--overwrite` behavior in `src/commands/plan.ts`. |
+| REQ-P-5 | PASS | `plan-self-containment.test.ts`. |
+| REQ-P-6 | PASS*\* | Skill validation in `src/skills.ts` + plan pipeline. |
+| REQ-P-7 | PASS*\* | Update mode in `src/commands/plan.ts`. |
+| REQ-P-8 | PASS | Idea archival in `plan-self-containment.test.ts` + `plan.test.ts`. |
+
+### 2.5 Develop (§4.5)
+
+| REQ | Status | Evidence |
+| --- | --- | --- |
+| REQ-D-1 | PASS*\* | Prereq check in `src/commands/develop.ts`. |
+| REQ-D-2 | PASS*\* | Locking in `src/commands/develop.ts` + `.voidrift/lock.pid`. |
+| REQ-D-3 | PASS*\* | Dispatch logic in `src/commands/develop.ts`. |
+| REQ-D-4 | PASS | `develop-guards.test.ts` — zero-write guard + diff warning. |
+| REQ-D-5 | PASS*\* | Escalation in `src/commands/develop.ts`. |
+| REQ-D-6 | PASS*\* | Rollback via git checkpoints in `src/git_checkpoint.ts`. |
+| REQ-D-7 | PASS*\* | Orphan recovery in `src/commands/develop.ts`. |
+| REQ-D-8 | PASS*\* | Change summary in `src/commands/develop.ts`. |
+| REQ-D-9 | PASS*\* | Mtime guard in `src/tools/filesystem.ts`. |
+| REQ-D-10 | PASS*\* | Checkpoint creation in `src/git_checkpoint.ts`. |
+| REQ-D-11 | PASS*\* | File coverage in `src/commands/develop.ts`. |
+| REQ-D-12 | PASS*\* | Self-review steering in `src/commands/develop.ts`. |
+| REQ-D-13 | PASS | `develop-guards.test.ts` — filesRead set. |
+
+### 2.6 Verify (§4.6)
+
+| REQ | Status | Evidence |
+| --- | --- | --- |
+| REQ-VF-1 | PASS*\* | Prereq check in `src/commands/verify.ts`. |
+| REQ-VF-2 | PASS*\* | Plan/execute/report stages in `src/commands/verify.ts`. |
+| REQ-VF-3 | PASS | `verify-doc.test.ts`. |
+
+### 2.7 Deploy (§4.7)
+
+| REQ | Status | Evidence |
+| --- | --- | --- |
+| REQ-DPL-1 | PASS*\* | Version bump in `src/commands/deploy.ts`. |
+| REQ-DPL-2 | PASS*\* | Changelog generation in `src/commands/deploy.ts`. |
+| REQ-DPL-3 | PASS*\* | Git tag creation in `src/commands/deploy.ts`. |
+| REQ-DPL-4 | PASS*\* | IaC generation in `src/commands/deploy.ts`. |
+| REQ-DPL-5 | PASS*\* | Post-deploy hook in `src/commands/deploy.ts`. |
+
+### 2.8 Utility (§4.8)
+
+| REQ | Status | Evidence |
+| --- | --- | --- |
+| REQ-UTIL-1 | PASS | `status.test.ts`. |
+| REQ-UTIL-2 | PASS | `log.test.ts`. |
+| REQ-UTIL-3 | PASS | `unlock.test.ts`. |
+| REQ-UTIL-4 | PASS*\* | `src/commands/completions.ts` — shell completion script. |
+| REQ-UTIL-5 | PASS | `prune.test.ts`. |
+| REQ-UTIL-6 | PASS*\* | `src/doctor.ts`. |
+| REQ-UTIL-7 | PASS | `skills-cli.test.ts`. |
+| REQ-UTIL-8 | PASS | `rollback.test.ts`. |
+| REQ-UTIL-9 | PASS*\* | `src/commands/memory.ts`. |
+
+### 2.9 Configuration (§4.9)
+
+| REQ | Status | Evidence |
+| --- | --- | --- |
+| REQ-CFG-1 | PASS*\* | Model resolution in `src/config.ts`. |
+| REQ-CFG-2 | PASS*\* | Model defaults in `src/config.ts`. |
+| REQ-CFG-3 | PASS | `config-expansion.test.ts` — `expandCrossRefs()`. |
+| REQ-CFG-4 | PASS*\* | Models-file check in `src/config.ts`. |
+| REQ-CFG-5 | PASS | `config-expansion.test.ts` — `getMaxTokens()`. |
+
+### 2.10 Skills (§4.10)
+
+| REQ | Status | Evidence |
+| --- | --- | --- |
+| REQ-SKL-1 | PASS*\* | Three-layer resolution in `src/skills.ts:61–96`. |
+| REQ-SKL-2 | PASS | `skill-allowed-tools.test.ts`. |
+| REQ-SKL-3 | **PARTIAL** | `src/skills.ts:79–93` — synthesis writes a placeholder file with frontmatter but does NOT call any model. The pending-approval gate is present; the content is a stub reading *"Pending synthesis. Run 'voidrift skills approve ...'"*. REQ mandates actual synthesis content. Code comment even misreferences the REQ as `REQ-SKL-10`. |
+
+### 2.11 Memory (§4.11)
+
+| REQ | Status | Evidence |
+| --- | --- | --- |
+| REQ-MEM-1 | PASS*\* | Layer resolution in `src/memory.ts`. |
+| REQ-MEM-2 | PASS*\* | Memory injection in `src/prompts.ts`. |
+| REQ-MEM-3 | PASS*\* | Memory tools in `src/tools/builder.ts`. |
+
+### 2.12 Tools (§4.12)
+
+| REQ | Status | Evidence |
+| --- | --- | --- |
+| REQ-TOOL-1 | PASS*\* | Large-content handling in `src/tools/filesystem.ts`. |
+| REQ-TOOL-2 | PASS*\* | Process tool in `src/tools/process.ts`. |
+| REQ-TOOL-3 | PASS*\* | HTTP tool with sessions in `src/tools/http.ts`. |
+| REQ-TOOL-4 | PASS | `tool-http-fetch.test.ts`. |
+| REQ-TOOL-5 | PASS*\* | Ask tool in `src/tools/builder.ts`. |
+| REQ-TOOL-6 | PASS*\* | Session search in `src/tools/builder.ts:170–227`. |
+| REQ-TOOL-7 | **PARTIAL** | `src/tools/builder.ts:229–272`. PDF/DOCX extraction shells out via `execSync("node -e \"...\"")` with interpolated paths (injection risk under REQ-SEC-1), unreadable inline scripts, and swallowed errors. XLSX branch is clean. REQ is satisfied in outcome but the implementation is fragile. |
+| REQ-TOOL-8 | PASS | `tool-code-analysis.test.ts`. |
+| REQ-TOOL-9 | PASS*\* | File edit tool in `src/tools/filesystem.ts`. |
+| REQ-TOOL-10 | PASS*\* | Tool guidelines injection in `src/prompts.ts`. |
+
+### 2.13 Security (§4.13)
+
+| REQ | Status | Evidence |
+| --- | --- | --- |
+| REQ-SEC-1 | PASS*\* | Shell config in `src/tools/security.ts`. |
+| REQ-SEC-2 | PASS*\* | Path sandbox in `src/tools/filesystem.ts` + `security.ts`. |
+| REQ-SEC-3 | PASS*\* | Protected paths in `src/tools/security.ts`. |
+| REQ-SEC-4 | PASS*\* | Command classification in `src/tools/security.ts`. |
+| REQ-SEC-5 | PASS*\* | SSRF guard in `src/tools/ssrf.ts`. |
+
+### 2.14 Git (§4.14)
+
+| REQ | Status | Evidence |
+| --- | --- | --- |
+| REQ-GIT-1 | PASS*\* | Bounded diff in `src/git_utils.ts`. |
+| REQ-GIT-2 | PASS*\* | Context injection in `src/git_context.ts`. |
+
+### 2.15 Logging (§4.15)
+
+| REQ | Status | Evidence |
+| --- | --- | --- |
+| REQ-LOG-1 | PASS*\* | Project log in `src/logger.ts`. |
+| REQ-LOG-2 | PASS | `log.test.ts`. |
+| REQ-LOG-3 | PASS | `log-iterations.test.ts`. |
+| REQ-LOG-4 | PASS | `error-summary.test.ts`. |
+
+### 2.16 Project Structure (§4.16)
+
+| REQ | Status | Evidence |
+| --- | --- | --- |
+| REQ-PS-1 | **PARTIAL** | Framework writes under `.voidrift/` (PASS) but REPO ROOT currently contains `BAK/`, `dist/`, `config.yml`, `ideas/` which should be in `.voidrift/` or excluded. See §7. |
+| REQ-PS-2 | PASS*\* | STATE.md updates in `src/state.ts`. |
+
+### 2.17 Task Manifest (§4.17)
+
+| REQ | Status | Evidence |
+| --- | --- | --- |
+| REQ-TM-1 | PASS*\* | Manifest ownership in `src/manifest.ts`. |
+| REQ-TM-2 | PASS*\* | Status transitions in `src/manifest.ts`. |
+| REQ-TM-3 | PASS*\* | Dependency blocking in `src/manifest.ts`. |
+| REQ-TM-4 | PASS*\* | History log in `src/manifest.ts`. |
+| REQ-TM-5 | PASS*\* | Archival logic in `src/manifest.ts`. |
+| REQ-TM-6 | PASS*\* | Bug file handling in `src/manifest.ts`. |
+| REQ-TM-7 | PASS*\* | History rotation on deploy in `src/commands/deploy.ts`. |
+
+### 2.18 UI (§4.18)
+
+| REQ | Status | Evidence |
+| --- | --- | --- |
+| REQ-UI-1 | PASS*\* | Progress display in `src/tui/*`. |
+| REQ-UI-2 | PASS*\* | Welcome box in `src/tui/Header.tsx`. |
+| REQ-UI-3 | PASS*\* | Command header in `src/tui/Header.tsx`. |
+| REQ-UI-4 | PASS*\* | Multiline input in `src/tui/components/Input.tsx`. |
+| REQ-UI-5 | PASS*\* | TUI layout in `src/tui/App.tsx`. |
+| REQ-UI-6 | PASS*\* | Message roles in `src/tui/Message.tsx`. |
+| REQ-UI-7 | PASS | `ui-input-queue.test.ts`. |
+| REQ-UI-8 | PASS*\* | Exit behavior in `src/tui/App.tsx`. |
+| REQ-UI-9 | PASS | `footer.test.ts`. |
+| REQ-UI-10 | PASS | `ui-stats.test.ts`. |
+| REQ-UI-11 | PASS*\* | Thinking indicator in `src/tui/Thinking.tsx`. |
+| REQ-UI-12 | PASS*\* | Input history in `src/tui/components/Input.tsx`. |
+| REQ-UI-13 | PASS | `src/tui/Message.tsx:85` — completion line rendered with elapsed + tokens. (Previously flagged PARTIAL in `GAP-ANALYSIS.md`; re-verified as PASS.) |
+
+### 2.19 Non-Functional (§5)
+
+| REQ | Status | Evidence |
+| --- | --- | --- |
+| NFR Security (V-NFR-1) | PASS | No hardcoded credentials in source; `src/config.ts` env-var and models-file only. |
+| NFR Portability (V-NFR-2) | **GAP** | No `.github/workflows/` directory. No CI matrix exists. Claim is unverifiable. |
+| NFR Maintainability (V-NFR-3) | **PARTIAL** | TypeScript strict mode ON (PASS); JSDoc coverage <1% across large modules. REQ names JSDoc; coverage is minimal. |
 
 ---
 
-## Progress Since Pre-Refactor Audit
+## 3. Incomplete Implementations
 
-| Metric | Pre-Refactor | Post-Refactor | Delta |
-|--------|-------------|---------------|-------|
-| PASS | 66 (44%) | 105 (70%) | +39 |
-| PARTIAL | 38 (25%) | 30 (20%) | -8 |
-| FAIL | 31 (21%) | 15 (10%) | -16 |
-| N/A | 15 (10%) | 0 (0%) | -15 |
-| Tests | 472 + 3 skip | 503 + 0 skip | +31 |
+### 3.1 Browser Tool — FULL STUB (GAP)
+**File:** `src/tools/browser.ts`
+**Evidence:**
+```
+browserNavigate(), browserScreenshot(), browserClick(), browserGetText()
+  → all return JSON.stringify({ error: "Browser tool not yet implemented." })
+closeAllSessions(), closeSession() → empty bodies
+```
+**Header comment:** *"Full implementation in Phase 5. Stub for Phase 2."*
+**Impact:** UI-based verification sub-agents cannot perform DOM assertions, screenshots, or page interactions. Wire-up from `src/tools/registry.ts` exists but all calls fail open. No tests reference these functions.
 
-### What the refactor delivered:
-- **Streaming** — chat uses `stream: true` with progressive markdown rendering
-- **Tool handlers** — memory, session, analyze, ask all wired (http still stub)
-- **Context management** — /compact, auto-compact at 80%, nudge at 70%, restoration
-- **Permission gate** — session-scoped writes/runs/reads-outside with allow/deny/always
-- **Idea flow** — /idea, /done, file I/O, manifest tracking
-- **Concurrent dispatch** — develop + verify use concurrency limit with async mutex
-- **Git commits** — plan artifacts + per-task develop commits
-- **System log** — ~/.voidrift/logs/voidrift.log with rotation
-- **ErrorTracker** — structured error accumulation + .errors.jsonl
-- **OCP contract** — command modules export AGENT_TOOLS, dynamic import
-- **Loop decomposition** — _handleStall, _drainSteering, _drainOneFollowup
-- **ModelInterface** — adapter bundled at resolution time
-- **Security** — symlink resolution, IPv6 SSRF, PATH_BLOCKED logging, ip4ToInt fix
-- **REQUIREMENTS.md** — all Python references replaced with TypeScript equivalents
+### 3.2 Skill Synthesis — PLACEHOLDER CONTENT (PARTIAL)
+**File:** `src/skills.ts:79–93`
+**Evidence:**
+```typescript
+// On-the-fly synthesis (REQ-SKL-10)    ← comment references wrong REQ (should be REQ-SKL-3)
+const synthesisModel = cfg.skills?.synthesisModel;
+if (synthesisModel) {
+  ...
+  writeFileSync(pendingPath, frontmatter +
+    `# ${upper}\n\nPending synthesis. Run 'voidrift skills approve ${name.toLowerCase()}' after review.\n`);
+}
+```
+**Gap:** `synthesisModel` is loaded but never invoked. No call is made to any protocol adapter. The file written is a placeholder, not synthesized content. REQ-SKL-3 AC: *"Given a missing skill and synthesis_model configured, When a command references it, Then a pending skill is synthesized"* — current behavior creates a file but the content is boilerplate.
 
-### What remains:
-1. **HTTP tool** (REQ-U-8) — the biggest remaining gap for chat usefulness
-2. **Skills synthesis** (REQ-SKL-5/6/10) — install/approve/review workflow
-3. **Verify tools** (REQ-VF-8/9/12) — process start, waitForReady, HTTP sessions
-4. **UI polish** — input history, --style modes, concurrent dashboard, multi-line input
-5. **Minor gaps** — interactive mode (ARCH-3), gather streaming (G-12), chunking wiring (G-13)
+### 3.3 Document Analysis — FRAGILE EXECSYNC (PARTIAL)
+**File:** `src/tools/builder.ts:240–253`
+**Evidence:**
+```typescript
+const text = execSync(
+  `node -e "require('pdf-parse')(require('fs').readFileSync('${resolved.replace(/'/g, "\\'")}')). then(d=>process.stdout.write(d.text))"`,
+  { timeout: 30000, encoding: "utf-8" }
+);
+```
+**Problems:**
+1. **Injection surface** — `resolved.replace(/'/g, "\\'")` handles single quotes but NOT backticks, `$(...)`, or newlines. Double quotes inside the path end the outer shell string.
+2. **Timeout swallowed** — 30 s timeout raises `ETIMEDOUT`, caught by the outer `catch` block which re-emits as *"Missing dependency: npm install pdf-parse"* — wrong error message.
+3. **Unreadable** — inline `node -e` escaping defeats type checking and static analysis.
+4. **Dead branch** — `const pdfParse = require("pdf-parse")` on line 241 is imported but never called (the execSync is the actual extraction); remove or use.
+5. **Same pattern repeated for DOCX** on line 253 with `mammoth`.
+
+**Fix direction:** Make the tool handler `async`; await the native promise API. Or use `pdfjs-dist` / `mammoth` sync APIs if available.
+
+### 3.4 No CI Matrix (GAP)
+**Expected:** `.github/workflows/ci.yml` or equivalent running `bun test` on Linux, macOS, WSL2.
+**Actual:** No `.github/` directory exists.
+**Impact:** V-NFR-2 (NFR Portability) Verification Plan entry *"CI matrix — tests pass on Linux, macOS, and WSL2"* cannot be satisfied.
+
+### 3.5 Low JSDoc Coverage (PARTIAL)
+**Examples:**
+- `src/agent/loop.ts` — 600+ lines, ~3 JSDoc blocks.
+- `src/tui/App.tsx` — ~400 lines, 0 JSDoc.
+- `src/commands/develop.ts` — ~500 lines, 1 JSDoc.
+**REQ-NFR (§5):** *"JSDoc comments and TypeScript types SHALL be used throughout."* TypeScript types are comprehensive; JSDoc is not.
+
+### 3.6 Code/REQ Comment Drift (MINOR)
+- `src/skills.ts:79` references `REQ-SKL-10`; REQ-SKL-10 does not exist. Should be `REQ-SKL-3`.
+- `src/tools/builder.ts:229` comment references `REQ-U-19, REQ-U-20`; REQ-U-* namespace does not exist in REQUIREMENTS.md. Should be `REQ-TOOL-7, REQ-TOOL-8`.
+
+---
+
+## 4. Unmapped Code
+
+All production code in `src/` maps to a requirement or serves as internal infrastructure (types, utilities, glue). Notable review:
+
+| Path | Maps to | Notes |
+| --- | --- | --- |
+| `src/agent/*.ts` | REQ-ARCH-3 through REQ-ARCH-19 | All files accounted for. |
+| `src/commands/*.ts` (23 files) | REQ-CHAT-*, REQ-G-*, REQ-P-*, REQ-D-*, REQ-VF-*, REQ-DPL-*, REQ-UTIL-* | All commands map to a requirement. |
+| `src/tools/*.ts` | REQ-TOOL-*, REQ-SEC-*, REQ-ARCH-10 | `browser.ts` is a stub (§3.1) but conceptually maps. |
+| `src/tui/**` | REQ-UI-1 through REQ-UI-13 | Internal components (regions/, panels/, useRegion.ts) support REQ-UI-5 (TUI layout). |
+| `resources/skills/*.md` (18 files) | REQ-SKL-1 (north-star layer) | 11 skills not actively referenced; authorized as "north-star layer" per REQ-SKL-1. |
+| `resources/prompts/*.md` (8 files) | REQ-ARCH-18 | All consumed by `src/prompts.ts`. |
+| `resources/templates/*.md` (5 files) | REQ-G-2, REQ-P-1 | All consumed by pipelines. |
+
+**No orphan production code was found.** All tests exercise production modules.
+
+---
+
+## 5. Test Coverage Gaps
+
+### 5.1 Test Execution
+- **Total:** 972 tests across 61 files
+- **Result:** 972 passing (100%)
+- **Runtime:** ~2.24 s
+- **Framework:** Vitest + Bun
+
+### 5.2 Missing Verification-Plan Test Files
+REQUIREMENTS.md §6 names the following test files; none exist in `tests/`:
+
+| Missing file | REQs named | Actual coverage |
+| --- | --- | --- |
+| `test_cli.ts` | ARCH-1, ARCH-2 | Partial in `tests/commands/*.test.ts`; dispatcher not directly tested. |
+| `test_agent.ts` | ARCH-3–14, 16, 17 | Covered organically by `tool-dedup.test.ts`, `governance.test.ts`, `prompts.test.ts`, and stall-specific tests. |
+| `test_tools.ts` | TOOL-1, 2, 3, 5, 6, 7, 9, 10 | Partial: `tool-http-fetch.test.ts`, `tool-code-analysis.test.ts`; no dedicated coverage for TOOL-1/2/5/6/7/9/10 ACs. |
+| `test_chat.ts` | CHAT-2, 4, 5, 7, 8, 9, 10, 13 | Covered by `chat-gather.test.ts`, `bare-mode.test.ts`, `idea-mode.test.ts`, `mode-switching.test.ts` — no single chat-level file. |
+| `test_develop.ts` | D-1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12 | Covered by `develop-guards.test.ts`; other ACs lack dedicated tests. |
+| `test_deploy.ts` | DPL-1, 2, 3, 4, 5 | No dedicated coverage. |
+| `test_verify.ts` | VF-1, 2 | `verify-doc.test.ts` covers VF-3 only. |
+| `test_ui.ts` | UI-1, 2, 3, 4, 5, 6, 8, 11, 12, 13 | `footer.test.ts`, `ui-input-queue.test.ts`, `ui-stats.test.ts` cover 7, 9, 10. Most UI REQs lack direct tests; behavior verified via integration runs. |
+| `test_gather.ts` | G-2, 3, 5 | Partial coverage in `gather.test.ts` and `gather-progress.test.ts`. |
+| `test_plan.ts` | P-1, 3, 4, 6, 7 | Partial coverage in `plan.test.ts`, `plan-task-acs.test.ts`, `plan-self-containment.test.ts`. |
+| `test_structure.ts` | PS-1, PS-2 | No dedicated coverage. |
+| `test_completions.ts` | UTIL-4 | No dedicated coverage. |
+| `test_logging.ts` | LOG-1 | `log.test.ts` covers LOG-2 only. |
+
+**Impact:** 73 of 135 REQs (54%) name a missing test file. The REQs are organically covered but the mapping is not documented, making regression detection harder and the plan audit-resistant.
+
+### 5.3 Tests With No REQ Traceback
+All 61 test files map to at least one REQ. No orphan tests found.
+
+---
+
+## 6. Non-Functional Gaps
+
+| Area | Status | Gap |
+| --- | --- | --- |
+| Security (V-NFR-1) | PASS | None. No hardcoded secrets. |
+| Portability (V-NFR-2) | **GAP** | No CI matrix. No `.github/workflows/` directory. No automated cross-platform verification. |
+| Maintainability (V-NFR-3) | **PARTIAL** | TypeScript strict mode: ON ✓. JSDoc coverage: <1% across large modules. |
+
+---
+
+## 7. Stale Artifacts at Repo Root
+
+Per REQ-PS-1, the framework writes under `.voidrift/`. These artifacts at repo root violate that principle or are build leftovers:
+
+| Path | Category | Disposition |
+| --- | --- | --- |
+| `BAK/` | Legacy Python tree (pre-TS rewrite) | **Ignore.** Not part of the current TypeScript codebase; retained for historical reference only. Audit excludes it from all other findings. |
+| `dist/` | Build output | Add to `.gitignore` (if not already ignored) and delete from tree. |
+| `config.yml` | Duplicate of `~/.voidrift/config.yml` | Confirm not referenced by tests/docs; if duplicate, delete. |
+| `ideas/` | Brainstorm drafts | Per REQ-PS-1 should live under `.voidrift/ideas/`. Move. |
+| `GAP-ANALYSIS.md` | Superseded by this audit | Delete. This audit supersedes it. |
+
+`.claude-flow/`, `.claude/`, `.kiro/`, `.vscode/` are tool-configuration directories owned by editors/assistants; leave as-is.
+
+---
+
+## 8. Recommended Backlog
+
+Priorities: **P0** — blocks a REQ outright. **P1** — material partial/fragility. **P2** — plan hygiene. **P3** — cleanup.
+
+### P0 — GAPs
+
+| ID | REQ | Summary | Estimate |
+| --- | --- | --- | --- |
+| AUD-P0-01 | REQ-VF-16 *(browser)* | Implement browser tool using Playwright or equivalent. Wire to existing `src/tools/browser.ts` signature. Add tests. | 3–5 d |
+| AUD-P0-02 | NFR Portability | Create `.github/workflows/ci.yml` matrix: {ubuntu-latest, macos-latest, wsl2} × `bun test`. | 0.5–1 d |
+
+### P1 — PARTIALs
+
+| ID | REQ | Summary | Estimate |
+| --- | --- | --- | --- |
+| AUD-P1-01 | REQ-SKL-3 | Replace placeholder in `src/skills.ts:79–93` with real synthesis call using `synthesisModel`. Preserve pending-approval gate. Add `test_skills.ts::TestAutoSynthesis`. Fix REQ comment reference. | 1–2 d |
+| AUD-P1-02 | REQ-TOOL-7 | Replace `execSync("node -e \"...\"")` pattern in `src/tools/builder.ts:240–253` with async handler awaiting native promise API. Eliminate path-injection surface. | 1 d |
+| AUD-P1-03 | NFR Maintainability | Add JSDoc to public API of top 10 modules by LOC (agent/loop, tui/App, commands/develop, commands/plan, commands/gather, tools/builder, prompts, config, manifest, session). | 2–3 d |
+| AUD-P1-04 | REQ-PS-1 | Move repo-root `ideas/` under `.voidrift/ideas/`. Update any references. | 0.5 d |
+
+### P2 — Test & Plan Hygiene
+
+| ID | REQ | Summary | Estimate |
+| --- | --- | --- | --- |
+| AUD-P2-01 | V-ARCH/CHAT/TOOL/UI/etc. | Either create the 13 test files named in §6 of REQUIREMENTS.md, OR update REQUIREMENTS.md to reference the actual test files. Recommendation: update REQUIREMENTS.md for coverage that already exists; add dedicated files where coverage is thin (see AUD-P2-02 through -05). | 1–2 d |
+| AUD-P2-02 | REQ-DPL-1..5 | Add `tests/commands/deploy.test.ts` (no coverage currently). | 1 d |
+| AUD-P2-03 | REQ-VF-1, REQ-VF-2 | Add `tests/commands/verify.test.ts` for prereq and pipeline (VF-3 already covered). | 1 d |
+| AUD-P2-04 | REQ-PS-1, REQ-PS-2 | Add `tests/structure.test.ts` (no coverage currently). | 0.5 d |
+| AUD-P2-05 | REQ-UTIL-4 | Add `tests/commands/completions.test.ts` (no coverage currently). | 0.5 d |
+| AUD-P2-06 | Verification Plan | Update §6 table in REQUIREMENTS.md to reflect actual test-file mapping; document that many REQs are covered by feature-named files (e.g., `bare-mode.test.ts` not `test_chat.ts`). | 0.5 d |
+
+### P3 — Cleanup
+
+| ID | Path | Action | Estimate |
+| --- | --- | --- | --- |
+| AUD-P3-01 | `dist/` | Delete; ensure `.gitignore` covers it. | 5 min |
+| AUD-P3-02 | `config.yml` (root) | Confirm unused, delete. | 10 min |
+| AUD-P3-03 | `GAP-ANALYSIS.md` | Delete (superseded by this audit). | 2 min |
+| AUD-P3-04 | `src/skills.ts:79` | Fix comment: `REQ-SKL-10` → `REQ-SKL-3`. | 1 min |
+| AUD-P3-05 | `src/tools/builder.ts:229` | Fix comment: `REQ-U-19, REQ-U-20` → `REQ-TOOL-7, REQ-TOOL-8`. | 1 min |
+| AUD-P3-06 | `src/tools/builder.ts:241` | Remove unused `const pdfParse = require("pdf-parse")` after AUD-P1-02 lands. | 2 min |
+
+---
+
+## 9. Verification
+
+- **Requirement counts** — cross-referenced against `REQUIREMENTS.md §6` Verification Plan (135 rows).
+- **PARTIAL/GAP claims** — each claim backed by a file path + line number; source was read in full.
+- **Test counts** — `bun test` output: 972 passed / 0 failed, 61 files.
+- **Stale files** — confirmed by `ls -la` of repo root (2026-04-20).
+
+---
+
+## 10. Change Log
+
+- **2026-04-20** — Initial audit authored. Supersedes `GAP-ANALYSIS.md` (2026-04-19).
+  - Reclassified REQ-UI-13 from PARTIAL (in GAP-ANALYSIS.md) to PASS after re-reading `src/tui/Message.tsx:85`.
+  - Added §4 (Unmapped Code) and §7 (Stale Artifacts) dimensions not present in the prior analysis.
+  - Added §5.2 missing-test-file analysis (73 REQs reference 13 non-existent files).

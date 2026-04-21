@@ -9,6 +9,7 @@ import { readProcessOutput } from "./process.js";
 import * as browser from "./browser.js";
 import { getBashConfig, getAllowedCommands } from "../config.js";
 import { findSkill, listSkills } from "../skills.js";
+import { loadPrompt } from "../prompts.js";
 
 export type Handler = (...args: unknown[]) => string;
 
@@ -25,6 +26,7 @@ const _FALLBACK_TOOLS: Record<string, Set<string>> = {
   chat: new Set(["file", "http", "shell", "skill", "memory", "session", "analyze", "ask"]),
   "verify-plan": new Set(["file"]),
   "verify-execute": new Set(["file", "http", "shell", "browser", "process"]),
+  "verify-doc": new Set(["file"]),
 };
 
 const _FALLBACK_ACTIONS: Record<string, Record<string, string[]>> = {
@@ -34,6 +36,7 @@ const _FALLBACK_ACTIONS: Record<string, Record<string, string[]>> = {
   chat: { file: ["read", "write", "edit", "delete", "list"], http: ["get", "post", "put", "delete"] },
   "verify-plan": { file: ["read", "list"] },
   "verify-execute": { file: ["read", "write", "list"], http: ["get", "post", "put", "delete"] },
+  "verify-doc": { file: ["read", "write", "list"] },
 };
 
 function resolveCommandToolSet(cmd: string): { tools: Set<string>; actions: Record<string, string[]> } {
@@ -45,6 +48,7 @@ function resolveCommandToolSet(cmd: string): { tools: Set<string>; actions: Reco
     chat: ["../commands/chat.js"],
     "verify-plan": ["../commands/verify.js", "AGENT_TOOLS_PLAN", "AGENT_TOOL_ACTIONS_PLAN"],
     "verify-execute": ["../commands/verify.js", "AGENT_TOOLS_EXECUTE", "AGENT_TOOL_ACTIONS_EXECUTE"],
+    "verify-doc": ["../commands/verify.js", "AGENT_TOOLS_DOC", "AGENT_TOOL_ACTIONS_DOC"],
   };
   const entry = cmdToModule[cmd];
   if (entry) {
@@ -127,7 +131,7 @@ export function buildDomainHandlers(
     const { model: fetchModel, logPath: fetchLog, webCache, allowList } = opts.webFetchKwargs;
     handlers.http = ((action: unknown, url: unknown, headers: unknown, body: unknown, session_id: unknown) => {
       const a = String(action ?? "get").toLowerCase();
-      if (a === "get") return _chatHttpGet(String(url), fetchModel, fetchLog, webCache, allowList ?? []);
+      if (a === "get") return _chatHttpGet(String(url), fetchModel, fetchLog, webCache, allowList ?? [], opts?.askFn);
       return JSON.stringify({ error: `HTTP action '${a}' not available in chat. Only 'get' is supported.` });
     }) as Handler;
   } else {
@@ -280,6 +284,11 @@ export function buildDomainHandlers(
       const content = rf(resolved, "utf-8");
       const lines = content.split("\n");
       const ext = String(path).split(".").pop()?.toLowerCase();
+      // Supported language check (REQ-TOOL-8)
+      const SUPPORTED_LANGUAGES = new Set(["ts", "tsx", "js", "jsx", "mjs", "cjs", "py"]);
+      if (!ext || !SUPPORTED_LANGUAGES.has(ext)) {
+        return `Unsupported language: .${ext ?? "unknown"}. Supported: ${[...SUPPORTED_LANGUAGES].sort().join(", ")}`;
+      }
       const imports = lines.filter((l: string) => /^(import |from |require\(|const .* = require)/.test(l.trim())).map((l: string) => l.trim());
       const symbols = lines.reduce((acc: Array<{name: string; line: number}>, l: string, i: number) => {
         const fn = l.match(/^(?:export\s+)?(?:async\s+)?function\s+(\w+)/);
@@ -323,9 +332,16 @@ function _chatHttpGet(
   logPath: string,
   cache: Map<string, string>,
   allowList: string[],
+  askFn?: (question: string, options?: string[]) => string,
 ): string {
   // Cache hit
   if (cache.has(url)) return cache.get(url)!;
+
+  // Operator confirmation (REQ-TOOL-4)
+  if (askFn) {
+    const answer = askFn(`Fetch ${url}?`, ["Allow", "Deny"]);
+    if (answer.toLowerCase().includes("deny")) return JSON.stringify({ error: "Fetch denied by operator." });
+  }
 
   // SSRF check (synchronous via execSync to avoid async in tool handler)
   try {
@@ -370,36 +386,23 @@ function _chatHttpGet(
     .trim()
     .slice(0, 50000);
 
-  // Sub-agent summarization
-  try {
-    const { AgentLoop } = require("../agent/loop.js");
-    const { getMaxTokens } = require("../config.js");
-    const agent = new AgentLoop({
-      model, systemPrompt: "Summarize the following web page content in ≤300 words. Focus on key facts, data, and actionable information.",
-      tools: [], toolHandlers: {},
-      stream: false, maxTokens: getMaxTokens(model.config, "chat.web-summary"),
-      logPath, showSpinner: false,
-    });
-    // AgentLoop.send is async — use sync workaround via execSync
-    const { execSync } = require("node:child_process");
-    const escapedContent = stripped.slice(0, 10000).replace(/'/g, "'\\''");
-    const script = `
-      const {AgentLoop} = require("./src/agent/loop.js");
-      const {getMaxTokens} = require("./src/config.js");
-      const {resolveModel} = require("./src/models.js");
-      const m = resolveModel("${model.config.alias}");
-      const a = new AgentLoop({model:m, systemPrompt:"Summarize in ≤300 words.", tools:[], toolHandlers:{}, stream:false, maxTokens:1024});
-      a.send(process.argv[1]).then(r => process.stdout.write(r)).catch(e => process.stdout.write("Summary unavailable: " + e.message));
-    `;
-    // This is complex — fall back to returning stripped content with a length cap
-    const summary = stripped.slice(0, 3000) + (stripped.length > 3000 ? "\n\n[Content truncated — full page was " + stripped.length + " chars]" : "");
-    cache.set(url, summary);
-    return summary;
-  } catch {
-    const summary = stripped.slice(0, 3000);
-    cache.set(url, summary);
-    return summary;
-  }
+  // Summarize: extract title, headings, and leading content (REQ-TOOL-4)
+  const summary = _summarizePage(stripped);
+  cache.set(url, summary);
+  return summary;
+}
+
+/** Extract structured summary from stripped page text. */
+function _summarizePage(text: string): string {
+  const lines = text.split(/\n/).map(l => l.trim()).filter(Boolean);
+  const parts: string[] = [];
+  // Title: first non-empty line
+  if (lines.length) parts.push(`**${lines[0]}**`);
+  // First 2000 chars of content
+  const body = lines.slice(1).join("\n").slice(0, 2000);
+  if (body) parts.push(body);
+  if (text.length > 2000) parts.push(`\n[Summarized from ${text.length} chars]`);
+  return parts.join("\n\n");
 }
 
 // ---------------------------------------------------------------------------

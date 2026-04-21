@@ -33,11 +33,11 @@ describe("OpenAIAdapter", () => {
     expect(req.stream_options).toEqual({ include_usage: true });
   });
 
-  it("excludes stream_options for generic providers (REQ-ARCH-20)", () => {
+  it("includes stream_options for all streaming requests", () => {
     const req = adapter.buildRequest({
       model: "local", messages: [], maxTokens: 1000, stream: true, provider: undefined,
     });
-    expect(req.stream_options).toBeUndefined();
+    expect(req.stream_options).toEqual({ include_usage: true });
   });
 
   it("excludes stream_options when not streaming", () => {
@@ -54,32 +54,115 @@ describe("OpenAIAdapter", () => {
     expect(req.stream_options).toEqual({ include_usage: true });
   });
 
-  it("excludes stream_options for z.ai provider", () => {
+  it("includes stream_options for z.ai provider", () => {
     const req = adapter.buildRequest({
       model: "glm-4", messages: [], maxTokens: 1000, stream: true, provider: "z.ai",
     });
-    expect(req.stream_options).toBeUndefined();
+    expect(req.stream_options).toEqual({ include_usage: true });
   });
 
-  it("excludes stream_options for empty string provider", () => {
+  it("includes stream_options for empty string provider", () => {
     const req = adapter.buildRequest({
       model: "local-model", messages: [], maxTokens: 1000, stream: true, provider: "",
     });
-    expect(req.stream_options).toBeUndefined();
+    expect(req.stream_options).toEqual({ include_usage: true });
   });
 
-  it("excludes stream_options for vllm provider", () => {
+  it("includes stream_options for vllm provider", () => {
     const req = adapter.buildRequest({
       model: "qwen3", messages: [], maxTokens: 1000, stream: true, provider: "vllm",
     });
-    expect(req.stream_options).toBeUndefined();
+    expect(req.stream_options).toEqual({ include_usage: true });
   });
 
-  it("strips caller-injected stream_options for unknown provider", () => {
+  it("includes stream_options regardless of provider", () => {
     const req = adapter.buildRequest({
       model: "m", messages: [], maxTokens: 1000, stream: true, provider: "",
     });
-    expect(req.stream_options).toBeUndefined();
+    expect(req.stream_options).toEqual({ include_usage: true });
+  });
+
+  // --- buildRequest: cache_control (REQ-ARCH-16) ---
+
+  it("adds cache_control to system messages for openai provider", () => {
+    const req = adapter.buildRequest({
+      model: "gpt-4", maxTokens: 1000, stream: false, provider: "openai",
+      messages: [
+        { role: "system", content: "You are helpful." },
+        { role: "user", content: "Hi" },
+      ],
+    });
+    const msgs = req.messages as Array<Record<string, unknown>>;
+    expect(msgs[0].role).toBe("system");
+    const content = msgs[0].content as Array<Record<string, unknown>>;
+    expect(content[0].type).toBe("text");
+    expect(content[0].text).toBe("You are helpful.");
+    expect(content[0].cache_control).toEqual({ type: "ephemeral" });
+    // User message unchanged
+    expect(msgs[1].content).toBe("Hi");
+  });
+
+  it("adds cache_control to system messages for deepseek provider", () => {
+    const req = adapter.buildRequest({
+      model: "deepseek-chat", maxTokens: 1000, stream: false, provider: "deepseek",
+      messages: [
+        { role: "system", content: "System prompt." },
+        { role: "user", content: "Hello" },
+      ],
+    });
+    const msgs = req.messages as Array<Record<string, unknown>>;
+    const content = msgs[0].content as Array<Record<string, unknown>>;
+    expect(content[0].cache_control).toEqual({ type: "ephemeral" });
+  });
+
+  it("adds cache_control to system messages for gemini provider", () => {
+    const req = adapter.buildRequest({
+      model: "gemini-2.5-pro", maxTokens: 1000, stream: false, provider: "gemini",
+      messages: [
+        { role: "system", content: "System prompt." },
+        { role: "user", content: "Hello" },
+      ],
+    });
+    const msgs = req.messages as Array<Record<string, unknown>>;
+    const content = msgs[0].content as Array<Record<string, unknown>>;
+    expect(content[0].cache_control).toEqual({ type: "ephemeral" });
+  });
+
+  it("does NOT add cache_control for unknown providers", () => {
+    const req = adapter.buildRequest({
+      model: "local", maxTokens: 1000, stream: false, provider: "vllm",
+      messages: [
+        { role: "system", content: "You are helpful." },
+        { role: "user", content: "Hi" },
+      ],
+    });
+    const msgs = req.messages as Array<Record<string, unknown>>;
+    // System message should be plain string content, not array
+    expect(msgs[0].content).toBe("You are helpful.");
+  });
+
+  it("does NOT add cache_control when provider is undefined", () => {
+    const req = adapter.buildRequest({
+      model: "local", maxTokens: 1000, stream: false,
+      messages: [
+        { role: "system", content: "You are helpful." },
+        { role: "user", content: "Hi" },
+      ],
+    });
+    const msgs = req.messages as Array<Record<string, unknown>>;
+    expect(msgs[0].content).toBe("You are helpful.");
+  });
+
+  it("does NOT add cache_control when provider is empty string", () => {
+    const req = adapter.buildRequest({
+      model: "local", maxTokens: 1000, stream: false, provider: "",
+      messages: [
+        { role: "system", content: "You are helpful." },
+        { role: "user", content: "Hi" },
+      ],
+    });
+    const msgs = req.messages as Array<Record<string, unknown>>;
+    expect(msgs[0].content).toBe("You are helpful.");
   });
 
   it("passes through model and max_tokens", () => {

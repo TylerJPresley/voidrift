@@ -96,3 +96,7 @@ Analyze this **{category}** file: `{filepath}`
 Generated files found in the project:
 
 {file_list}
+
+## CHUNK-MERGE
+
+Merge these partial analyses into a single unified analysis. Preserve all key findings, requirements, and behavioral contracts from each chunk. Remove redundancy but keep distinct details.

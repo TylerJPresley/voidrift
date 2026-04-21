@@ -34,6 +34,9 @@ export interface RequestOpts {
 // Known providers that support stream_options
 const STREAM_USAGE_PROVIDERS = new Set(["openai", "anthropic", "gemini"]);
 
+// Providers that support cache_control in OpenAI-compatible format (REQ-ARCH-16)
+const CACHE_CONTROL_PROVIDERS = new Set(["openai", "deepseek", "gemini"]);
+
 // ---------------------------------------------------------------------------
 // OpenAI Adapter
 // ---------------------------------------------------------------------------
@@ -51,9 +54,16 @@ export class OpenAIAdapter implements ProtocolAdapter {
   }
 
   buildRequest(opts: RequestOpts): Record<string, unknown> {
+    // Add cache_control to system messages for providers that support it (REQ-ARCH-16)
+    const messages = opts.provider && CACHE_CONTROL_PROVIDERS.has(opts.provider)
+      ? opts.messages.map(m => m.role === "system"
+        ? { role: m.role, content: [{ type: "text", text: m.content ?? "", cache_control: { type: "ephemeral" } }] }
+        : m)
+      : opts.messages;
+
     const req: Record<string, unknown> = {
       model: opts.model,
-      messages: opts.messages,
+      messages,
       max_tokens: opts.maxTokens,
       stream: opts.stream,
     };
@@ -61,8 +71,8 @@ export class OpenAIAdapter implements ProtocolAdapter {
       req.tools = opts.tools.map(t => ({ type: t.type, function: t.function }));
       if (opts.toolChoice) req.tool_choice = opts.toolChoice;
     }
-    // Only add stream_options for known providers (REQ-ARCH-20)
-    if (opts.stream && opts.provider && STREAM_USAGE_PROVIDERS.has(opts.provider)) {
+    // Include usage in streaming responses (OpenAI API spec)
+    if (opts.stream) {
       req.stream_options = { include_usage: true };
     }
     return req;

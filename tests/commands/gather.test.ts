@@ -155,3 +155,68 @@ describe("analysis cache", () => {
     expect(loadCachedAnalysis(tmp, "stale.py", "new_hash")).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// --idea mode (REQ-G-1)
+// ---------------------------------------------------------------------------
+
+describe("runGather --idea mode", () => {
+  it("index.ts parses --idea flag and passes ideaId", () => {
+    const source = require("node:fs").readFileSync(join(__dirname, "../../src/index.ts"), "utf-8");
+    expect(source).toContain('getFlag("idea")');
+    expect(source).toContain("ideaId");
+  });
+
+  it("index.ts parses --ref flag", () => {
+    const source = require("node:fs").readFileSync(join(__dirname, "../../src/index.ts"), "utf-8");
+    expect(source).toContain('getFlag("ref")');
+    expect(source).toContain("runChat(mc, { ref })");
+  });
+
+  it("index.ts error message lists all three flags", () => {
+    const source = require("node:fs").readFileSync(join(__dirname, "../../src/index.ts"), "utf-8");
+    expect(source).toContain("--import, --idea, or --ref required");
+  });
+
+  it("index.ts help text shows all three gather modes", () => {
+    const source = require("node:fs").readFileSync(join(__dirname, "../../src/index.ts"), "utf-8");
+    expect(source).toContain("--import <dir>");
+    expect(source).toContain("--idea <id>");
+    expect(source).toContain("--ref <dir>");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// --ref mode (REQ-G-1)
+// ---------------------------------------------------------------------------
+
+describe("runChat --ref mode", () => {
+  it("chat.ts accepts ref option and injects file tree into system prompt", () => {
+    const source = require("node:fs").readFileSync(join(__dirname, "../../src/commands/chat.ts"), "utf-8");
+    expect(source).toContain("options.ref");
+    expect(source).toContain("buildFileTree");
+    expect(source).toContain("Reference Codebase");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// --idea gather.ts logic (REQ-G-1)
+// ---------------------------------------------------------------------------
+
+describe("runGather --idea implementation", () => {
+  it("gather.ts has idea mode code path", () => {
+    const source = require("node:fs").readFileSync(join(__dirname, "../../src/commands/gather.ts"), "utf-8");
+    expect(source).toContain("readIdea(projectDir, ideaId)");
+    expect(source).toContain("ANALYSIS-REQS");
+    expect(source).toContain("REQUIREMENTS-TEMPLATE");
+    expect(source).toContain("Gather Results");
+    expect(source).toContain("Affected REQ IDs");
+  });
+
+  it("gather.ts writes diff summary back to idea file", () => {
+    const source = require("node:fs").readFileSync(join(__dirname, "../../src/commands/gather.ts"), "utf-8");
+    expect(source).toContain("writeIdea(projectDir, ideaId");
+    expect(source).toContain("Added:");
+    expect(source).toContain("Removed:");
+  });
+});

@@ -16,13 +16,15 @@ import { BudgetExhaustedError } from "../agent/budget.js";
 import { ManifestManager } from "../manifest.js";
 import { WriteContext } from "../tools/filesystem.js";
 import { buildLocalTools } from "../tools/builder.js";
-import { findSkill } from "../skills.js";
-import { loadPrompt } from "../prompts.js";
+import { findSkill, getSkillAllowedTools } from "../skills.js";
+import { loadPrompt, buildSystemPrompt } from "../prompts.js";
 import { ensureVoidriftDir, bootRun, appendState, checkDiskSpace, checkRequirementsExist, printCommandHeader } from "../utils.js";
 import { getMaxTokens } from "../config.js";
 import { captureGitSnapshot, snapshotToPromptBlock, GitCheckpointManager } from "../git.js";
 import { snipOldToolResults } from "../agent/context.js";
 import { clearAbort, isAbortRequested, requestAbort } from "../agent/abort.js";
+import { trackAgentWithStats, elapsedStr } from "./progress.js";
+import { resetSharedTracker, displayErrorSummary } from "../errors.js";
 
 const MAX_ESCALATIONS = 5;
 
@@ -67,6 +69,7 @@ export async function runDevelop(
 ): Promise<number> {
   const emit = onProgress ?? ((msg: string) => process.stderr.write(msg + "\n"));
   checkDiskSpace();
+  resetSharedTracker();
   const d = ensureVoidriftDir();
   if (!checkRequirementsExist()) {
     emit("Error: REQUIREMENTS.md not found. Run 'voidrift gather' first.");
@@ -114,7 +117,9 @@ export async function runDevelop(
   clearAbort();
   const [log, runId] = bootRun("develop");
   if (!onProgress) printCommandHeader("develop", worker.config.alias, log);
+  const startTime = Date.now();
   const [tools, handlers] = buildLocalTools("develop", join(d, ".."), ctx);
+  const frameworkContext = loadPrompt("system", "CONTEXT");
   const devPrompt = loadPrompt("develop", "TASK");
   const escPrompt = loadPrompt("develop", "ESCALATION");
 
@@ -158,6 +163,7 @@ export async function runDevelop(
 
         // Parse skills from frontmatter
         let skillContent = "";
+        let skillRestriction: { skill: string; tools: string[] } | undefined;
         if (taskText.startsWith("---\n")) {
           const end = taskText.indexOf("\n---\n", 4);
           if (end !== -1) {
@@ -166,27 +172,41 @@ export async function runDevelop(
               for (const s of fm?.skills ?? []) {
                 const sc = findSkill(String(s));
                 if (sc) skillContent += `\n\n${sc}`;
+                const allowed = getSkillAllowedTools(String(s));
+                if (allowed) skillRestriction = { skill: String(s), tools: allowed };
               }
             } catch { /* */ }
           }
         }
 
-        const systemCtx = loadPrompt("system", "CONTEXT");
-        const system = [systemCtx, skillContent, devPrompt.replace("{task_text}", taskText).replace("{arch_context}", "").replace("{skill_content}", ""), gitContext].filter(Boolean).join("\n\n");
+        const system = buildSystemPrompt(frameworkContext, skillContent, devPrompt.replace("{task_text}", taskText).replace("{arch_context}", "").replace("{skill_content}", ""), gitContext);
 
         ctx.setSnapshots();
         ctx.resetSessionFiles();
         let writeNudges = 0;
         let selfReviewInjected = false;
+        const filesRead = new Set<string>();
 
         const agent = new AgentLoop({
           model: worker, systemPrompt: system, tools, toolHandlers: handlers,
           stream: false, maxTokens: getMaxTokens(worker.config, "develop.task"),
           logPath: log, showSpinner: false, tokenBudget,
+          skillAllowedTools: skillRestriction,
           transformContext: (msgs) => snipOldToolResults(msgs),
           beforeToolCall: (name, args) => {
             if (name === "done" && ctx.getWriteCount() === 0) {
               return "ERROR: No files written yet. Call file(action='write') before done().";
+            }
+            // Read-before-write enforcement (REQ-D-13)
+            if (name === "file") {
+              try {
+                const parsed = JSON.parse(args);
+                if (parsed.action === "read" && parsed.path) filesRead.add(parsed.path);
+                if ((parsed.action === "write" || parsed.action === "edit") && parsed.path
+                    && !filesRead.has(parsed.path) && existsSync(join(d, "..", parsed.path))) {
+                  return `Read ${parsed.path} first — use file(action='read') to understand existing code before writing.`;
+                }
+              } catch { /* */ }
             }
             return null;
           },
@@ -207,7 +227,8 @@ export async function runDevelop(
         });
 
         try {
-          await agent.send(loadPrompt("develop", "TASK-USER"));
+          await trackAgentWithStats(agent, loadPrompt("develop", "TASK-USER"), `TASK-${taskId}`,
+            (p) => emit(`  TASK-${taskId}: ${p.status === "thinking" ? `${elapsedStr(p.elapsed)} thinking...` : p.status}`));
         } catch (e) {
           if (e instanceof BudgetExhaustedError) throw e;
           ctx.rollbackSnapshots();
@@ -218,6 +239,15 @@ export async function runDevelop(
         if (ctx.getWriteCount() > 0) {
           const stats = ctx.computeDiffStats();
           if (stats.length) allDiffStats.push([taskId, stats]);
+
+          // Git diff warning: writes occurred but no actual changes (REQ-D-4)
+          if (stats.length && stats.every(s => s.linesAdded === 0 && s.linesRemoved === 0)) {
+            const { isGitRepo: igr } = require("../git.js");
+            if (igr(join(d, ".."))) {
+              process.stderr.write(`⚠ TASK-${taskId}: writes occurred but git diff shows no changes\n`);
+            }
+          }
+
           ctx.clearSnapshots();
           mm.setStatus(taskId, "implemented");
 
@@ -241,12 +271,12 @@ export async function runDevelop(
             // Consult architect (REQ-D-6)
             const reqs = existsSync(join(d, "REQUIREMENTS.md")) ? readFileSync(join(d, "REQUIREMENTS.md"), "utf-8") : "";
             const arch = existsSync(join(d, "ARCHITECTURE.md")) ? readFileSync(join(d, "ARCHITECTURE.md"), "utf-8") : "";
-            const escSystem = escPrompt.replace("{question}", "Task produced no writes").replace("{task_text}", taskText).replace("{requirements}", reqs).replace("{architecture}", arch);
+            const escSystem = buildSystemPrompt(frameworkContext, undefined, escPrompt.replace("{question}", "Task produced no writes").replace("{task_text}", taskText).replace("{requirements}", reqs).replace("{architecture}", arch));
             const escAgent = new AgentLoop({
               model: archModel, systemPrompt: escSystem, tools: [], toolHandlers: {},
               stream: false, maxTokens: getMaxTokens(archModel.config, "develop.escalation"), logPath: log, showSpinner: false,
             });
-            try { await escAgent.send(loadPrompt("develop", "ESCALATION-USER")); } catch { /* */ }
+            try { await trackAgentWithStats(escAgent, loadPrompt("develop", "ESCALATION-USER"), `TASK-${taskId} (escalation)`); } catch { /* */ }
             mm.setStatus(taskId, "planned");
           } else {
             mm.setStatus(taskId, "blocked");
@@ -271,6 +301,8 @@ export async function runDevelop(
   }
 
   appendState("develop", worker.config.alias, "completed", ctx.getSessionFiles().length ? ctx.getSessionFiles() : undefined);
+  emit(`\n✓ Develop complete (${elapsedStr((Date.now() - startTime) / 1000)})`);
+  displayErrorSummary(emit);
   return 0;
 }
 

@@ -110,3 +110,43 @@ export function clearCache(): void {
   promptCache.clear();
   templateCache.clear();
 }
+
+/**
+ * Resolve template variables in a prompt string (REQ-ARCH-18).
+ *
+ * Replaces all `{key}` patterns with values from the vars map.
+ * Raises an error if any `{key}` patterns remain after substitution.
+ */
+export function resolvePrompt(prompt: string, vars: Record<string, string>): string {
+  let result = prompt;
+  for (const [key, value] of Object.entries(vars)) {
+    result = result.replace(new RegExp(`\\{${key}\\}`, "g"), value);
+  }
+  const unresolved = result.match(/\{[a-z_]+\}/g);
+  if (unresolved) {
+    const unique = [...new Set(unresolved)];
+    throw new Error(`Unresolved template variable(s): ${unique.join(", ")}`);
+  }
+  return result;
+}
+
+/**
+ * Build a system prompt from the 4-layer structure (REQ-ARCH-19).
+ *
+ * Layer 1: Shared framework context (loaded once per command run)
+ * Layer 2: Methodology skill (how to think)
+ * Layer 3: Stage-specific instructions (what to do)
+ * Layer 4: Injected context (what to work with)
+ *
+ * All layers are optional — empty/undefined values are filtered out.
+ */
+export function buildSystemPrompt(
+  frameworkContext: string,
+  skill?: string,
+  stagePrompt?: string,
+  ...injectedContext: (string | undefined)[]
+): string {
+  return [frameworkContext, skill, stagePrompt, ...injectedContext]
+    .filter(Boolean)
+    .join("\n\n");
+}

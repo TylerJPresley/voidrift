@@ -1,15 +1,15 @@
-# Project VoidRift
+# VoidRift
 
 **Agentic Software Engineering Framework**
 
-An agentic software engineering framework composed of independent framework commands — Gather, Plan, Develop, Verify, Deploy, Chat — each of which reads and writes artifacts in a project's `.voidrift/` directory. AI agents reverse-engineer requirements from existing codebases, generate architecture and task breakdowns, implement code, produce infrastructure-as-code, and validate the result against acceptance criteria. They are not a pipeline: each command's input is a file and its output is a file. Operators run the commands they need, skip the ones they don't, and can provide hand-authored artifacts to any command that accepts them. Any model can fill any role: local vLLM, cloud API, or gateway.
+AI agents reverse-engineer requirements from existing codebases, generate architecture and task breakdowns, implement code, and validate the result against acceptance criteria. Each command reads a file and writes a file — run the ones you need, skip the ones you don't, hand-author any artifact yourself. Any model can fill any role: local vLLM, cloud API, or gateway.
 
 ```
   Gather ─── reads codebase, writes REQUIREMENTS.md
   Plan ───── reads REQUIREMENTS.md, writes ARCHITECTURE.md + task tickets
   Develop ── reads task tickets, writes source code
   Verify ─── reads REQUIREMENTS.md, tests the implementation
-  Deploy ── reads verified tasks + history.log, tags release
+  Deploy ─── reads verified tasks + history.log, tags release
   Chat ───── interactive refinement of any .voidrift/ artifact
 ```
 
@@ -22,76 +22,102 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for component design, data flows, and key
 1. [Installation](#installation)
 2. [Configuration](#configuration)
 3. [Models](#models)
-4. [Commands](#commands)
-5. [Utilities](#utilities)
-6. [Project Layout](#project-layout)
-7. [Development](#development)
+4. [Chat](#chat)
+5. [Lifecycle Commands](#lifecycle-commands)
+6. [Utilities](#utilities)
+7. [Project Layout](#project-layout)
+8. [Development](#development)
 
 ---
 
 ## Installation
 
-**Workstation requirements:** Linux, macOS, or WSL2 · Git · Node.js 22+ or Bun
+**Requirements:** Linux, macOS, or WSL2 · Git · Node.js 22+ or Bun
 
 ```bash
 git clone <repo-url> ~/Projects/voidrift
 cd ~/Projects/voidrift
-bun install       # install dependencies
+bun install
 ```
 
 Verify:
 
 ```bash
-bun run dev       # runs from source
-voidrift          # opens interactive mode if no args
+bun run dev       # run from source
+voidrift          # opens chat
+```
+
+Override the default data directory (`~/.voidrift/`) by setting `VOIDRIFT_HOME`:
+
+```bash
+export VOIDRIFT_HOME=/path/to/custom/home
 ```
 
 ---
 
 ## Configuration
 
-All settings in `~/.voidrift/config.yml`:
+All settings live in `~/.voidrift/config.yml` (or `$VOIDRIFT_HOME/config.yml`).
 
 ```yaml
-models_file: ~/.worker-cli/models.yml
-active_container_file: ~/.worker-cli/.active-container
-
-api_keys:
-  anthropic: ${ANTHROPIC_API_KEY}
-  gemini: ${GEMINI_API_KEY}
+models_file: ~/models.yml
+current_model: claude                # set by /model in chat; used on next launch
 
 protected_paths:              # files blocked from agent writes
-  - pyproject.toml
-  - Makefile
+  - .env
+  - .secrets
+  - "**/*.pem"
+  - "**/*.key"
 
 allowed_commands:             # shell commands that skip security classification
   - "make *"
   - "pytest *"
   - "cargo *"
 
-ssrf_allow_list:              # hostnames/CIDRs that bypass SSRF blocking
-  - "internal-api.mycompany.com"
-  - "10.20.30.0/24"
+ssrf_allow_list: []           # hostnames/CIDRs that bypass SSRF blocking
 
 git:
-  max_diff_lines: 2000        # max total lines in git diff output
-  max_diff_files: 50          # max files included in diff
-  max_file_diff_lines: 400    # max lines per file in diff
+  max_diff_lines: 2000
+  max_diff_files: 50
+  max_file_diff_lines: 400
 
 retention:
-  project: 5                  # number of recent project logs to keep
-  global: 30                  # days of global framework logs to keep
+  project: 5                  # recent project logs to keep
+  global: 30                  # days of global framework logs
 
 cache:
-  max_entries: 500            # max analysis cache entries before LRU eviction
-  ttl_days: 30                # analysis entries older than this are pruned
+  max_entries: 500
+  ttl_days: 30
+
+skills:
+  synthesis_model: ""          # model alias for skill synthesis; empty disables
+  repos: []                    # skill manifest URLs for search
+
+stage_max_tokens:
+  gather.triage: 8192
+  gather.analysis: 8192
+  gather.consolidation: 32768
+  plan.architecture: 32768
+  plan.module-arch: 32768
+  plan.outline: 8192
+  plan.deps: 8192
+  plan.task: 16384
+  plan.readme: 32768
+  develop.task: 16384
+  develop.escalation: 16384
+  verify.plan: 32768
+  verify.execute: 8192
+  chat.session: 16384
+  chat.quick: 2048
+  deploy.version: 4096
+  deploy.iac: 8192
 
 bash:
-  timeout: 120                # default timeout (seconds)
-  max_output_lines: 500       # truncate stdout/stderr beyond this
+  timeout: 120
+  max_output_lines: 500
   develop:
     enabled: true
-    allowed_patterns:          # only these patterns run in develop
+    allowed_patterns:
       - "make *"
       - "pytest *"
       - "cargo *"
@@ -112,31 +138,29 @@ bash:
 
 **Config reference:**
 
-| Key | Purpose |
-|---|---|
-| `models_file` | Path to the models YAML file (default `~/.worker-cli/models.yml`) |
-| `active_container_file` | Path to the active container marker written by worker-cli (default `~/.worker-cli/.active-container`). Used to default the model prompt in interactive mode. |
-| `api_keys` | API keys for cloud providers, referenced via `${VAR}` expansion |
-| `protected_paths` | Files the agent cannot write to, even inside the project root |
-| `allowed_commands` | Glob patterns for shell commands that bypass security classification |
-| `ssrf_allow_list` | Hostnames or CIDRs that bypass SSRF blocking on `http(action="get")` and `http`. Private IPs (10.x, 172.16.x, 192.168.x) and cloud metadata (169.254.x) are blocked by default. Loopback (127.0.0.1) is allowed for local dev servers. |
-| `git.max_diff_lines` | Cap on total git diff lines injected into agent context (default 2000) |
-| `git.max_diff_files` | Cap on number of files in git diff (default 50) |
-| `git.max_file_diff_lines` | Cap on diff lines per file (default 400) |
-| `retention.project` | Number of recent project command logs to keep (default 5) |
-| `retention.global` | Days of global framework logs to keep (default 30) |
-| `cache.max_entries` | Max analysis cache entries before LRU eviction (default 500) |
-| `cache.ttl_days` | Analysis entries older than this are pruned (default 30) |
-| `stage_max_tokens.<stage>` | Max output tokens per agent stage. Capped by the model's `max_tokens`. Stages: `triage`, `analysis`, `synthesis`, `consolidation`, `task`, `plan`, `verify-plan`, `verify-execute` |
-| `skills.synthesis_model` | Model alias for skill synthesis via `voidrift skills install --synthesize`; empty disables synthesis (default empty) |
-| `skills.repos` | List of manifest URLs searched by `voidrift skills search` (default empty) |
-| `bash.timeout` | Default timeout for `shell` across all commands (default 120s) |
-| `bash.max_output_lines` | Truncate stdout/stderr beyond this many lines (default 500) |
-| `bash.<command>.enabled` | Enable/disable `shell` for a specific command (default true) |
-| `bash.<command>.allowed_patterns` | Glob patterns restricting which commands the agent can run. Empty = use global `allowed_commands` |
-| `bash.<command>.timeout` | Per-command timeout override (inherits from `bash.timeout`) |
-
-The `models_file` points to a YAML file containing all model definitions — local, cloud, and gateway. The path can be anywhere on the system.
+| Key | Default | Purpose |
+|---|---|---|
+| `models_file` | `~/models.yml` | Path to the models YAML file |
+| `current_model` | — | Last selected model alias (set by `/model` in chat) |
+| `protected_paths` | `[]` | Files the agent cannot write to, even inside the project |
+| `allowed_commands` | `[]` | Shell command globs that bypass security classification |
+| `ssrf_allow_list` | `[]` | Hostnames/CIDRs that bypass SSRF blocking. Private IPs and cloud metadata (169.254.x) are blocked by default; loopback (127.0.0.1) is allowed |
+| `git.max_diff_lines` | `2000` | Max total lines in git diff injected into agent context |
+| `git.max_diff_files` | `50` | Max files in git diff |
+| `git.max_file_diff_lines` | `400` | Max diff lines per file |
+| `retention.project` | `5` | Number of recent project logs to keep |
+| `retention.global` | `30` | Days of global framework logs to keep |
+| `cache.max_entries` | `500` | Max analysis cache entries before LRU eviction |
+| `cache.ttl_days` | `30` | Analysis entries older than this are pruned |
+| `stage_max_tokens.<stage>` | varies | Max output tokens per agent stage, capped by the model's `max_tokens`. Stages use dotted names: `gather.triage`, `gather.analysis`, `gather.consolidation`, `plan.architecture`, `plan.module-arch`, `plan.outline`, `plan.deps`, `plan.task`, `plan.readme`, `develop.task`, `develop.escalation`, `verify.plan`, `verify.execute`, `deploy.version`, `deploy.iac`, `chat.session`, `chat.quick`, `internal.summary` |
+| `skills.synthesis_model` | `""` | Model alias for skill synthesis; empty disables it |
+| `skills.repos` | `[]` | Manifest URLs searched by `voidrift skills search` |
+| `governance_max_tokens` | `6144` | Max tokens for the governance layer in chat. Warns when exceeded |
+| `bash.timeout` | `120` | Default shell timeout (seconds) |
+| `bash.max_output_lines` | `500` | Truncate shell output beyond this |
+| `bash.<command>.enabled` | `true` | Enable/disable shell for a specific command |
+| `bash.<command>.allowed_patterns` | `[]` | Shell command globs for this command. Empty = use global `allowed_commands`. Can only narrow, never widen the global list |
+| `bash.<command>.timeout` | inherits | Per-command timeout override |
 
 Config values support variable expansion:
 
@@ -150,10 +174,10 @@ Config values support variable expansion:
 
 ## Models
 
-Models are referenced by alias in all commands. All model definitions — local, cloud, and gateway — live in a single YAML file at the path configured in `models_file`. Each entry is self-contained with its own connection details. An optional `fallback` field specifies another model alias to use when retries are exhausted on rate limits (429) or server errors (5xx).
+Models are referenced by alias everywhere. All definitions live in a single YAML file at the path set in `models_file`.
 
 ```yaml
-# Example: ~/.worker-cli/models.yml
+# Example: ~/models.yml
 defaults:
   max_tokens: 16384
   concurrency: 1
@@ -173,149 +197,196 @@ models:
     fallback: haiku
 ```
 
-Each model needs `base_url`, `api_key`, and `model_id`. Optional fields control operational limits (`max_tokens`, `max_context`, `concurrency`, `max_read_lines`) and token budgets (`max_input_tokens`, `max_output_tokens`). See [ARCHITECTURE.md](ARCHITECTURE.md) for the full model entry field reference.
+Each model needs `base_url`, `api_key`, and `model_id`. Optional fields:
 
-**Native Anthropic protocol:** Set `protocol: anthropic` to use the native Anthropic Messages API instead of the OpenAI-compatible endpoint. The agent loop is protocol-agnostic — all wire format differences are handled by the adapter (`AnthropicAdapter`). Omitting `protocol` (or setting it to `openai`) preserves all existing behavior.
+| Field | Default | Purpose |
+|---|---|---|
+| `max_tokens` | `16384` | Max output tokens per API call |
+| `max_context` | query API | Context window size in tokens |
+| `max_read_lines` | `2000` | Max lines returned by file reads |
+| `max_input_chars` | unlimited | Max input chars for gather chunking |
+| `concurrency` | `1` | Max concurrent task agents in develop |
+| `protocol` | `openai` | Wire protocol: `openai` or `anthropic` |
+| `fallback` | — | Alias to use when retries are exhausted on 429/5xx (max one level) |
+| `max_input_tokens` | — | Token budget: cap total input tokens per command run |
+| `max_output_tokens` | — | Token budget: cap total output tokens per command run |
 
-**Token budgets:** Set `max_input_tokens` and `max_output_tokens` per model to cap total token consumption for a command run. Useful for expensive cloud models — a develop session with 20 tasks can accumulate significant cost. CLI flags (`--max-input-tokens`, `--max-output-tokens` on gather and develop) override model config values per run. When a limit is exceeded, the run stops with a budget summary.
+**List configured models:**
 
-**Fallback:** Set `fallback: <alias>` on a model to automatically switch to another model when retries are exhausted on rate limits (429) or server errors (5xx). Max one level of fallback — if the fallback also fails, the error is raised.
+```bash
+voidrift models
+```
 
-**Skills `allowed_tools`:** Skill files can include `allowed_tools: [tool1, tool2]` in YAML frontmatter to restrict which tools the agent can call while that skill is active. A read-only analysis skill can block `file(action="write")`. Absent field means no restriction; empty list blocks all tools.
+**Token budgets:** Set `max_input_tokens` and `max_output_tokens` per model to cap cost. CLI flags (`--max-input-tokens`, `--max-output-tokens` on gather and develop) override per run.
+
+**Skills `allowed_tools`:** Skill files can include `allowed_tools: [tool1, tool2]` in YAML frontmatter to restrict which tools the agent can use while that skill is active.
 
 ---
 
-## Commands
-
-All commands write artifacts to `<project>/.voidrift/`. Run commands from your project directory.
-
-### Chat
+## Chat
 
 ```bash
 voidrift                                       # open chat (default)
 voidrift --doc REQUIREMENTS.md                 # scope to a .voidrift/ artifact
 voidrift --bare                                # no skills, git, or project state
-voidrift --bare --system-prompt p.md           # fully custom system prompt
+voidrift --bare --system-prompt prompt.md      # fully custom system prompt
 ```
 
-Interactive session with full tool access — the central command for iterating on any `.voidrift/` artifact. Review requirements before running plan, refine architecture after plan, debug issues, explore ideas.
+Chat is the primary interface. It opens by default when you run `voidrift` with no arguments. The agent can read and write files, run shell commands, fetch URLs, search conversation history, and persist knowledge across sessions. The active model is resolved from config — switch it mid-session with `/model`.
 
-**Multi-line input:** Enter submits. `\` + Enter or Ctrl+J inserts a newline for multi-line messages.
+### Modes
 
-**Session persistence:** Sessions are automatically saved to `.voidrift/chat-session.jsonl` and restored on next `voidrift chat`. Close the terminal, come back later — your context is preserved. Type `/clear` to start a fresh session.
+Modes change the agent's personality without leaving the session or losing conversation history. Type a mode command and the agent shifts focus.
 
-**Context management:**
-- `/compact` — summarize conversation history to free context. Auto-compact triggers at 80% utilization; a nudge appears at 70%. After compaction, recently accessed files and skills are automatically restored.
-- `/quick <question>` — one-shot side question that doesn't affect session history. The answer is displayed inline and nothing is saved to the session.
+**`/chat`** — Interactive assistant (default). Helps you review, refine, and debug `.voidrift/` artifacts. Reads files before answering, proposes changes before writing, summarizes what it did. Cannot run lifecycle commands — it tells you the CLI command to run instead.
 
-**History search:** The agent can search earlier conversation turns via `session(action="search")(query, limit)` — a case-insensitive keyword search over the raw session JSONL, including entries before compaction boundaries. Returns matching entries with timestamps and roles, content capped at 2000 characters per result. Useful when specific wording or decisions from earlier in a long session were compacted away.
+**`/gather`** — Requirements agent. Guides you toward formal, structured requirements using EARS notation (`WHEN [trigger], THE SYSTEM SHALL [result]`). Challenges vague statements, pushes for testable acceptance criteria, organizes by functional area. When you're satisfied, it writes `REQUIREMENTS.md`.
 
-**Document reading:** The agent can extract text from binary documents via `analyze(action="document")(path)` — supports PDF, DOCX, and XLSX. PDF text is extracted via `pymupdf`, DOCX preserves heading hierarchy as markdown, XLSX returns markdown tables per sheet. Libraries are soft dependencies — install only what you need (`pip install pymupdf`, `pip install python-docx`, `pip install openpyxl`). Also available in gather for processing non-plaintext requirements sources.
+**`/plan`** — Architecture & planning agent. Helps you design systems: module boundaries, cross-module contracts, data flows, trade-offs. References REQ IDs when discussing components. Pushes for specific interfaces and error handling rather than hand-wavy descriptions.
 
-**Code analysis:** The agent can analyze source files via `analyze(action="code")(path)` — returns structured JSON with language, line count, imports, exported symbols (functions, classes, constants with line numbers), and complexity estimate. Powered by tree-sitter — install the base package and per-language grammars (`pip install tree-sitter tree-sitter-python`). Also available in gather for supplementing prompt-based analysis with machine-parsed facts.
+**`/idea`** — Guided idea refinement. Walks you through four stages:
+1. **Intake** — describe the idea at a high level
+2. **Exploration** — clarifying questions, referencing existing requirements and architecture
+3. **Shaping** — proposes a user story, acceptance criteria, and affected modules
+4. **Summary** — presents the complete structured idea for your review
 
-**Memory:** The agent can persist project knowledge across sessions using memory entries. When you say "remember this for future sessions," the agent calls `memory(action="write")` to save it. Memory has two layers:
-- Project memory (`.voidrift/memory/`) — facts specific to this project (stack, conventions, decisions)
-- Global memory (`~/.voidrift/memory/`) — operator preferences shared across all projects
+Type `/idea` to start a new idea or `/idea 3` to resume an existing one. Type `/done` when finished — you'll pick a priority (`now`, `next`, or `later`) and the idea is saved to `.voidrift/ideas/`.
 
-On session start, the memory index (names and descriptions) is injected into the system prompt. The agent loads full entries on demand via `memory(action="read")`. Project entries override global entries with the same name.
+**`/bare`** — Raw model access. Strips all automatic context: no skills, no git snapshot, no memory, no project state. Your current conversation is frozen and restored when you type any mode command (`/chat`, `/plan`, `/gather`, `/idea`) to return.
 
-**Idea refinement:** Type `/idea` to start a guided idea flow — the agent walks you through intake, exploration, shaping, and summary. Ideas are stored as `IDEA-{id}.md` in `.voidrift/ideas/` and categorized as `now`, `next`, or `later`. Type `/idea 3` to resume an existing idea. Type `/done` to save and return to normal chat.
+### Running Pipelines from Chat
 
-**Permission prompts:** Before the agent takes a consequential action, it pauses and asks for your approval:
+Type `/exec` to run lifecycle commands without leaving chat. Progress appears as system messages and doesn't consume your conversation context.
+
+```
+/exec gather --import ./src       reverse-engineer requirements
+/exec gather --idea 3             requirements from a refined idea
+/exec plan                        generate architecture + tasks
+/exec plan overwrite              fresh plan, discard previous
+/exec develop                     execute tasks from manifest
+/exec verify                      run acceptance tests
+/exec deploy                      prepare release
+```
+
+Shorthand: `/gather --import ./src` and `/plan overwrite` route to the pipeline automatically. `/gather` and `/plan` with no arguments switch modes instead. `/develop`, `/verify`, and `/deploy` always run the pipeline.
+
+### Session
+
+**Persistence:** Sessions save automatically to `.voidrift/chat-session.jsonl` and restore on next launch. Close the terminal, come back later — your context is preserved.
+
+**`/compact`** — When your conversation gets long, `/compact` summarizes the history to free space. The system prompt (governance layer) is never touched — only the message history is summarized. Auto-compact kicks in at 80% context utilization; a nudge appears at 70%. After compaction, recently used files and skills are automatically reloaded.
+
+**`/ask <question>`** — One-shot side question. The answer appears inline and nothing is saved to the session history. Useful for quick lookups without polluting context.
+
+**`/clear`** — Delete the session and start fresh.
+
+**`/settings`** — View all config settings. `/settings set <key> <value>` to change one.
+
+**`/model [alias]`** — Switch the active model. With no argument, opens a selector. The choice persists to config.
+
+**`/help`** — Show the command reference.
+
+### Agent Capabilities
+
+The chat agent can:
+
+- **Read and write files** in your project
+- **Run shell commands** (with permission)
+- **Fetch and summarize web pages** (with permission, cached per session)
+- **Read PDFs, Word docs, and Excel files** — extracts text to markdown (requires `pdf-parse`, `mammoth`, or `xlsx` packages)
+- **Analyze source code** — returns imports, exported symbols, and complexity for `.ts`, `.js`, `.py` files
+- **Search conversation history** — finds earlier messages by keyword, even across compaction boundaries
+- **Persist knowledge** — tell the agent "remember this for future sessions" and it saves to project or global memory. Memory entries are indexed on session start; full content loads on demand.
+
+### Progress Display
+
+While the model is working, a thinking indicator shows elapsed time and output tokens:
+
+```
+⠹ Pondering... · 3s · ↑ 48
+```
+
+When the response completes, a full stats line appears:
+
+```
+▸ 4s · ↓ 3.7k · ↑ 192 · ◔ 1% · ✓ complete
+```
+
+### Permission Prompts
+
+Before the agent writes a file, runs a shell command, or reads outside the project directory, it asks:
 
 ```
 ▸ Permission required: file(action="write")('REQUIREMENTS.md')
   [1] Allow once  [2] Always allow this session  [3] Deny
 ```
 
-Three categories are gated independently: **writes** (any file write or edit), **runs** (`shell`), and **reads outside the project root**. Reads within the current project directory are always free. Choose `1` to allow once, `2` to allow that category for the rest of the session without further prompts, or `3` to deny (the agent receives an error as the tool result and can try a different approach). The permission state is session-scoped — it resets when you exit chat.
+Three categories are gated independently: **writes**, **runs**, and **reads outside the project root**. "Always" grants that category for the rest of the session. Denial returns an error to the agent — it can try a different approach. Resets when you exit chat.
 
-**Bare mode:** `--bare` strips all automatic context injection — no skills, git snapshot, project state, or memory. Just you and the model with full session mechanics. Combine with `--system-prompt <path>` to replace the system prompt entirely.
+---
 
-**Output styles:** `--style verbose` (default) shows each tool call. `--style terse` hides individual calls, shows a summary count per round. `--style raw` disables Rich formatting for piping.
+## Lifecycle Commands
 
-**Framework commands in chat:** Run any framework command as a slash command without leaving the chat session. Progress appears as system messages in the conversation area with a thinking spinner.
-
-- `/gather [path]` — reverse-engineer requirements from codebase
-- `/plan [overwrite]` — generate architecture + tasks
-- `/develop` — execute tasks from manifest
-- `/verify` — run acceptance tests
-- `/deploy` — prepare release (version, tag)
-
-**Example workflow — new project:**
-```bash
-voidrift gather --model <model> --path ./src         # reverse-engineer requirements
-voidrift chat <model> --doc REQUIREMENTS.md  # review and refine
-voidrift plan --model <model>                 # generate architecture + tasks
-voidrift chat <model> --doc ARCHITECTURE.md  # review architecture
-voidrift develop --model <model>              # implement tasks
-voidrift verify --model <model>               # acceptance testing
-```
-
-**Example workflow — new feature on existing project:**
-```bash
-voidrift chat <model>                        # /idea to capture and refine
-voidrift gather --model <model> --idea 3             # generate requirements from idea
-voidrift plan --model <model> --idea 3               # plan tasks scoped to idea
-voidrift develop --model <model>                     # implement
-voidrift verify --model <model>                      # validate
-```
+All commands write artifacts to `<project>/.voidrift/`. Run from your project directory.
 
 ### Gather
 
-Reverse-engineers requirements from an existing codebase in four stages:
+Reverse-engineers requirements from an existing codebase.
+
+```bash
+voidrift gather --model <alias> --import <path>                    # from codebase
+voidrift gather --model <alias> --idea <id>                        # from a refined idea
+voidrift gather --model <alias> --ref <path>                       # open chat with codebase as context
+voidrift gather --model <alias> --import <path> --overwrite        # fresh start
+voidrift gather --model <alias> --import <path> --max-output-tokens 50000
+```
+
+**`--import`** runs a four-stage pipeline:
 
 ```mermaid
 flowchart LR
-    T[Triage\ncategorize files] --> C[Context Build\nnon-source categories] --> A[Source Analysis\none agent per file] --> F[Final Pass\nbuild REQUIREMENTS.md]
+    T[Triage\ncategorize files] --> C[Context Build\nnon-source categories] --> A[Source Analysis\none agent per file] --> F[Consolidation\nbuild REQUIREMENTS.md]
     style T fill:#1e3a5f,color:#fff
     style C fill:#1e3a5f,color:#fff
     style A fill:#1e3a5f,color:#fff
     style F fill:#1e3a5f,color:#fff
 ```
 
-```bash
-voidrift gather --model <model> --path <path>        # reverse-engineer requirements from codebase
-voidrift gather --model <model> --idea <id>          # generate requirements from a refined idea
-voidrift gather --model <model> --path <path> --overwrite  # remove previous gather artifacts and start fresh
-voidrift gather --model <model> --path <path> --max-output-tokens 50000  # cap total output tokens
-```
+Produces: `REQUIREMENTS.md`, `ANALYSIS.md` (index), `analysis/<file>.md` (per-file). Re-running merges new analysis with existing requirements. Respects `.gitignore`. Never auto-commits.
 
-Produces: `REQUIREMENTS.md`, `ANALYSIS.md` (index), `analysis/<file>.md` (per-file)
+**`--idea`** generates requirements from a refined idea file, recording affected REQ IDs and a diff back into the idea file.
 
-`--path` mode reverse-engineers requirements from the codebase using a four-stage pipeline. `--idea` mode reads a refined idea file and uses the same ANALYSIS-REQS skill and REQUIREMENTS-TEMPLATE to generate or update requirements — recording the affected REQ IDs and a diff in the idea file.
-
-Re-running gather updates requirements in place: the existing `REQUIREMENTS.md` is passed as context to the final consolidation pass, which merges new analysis with preserved rationale and user stories. Gather never auto-commits. Respects `.gitignore`.
+**`--ref`** opens a chat session with the external codebase's file tree loaded as context — you drive the requirements conversation manually.
 
 ### Plan
 
-Generates architecture and task breakdown from requirements:
+Generates architecture and task breakdown from requirements.
 
 ```bash
-voidrift plan --model <model>             # update mode if artifacts exist, fresh plan if not
-voidrift plan --model <model> --idea <id> # scope planning to a specific idea (requires reqs)
-voidrift plan --model <model> --overwrite # remove previous plan artifacts and start fresh
+voidrift plan --model <alias>                # update mode if artifacts exist, fresh if not
+voidrift plan --model <alias> --overwrite    # remove previous plan artifacts, start fresh
 ```
 
-Produces: `ARCHITECTURE.md`, `README.md`, `tasks/manifest.yml`, `tasks/active/TASK-*.md`, `arch/<module>.md`
+Six stages: architecture → module arch → task outline → dependency resolution → task files → README. Produces: `ARCHITECTURE.md`, `arch/<module>.md`, `tasks/manifest.yml`, `tasks/active/TASK-*.md`, `README.md`.
 
-Re-running plan when artifacts already exist triggers update mode: a delta analysis agent scans the project source tree (filenames only) against REQUIREMENTS.md to identify what's already implemented. The delta summary is injected into the architecture and task outline stages so the pipeline focuses on unimplemented work. `--overwrite` removes all plan-produced directories (`tasks/`, `arch/`) and `ARCHITECTURE.md` before starting for a guaranteed clean slate with no delta analysis. `ARCHITECTURE.md` is a lean system map (module inventory, cross-module contracts). `arch/<module>.md` carries the design depth for each module (components, data models, interfaces). `README.md` is the user manual — how to install, configure, and use the project. Tasks are single atomic file operations with enough context for an agent to implement without cross-referencing requirements.
+Re-running with existing artifacts triggers update mode — a delta analysis identifies what's already implemented and the pipeline focuses on remaining work. `--overwrite` removes all plan artifacts for a clean slate.
 
 ### Develop
 
-Executes tasks from the manifest. Each task gets a fresh agent with the task file as its prompt — self-contained with user story, context, and acceptance criteria.
+Executes tasks from the manifest.
 
 ```bash
-voidrift develop --model <model>                  # single model for tasks and escalation
-voidrift develop --model <model> <architect>      # separate model for escalation
-voidrift develop --model <model> --max-output-tokens 50000  # cap total output tokens
-voidrift develop --model <model> --max-input-tokens 200000  # cap total input tokens
+voidrift develop --model <alias>                                   # single model
+voidrift develop --model <alias> --architect <alias>               # separate model for escalation
+voidrift develop --model <alias> --max-output-tokens 50000
+voidrift develop --model <alias> --max-input-tokens 200000
 ```
+
+Each task gets a fresh agent with the task file as its prompt. Ready tasks dispatch concurrently up to the model's `concurrency` limit. When concurrent, a live progress table shows per-task status, tokens, context %, and elapsed time.
 
 ```mermaid
 flowchart TD
-    N[Read manifest → find ready tasks] --> W[Dispatch agent → file(action="write")]
+    N[Read manifest → find ready tasks] --> W[Dispatch agent → write files]
     W --> C{Write occurred?}
     C -- yes --> K[Mark implemented → next]
     C -- no --> R[Retry once]
@@ -329,46 +400,42 @@ flowchart TD
     B -- no --> N
 ```
 
-Ready tasks from any module are dispatched concurrently up to the model's `concurrency` limit (configured per model in models.yml). When concurrency is 1, tasks run sequentially. When concurrent, a Rich Live table shows per-task progress (status, turn, tokens, context %, elapsed, last tool). In git repositories, each agent receives a compact git context snapshot (branch, recent commits, uncommitted changes) to avoid overwriting uncommitted work or duplicating recent changes.
+In git repositories, each agent receives a snapshot of branch, recent commits, and uncommitted changes to avoid overwriting your work.
 
 ### Verify
 
-Two-stage requirements-driven acceptance testing:
+Requirements-driven acceptance testing.
 
 ```bash
-voidrift verify --model <model>
+voidrift verify --model <alias>
 ```
 
-**Stage 1 — Plan agent:** Reads all project documentation (REQUIREMENTS.md, ARCHITECTURE.md, arch/*.md, task files) and writes `.voidrift/VERIFY-PLAN.md` — one self-contained test case per testable requirement. Each test case embeds the requirement, scenario steps, credentials, and evidence collection instructions.
+**Stage 0 — Doc verification:** Checks README.md and ARCHITECTURE.md against source code. Mismatches produce bug reports in `.voidrift/bugs/DOC-N.md`.
 
-**Stage 2 — Concurrent sub-agents:** One sub-agent per test case. Each executes its scenario using HTTP, process, and browser tools. On failure it writes a full bug report to `.voidrift/bugs/<ITEM-ID>.md` with request/response detail, process output, stack traces, and screenshots.
+**Stage 1 — Test planning:** Reads all project documentation and writes one self-contained test case per testable requirement to `VERIFY-PLAN.md`.
 
-**Stage 3 — Report:** Orchestrator writes `.voidrift/VERIFY.md` (summary table, per-item results with bug report links, verdict) and a STATE.md entry.
+**Stage 2 — Test execution:** One concurrent sub-agent per test case using HTTP, process, shell, and browser (Playwright) tools. Failures produce bug reports with full evidence (request/response, stack traces, screenshots).
 
-Verify never modifies source files. Failures become tasks for Develop.
+**Stage 3 — Report:** Writes `VERIFY.md` with summary table, per-item results, and verdict.
+
+Verify never modifies source files. Failures become tasks for develop.
 
 ### Deploy
 
-Prepares verified code for release:
+Prepares verified code for release.
 
 ```bash
-voidrift deploy --model <model>
-voidrift deploy --model <model> <architect>
+voidrift deploy --model <alias>
+voidrift deploy --model <alias> --architect <alias>
 ```
 
-Determines version bump (major/minor/patch) from verified tasks since the last release tag. Generates a changelog entry from history.log. Creates an annotated git tag locking the changeset. Optionally generates IaC when ARCHITECTURE.md indicates infrastructure requirements.
+Determines version bump (major/minor/patch) from verified tasks since the last release tag. Generates a changelog entry from `history.log`. Creates an annotated git tag. Optionally generates infrastructure-as-code when ARCHITECTURE.md indicates infrastructure requirements.
 
 ---
 
 ## Utilities
 
-### Interactive Mode
-
-```bash
-voidrift
-```
-
-Launched with no arguments — prompts for command, model, and options. Defaults to the first configured model alias.
+None of these require a model.
 
 ### Status
 
@@ -376,26 +443,36 @@ Launched with no arguments — prompts for command, model, and options. Defaults
 voidrift status
 ```
 
-Shows command completion (✅ done, ⬜ not started, 🔄 in progress) and task counts.
+Shows command completion (done / not started / in progress), task counts by lifecycle status, and idea count.
+
+### Models
+
+```bash
+voidrift models
+```
+
+Lists all configured model aliases from the models file.
 
 ### Log
 
 ```bash
-voidrift log <command>          # show last 200 lines of most recent log
-voidrift log <command> -f       # follow live output
-voidrift log <command> --prune  # delete all logs for that command
-voidrift log --prune            # delete all command logs
+voidrift log                         # last 200 lines of project log
+voidrift log <command>               # last 200 lines of most recent <command> section
+voidrift log <command> -f            # follow live output
+voidrift log --global                # global framework log
+voidrift log --prune                 # delete project log
+voidrift log --prune --global        # delete global framework log
 ```
 
-Command logs are at `<project>/.voidrift/logs/<command>-<timestamp>.log`. The framework system log (`voidrift.log`) is at `~/.voidrift/logs/` and rotates automatically.
+Project log: `.voidrift/voidrift.log`. Global log: `~/.voidrift/logs/voidrift.log` (records CLI invocations with cwd, model, and outcome metadata).
 
 ### Prune
 
 ```bash
-voidrift prune                # remove old project logs (keeps 5 most recent)
-voidrift prune --all          # remove entire .voidrift/ directory
-voidrift prune --global       # prune old global framework logs from ~/.voidrift/logs/
-voidrift prune --global --all # remove all global framework logs
+voidrift prune                       # remove old project logs (keeps 5 most recent)
+voidrift prune --all                 # remove entire .voidrift/ directory
+voidrift prune --global              # prune old global framework logs
+voidrift prune --global --all        # remove all global framework logs
 ```
 
 ### Unlock
@@ -409,50 +486,46 @@ Removes `.develop.lock` and kills the running develop process. Use if a develop 
 ### Rollback
 
 ```bash
-voidrift rollback          # list available checkpoints
-voidrift rollback <turn>   # restore working tree to checkpoint at turn N
+voidrift rollback                    # list available checkpoints
+voidrift rollback <turn>             # restore working tree to checkpoint at turn N
 ```
 
-Restores the working tree to a prior develop checkpoint. Checkpoints are created automatically before each task during `voidrift develop`.
+Checkpoints are created automatically before each task during `voidrift develop`.
 
 ### Doctor
 
 ```bash
-voidrift doctor          # run diagnostic checks
-voidrift doctor --fix    # auto-fix where safe (create missing directories)
+voidrift doctor                      # run diagnostic checks
+voidrift doctor --fix                # auto-fix where safe (create missing directories)
 ```
 
-Checks config file syntax, models file existence, skill file parseability, log directory writability, and disk space. Reports pass/warn/fail per check with fix suggestions.
+Checks config syntax, models file, skill parseability, log directory writability, and disk space.
 
 ### Skills
 
 ```bash
-voidrift skills list              # list all skills by layer (north star, domain, project)
-voidrift skills search <query>    # search skill manifests from configured repos
-voidrift skills install <name>    # synthesize and install a domain skill (pending approval)
-voidrift skills approve <name>    # promote a pending skill to active
-voidrift skills remove <name>     # remove a domain skill
+voidrift skills list                 # all skills by layer (north star, domain, project)
+voidrift skills search <query>       # search configured repos
+voidrift skills install <name>       # synthesize and install (pending approval)
+voidrift skills approve <name>       # promote pending to active
+voidrift skills remove <name>        # remove a domain skill
+voidrift skills review               # list pending skills
 ```
-
-### Memory
-
-```bash
-voidrift memory list              # list all entries (project + global)
-voidrift memory show <name>       # print full content of an entry
-voidrift memory delete <name>     # remove from project memory
-voidrift memory delete <name> --global  # remove from global memory
-voidrift memory export            # export all entries as a single markdown file
-```
-
-Manage memory entries without a chat session. Memory is created during chat when you tell the agent to remember something — these commands let you review and clean up entries directly.
 
 ### Shell Completions
 
 ```bash
+# bash
 voidrift completions bash > ~/.local/share/bash-completion/completions/voidrift
+
+# zsh
+voidrift completions zsh > ~/.zfunc/_voidrift
+
+# fish
+voidrift completions fish > ~/.config/fish/completions/voidrift.fish
 ```
 
-Model alias arguments complete from configured aliases in the models file.
+Model aliases complete on tab.
 
 ---
 
@@ -463,32 +536,34 @@ After running framework commands, your project will have:
 ```
 your-project/
 ├── .voidrift/
-│   ├── REQUIREMENTS.md      # System-level requirements         ← Gather
-│   ├── ANALYSIS.md          # Analysis index (categories, links) ← Gather
-│   ├── analysis/<file>.md   # Per-file source analysis          ← Gather
-│   ├── ARCHITECTURE.md      # System map, cross-module contracts ← Plan
-│   ├── arch/<module>.md     # Module design, components, interfaces ← Plan
-│   ├── ideas/               # Operator-owned idea backlog       ← Chat
+│   ├── REQUIREMENTS.md        # System-level requirements           ← Gather
+│   ├── ANALYSIS.md            # Analysis index                      ← Gather
+│   ├── analysis/<file>.md     # Per-file source analysis            ← Gather
+│   ├── ARCHITECTURE.md        # System map, cross-module contracts  ← Plan
+│   ├── arch/<module>.md       # Module design, interfaces           ← Plan
+│   ├── ideas/                 # Idea backlog                        ← Chat
 │   │   ├── IDEA-{id}.md
-│   │   └── archived/        # Completed ideas                  ← CLI
-│   ├── tasks/               # System-owned work items           ← Plan/CLI
-│   │   ├── manifest.yml     # Task status, deps, modules       ← CLI
-│   │   ├── active/          # Task and bug tickets             ← Plan/CLI
-│   │   ├── archived/        # Verified tasks                   ← CLI
-│   │   └── history.log      # Lifecycle event log              ← CLI
-│   ├── VERIFY.md            # Test results, verdict             ← Verify
-│   ├── STATE.md             # Command run history (append-only)
-│   ├── chat-session.jsonl   # Chat session persistence (append-only) ← Chat
-│   ├── memory/              # Project-specific memory entries   ← Chat
-│   └── logs/
-│       └── <command>-<ts>.log # Full agent dialog per run
-└── src/                     # Your source code                  ← Develop
+│   │   └── archived/
+│   ├── tasks/                 # Work items                          ← Plan/CLI
+│   │   ├── manifest.yml       # Task status, deps, modules
+│   │   ├── active/            # Task and bug tickets
+│   │   ├── archived/          # Verified tasks
+│   │   └── history.log        # Lifecycle event log
+│   ├── bugs/                  # Bug reports from verify             ← Verify
+│   ├── VERIFY-PLAN.md         # Test cases                         ← Verify
+│   ├── VERIFY.md              # Test results, verdict               ← Verify
+│   ├── STATE.md               # Command run history (append-only)
+│   ├── chat-session.jsonl     # Chat session                       ← Chat
+│   ├── memory/                # Project-specific memory entries     ← Chat
+│   └── voidrift.log           # Command run log                    ← All
+└── src/                       # Your source code                    ← Develop
 
-~/.voidrift/                  # Framework data (shared across projects)
+~/.voidrift/                    # Framework data (shared across projects)
 ├── config.yml
-├── memory/                  # Global memory (operator preferences)
+├── memory/                    # Global memory (operator preferences)
+├── resources/                 # Skills, prompts, templates
 └── logs/
-    └── voidrift.log         # CLI invocations, command outcomes (rotating)
+    └── voidrift.log           # CLI invocations, command outcomes
 ```
 
 ---
@@ -496,72 +571,35 @@ your-project/
 ## Development
 
 ```bash
-bun install     # install dependencies
-bun test        # run all tests (vitest)
-bun run build   # build CLI binary (tsup)
-bun run dev     # run from source
+bun install          # install dependencies
+bun test             # run all 986 tests (vitest)
+bun run build        # build CLI binary (tsup)
+bun run dev          # run from source
 ```
 
-### Repository Layout
+CI runs on every push via `.github/workflows/ci.yml` (ubuntu-latest + macos-latest).
 
+### Example Workflows
+
+**New project — reverse-engineer from existing code:**
+
+```bash
+voidrift gather --model claude --import ./src    # reverse-engineer requirements
+voidrift --doc REQUIREMENTS.md                   # review and refine in chat
+voidrift plan --model claude                     # generate architecture + tasks
+voidrift --doc ARCHITECTURE.md                   # review architecture
+voidrift develop --model claude                  # implement tasks
+voidrift verify --model claude                   # acceptance testing
 ```
-voidrift/
-├── src/                            # TypeScript CLI
-│   ├── index.ts                    # Commander entry point
-│   ├── config.ts                   # Config loading, variable expansion
-│   ├── models.ts                   # Model alias resolution
-│   ├── prompts.ts                  # Prompt/template loading (3-layer)
-│   ├── skills.ts                   # Skill resolution (3-layer)
-│   ├── manifest.ts                 # ManifestManager: task status, deps, dispatch
-│   ├── session.ts                  # Chat session persistence (JSONL)
-│   ├── memory.ts                   # Two-layer project/global memory
-│   ├── git.ts                      # Git snapshot, bounded diff, checkpoints
-│   ├── utils.ts                    # STATE.md, logging, helpers
-│   ├── agent/                      # Agent loop
-│   │   ├── loop.ts                 # Core loop: API calls, tool dispatch, hooks, retry
-│   │   ├── protocol.ts             # OpenAI + Anthropic adapters
-│   │   ├── stall.ts                # Stall detection
-│   │   ├── context.ts              # Snip old results, reactive compaction
-│   │   ├── think.ts                # Think-tag stripping
-│   │   ├── budget.ts               # Token budget tracking
-│   │   ├── abort.ts                # Abort mechanism
-│   │   └── types.ts                # Shared types
-│   ├── commands/                   # Command implementations
-│   │   ├── gather.ts               # 4-stage gather pipeline
-│   │   ├── plan.ts                 # 6-stage plan pipeline
-│   │   ├── develop.ts              # Task dispatch loop
-│   │   ├── verify.ts               # Acceptance testing pipeline
-│   │   ├── deploy.ts               # Version, changelog, tag
-│   │   ├── chat.ts                 # Ink TUI chat session
-│   │   ├── slashCommands.ts        # /gather, /plan, /develop, /verify handlers
-│   │   ├── idea.ts                 # Idea refinement state machine
-│   │   ├── doctor.ts               # Diagnostic checks
-│   │   └── status.ts               # Task status display
-│   ├── tools/                      # 10 domain tools
-│   │   ├── registry.ts             # Tool schemas
-│   │   ├── builder.ts              # Per-command filtering + handler wiring
-│   │   ├── filesystem.ts           # WriteContext: read, write, edit, delete, list
-│   │   ├── shell.ts                # Shell execution + security
-│   │   ├── security.ts             # Command classification
-│   │   ├── ssrf.ts                 # SSRF guard
-│   │   ├── http.ts                 # HTTP client
-│   │   ├── process.ts              # Subprocess lifecycle
-│   │   └── browser.ts              # Playwright automation
-│   └── tui/                        # Ink components
-│       ├── App.tsx                  # Root layout
-│       ├── Header.tsx               # ASCII art + callout
-│       ├── Footer.tsx               # Status bar
-│       ├── Message.tsx              # Role-colored messages
-│       ├── ToolCall.tsx             # Tool call display
-│       ├── Thinking.tsx             # Braille spinner
-│       └── state.ts                # TUI state management
-├── tests/                          # Vitest test suite (219 tests)
-├── resources/                      # Prompts, skills, templates → ~/.voidrift/
-├── legacy/python/                  # Python reference implementation (archived)
-├── package.json
-├── tsconfig.json
-├── vitest.config.ts
-├── REQUIREMENTS.md
-├── ARCHITECTURE.md
-└── README.md
+
+**New feature on existing project:**
+
+```bash
+voidrift                                         # open chat
+# type /idea to capture and refine the feature
+# type /done to save it
+voidrift gather --model claude --idea 3          # generate requirements from idea
+voidrift plan --model claude                     # plan tasks
+voidrift develop --model claude                  # implement
+voidrift verify --model claude                   # validate
 ```

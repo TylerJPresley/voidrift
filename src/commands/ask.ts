@@ -1,4 +1,5 @@
 import { SlashCommand, type ChatContext } from "./base.js";
+import { loadPrompt } from "../prompts.js";
 
 export class AskCommand extends SlashCommand {
   readonly name = "ask";
@@ -14,7 +15,7 @@ export class AskCommand extends SlashCommand {
       const { AgentLoop } = await import("../agent/loop.js");
       const { getMaxTokens } = await import("../config.js");
       const oneShot = new AgentLoop({
-        model: this.ctx.model, systemPrompt: "Answer concisely.", tools: [], toolHandlers: {},
+        model: this.ctx.model, systemPrompt: loadPrompt("chat", "ASK"), tools: [], toolHandlers: {},
         stream: false, maxTokens: getMaxTokens(this.ctx.model.config, "chat.quick"),
         logPath: this.ctx.logPath, showSpinner: false,
       });
