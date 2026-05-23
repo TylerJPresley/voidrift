@@ -1,0 +1,13 @@
+{
+  "default_model": "qwen36-27b",
+  "models": {
+    "qwen36-27b": {
+      "model_id": "qwen36-27b",
+      "base_url": "http://192.168.50.100:8000/v1",
+      "api_key": "${OPENAI_API_KEY:-no-key}",
+      "protocol": "openai",
+      "max_tokens": 32768,
+      "max_context": 262144
+    }
+  }
+}

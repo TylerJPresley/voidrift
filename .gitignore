@@ -1,18 +1,7 @@
-# Node / TypeScript
 node_modules/
 dist/
-
-# Python (legacy)
-__pycache__/
-*.pyc
-*.egg-info/
-.pytest_cache/
-
-# VoidRift
-.voidrift/
-sessions.db
-logs/
-
-# IDE / tools
-.claude-flow/
-.aider.chat.history.md
+_CUR/
+_BAK/
+.voidrift/session.json
+.voidrift/cache/
+*.DS_Store

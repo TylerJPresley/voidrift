@@ -1,4 +1,0 @@
-[tool.pytest.ini_options]
-testpaths = ["cli/tests", "worker-cli/tests"]
-pythonpath = ["cli/tests", "worker-cli/tests"]
-addopts = "-v --tb=short"
