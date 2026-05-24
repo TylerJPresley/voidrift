@@ -252,8 +252,8 @@
   - Given `/model` typed, When the selector displays, Then all configured model aliases are shown.
   - Given `/model claude` typed, When the switch completes, Then subsequent turns use the Anthropic adapter and the footer shows `claude`.
 
-- **REQ-TUI-29:** THE SYSTEM SHALL provide `/stats` that displays: total tokens used (prompt + completion), turn count, session duration, current context utilization, and active model.
-  - Given a session with 15 turns, When `/stats` is typed, Then token totals, turn count, duration, context %, and model are displayed.
+- **REQ-TUI-29:** THE SYSTEM SHALL provide `/stats` that displays in a panel (REQ-TUI-37): total tokens used (prompt + completion), turn count, session duration, current context utilization, active model, tool call summary, and performance breakdown.
+  - Given a session with 15 turns, When `/stats` is typed, Then token totals, turn count, duration, context %, model, and performance are displayed in a panel below the input.
 
 - **REQ-TUI-30:** THE SYSTEM SHALL provide `/tools` that lists all tools available in the current mode with descriptions.
   - Given dev mode with file and shell tools, When `/tools` is typed, Then those tools are listed with descriptions.
@@ -275,6 +275,23 @@
 
 - **REQ-TUI-35:** THE SYSTEM SHALL provide `/memory` that performs memory operations.
   - Given `/memory list`, When processed, Then all memory entries are listed with names and descriptions.
+
+### 5.5 Welcome Screen
+
+- **REQ-TUI-36:** WHEN the TUI launches, THE SYSTEM SHALL display a welcome header with the VoidRift logo on the left and session info on the right: product name and version, active model and protocol, workspace path, and git branch.
+  - Given the TUI starts, When the welcome screen renders, Then the logo is displayed on the left with info stacked to the right.
+  - Given the model is `qwen2.5-coder-32b` via OpenAI protocol, When the welcome screen renders, Then it shows `qwen2.5-coder-32b (OpenAI)`.
+
+### 5.6 Panel System
+
+- **REQ-TUI-37:** WHEN a slash command produces structured output, THE SYSTEM SHALL render it in a panel below the input prompt. The panel SHALL be dismissed with Esc. Input SHALL be locked while a panel is open.
+  - Given `/stats` is typed, When the panel renders, Then it appears below the input line.
+  - Given a panel is open, When the user presses Esc, Then the panel is dismissed and input is unlocked.
+  - Given a panel is open, When the user types, Then input is not accepted.
+
+### 5.7 Color Palette
+
+- **REQ-TUI-38:** THE SYSTEM SHALL use a blue synthwave color palette: `#6a7ec8` (primary UI chrome), `#61afef` (accent/tool names), `#5a6aa8` (borders), `#4ec9b0` (teal highlights), `#00d4ff` (bright accents). No purple or magenta SHALL be used in the default theme.
 
 ## 6. Tools & MCP
 

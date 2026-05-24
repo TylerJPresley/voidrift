@@ -520,11 +520,15 @@ Each tool/result pair is visible in the message history. The user can scroll thr
 
 **Source:** `tui.md` — Claude Code's `StatusLine` component, debounced 300ms. **Not Gemini Core.**
 
-**Target behavior:** Shows session name, model info, workspace, version, output style, cost, context window stats, rate limits, vim mode, agent name.
+**Target behavior:** A full-width horizontal rule separates the footer from the content area. Below it, a left/right split:
+- **Left:** `[mode] voidrift · model · ◎ context% · 🛡 governance_tokens`
+- **Right:** `~/workspace · branch`
+
+Context utilization is color-coded (green < 50%, yellow < 80%, red ≥ 80%). A blank line separates the footer from the input prompt below.
 
 **Why this source:** Claude Code's footer is the most information-dense while remaining readable. Context visualization grid is deferred, but the status line itself is the target.
 
-**Status:** **Deviation adopted.** Gemini Core has a simpler footer. Claude Code's is richer. Adopt the Claude Code version for the foundation.
+**Status:** **Deviation adopted.** Gemini Core has a simpler footer. Claude Code's is richer. Adopt the Claude Code version for the foundation with the left/right layout defined above.
 
 ### 4.20 Message History Navigation (Target: Gemini Core)
 
