@@ -38,13 +38,13 @@ describe("parseMarkdownLines", () => {
     const md = "# Header\n\nSome text with **bold**.\n\n```\ncode\n```\n\n- list";
     const lines = parseMarkdownLines(md);
     expect(lines[0].type).toBe("header");
-    expect(lines[1].type).toBe("text"); // empty line
-    expect(lines[2].type).toBe("text"); // "Some text..."
-    expect(lines[3].type).toBe("text"); // empty line
+    expect(lines[1].type).toBe("blank");
+    expect(lines[2].type).toBe("text");
+    expect(lines[3].type).toBe("blank");
     expect(lines[4].type).toBe("code_start");
     expect(lines[5].type).toBe("code_line");
     expect(lines[6].type).toBe("code_end");
-    expect(lines[7].type).toBe("text"); // empty line
+    expect(lines[7].type).toBe("blank");
     expect(lines[8].type).toBe("list_item");
   });
 

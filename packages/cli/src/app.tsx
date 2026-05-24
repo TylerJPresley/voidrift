@@ -101,7 +101,7 @@ function StreamingView({ text, elapsed, tokens }: { text: string; elapsed: numbe
   );
 }
 
-function Footer({ mode, model, contextPct, branch }: { mode: string; model: string; contextPct: number; branch: string }) {
+function Footer({ mode, model, contextPct, branch, cwd }: { mode: string; model: string; contextPct: number; branch: string; cwd: string }) {
   const ctxColor = contextPct < 50 ? "green" : contextPct < 80 ? "yellow" : "red";
   return (
     <Box flexDirection="column">
@@ -118,7 +118,7 @@ function Footer({ mode, model, contextPct, branch }: { mode: string; model: stri
           <Text>🛡  0</Text>
         </Text>
         <Text>
-          <Text color="#61afef">~/voidrift</Text>
+          <Text color="#61afef">{cwd}</Text>
           <Text dimColor> · </Text>
           <Text color="#00d4ff">{branch}</Text>
         </Text>
@@ -331,7 +331,7 @@ function App() {
       {ctrlCHint && <Text dimColor italic>  Type /exit to exit.</Text>}
 
       <Box flexDirection="column" marginTop={1}>
-        <Footer mode="chat" model={modelName} contextPct={debouncedCtx} branch={branch} />
+        <Footer mode="chat" model={modelName} contextPct={debouncedCtx} branch={branch} cwd={cwd} />
         <Text> </Text>
         <Box>
           <Text color="#6a7ec8" bold>❯ </Text>
