@@ -4,6 +4,7 @@ import TextInput from "ink-text-input";
 import { loadConfig } from "./config/loader.js";
 import { createAdapter } from "./adapters/factory.js";
 import { SessionManager, type ConfirmFn } from "./session/manager.js";
+import { saveSession, loadSession, clearSession } from "./session/persistence.js";
 import { ToolRegistry, type ConfirmResult } from "./tools/registry.js";
 import { builtinTools } from "./tools/builtins.js";
 
@@ -13,6 +14,9 @@ const { model, modelName } = loadConfig();
 const adapter = createAdapter(model);
 const registry = new ToolRegistry();
 builtinTools.forEach(t => registry.register(t));
+
+// Restore previous session
+const savedSession = loadSession();
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -177,7 +181,16 @@ function getShortCwd(): string {
 
 function App() {
   const { exit } = useApp();
-  const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [history, setHistory] = useState<HistoryItem[]>(() => {
+    if (!savedSession?.messages.length) return [];
+    // Convert saved messages to display history
+    return savedSession.messages
+      .filter(m => m.role === "user" || (m.role === "assistant" && m.content))
+      .map((m, i) => m.role === "user"
+        ? { id: String(i), type: "user" as const, text: m.content || "" }
+        : { id: String(i), type: "assistant" as const, model: modelName, text: m.content || "" }
+      );
+  });
   const [streaming, setStreaming] = useState<{ text: string; elapsed: number; tokens: number } | null>(null);
   const [pendingTool, setPendingTool] = useState<{ name: string; args: string } | null>(null);
   const [confirming, setConfirming] = useState<{ name: string; args: string; resolve: (r: ConfirmResult) => void } | null>(null);
@@ -197,7 +210,12 @@ function App() {
     });
   };
 
-  const sessionRef = useRef(new SessionManager(adapter, registry, confirmFn));
+  const sessionRef = useRef(() => {
+    const s = new SessionManager(adapter, registry, confirmFn);
+    if (savedSession?.messages) s.restoreHistory(savedSession.messages);
+    return s;
+  });
+  const sessionInstance = useRef(sessionRef.current());
 
   useInput((ch, key) => {
     if (confirming) return; // Let ConfirmationPrompt handle input
@@ -226,7 +244,7 @@ function App() {
     setInput("");
 
     if (text.trim() === "/exit") { exit(); return; }
-    if (text.trim() === "/clear") { setHistory([]); setContextPct(0); return; }
+    if (text.trim() === "/clear") { setHistory([]); setContextPct(0); clearSession(); return; }
 
     setHistory(h => [...h, { id: id(), type: "user", text: text.trim() }]);
     setBusy(true);
@@ -237,7 +255,7 @@ function App() {
     let tokenCount = 0;
 
     try {
-      for await (const event of sessionRef.current.send(text.trim())) {
+      for await (const event of sessionInstance.current.send(text.trim())) {
         switch (event.type) {
           case "content":
             acc += event.content;
@@ -279,6 +297,7 @@ function App() {
     setPendingTool(null);
     setBusy(false);
     setContextPct(p => Math.min(95, p + 2));
+    saveSession(sessionInstance.current.getHistory());
   }, [busy]);
 
   return (

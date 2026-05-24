@@ -83,4 +83,8 @@ export class SessionManager {
   getHistory(): ChatMessage[] {
     return this.history;
   }
+
+  restoreHistory(messages: ChatMessage[]) {
+    this.history = messages;
+  }
 }
