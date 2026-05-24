@@ -201,57 +201,32 @@ function StatsPanel({ onClose }: { onClose: () => void }) {
   useInput((_, key) => { if (key.escape) onClose(); });
   return (
     <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1} paddingY={1}>
-      <Text color="#4ec9b0">Agent powering down. Goodbye!</Text>
+      <Text bold>Session Summary</Text>
       <Text> </Text>
-      <Text bold>Interaction Summary</Text>
-      <Text><Text color="#61afef">Session ID:   </Text><Text dimColor>a3f7c912-8b4e-4d1a-ba93-b53f5e060908</Text></Text>
-      <Text><Text color="#61afef">Tool Calls:   </Text><Text>4 ( <Text color="green">✓ 4</Text> <Text color="red">× 0</Text> )</Text></Text>
-      <Text><Text color="#61afef">Success Rate: </Text><Text color="green">100%</Text></Text>
+      <Text><Text color="#61afef">Session:   </Text><Text dimColor>a3f7c912-8b4e</Text></Text>
+      <Text><Text color="#61afef">Duration:  </Text><Text>12m 34s</Text></Text>
+      <Text><Text color="#61afef">Turns:     </Text><Text>8</Text></Text>
       <Text> </Text>
       <Text bold>Performance</Text>
-      <Text><Text color="#61afef">Wall Time:    </Text><Text>42.1s</Text></Text>
-      <Text><Text color="#61afef">Agent Active: </Text><Text>38.7s</Text></Text>
-      <Text><Text dimColor>  » API Time:  </Text><Text dimColor>31.2s (80.6%)</Text></Text>
-      <Text><Text dimColor>  » Tool Time: </Text><Text dimColor>7.5s (19.4%)</Text></Text>
+      <Text><Text color="#61afef">Wall Time:   </Text><Text>12m 34s</Text></Text>
+      <Text><Text color="#61afef">API Time:    </Text><Text>2m 08s (17%)</Text></Text>
+      <Text><Text color="#61afef">Tool Time:   </Text><Text>1m 12s (10%)</Text></Text>
+      <Text> </Text>
+      <Text bold>Tools</Text>
+      <Text><Text color="#61afef">Calls:        </Text><Text>14 ( <Text color="green">✓ 13</Text> <Text color="red">× 1</Text> )</Text></Text>
+      <Text><Text color="#61afef">Success Rate: </Text><Text color="green">93%</Text></Text>
       <Text> </Text>
       <Text bold>Model Usage</Text>
-      <Text dimColor>{'Model'.padEnd(28)}{'Reqs'.padStart(6)}{'Input'.padStart(8)}{'Cache'.padStart(8)}{'Output'.padStart(8)}</Text>
-      <Text dimColor>{'─'.repeat(58)}</Text>
-      <Text>{'qwen2.5-coder-32b'.padEnd(28)}<Text>{'4'.padStart(6)}{'8,420'.padStart(8)}{'0'.padStart(8)}{'1,205'.padStart(8)}</Text></Text>
-      <Text dimColor>{'  ↳ main'.padEnd(28)}{'4'.padStart(6)}{'8,420'.padStart(8)}{'0'.padStart(8)}{'1,205'.padStart(8)}</Text>
+      <Text dimColor>{'Model'.padEnd(30)}{'Turns'.padStart(6)}{'Input'.padStart(8)}{'Output'.padStart(8)}{'Cache'.padStart(8)}{'tok/s'.padStart(7)}</Text>
+      <Text dimColor>{'─'.repeat(67)}</Text>
+      <Text>{'qwen2.5-coder-32b (local)'.padEnd(30)}{'5'.padStart(6)}{'12,840'.padStart(8)}{'3,205'.padStart(8)}{'—'.padStart(8)}{'42.1'.padStart(7)}</Text>
+      <Text>{'claude-sonnet-4 (anthropic)'.padEnd(30)}{'3'.padStart(6)}{'8,420'.padStart(8)}{'1,105'.padStart(8)}{'6,200'.padStart(8)}{'68.3'.padStart(7)}</Text>
+      <Text dimColor>{'─'.repeat(67)}</Text>
+      <Text bold>{'Total'.padEnd(30)}{'8'.padStart(6)}{'21,260'.padStart(8)}{'4,310'.padStart(8)}{'6,200'.padStart(8)}{'—'.padStart(7)}</Text>
       <Text> </Text>
-      <Text dimColor>To resume: voidrift --resume a3f7c912-8b4e-4d1a-ba93-b53f5e060908</Text>
+      <Text><Text color="#61afef">Context: </Text><Text color="green">◎ 34%</Text><Text dimColor> (21,260 / 62,000)</Text></Text>
       <Text> </Text>
-      <Text dimColor>↑/↓ Scroll · <Text color="#61afef">pgup/pgdown</Text> Page · <Text color="#61afef">esc</Text> Close</Text>
-    </Box>
-  );
-}
-
-function UsagePanel({ onClose }: { onClose: () => void }) {
-  useInput((_, key) => { if (key.escape) onClose(); });
-  const bar = (pct: number) => {
-    const filled = Math.round(pct / 100 * 7);
-    const blocks = Array(7).fill(null).map((_, i) => i < filled ? "██████████" : "          ");
-    return blocks.join(" ");
-  };
-  const models = [
-    { name: "qwen2.5-coder-32b (Local)", pct: 100 },
-    { name: "claude-sonnet-4 (Anthropic)", pct: 72 },
-    { name: "gpt-4o (OpenAI)", pct: 45 },
-  ];
-  return (
-    <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1} paddingY={1}>
-      <Text bold>↳ Model Quota</Text>
-      <Text> </Text>
-      {models.map((m, i) => (
-        <Box key={i} flexDirection="column">
-          <Text bold>{m.name}</Text>
-          <Text><Text color="green">{bar(m.pct)}</Text><Text> {m.pct}%</Text></Text>
-          <Text color="green">Quota available</Text>
-          <Text> </Text>
-        </Box>
-      ))}
-      <Text dimColor>↑/↓ Scroll · <Text color="#61afef">pgup/pgdown</Text> Page · <Text color="#61afef">esc</Text> Close</Text>
+      <Text dimColor>↑/↓ Scroll · <Text color="#61afef">esc</Text> Close</Text>
     </Box>
   );
 }
@@ -268,7 +243,7 @@ function App() {
   const [busy, setBusy] = useState(false);
   const [contextPct, setContextPct] = useState(12);
   const [ctrlC, setCtrlC] = useState(false);
-  const [panel, setPanel] = useState<"stats" | "usage" | null>(null);
+  const [panel, setPanel] = useState<"stats" | null>(null);
 
   let nextId = history.length + 1;
   const id = () => String(nextId++);
@@ -359,7 +334,6 @@ function App() {
       return;
     }
     if (text.trim() === "/stats") { setPanel("stats"); return; }
-    if (text.trim() === "/usage") { setPanel("usage"); return; }
 
     setHistory(h => [...h, { id: id(), type: "user", text: text.trim() }]);
     simulate(text.trim());
@@ -411,7 +385,6 @@ function App() {
 
       {/* Panel (slash command output — below input) */}
       {panel === "stats" && <StatsPanel onClose={() => setPanel(null)} />}
-      {panel === "usage" && <UsagePanel onClose={() => setPanel(null)} />}
     </Box>
   );
 }

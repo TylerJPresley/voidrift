@@ -252,8 +252,8 @@
   - Given `/model` typed, When the selector displays, Then all configured model aliases are shown.
   - Given `/model claude` typed, When the switch completes, Then subsequent turns use the Anthropic adapter and the footer shows `claude`.
 
-- **REQ-TUI-29:** THE SYSTEM SHALL provide `/stats` that displays in a panel (REQ-TUI-37): total tokens used (prompt + completion), turn count, session duration, current context utilization, active model, tool call summary, and performance breakdown.
-  - Given a session with 15 turns, When `/stats` is typed, Then token totals, turn count, duration, context %, model, and performance are displayed in a panel below the input.
+- **REQ-TUI-29:** THE SYSTEM SHALL provide `/stats` that displays in a panel (REQ-TUI-37): session ID, turn count, session duration, performance breakdown (wall time, API time, tool time), tool call summary (success/fail count), and a per-model usage table showing turns, input tokens, output tokens, cache tokens, and tokens/sec for each model used in the session.
+  - Given a session with 8 turns across 2 models, When `/stats` is typed, Then each model's token usage is shown in a table with totals and context utilization.
 
 - **REQ-TUI-30:** THE SYSTEM SHALL provide `/tools` that lists all tools available in the current mode with descriptions.
   - Given dev mode with file and shell tools, When `/tools` is typed, Then those tools are listed with descriptions.
