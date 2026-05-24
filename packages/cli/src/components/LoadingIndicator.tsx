@@ -14,7 +14,7 @@ const PHRASES = [
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
-export function LoadingIndicator({ startTime, tokens }: { startTime: number; tokens: number }) {
+export function LoadingIndicator({ startTime }: { startTime: number }) {
   const [frame, setFrame] = useState(0);
   const [phraseIdx, setPhraseIdx] = useState(0);
   const [elapsed, setElapsed] = useState(0);
@@ -33,13 +33,12 @@ export function LoadingIndicator({ startTime, tokens }: { startTime: number; tok
   }, []);
 
   const elapsedStr = elapsed < 60 ? `${elapsed}s` : `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`;
-  const arrow = tokens > 0 ? "↓" : "↑";
 
   return (
     <Box paddingLeft={2} marginTop={1}>
       <Text color="#6a7ec8">{SPINNER_FRAMES[frame]} </Text>
       <Text color="#4ec9b0">{PHRASES[phraseIdx]}</Text>
-      <Text dimColor>  ({elapsedStr} · {arrow} {tokens} tokens · esc to cancel)</Text>
+      <Text dimColor>  ({elapsedStr} · esc to cancel)</Text>
     </Box>
   );
 }

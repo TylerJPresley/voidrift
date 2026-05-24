@@ -324,7 +324,7 @@ function App() {
         }}
       </Static>
 
-      {loading && !streaming && <LoadingIndicator startTime={loading} tokens={tokenCount} />}
+      {loading && !streaming && <LoadingIndicator startTime={loading} />}
       {toolGroup.length > 0 && !confirming && <ToolGroupMessage tools={toolGroup} />}
       {confirming && <ConfirmationPrompt toolName={confirming.name} keyArg={confirming.keyArg} args={confirming.args} onRespond={handleConfirm} />}
       {streaming && streaming.text && <StreamingView text={streaming.text} elapsed={streaming.elapsed} tokens={streaming.tokens} />}
