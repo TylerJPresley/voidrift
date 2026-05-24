@@ -86,27 +86,68 @@ VoidRift owns layer 2. Nothing in layer 2 modifies layer 3 or 4.
 
 | Package | Type | Depends On | Purpose |
 |---------|------|------------|---------|
-| `@voidrift/core` | Infrastructure | gemini-cli-core | Config bridge, workflow objects, adapter factory |
-| `@voidrift/openai-adapter` | Adapter | gemini-cli-core, openai | OpenAI ContentGenerator |
-| `@voidrift/anthropic-adapter` | Adapter | gemini-cli-core, @anthropic-ai/sdk | Anthropic ContentGenerator |
-| `@voidrift/tui` | Frontend | core, governance, modes, memory | Ink terminal UI |
-| `@voidrift/governance` | System | gemini-cli-core | Context window partition |
-| `@voidrift/modes` | System | governance | Built-in mode cycling |
-| `@voidrift/memory` | System | governance | Persistent memory operations |
-| `@voidrift/commands` | System | core, modes | Development command pipeline |
-| `@voidrift/cli` | Entry | core, tui, commands | CLI entry point and launcher |
+| `@voidrift/cli` | Application | gemini-cli-core, openai, @anthropic-ai/sdk | The entire app — entry point, TUI, adapters, tools, session, config |
+
+**Deferred features** (internal modules, extracted to packages only if complexity warrants):
+
+| Module | Purpose |
+|--------|---------|
+| `governance/` | Context window partition |
+| `modes/` | Built-in mode cycling |
+| `memory/` | Persistent memory operations |
+| `commands/` | Development command pipeline |
 
 **Foundation scope** (what's built now):
 
 | Package | Type | Depends On | Purpose |
 |---------|------|------------|---------|
-| `@voidrift/core` | Infrastructure | gemini-cli-core | Config bridge, adapter factory, tool registry, session manager |
-| `@voidrift/openai-adapter` | Adapter | gemini-cli-core, openai | OpenAI ContentGenerator (streaming) |
-| `@voidrift/anthropic-adapter` | Adapter | gemini-cli-core, @anthropic-ai/sdk | Anthropic ContentGenerator (streaming) |
-| `@voidrift/tui` | Frontend | core | Ink terminal UI with streaming, tool display, session history |
-| `@voidrift/cli` | Entry | core, tui | CLI entry point, session launch, TUI bootstrap |
+| `@voidrift/cli` | Application | gemini-cli-core, openai, @anthropic-ai/sdk | Entry point, TUI, adapters, tools, session, config |
 
-**Deferred from foundation scope:** `modes`, `memory`, `commands`, `governance` — not needed to get chat working.
+**Internal module structure:**
+
+```
+packages/cli/src/
+├── app.tsx                 Entry point, bootstrap
+├── headless.ts             Headless mode runner
+├── adapters/
+│   ├── factory.ts          Resolves protocol → ContentGenerator
+│   ├── openai.ts           OpenAI adapter
+│   └── anthropic.ts        Anthropic adapter
+├── config/
+│   ├── paths.ts            Path system
+│   ├── loader.ts           Model config loading
+│   └── resources.ts        Resource resolution
+├── session/
+│   ├── manager.ts          Session lifecycle
+│   ├── history.ts          Message history
+│   └── metrics.ts          Token/timing tracking
+├── tools/
+│   ├── registry.ts         Tool registration
+│   ├── executor.ts         Tool execution
+│   ├── bash.ts             Shell tool
+│   ├── read.ts             File read tool
+│   ├── write.ts            File write tool
+│   ├── edit.ts             File edit tool
+│   └── glob.ts             Glob tool
+├── components/
+│   ├── Welcome.tsx         Header/logo
+│   ├── UserMessage.tsx     User input display
+│   ├── AssistantMessage.tsx Model response display
+│   ├── StreamingResponse.tsx Live streaming
+│   ├── ToolGroup.tsx       Tool call display
+│   ├── DiffDisplay.tsx     Diff rendering
+│   ├── Footer.tsx          Status bar
+│   ├── StatsPanel.tsx      /stats panel
+│   └── ThinkingIndicator.tsx Spinner
+├── hooks/
+│   ├── useStreaming.ts     Stream state management
+│   └── useSession.ts      Session state
+└── slash/
+    ├── registry.ts         Slash command dispatch
+    ├── stats.ts            /stats
+    ├── clear.ts            /clear
+    └── exit.ts             /exit
+```
 
 The adapter contract defines the boundary between VoidRift and model endpoints:
 
