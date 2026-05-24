@@ -1,11 +1,14 @@
 import React from "react";
 import { Text, Box } from "ink";
 
+type LineType = "text" | "header" | "code_start" | "code_line" | "code_end" | "list_item" | "table_row" | "table_sep";
+
 interface MarkdownLine {
-  type: "text" | "header" | "code_start" | "code_line" | "code_end" | "list_item";
+  type: LineType;
   content: string;
-  level?: number; // header level or list indent
-  lang?: string;  // code block language
+  level?: number;
+  lang?: string;
+  cells?: string[];
 }
 
 export function parseMarkdownLines(text: string): MarkdownLine[] {
@@ -15,17 +18,24 @@ export function parseMarkdownLines(text: string): MarkdownLine[] {
   let codeLang = "";
 
   for (const line of lines) {
-    if (!inCode && line.match(/^```(\w*)$/)) {
+    if (!inCode && line.match(/^```(\w*)\s*$/)) {
       inCode = true;
       codeLang = RegExp.$1;
       result.push({ type: "code_start", content: "", lang: codeLang });
-    } else if (inCode && line === "```") {
+    } else if (inCode && line.trim() === "```") {
       inCode = false;
       result.push({ type: "code_end", content: "" });
     } else if (inCode) {
       result.push({ type: "code_line", content: line });
     } else if (line.match(/^(#{1,4})\s+(.+)$/)) {
       result.push({ type: "header", content: RegExp.$2, level: RegExp.$1.length });
+    } else if (line.match(/^\|[\s:]*-+[\s:|-]*\|?\s*$/)) {
+      // Table separator row (|---|---|)
+      result.push({ type: "table_sep", content: line });
+    } else if (line.match(/^\|(.+)\|?\s*$/)) {
+      // Table data row
+      const cells = line.split("|").slice(1).map(c => c.trim()).filter((_, i, arr) => i < arr.length - (line.endsWith("|") ? 1 : 0));
+      result.push({ type: "table_row", content: line, cells });
     } else if (line.match(/^(\s*)[-*]\s+(.+)$/)) {
       result.push({ type: "list_item", content: RegExp.$2, level: Math.floor(RegExp.$1.length / 2) });
     } else if (line.match(/^(\s*)\d+\.\s+(.+)$/)) {
@@ -39,7 +49,6 @@ export function parseMarkdownLines(text: string): MarkdownLine[] {
 
 function renderInline(text: string): React.ReactNode[] {
   const nodes: React.ReactNode[] = [];
-  // Match: **bold**, *italic*, `code`, or plain text
   const regex = /(\*\*(.+?)\*\*|\*(.+?)\*|`([^`]+)`)/g;
   let lastIndex = 0;
   let match: RegExpExecArray | null;
@@ -64,8 +73,22 @@ function renderInline(text: string): React.ReactNode[] {
   return nodes.length > 0 ? nodes : [<Text key={0}>{text}</Text>];
 }
 
+function TableRow({ cells, header }: { cells: string[]; header?: boolean }) {
+  return (
+    <Text>
+      {cells.map((cell, i) => (
+        <Text key={i}>
+          {i > 0 && <Text dimColor> │ </Text>}
+          {header ? <Text bold>{renderInline(cell)}</Text> : <Text>{renderInline(cell)}</Text>}
+        </Text>
+      ))}
+    </Text>
+  );
+}
+
 export function MarkdownText({ text }: { text: string }) {
   const lines = parseMarkdownLines(text);
+  let isFirstTableRow = true;
 
   return (
     <Box flexDirection="column">
@@ -81,6 +104,13 @@ export function MarkdownText({ text }: { text: string }) {
             return <Text key={i} dimColor>{'─'.repeat(40)}</Text>;
           case "list_item":
             return <Text key={i}>{"  ".repeat(line.level || 0)}• {renderInline(line.content)}</Text>;
+          case "table_sep":
+            return <Text key={i} dimColor>{'─'.repeat(40)}</Text>;
+          case "table_row": {
+            // First table row is the header
+            const isHeader = i === 0 || (i > 0 && lines[i + 1]?.type === "table_sep");
+            return <TableRow key={i} cells={line.cells || []} header={isHeader} />;
+          }
           case "text":
             return <Text key={i}>{renderInline(line.content)}</Text>;
           default:

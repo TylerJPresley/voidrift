@@ -53,4 +53,13 @@ describe("parseMarkdownLines", () => {
     expect(lines[1]).toEqual({ type: "code_line", content: "# not a header" });
     expect(lines[2]).toEqual({ type: "code_line", content: "- not a list" });
   });
+
+  it("parses table rows", () => {
+    const lines = parseMarkdownLines("| Name | Value |\n| --- | --- |\n| foo | bar |");
+    expect(lines[0].type).toBe("table_row");
+    expect(lines[0].cells).toEqual(["Name", "Value"]);
+    expect(lines[1].type).toBe("table_sep");
+    expect(lines[2].type).toBe("table_row");
+    expect(lines[2].cells).toEqual(["foo", "bar"]);
+  });
 });

@@ -267,6 +267,7 @@ function App() {
             acc = "";
             localTokens = 0;
             setTokenCount(0);
+            setLoading(Date.now()); // Show loading while waiting for model to continue
             break;
           }
           case "tool_denied": {
