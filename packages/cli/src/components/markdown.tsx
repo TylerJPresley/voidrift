@@ -92,35 +92,37 @@ function TableRow({ cells, header }: { cells: string[]; header?: boolean }) {
   );
 }
 
-export function MarkdownText({ text }: { text: string }) {
+export function MarkdownText({ text, prefix }: { text: string; prefix?: string }) {
   const lines = parseMarkdownLines(text);
+  const pad = prefix ? " ".repeat(prefix.length + 1) : "";
 
   return (
     <Box flexDirection="column">
       {lines.map((line, i) => {
+        const linePrefix = i === 0 && prefix ? <Text color="#4ec9b0">{prefix} </Text> : (prefix ? <Text>{pad}</Text> : null);
         switch (line.type) {
           case "header":
-            return <Text key={i} bold color="#4ec9b0">{renderInline(line.content)}</Text>;
+            return <Text key={i}>{linePrefix}<Text bold color="#4ec9b0">{renderInline(line.content)}</Text></Text>;
           case "code_start":
-            return <Box key={i} marginTop={1}><Text dimColor>{'┌─'}{line.lang ? ` ${line.lang} ` : ""}{'─'.repeat(Math.max(0, 36 - (line.lang?.length || 0)))}</Text></Box>;
+            return <Text key={i}>{linePrefix}<Text dimColor>{'┌─'}{line.lang ? ` ${line.lang} ` : ""}{'─'.repeat(Math.max(0, 36 - (line.lang?.length || 0)))}</Text></Text>;
           case "code_line":
-            return <Text key={i} color="#abb2bf">{'│ '}{line.content}</Text>;
+            return <Text key={i}>{linePrefix}<Text color="#abb2bf">{'│ '}{line.content}</Text></Text>;
           case "code_end":
-            return <Box key={i} marginBottom={1}><Text dimColor>{'└─'.padEnd(40, '─')}</Text></Box>;
+            return <Text key={i}>{linePrefix}<Text dimColor>{'└─'.padEnd(40, '─')}</Text></Text>;
           case "list_item":
-            return <Text key={i}>{"  ".repeat(line.level || 0)}  • {renderInline(line.content)}</Text>;
+            return <Text key={i}>{linePrefix}{"  ".repeat(line.level || 0)}• {renderInline(line.content)}</Text>;
           case "table_sep":
-            return <Text key={i} dimColor>  {'─'.repeat(40)}</Text>;
+            return <Text key={i}>{linePrefix}<Text dimColor>{'─'.repeat(40)}</Text></Text>;
           case "table_row": {
-            const isHeader = i === 0 || lines[i + 1]?.type === "table_sep";
-            return <Box key={i} marginLeft={1}><TableRow cells={line.cells || []} header={isHeader} /></Box>;
+            const isHeader = lines[i + 1]?.type === "table_sep";
+            return <Box key={i}>{linePrefix}<TableRow cells={line.cells || []} header={isHeader} /></Box>;
           }
           case "hr":
-            return <Text key={i} dimColor>{'─'.repeat(40)}</Text>;
+            return <Text key={i}>{linePrefix}<Text dimColor>{'─'.repeat(40)}</Text></Text>;
           case "blank":
             return <Text key={i}> </Text>;
           case "text":
-            return <Text key={i} wrap="wrap">{renderInline(line.content)}</Text>;
+            return <Text key={i} wrap="wrap">{linePrefix}{renderInline(line.content)}</Text>;
           default:
             return null;
         }

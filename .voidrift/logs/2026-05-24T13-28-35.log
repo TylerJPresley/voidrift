@@ -1,0 +1,35 @@
+[13:28:35.378] [tool] execute: echo {"msg":"hello"}
+[13:28:35.378] [tool] result: echo {"len":11}
+[13:28:35.379] [tool] execute: fail {}
+[13:28:35.379] [tool] error: fail {"error":"boom"}
+[13:28:35.380] [api] request {"model":"test","messages":1,"tools":0}
+[13:28:35.388] [session] send {"text":"hi"}
+[13:28:35.388] [session] calling model {"historyLen":1}
+[13:28:35.388] [api] request {"model":"test","messages":1,"tools":0}
+[13:28:35.389] [api] request {"model":"test","messages":1,"tools":0}
+[13:28:35.389] [api] error {"status":500,"text":"oops"}
+[13:28:35.390] [session] send {"text":"do something"}
+[13:28:35.390] [session] calling model {"historyLen":1}
+[13:28:35.390] [session] tool_calls received ["echo"]
+[13:28:35.390] [tool] execute: echo {"msg":"hi"}
+[13:28:35.390] [tool] result: echo {"len":8}
+[13:28:35.390] [session] tool_result {"name":"echo","resultLen":8}
+[13:28:35.390] [session] calling model {"historyLen":3}
+[13:28:35.391] [session] send {"text":"run ls"}
+[13:28:35.391] [session] calling model {"historyLen":1}
+[13:28:35.391] [session] tool_calls received ["bash"]
+[13:28:35.391] [tool] execute: bash {"command":"ls"}
+[13:28:35.391] [tool] result: bash {"len":6}
+[13:28:35.391] [session] tool_result {"name":"bash","resultLen":6}
+[13:28:35.391] [session] calling model {"historyLen":3}
+[13:28:35.391] [session] send {"text":"delete everything"}
+[13:28:35.391] [session] calling model {"historyLen":1}
+[13:28:35.391] [session] tool_calls received ["bash"]
+[13:28:35.391] [session] calling model {"historyLen":3}
+[13:28:35.391] [session] send {"text":"run ls"}
+[13:28:35.391] [session] calling model {"historyLen":1}
+[13:28:35.391] [session] tool_calls received ["bash"]
+[13:28:35.391] [tool] execute: bash {"command":"ls"}
+[13:28:35.391] [tool] result: bash {"len":6}
+[13:28:35.391] [session] tool_result {"name":"bash","resultLen":6}
+[13:28:35.391] [session] calling model {"historyLen":3}

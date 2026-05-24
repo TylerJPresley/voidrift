@@ -76,11 +76,8 @@ function UserMessage({ text }: { text: string }) {
 function AssistantMessage({ text, stats }: { model: string; text: string; stats?: string }) {
   return (
     <Box flexDirection="column" marginTop={1} marginLeft={2}>
-      <Box>
-        <Text color="#4ec9b0">{"✦ "}</Text>
-        <Box flexDirection="column">
-          <MarkdownText text={text} />
-        </Box>
+      <Box flexDirection="column">
+        <MarkdownText text={text} prefix="✦" />
       </Box>
       {stats && <Text dimColor>  {stats}</Text>}
     </Box>
@@ -91,12 +88,7 @@ function StreamingView({ text, elapsed, tokens }: { text: string; elapsed: numbe
   const safe = !hasUnclosedFormatting(text);
   return (
     <Box flexDirection="column" marginTop={1} marginLeft={2}>
-      <Box>
-        <Text color="#4ec9b0">{"✦ "}</Text>
-        <Box flexDirection="column">
-          {safe ? <MarkdownText text={text} /> : <Text>{text}</Text>}
-        </Box>
-      </Box>
+      {safe ? <MarkdownText text={text} prefix="✦" /> : <Text><Text color="#4ec9b0">✦ </Text>{text}</Text>}
     </Box>
   );
 }
