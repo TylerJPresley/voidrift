@@ -141,17 +141,24 @@ function getShortCwd(): string {
   return cwd.startsWith(home) ? "~" + cwd.slice(home.length) : cwd;
 }
 
+function timeSince(isoDate: string): string {
+  const diff = Date.now() - new Date(isoDate).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
 function App() {
   const { exit } = useApp();
   const [history, setHistory] = useState<HistoryItem[]>(() => {
     if (!savedSession?.messages.length) return [];
-    // Convert saved messages to display history
-    return savedSession.messages
-      .filter(m => m.role === "user" || (m.role === "assistant" && m.content))
-      .map((m, i) => m.role === "user"
-        ? { id: String(i), type: "user" as const, text: m.content || "" }
-        : { id: String(i), type: "assistant" as const, model: modelName, text: m.content || "" }
-      );
+    const msgCount = savedSession.messages.filter(m => m.role === "user" || m.role === "assistant").length;
+    const lastActive = savedSession.updatedAt ? timeSince(savedSession.updatedAt) : "unknown";
+    return [{ id: "resume", type: "system", text: `Resuming session (${msgCount} messages, last active ${lastActive})` }];
   });
   const [streaming, setStreaming] = useState<{ text: string; elapsed: number; tokens: number } | null>(null);
   const [toolGroup, setToolGroup] = useState<ToolCallData[]>([]);
