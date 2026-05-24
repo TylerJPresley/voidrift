@@ -7,6 +7,7 @@ import { SessionManager, type ConfirmFn } from "./session/manager.js";
 import { saveSession, loadSession, clearSession } from "./session/persistence.js";
 import { ToolRegistry, type ConfirmResult } from "./tools/registry.js";
 import { builtinTools } from "./tools/builtins.js";
+import { MarkdownText } from "./components/markdown.js";
 
 // ─── Bootstrap ───────────────────────────────────────────────────────────────
 
@@ -70,12 +71,10 @@ function AssistantMessage({ model, text, stats }: { model: string; text: string;
   return (
     <Box flexDirection="column" marginTop={1}>
       <Text dimColor italic>  {model}</Text>
-      {text.split("\n").map((line, i) => (
-        <Box key={i}>
-          <Text color="#6a7ec8">┃ </Text>
-          <Text>{line}</Text>
-        </Box>
-      ))}
+      <Box>
+        <Text color="#6a7ec8">┃ </Text>
+        <MarkdownText text={text} />
+      </Box>
       {stats && <Text dimColor>  · {stats}</Text>}
     </Box>
   );
