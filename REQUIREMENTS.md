@@ -234,9 +234,10 @@
 - **REQ-TUI-24:** THE SYSTEM SHALL display model responses as streaming markdown text with the model name attributed.
   - Given the model streams 50 tokens, When displayed, Then tokens appear incrementally with the model name shown.
 
-- **REQ-TUI-25:** CTR+C ONCE SHALL warn, CTR+C TWICE SHALL exit immediately.
-  - Given the TUI is running, When Ctrl+C is pressed once, Then a warning is displayed.
-  - Given the TUI is running, When Ctrl+C is pressed twice rapidly, Then the TUI exits immediately.
+- **REQ-TUI-25:** CTRL+C SHALL cancel the current operation (close panel, cancel generation) but SHALL NOT exit the TUI. WHEN there is nothing to cancel, THE SYSTEM SHALL display "Type /exit to exit."
+  - Given a panel is open, When Ctrl+C is pressed, Then the panel is closed.
+  - Given the model is streaming, When Ctrl+C is pressed, Then generation is cancelled.
+  - Given the TUI is idle, When Ctrl+C is pressed, Then "Type /exit to exit" is displayed.
 
 ### 5.4 Slash Commands
 
@@ -265,8 +266,8 @@
 - **REQ-TUI-32:** THE SYSTEM SHALL provide `/clear` that deletes the session and starts fresh.
   - Given `/clear` typed, When processed, Then the session file is deleted and the agent starts fresh.
 
-- **REQ-TUI-33:** THE SYSTEM SHALL provide `/quit` that exits the TUI.
-  - Given `/quit` typed, When processed, Then the TUI exits.
+- **REQ-TUI-33:** THE SYSTEM SHALL provide `/exit` that exits the TUI.
+  - Given `/exit` typed, When processed, Then the TUI exits.
 
 - **REQ-TUI-34:** THE SYSTEM SHALL provide `/exec <cmd>` that runs a development command without consuming chat context tokens. Progress SHALL appear as system messages. Errors SHALL be displayed and the session SHALL remain usable. `/exec` with no arguments SHALL list available commands. An unknown command SHALL display an error.
   - Given `/exec import ./src`, When the pipeline completes, Then an import report is produced and progress appeared as system messages.
