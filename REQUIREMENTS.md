@@ -215,9 +215,9 @@
   - Given a session uses 85% of the context window, When rendered, Then the context % is red.
   - Given a session uses 10% of the context window, When rendered, Then the context % is green.
 
-- **REQ-TUI-20:** THE SYSTEM SHALL display a footer with: active mode, product name, active model, context utilization percentage, governance shield with token count, and git branch.
-  - Given chat mode, model `claude`, 45% context, branch `main`, When the footer renders, Then it shows `[chat] voidrift · claude · 45% · 🛡 4.2k · main`.
-  - Given plan mode, When the footer renders, Then it shows `[plan] voidrift · claude · 45% · 🛡 4.2k · main`.
+- **REQ-TUI-20:** THE SYSTEM SHALL display a footer with two sections. The left section SHALL show: active mode, product name, active model, context utilization percentage, and governance partition token count. The right section SHALL show: workspace directory and git branch.
+  - Given chat mode, model `claude`, 45% context, 4.2k governance tokens, workspace `~/Projects/voidrift`, branch `main`, When the footer renders, Then the left shows `[chat] voidrift · claude · ◎ 45% · 🛡 4.2k` and the right shows `~/Projects/voidrift · (main)`.
+  - Given plan mode, When the footer renders, Then the left shows `[plan]` as the mode indicator.
 
 - **REQ-TUI-21:** THE SYSTEM SHALL support input history. UP/DOWN arrow keys SHALL cycle through previous inputs within the session.
   - Given 3 previous inputs, When up arrow is pressed 2 times, Then the second-to-last input is shown.

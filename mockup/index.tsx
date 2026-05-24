@@ -174,18 +174,25 @@ function ThinkingIndicator({ label }: { label: string }) {
 function Footer({ mode, model, contextPct, branch }: { mode: string; model: string; contextPct: number; branch: string }) {
   const ctxColor = contextPct < 50 ? "green" : contextPct < 80 ? "yellow" : "red";
   return (
-    <Box borderStyle="single" borderColor="gray" paddingX={1} justifyContent="space-between">
-      <Text>
-        <Text color="#6a7ec8">[{mode}]</Text>
-        <Text> voidrift</Text>
-        <Text dimColor> · </Text>
-        <Text>{model}</Text>
-      </Text>
-      <Text>
-        <Text color={ctxColor}>◎ {contextPct}%</Text>
-        <Text dimColor> · </Text>
-        <Text color="magenta">{branch}</Text>
-      </Text>
+    <Box flexDirection="column">
+      <Text dimColor>{'─'.repeat(process.stdout.columns || 80)}</Text>
+      <Box justifyContent="space-between" paddingX={1}>
+        <Text>
+          <Text color="#6a7ec8">[{mode}]</Text>
+          <Text> voidrift</Text>
+          <Text dimColor> · </Text>
+          <Text>{model}</Text>
+          <Text dimColor> · </Text>
+          <Text color={ctxColor}>◎ {contextPct}%</Text>
+          <Text dimColor> · </Text>
+          <Text>🛡  4.2k</Text>
+        </Text>
+        <Text>
+          <Text color="#61afef">~/voidrift</Text>
+          <Text dimColor> · </Text>
+          <Text color="#00d4ff">{branch}</Text>
+        </Text>
+      </Box>
     </Box>
   );
 }
@@ -390,6 +397,7 @@ function App() {
       {/* Footer + Input */}
       <Box flexDirection="column" marginTop={1}>
         <Footer mode="chat" model="qwen2.5-coder-32b" contextPct={contextPct} branch="gemini-core" />
+        <Text> </Text>
         <Box>
           <Text color="#6a7ec8" bold>❯ </Text>
           {busy
