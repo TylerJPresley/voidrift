@@ -8,6 +8,8 @@ import { saveSession, loadSession, clearSession } from "./session/persistence.js
 import { ToolRegistry, type ConfirmResult } from "./tools/registry.js";
 import { builtinTools } from "./tools/builtins.js";
 import { MarkdownText } from "./components/markdown.js";
+import { hasUnclosedFormatting } from "./components/boundary.js";
+import { useDebounce } from "./hooks/useDebounce.js";
 
 // ─── Bootstrap ───────────────────────────────────────────────────────────────
 
@@ -93,15 +95,14 @@ function ToolCallDisplay({ name, args, result, denied }: { name: string; args: s
 }
 
 function StreamingView({ model, text, elapsed, tokens }: { model: string; text: string; elapsed: number; tokens: number }) {
+  const safe = !hasUnclosedFormatting(text);
   return (
     <Box flexDirection="column" marginTop={1}>
       <Text dimColor italic>  {model}</Text>
-      {text.split("\n").map((line, i) => (
-        <Box key={i}>
-          <Text color="#6a7ec8">┃ </Text>
-          <Text>{line}</Text>
-        </Box>
-      ))}
+      <Box>
+        <Text color="#6a7ec8">┃ </Text>
+        {safe ? <MarkdownText text={text} /> : <Text>{text}</Text>}
+      </Box>
       <Box><Text color="#6a7ec8">┃ </Text><Text color="#6a7ec8">▊</Text></Box>
       <Text dimColor>  ⠹ {elapsed}s · {tokens} tokens</Text>
     </Box>
@@ -196,6 +197,7 @@ function App() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [contextPct, setContextPct] = useState(0);
+  const debouncedCtx = useDebounce(contextPct, 300);
   const [ctrlCHint, setCtrlCHint] = useState(false);
   const branch = getBranch();
   const cwd = getShortCwd();
@@ -322,7 +324,7 @@ function App() {
       {ctrlCHint && <Text dimColor italic>  Type /exit to exit.</Text>}
 
       <Box flexDirection="column" marginTop={1}>
-        <Footer mode="chat" model={modelName} contextPct={contextPct} branch={branch} />
+        <Footer mode="chat" model={modelName} contextPct={debouncedCtx} branch={branch} />
         <Text> </Text>
         <Box>
           <Text color="#6a7ec8" bold>❯ </Text>
