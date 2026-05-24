@@ -3,15 +3,21 @@ export interface ToolParameter {
   description: string;
 }
 
+export type ConfirmPolicy = "auto" | "confirm";
+
 export interface ToolDefinition {
   name: string;
   description: string;
   parameters: Record<string, ToolParameter>;
+  confirmPolicy: ConfirmPolicy;
   execute: (args: Record<string, unknown>) => Promise<string>;
 }
 
+export type ConfirmResult = "allow" | "always" | "deny";
+
 export class ToolRegistry {
   private tools = new Map<string, ToolDefinition>();
+  private alwaysApproved = new Set<string>();
 
   register(tool: ToolDefinition) {
     this.tools.set(tool.name, tool);
@@ -19,6 +25,16 @@ export class ToolRegistry {
 
   get(name: string): ToolDefinition | undefined {
     return this.tools.get(name);
+  }
+
+  needsConfirmation(name: string): boolean {
+    if (this.alwaysApproved.has(name)) return false;
+    const tool = this.tools.get(name);
+    return tool?.confirmPolicy === "confirm";
+  }
+
+  approveAlways(name: string) {
+    this.alwaysApproved.add(name);
   }
 
   async execute(name: string, args: Record<string, unknown>): Promise<string> {

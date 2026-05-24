@@ -1,10 +1,10 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useRef } from "react";
 import { render, Box, Text, Static, useInput, useApp } from "ink";
 import TextInput from "ink-text-input";
 import { loadConfig } from "./config/loader.js";
 import { createAdapter } from "./adapters/factory.js";
-import { SessionManager } from "./session/manager.js";
-import { ToolRegistry } from "./tools/registry.js";
+import { SessionManager, type ConfirmFn } from "./session/manager.js";
+import { ToolRegistry, type ConfirmResult } from "./tools/registry.js";
 import { builtinTools } from "./tools/builtins.js";
 
 // ─── Bootstrap ───────────────────────────────────────────────────────────────
@@ -13,13 +13,12 @@ const { model, modelName } = loadConfig();
 const adapter = createAdapter(model);
 const registry = new ToolRegistry();
 builtinTools.forEach(t => registry.register(t));
-const session = new SessionManager(adapter, registry);
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 interface UserMsg { id: string; type: "user"; text: string }
 interface AssistantMsg { id: string; type: "assistant"; model: string; text: string; stats?: string }
-interface ToolMsg { id: string; type: "tool"; name: string; args: string; result: string }
+interface ToolMsg { id: string; type: "tool"; name: string; args: string; result: string; denied?: boolean }
 interface SystemMsg { id: string; type: "system"; text: string }
 
 type HistoryItem = UserMsg | AssistantMsg | ToolMsg | SystemMsg;
@@ -78,11 +77,13 @@ function AssistantMessage({ model, text, stats }: { model: string; text: string;
   );
 }
 
-function ToolCallDisplay({ name, args, result }: { name: string; args: string; result: string }) {
+function ToolCallDisplay({ name, args, result, denied }: { name: string; args: string; result: string; denied?: boolean }) {
+  const icon = denied ? "✗" : "✓";
+  const color = denied ? "red" : "green";
   const truncResult = result.length > 200 ? result.slice(0, 200) + "..." : result;
   return (
     <Box flexDirection="column" marginLeft={2}>
-      <Text><Text color="green">✓ </Text><Text color="#61afef" bold>{name}</Text><Text dimColor> ({args})</Text></Text>
+      <Text><Text color={color}>{icon} </Text><Text color="#61afef" bold>{name}</Text><Text dimColor> ({args})</Text></Text>
       <Box marginLeft={2}><Text dimColor>{truncResult}</Text></Box>
     </Box>
   );
@@ -104,10 +105,31 @@ function StreamingView({ model, text, elapsed, tokens }: { model: string; text: 
   );
 }
 
-function PendingTool({ name, args }: { name: string; args: string }) {
+function ConfirmationPrompt({ name, args, onRespond }: { name: string; args: string; onRespond: (r: ConfirmResult) => void }) {
+  const [selected, setSelected] = useState(0);
+  const options: { label: string; value: ConfirmResult }[] = [
+    { label: "Allow once", value: "allow" },
+    { label: "Allow always", value: "always" },
+    { label: "Deny", value: "deny" },
+  ];
+
+  useInput((_, key) => {
+    if (key.leftArrow) setSelected(s => Math.max(0, s - 1));
+    if (key.rightArrow) setSelected(s => Math.min(options.length - 1, s + 1));
+    if (key.return) onRespond(options[selected].value);
+  });
+
   return (
-    <Box marginLeft={2}>
-      <Text color="yellow">⠹ </Text><Text color="#61afef" bold>{name}</Text><Text dimColor> ({args})</Text>
+    <Box flexDirection="column" marginLeft={2} marginTop={1}>
+      <Text><Text color="yellow">⚠ </Text><Text bold>{name}</Text><Text dimColor> wants to execute:</Text></Text>
+      <Text dimColor>  {args}</Text>
+      <Box marginTop={1} gap={2}>
+        {options.map((opt, i) => (
+          <Text key={i} color={i === selected ? "#4ec9b0" : undefined} bold={i === selected}>
+            {i === selected ? `[${opt.label}]` : ` ${opt.label} `}
+          </Text>
+        ))}
+      </Box>
     </Box>
   );
 }
@@ -158,6 +180,7 @@ function App() {
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [streaming, setStreaming] = useState<{ text: string; elapsed: number; tokens: number } | null>(null);
   const [pendingTool, setPendingTool] = useState<{ name: string; args: string } | null>(null);
+  const [confirming, setConfirming] = useState<{ name: string; args: string; resolve: (r: ConfirmResult) => void } | null>(null);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [contextPct, setContextPct] = useState(0);
@@ -167,7 +190,17 @@ function App() {
   let nextId = history.length;
   const id = () => String(nextId++);
 
+  // Confirmation callback for session manager
+  const confirmFn: ConfirmFn = (toolName, args) => {
+    return new Promise<ConfirmResult>((resolve) => {
+      setConfirming({ name: toolName, args: JSON.stringify(args, null, 2), resolve });
+    });
+  };
+
+  const sessionRef = useRef(new SessionManager(adapter, registry, confirmFn));
+
   useInput((ch, key) => {
+    if (confirming) return; // Let ConfirmationPrompt handle input
     if (key.escape || (ch === "c" && key.ctrl)) {
       if (busy) {
         setBusy(false);
@@ -180,6 +213,13 @@ function App() {
       setTimeout(() => setCtrlCHint(false), 3000);
     }
   });
+
+  const handleConfirm = useCallback((result: ConfirmResult) => {
+    if (confirming) {
+      confirming.resolve(result);
+      setConfirming(null);
+    }
+  }, [confirming]);
 
   const handleSubmit = useCallback(async (text: string) => {
     if (!text.trim() || busy) return;
@@ -197,7 +237,7 @@ function App() {
     let tokenCount = 0;
 
     try {
-      for await (const event of session.send(text.trim())) {
+      for await (const event of sessionRef.current.send(text.trim())) {
         switch (event.type) {
           case "content":
             acc += event.content;
@@ -210,8 +250,14 @@ function App() {
             break;
           case "tool_result":
             setPendingTool(null);
-            setHistory(h => [...h, { id: id(), type: "tool", name: event.toolResult!.name, args: event.toolCall?.args || "", result: event.toolResult!.result }]);
-            // Reset streaming for model's next response
+            setHistory(h => [...h, { id: id(), type: "tool", name: event.toolResult!.name, args: event.toolResult!.id, result: event.toolResult!.result }]);
+            acc = "";
+            tokenCount = 0;
+            setStreaming({ text: "", elapsed: +((Date.now() - startTime) / 1000).toFixed(1), tokens: 0 });
+            break;
+          case "tool_denied":
+            setPendingTool(null);
+            setHistory(h => [...h, { id: id(), type: "tool", name: event.toolCall!.name, args: event.toolCall!.args, result: "Denied by user", denied: true }]);
             acc = "";
             tokenCount = 0;
             setStreaming({ text: "", elapsed: +((Date.now() - startTime) / 1000).toFixed(1), tokens: 0 });
@@ -243,14 +289,17 @@ function App() {
           switch (item.type) {
             case "user": return <UserMessage key={item.id} text={item.text} />;
             case "assistant": return <AssistantMessage key={item.id} model={item.model} text={item.text} stats={item.stats} />;
-            case "tool": return <ToolCallDisplay key={item.id} name={item.name} args={item.args} result={item.result} />;
+            case "tool": return <ToolCallDisplay key={item.id} name={item.name} args={item.args} result={item.result} denied={item.denied} />;
             case "system": return <Text key={item.id} dimColor italic>  {item.text}</Text>;
             default: return null;
           }
         }}
       </Static>
 
-      {pendingTool && <PendingTool name={pendingTool.name} args={pendingTool.args} />}
+      {pendingTool && !confirming && (
+        <Box marginLeft={2}><Text color="yellow">⠹ </Text><Text color="#61afef" bold>{pendingTool.name}</Text><Text dimColor> ({pendingTool.args})</Text></Box>
+      )}
+      {confirming && <ConfirmationPrompt name={confirming.name} args={confirming.args} onRespond={handleConfirm} />}
       {streaming && streaming.text && <StreamingView model={modelName} text={streaming.text} elapsed={streaming.elapsed} tokens={streaming.tokens} />}
       {ctrlCHint && <Text dimColor italic>  Type /exit to exit.</Text>}
 
@@ -259,9 +308,11 @@ function App() {
         <Text> </Text>
         <Box>
           <Text color="#6a7ec8" bold>❯ </Text>
-          {busy
+          {busy && !confirming
             ? <Text dimColor italic>streaming...</Text>
-            : <TextInput value={input} onChange={setInput} onSubmit={handleSubmit} placeholder="ask a question or describe a task" />
+            : confirming
+              ? <Text dimColor italic>← → to select, enter to confirm</Text>
+              : <TextInput value={input} onChange={setInput} onSubmit={handleSubmit} placeholder="ask a question or describe a task" />
           }
         </Box>
       </Box>

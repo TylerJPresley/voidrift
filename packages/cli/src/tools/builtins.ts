@@ -8,6 +8,7 @@ export const bashTool: ToolDefinition = {
   name: "bash",
   description: "Execute a shell command. Returns stdout, stderr, and exit code.",
   parameters: { command: { type: "string", description: "The shell command to execute" } },
+  confirmPolicy: "confirm",
   async execute(args) {
     const cmd = args.command as string;
     try {
@@ -23,6 +24,7 @@ export const readTool: ToolDefinition = {
   name: "read",
   description: "Read a file at the given path.",
   parameters: { path: { type: "string", description: "Path to the file to read" } },
+  confirmPolicy: "auto",
   async execute(args) {
     const path = args.path as string;
     if (!existsSync(path)) return `Error: file not found: ${path}`;
@@ -39,6 +41,7 @@ export const writeTool: ToolDefinition = {
     path: { type: "string", description: "Path to the file to write" },
     content: { type: "string", description: "The content to write" },
   },
+  confirmPolicy: "confirm",
   async execute(args) {
     const path = args.path as string;
     const content = args.content as string;
@@ -56,6 +59,7 @@ export const editTool: ToolDefinition = {
     old_text: { type: "string", description: "Exact text to find and replace" },
     new_text: { type: "string", description: "Replacement text" },
   },
+  confirmPolicy: "confirm",
   async execute(args) {
     const path = args.path as string;
     const oldText = args.old_text as string;
@@ -72,6 +76,7 @@ export const globTool: ToolDefinition = {
   name: "glob",
   description: "Find files matching a glob pattern.",
   parameters: { pattern: { type: "string", description: "The glob pattern to match" } },
+  confirmPolicy: "auto",
   async execute(args) {
     const pattern = args.pattern as string;
     try {
