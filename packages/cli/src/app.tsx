@@ -1,23 +1,28 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useCallback } from "react";
 import { render, Box, Text, Static, useInput, useApp } from "ink";
 import TextInput from "ink-text-input";
 import { loadConfig } from "./config/loader.js";
 import { createAdapter } from "./adapters/factory.js";
 import { SessionManager } from "./session/manager.js";
+import { ToolRegistry } from "./tools/registry.js";
+import { builtinTools } from "./tools/builtins.js";
 
 // ─── Bootstrap ───────────────────────────────────────────────────────────────
 
 const { model, modelName } = loadConfig();
 const adapter = createAdapter(model);
-const session = new SessionManager(adapter);
+const registry = new ToolRegistry();
+builtinTools.forEach(t => registry.register(t));
+const session = new SessionManager(adapter, registry);
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 interface UserMsg { id: string; type: "user"; text: string }
 interface AssistantMsg { id: string; type: "assistant"; model: string; text: string; stats?: string }
+interface ToolMsg { id: string; type: "tool"; name: string; args: string; result: string }
 interface SystemMsg { id: string; type: "system"; text: string }
 
-type HistoryItem = UserMsg | AssistantMsg | SystemMsg;
+type HistoryItem = UserMsg | AssistantMsg | ToolMsg | SystemMsg;
 
 // ─── Components ──────────────────────────────────────────────────────────────
 
@@ -73,6 +78,16 @@ function AssistantMessage({ model, text, stats }: { model: string; text: string;
   );
 }
 
+function ToolCallDisplay({ name, args, result }: { name: string; args: string; result: string }) {
+  const truncResult = result.length > 200 ? result.slice(0, 200) + "..." : result;
+  return (
+    <Box flexDirection="column" marginLeft={2}>
+      <Text><Text color="green">✓ </Text><Text color="#61afef" bold>{name}</Text><Text dimColor> ({args})</Text></Text>
+      <Box marginLeft={2}><Text dimColor>{truncResult}</Text></Box>
+    </Box>
+  );
+}
+
 function StreamingView({ model, text, elapsed, tokens }: { model: string; text: string; elapsed: number; tokens: number }) {
   return (
     <Box flexDirection="column" marginTop={1}>
@@ -83,11 +98,16 @@ function StreamingView({ model, text, elapsed, tokens }: { model: string; text: 
           <Text>{line}</Text>
         </Box>
       ))}
-      <Box>
-        <Text color="#6a7ec8">┃ </Text>
-        <Text color="#6a7ec8">▊</Text>
-      </Box>
+      <Box><Text color="#6a7ec8">┃ </Text><Text color="#6a7ec8">▊</Text></Box>
       <Text dimColor>  ⠹ {elapsed}s · {tokens} tokens</Text>
+    </Box>
+  );
+}
+
+function PendingTool({ name, args }: { name: string; args: string }) {
+  return (
+    <Box marginLeft={2}>
+      <Text color="yellow">⠹ </Text><Text color="#61afef" bold>{name}</Text><Text dimColor> ({args})</Text>
     </Box>
   );
 }
@@ -137,6 +157,7 @@ function App() {
   const { exit } = useApp();
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [streaming, setStreaming] = useState<{ text: string; elapsed: number; tokens: number } | null>(null);
+  const [pendingTool, setPendingTool] = useState<{ name: string; args: string } | null>(null);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [contextPct, setContextPct] = useState(0);
@@ -151,6 +172,7 @@ function App() {
       if (busy) {
         setBusy(false);
         setStreaming(null);
+        setPendingTool(null);
         setHistory(h => [...h, { id: id(), type: "system", text: "Generation cancelled." }]);
         return;
       }
@@ -164,11 +186,7 @@ function App() {
     setInput("");
 
     if (text.trim() === "/exit") { exit(); return; }
-    if (text.trim() === "/clear") {
-      setHistory([]);
-      setContextPct(0);
-      return;
-    }
+    if (text.trim() === "/clear") { setHistory([]); setContextPct(0); return; }
 
     setHistory(h => [...h, { id: id(), type: "user", text: text.trim() }]);
     setBusy(true);
@@ -179,26 +197,40 @@ function App() {
     let tokenCount = 0;
 
     try {
-      for await (const chunk of session.send(text.trim())) {
-        if (chunk.content) {
-          acc += chunk.content;
-          tokenCount++;
-          const elapsed = (Date.now() - startTime) / 1000;
-          setStreaming({ text: acc, elapsed: +elapsed.toFixed(1), tokens: tokenCount });
+      for await (const event of session.send(text.trim())) {
+        switch (event.type) {
+          case "content":
+            acc += event.content;
+            tokenCount++;
+            setStreaming({ text: acc, elapsed: +((Date.now() - startTime) / 1000).toFixed(1), tokens: tokenCount });
+            break;
+          case "tool_call":
+            setStreaming(null);
+            setPendingTool({ name: event.toolCall!.name, args: event.toolCall!.args });
+            break;
+          case "tool_result":
+            setPendingTool(null);
+            setHistory(h => [...h, { id: id(), type: "tool", name: event.toolResult!.name, args: event.toolCall?.args || "", result: event.toolResult!.result }]);
+            // Reset streaming for model's next response
+            acc = "";
+            tokenCount = 0;
+            setStreaming({ text: "", elapsed: +((Date.now() - startTime) / 1000).toFixed(1), tokens: 0 });
+            break;
+          case "done":
+            if (acc) {
+              const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
+              const tokPerSec = tokenCount > 0 ? (tokenCount / +totalTime).toFixed(1) : "0";
+              setHistory(h => [...h, { id: id(), type: "assistant", model: modelName, text: acc, stats: `↓ ${tokenCount} · ${tokPerSec} tok/s · ${totalTime}s` }]);
+            }
+            break;
         }
       }
-
-      const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
-      const tokPerSec = tokenCount > 0 ? (tokenCount / +totalTime).toFixed(1) : "0";
-      setHistory(h => [...h, {
-        id: id(), type: "assistant", model: modelName, text: acc,
-        stats: `↑ — · ↓ ${tokenCount} · ${tokPerSec} tok/s · ${totalTime}s`
-      }]);
     } catch (err: any) {
       setHistory(h => [...h, { id: id(), type: "system", text: `Error: ${err.message}` }]);
     }
 
     setStreaming(null);
+    setPendingTool(null);
     setBusy(false);
     setContextPct(p => Math.min(95, p + 2));
   }, [busy]);
@@ -211,14 +243,15 @@ function App() {
           switch (item.type) {
             case "user": return <UserMessage key={item.id} text={item.text} />;
             case "assistant": return <AssistantMessage key={item.id} model={item.model} text={item.text} stats={item.stats} />;
+            case "tool": return <ToolCallDisplay key={item.id} name={item.name} args={item.args} result={item.result} />;
             case "system": return <Text key={item.id} dimColor italic>  {item.text}</Text>;
             default: return null;
           }
         }}
       </Static>
 
-      {streaming && <StreamingView model={modelName} text={streaming.text} elapsed={streaming.elapsed} tokens={streaming.tokens} />}
-
+      {pendingTool && <PendingTool name={pendingTool.name} args={pendingTool.args} />}
+      {streaming && streaming.text && <StreamingView model={modelName} text={streaming.text} elapsed={streaming.elapsed} tokens={streaming.tokens} />}
       {ctrlCHint && <Text dimColor italic>  Type /exit to exit.</Text>}
 
       <Box flexDirection="column" marginTop={1}>

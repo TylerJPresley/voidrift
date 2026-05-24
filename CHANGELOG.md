@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-05-23 — Tool System
+
+### Implemented
+- **packages/cli/src/tools/registry.ts** — Tool registration, execution, OpenAI function format conversion
+- **packages/cli/src/tools/builtins.ts** — 5 built-in tools: bash, read, write, edit, glob
+- **packages/cli/src/adapters/openai.ts** — Now sends tool definitions, parses tool_call deltas from streaming (handles split arguments across chunks)
+- **packages/cli/src/session/manager.ts** — Full tool loop: model → tool_calls → execute → send results → model continues until text-only response
+- **packages/cli/src/app.tsx** — Tool call display (✓ name (args) + truncated result), pending tool spinner, wired to real tool execution
+
+### Tool Loop Flow
+1. User sends message
+2. Model streams response (may include tool_calls)
+3. If tool_calls: execute each tool, show results, send back to model
+4. Model continues (may call more tools or respond with text)
+5. Loop ends when model responds with text only
+
 ## 2026-05-23 — Foundation: Minimum Viable Chat Loop
 
 ### Architecture Decision
