@@ -5,12 +5,23 @@ import type { ToolRegistry, ConfirmResult } from "../tools/registry.js";
 export interface SessionEvent {
   type: "content" | "tool_call" | "tool_result" | "tool_denied" | "confirm" | "done" | "error";
   content?: string;
-  toolCall?: { id: string; name: string; args: string };
+  toolCall?: { id: string; name: string; args: string; parsedArgs: Record<string, unknown>; keyArg: string };
   toolResult?: { id: string; name: string; result: string };
   error?: string;
 }
 
 export type ConfirmFn = (toolName: string, args: Record<string, unknown>) => Promise<ConfirmResult>;
+
+function extractKeyArg(toolName: string, args: Record<string, unknown>): string {
+  switch (toolName) {
+    case "bash": return String(args.command || "");
+    case "read": return String(args.path || "");
+    case "write": return String(args.path || "");
+    case "edit": return String(args.path || "");
+    case "glob": return String(args.pattern || "");
+    default: return Object.values(args)[0] ? String(Object.values(args)[0]) : "";
+  }
+}
 
 export class SessionManager {
   private history: ChatMessage[] = [];
@@ -50,14 +61,15 @@ export class SessionManager {
           let args: Record<string, unknown> = {};
           try { args = JSON.parse(tc.function.arguments); } catch {}
 
-          yield { type: "tool_call", toolCall: { id: tc.id, name: tc.function.name, args: tc.function.arguments } };
+          const keyArg = extractKeyArg(tc.function.name, args);
+          yield { type: "tool_call", toolCall: { id: tc.id, name: tc.function.name, args: tc.function.arguments, parsedArgs: args, keyArg } };
 
           // Check confirmation
           if (this.registry.needsConfirmation(tc.function.name)) {
             const decision = await this.confirmFn(tc.function.name, args);
             if (decision === "deny") {
               const denied = `Tool "${tc.function.name}" was denied by the user.`;
-              yield { type: "tool_denied", toolCall: { id: tc.id, name: tc.function.name, args: tc.function.arguments } };
+              yield { type: "tool_denied", toolCall: { id: tc.id, name: tc.function.name, args: tc.function.arguments, parsedArgs: args, keyArg } };
               this.history.push({ role: "tool", content: denied, tool_call_id: tc.id });
               continue;
             }
