@@ -12,6 +12,7 @@ import { hasUnclosedFormatting } from "./components/boundary.js";
 import { useDebounce } from "./hooks/useDebounce.js";
 import { ToolGroupMessage } from "./components/ToolGroupMessage.js";
 import { ConfirmationPrompt } from "./components/ConfirmationPrompt.js";
+import { LoadingIndicator } from "./components/LoadingIndicator.js";
 import type { ToolCallData, ToolStatus } from "./components/ToolMessage.js";
 
 // ─── Bootstrap ───────────────────────────────────────────────────────────────
@@ -65,37 +66,37 @@ function Welcome({ modelName, protocol, cwd, branch }: { modelName: string; prot
 
 function UserMessage({ text }: { text: string }) {
   return (
-    <Box marginTop={1}>
-      <Text color="#6a7ec8">┃ </Text>
+    <Box marginTop={1} marginLeft={2}>
+      <Text color="#6a7ec8" bold>{"> "}</Text>
       <Text bold>{text}</Text>
     </Box>
   );
 }
 
-function AssistantMessage({ model, text, stats }: { model: string; text: string; stats?: string }) {
+function AssistantMessage({ text, stats }: { model: string; text: string; stats?: string }) {
   return (
-    <Box flexDirection="column" marginTop={1}>
-      <Text dimColor italic>  {model}</Text>
+    <Box flexDirection="column" marginTop={1} marginLeft={2}>
       <Box>
-        <Text color="#6a7ec8">┃ </Text>
-        <MarkdownText text={text} />
+        <Text color="#4ec9b0">{"✦ "}</Text>
+        <Box flexDirection="column">
+          <MarkdownText text={text} />
+        </Box>
       </Box>
-      {stats && <Text dimColor>  · {stats}</Text>}
+      {stats && <Text dimColor>  {stats}</Text>}
     </Box>
   );
 }
 
-function StreamingView({ model, text, elapsed, tokens }: { model: string; text: string; elapsed: number; tokens: number }) {
+function StreamingView({ text, elapsed, tokens }: { text: string; elapsed: number; tokens: number }) {
   const safe = !hasUnclosedFormatting(text);
   return (
-    <Box flexDirection="column" marginTop={1}>
-      <Text dimColor italic>  {model}</Text>
+    <Box flexDirection="column" marginTop={1} marginLeft={2}>
       <Box>
-        <Text color="#6a7ec8">┃ </Text>
-        {safe ? <MarkdownText text={text} /> : <Text>{text}</Text>}
+        <Text color="#4ec9b0">{"✦ "}</Text>
+        <Box flexDirection="column">
+          {safe ? <MarkdownText text={text} /> : <Text>{text}</Text>}
+        </Box>
       </Box>
-      <Box><Text color="#6a7ec8">┃ </Text><Text color="#6a7ec8">▊</Text></Box>
-      <Text dimColor>  ⠹ {elapsed}s · {tokens} tokens</Text>
     </Box>
   );
 }
@@ -161,6 +162,8 @@ function App() {
     return [{ id: "resume", type: "system", text: `Resuming session (${msgCount} messages, last active ${lastActive})` }];
   });
   const [streaming, setStreaming] = useState<{ text: string; elapsed: number; tokens: number } | null>(null);
+  const [loading, setLoading] = useState<number | null>(null); // startTime when loading
+  const [tokenCount, setTokenCount] = useState(0);
   const [toolGroup, setToolGroup] = useState<ToolCallData[]>([]);
   const [confirming, setConfirming] = useState<{ name: string; keyArg: string; args: Record<string, unknown>; resolve: (r: ConfirmResult) => void } | null>(null);
   const [input, setInput] = useState("");
@@ -194,6 +197,7 @@ function App() {
       if (busy) {
         setBusy(false);
         setStreaming(null);
+        setLoading(null);
         setToolGroup([]);
         setHistory(h => [...h, { id: id(), type: "system", text: "Generation cancelled." }]);
         return;
@@ -219,23 +223,28 @@ function App() {
 
     setHistory(h => [...h, { id: id(), type: "user", text: text.trim() }]);
     setBusy(true);
-    setStreaming({ text: "", elapsed: 0, tokens: 0 });
+    setStreaming(null);
+    setLoading(Date.now());
     setToolGroup([]);
 
     const startTime = Date.now();
     let acc = "";
-    let tokenCount = 0;
     let currentTools: ToolCallData[] = [];
+    let localTokens = 0;
+    setTokenCount(0);
 
     try {
       for await (const event of sessionInstance.current.send(text.trim())) {
         switch (event.type) {
           case "content":
+            if (loading) setLoading(null);
             acc += event.content;
-            tokenCount++;
-            setStreaming({ text: acc, elapsed: +((Date.now() - startTime) / 1000).toFixed(1), tokens: tokenCount });
+            localTokens++;
+            setTokenCount(localTokens);
+            setStreaming({ text: acc, elapsed: +((Date.now() - startTime) / 1000).toFixed(1), tokens: localTokens });
             break;
           case "tool_call": {
+            setLoading(null);
             setStreaming(null);
             const tc: ToolCallData = {
               id: event.toolCall!.id,
@@ -256,7 +265,8 @@ function App() {
             );
             setToolGroup([...currentTools]);
             acc = "";
-            tokenCount = 0;
+            localTokens = 0;
+            setTokenCount(0);
             break;
           }
           case "tool_denied": {
@@ -267,7 +277,8 @@ function App() {
             );
             setToolGroup([...currentTools]);
             acc = "";
-            tokenCount = 0;
+            localTokens = 0;
+            setTokenCount(0);
             break;
           }
           case "done":
@@ -279,8 +290,8 @@ function App() {
             }
             if (acc) {
               const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
-              const tokPerSec = tokenCount > 0 ? (tokenCount / +totalTime).toFixed(1) : "0";
-              setHistory(h => [...h, { id: id(), type: "assistant", model: modelName, text: acc, stats: `↓ ${tokenCount} · ${tokPerSec} tok/s · ${totalTime}s` }]);
+              const tokPerSec = localTokens > 0 ? (localTokens / +totalTime).toFixed(1) : "0";
+              setHistory(h => [...h, { id: id(), type: "assistant", model: modelName, text: acc, stats: `↓ ${localTokens} · ${tokPerSec} tok/s · ${totalTime}s` }]);
             }
             break;
         }
@@ -290,6 +301,7 @@ function App() {
     }
 
     setStreaming(null);
+    setLoading(null);
     setToolGroup([]);
     setBusy(false);
     setContextPct(p => Math.min(95, p + 2));
@@ -311,9 +323,10 @@ function App() {
         }}
       </Static>
 
+      {loading && !streaming && <LoadingIndicator startTime={loading} tokens={tokenCount} />}
       {toolGroup.length > 0 && !confirming && <ToolGroupMessage tools={toolGroup} />}
       {confirming && <ConfirmationPrompt toolName={confirming.name} keyArg={confirming.keyArg} args={confirming.args} onRespond={handleConfirm} />}
-      {streaming && streaming.text && <StreamingView model={modelName} text={streaming.text} elapsed={streaming.elapsed} tokens={streaming.tokens} />}
+      {streaming && streaming.text && <StreamingView text={streaming.text} elapsed={streaming.elapsed} tokens={streaming.tokens} />}
       {ctrlCHint && <Text dimColor italic>  Type /exit to exit.</Text>}
 
       <Box flexDirection="column" marginTop={1}>
