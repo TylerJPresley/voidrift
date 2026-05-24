@@ -21,16 +21,29 @@ function resolveEnvVar(value: string): string {
   return process.env[match[1]] || match[2] || "";
 }
 
+/**
+ * Config resolution order:
+ * 1. .voidrift/models.json in cwd (workspace override)
+ * 2. ~/.config/voidrift/models.json (global)
+ */
 export function loadConfig(cwd: string = process.cwd()): { model: ModelConfig; modelName: string } {
-  const configPath = join(cwd, ".voidrift", "models.json");
-  if (!existsSync(configPath)) {
-    throw new Error(`No config found at ${configPath}`);
+  const workspacePath = join(cwd, ".voidrift", "models.json");
+  const globalPath = join(process.env.HOME || "/", ".config", "voidrift", "models.json");
+
+  let configPath: string;
+  if (existsSync(workspacePath)) {
+    configPath = workspacePath;
+  } else if (existsSync(globalPath)) {
+    configPath = globalPath;
+  } else {
+    throw new Error(`No config found. Checked:\n  ${workspacePath}\n  ${globalPath}`);
   }
+
   const raw: ModelsFile = JSON.parse(readFileSync(configPath, "utf-8"));
   const modelName = raw.default_model;
   const model = raw.models[modelName];
   if (!model) {
-    throw new Error(`Model "${modelName}" not found in config`);
+    throw new Error(`Model "${modelName}" not found in ${configPath}`);
   }
   return { model: { ...model, api_key: resolveEnvVar(model.api_key) }, modelName };
 }

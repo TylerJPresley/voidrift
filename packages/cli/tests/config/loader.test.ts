@@ -42,7 +42,11 @@ describe("loadConfig", () => {
   });
 
   it("throws when config file is missing", () => {
+    // Mock homedir to a nonexistent path too
+    const origHome = process.env.HOME;
+    process.env.HOME = "/nonexistent_home";
     expect(() => loadConfig("/nonexistent")).toThrow("No config found");
+    process.env.HOME = origHome;
   });
 
   it("throws when model name is not in config", () => {
