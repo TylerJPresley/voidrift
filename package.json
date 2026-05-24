@@ -7,11 +7,10 @@
     "voidrift": "./cli/bin/voidrift.js"
   },
   "scripts": {
-    "build": "node build.js",
-    "dev": "bun build --target=bun --watch src/index.tsx --outfile=dist/app.js",
+    "start": "tsx packages/cli/src/app.tsx",
     "mockup": "tsx mockup/index.tsx",
     "test": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit -p packages/cli/tsconfig.json"
   },
   "dependencies": {
     "ink": "^5.0.0",
