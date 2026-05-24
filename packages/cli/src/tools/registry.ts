@@ -41,8 +41,14 @@ export class ToolRegistry {
     const tool = this.tools.get(name);
     if (!tool) return `Error: unknown tool "${name}"`;
     try {
-      return await tool.execute(args);
+      const { log } = await import("../debug.js");
+      log("tool", `execute: ${name}`, args);
+      const result = await tool.execute(args);
+      log("tool", `result: ${name}`, { len: result.length });
+      return result;
     } catch (err: any) {
+      const { log } = await import("../debug.js");
+      log("tool", `error: ${name}`, { error: err.message });
       return `Error: ${err.message}`;
     }
   }

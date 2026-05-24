@@ -1,7 +1,7 @@
 import type { ChatMessage, StreamChunk, ToolCallMessage, OpenAITool } from "../adapters/openai.js";
 import type { OpenAIAdapter } from "../adapters/openai.js";
 import type { ToolRegistry, ConfirmResult } from "../tools/registry.js";
-import { debug } from "../debug.js";
+import { log } from "../debug.js";
 
 export interface SessionEvent {
   type: "content" | "tool_call" | "tool_result" | "tool_denied" | "confirm" | "done" | "error";
@@ -40,12 +40,12 @@ export class SessionManager {
 
   async *send(text: string): AsyncGenerator<SessionEvent> {
     this.history.push({ role: "user", content: text });
-    debug("session", "send", { text: text.slice(0, 100) });
+    log("session", "send", { text: text.slice(0, 100) });
 
     while (true) {
       let content = "";
       let toolCalls: ToolCallMessage[] | null = null;
-      debug("session", "calling model", { historyLen: this.history.length });
+      log("session", "calling model", { historyLen: this.history.length });
 
       for await (const chunk of this.adapter.stream(this.history, this.tools)) {
         if (chunk.type === "content" && chunk.content) {
@@ -54,7 +54,7 @@ export class SessionManager {
         }
         if (chunk.type === "tool_calls" && chunk.toolCalls) {
           toolCalls = chunk.toolCalls;
-          debug("session", "tool_calls received", toolCalls.map(t => t.function.name));
+          log("session", "tool_calls received", toolCalls.map(t => t.function.name));
         }
       }
 
@@ -83,7 +83,7 @@ export class SessionManager {
           }
 
           const result = await this.registry.execute(tc.function.name, args);
-          debug("session", "tool_result", { name: tc.function.name, resultLen: result.length });
+          log("session", "tool_result", { name: tc.function.name, resultLen: result.length });
           yield { type: "tool_result", toolResult: { id: tc.id, name: tc.function.name, result } };
           this.history.push({ role: "tool", content: result, tool_call_id: tc.id });
         }

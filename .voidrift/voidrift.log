@@ -1,0 +1,47 @@
+
+════════════════════════════════════════════════════════════
+[2026-05-24T13:15:34.871Z] Session started
+════════════════════════════════════════════════════════════
+[13:15:34.876] [session] send {"text":"hi"}
+[13:15:34.876] [session] calling model {"historyLen":1}
+
+════════════════════════════════════════════════════════════
+[2026-05-24T13:15:34.877Z] Session started
+════════════════════════════════════════════════════════════
+[13:15:34.877] [api] request {"model":"test","messages":1,"tools":0}
+
+════════════════════════════════════════════════════════════
+[2026-05-24T13:15:34.878Z] Session started
+════════════════════════════════════════════════════════════
+[13:15:34.878] [tool] execute: echo {"msg":"hello"}
+[13:15:34.878] [tool] result: echo {"len":11}
+[13:15:34.878] [session] send {"text":"do something"}
+[13:15:34.878] [session] calling model {"historyLen":1}
+[13:15:34.878] [session] tool_calls received ["echo"]
+[13:15:34.878] [tool] execute: fail {}
+[13:15:34.878] [api] request {"model":"test","messages":1,"tools":0}
+[13:15:34.879] [tool] execute: echo {"msg":"hi"}
+[13:15:34.879] [tool] result: echo {"len":8}
+[13:15:34.879] [tool] error: fail {"error":"boom"}
+[13:15:34.879] [session] tool_result {"name":"echo","resultLen":8}
+[13:15:34.879] [session] calling model {"historyLen":3}
+[13:15:34.879] [session] send {"text":"run ls"}
+[13:15:34.879] [session] calling model {"historyLen":1}
+[13:15:34.879] [session] tool_calls received ["bash"]
+[13:15:34.879] [tool] execute: bash {"command":"ls"}
+[13:15:34.879] [tool] result: bash {"len":6}
+[13:15:34.879] [session] tool_result {"name":"bash","resultLen":6}
+[13:15:34.879] [session] calling model {"historyLen":3}
+[13:15:34.879] [api] request {"model":"test","messages":1,"tools":0}
+[13:15:34.879] [session] send {"text":"delete everything"}
+[13:15:34.879] [session] calling model {"historyLen":1}
+[13:15:34.879] [session] tool_calls received ["bash"]
+[13:15:34.879] [session] calling model {"historyLen":3}
+[13:15:34.879] [api] error {"status":500,"text":"oops"}
+[13:15:34.880] [session] send {"text":"run ls"}
+[13:15:34.880] [session] calling model {"historyLen":1}
+[13:15:34.880] [session] tool_calls received ["bash"]
+[13:15:34.880] [tool] execute: bash {"command":"ls"}
+[13:15:34.880] [tool] result: bash {"len":6}
+[13:15:34.880] [session] tool_result {"name":"bash","resultLen":6}
+[13:15:34.880] [session] calling model {"historyLen":3}

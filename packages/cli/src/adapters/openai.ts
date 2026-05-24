@@ -1,4 +1,5 @@
 import type { ModelConfig } from "../config/loader.js";
+import { log } from "../debug.js";
 
 export interface ChatMessage {
   role: "system" | "user" | "assistant" | "tool";
@@ -40,6 +41,8 @@ export class OpenAIAdapter {
     };
     if (tools && tools.length > 0) body.tools = tools;
 
+    log("api", "request", { model: this.config.model_id, messages: messages.length, tools: tools?.length || 0 });
+
     const response = await fetch(`${this.config.base_url}/chat/completions`, {
       method: "POST",
       headers: {
@@ -51,6 +54,7 @@ export class OpenAIAdapter {
 
     if (!response.ok) {
       const text = await response.text().catch(() => "");
+      log("api", "error", { status: response.status, text: text.slice(0, 200) });
       throw new Error(`API error: ${response.status} ${response.statusText}\n${text}`);
     }
 
