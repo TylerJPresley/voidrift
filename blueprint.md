@@ -1,0 +1,381 @@
+# VoidRift: Decoupled Subsystem Architecture
+
+This document defines the architectural blueprint of **VoidRift** at a high-level feature and conceptual block level. 
+
+Rather than building a vertical stack, the system is modeled as a **Composition Root & Event-Driven Subsystem Architecture**. The application container acts as a central coordinator that wires together parallel, decoupled features through a central **Event Bus** and modular **Registries**.
+
+---
+
+## 1. System Feature Index (Subsystem & Tool Summary)
+
+This index provides a compact, high-level map of the entire harness feature set, showing exactly which subsystem owns each baseline capability, safeguard, and context-saving tool:
+
+1. **Subsystem 1 (Application Container)**:
+   - `[CORE]` The Environment Bootstrap Loader (Resolves workspace credentials and config).
+   - `[CORE]` The Workspace File System Watcher (Active background re-indexing of file changes).
+2. **Subsystem 2 (Model Connectivity)**:
+   - `[CORE]` The Unified Model Adapter Factory (Resolves configurations and instantiates standardized LangChain clients).
+   - `[CORE]` The Dynamic Three-Tier Model Router (Classifying and routing tasks between Flash, Utility, and Dense models).
+3. **Subsystem 3 (Capability Subsystem)**:
+   - `[CORE]` The Git Safeguard (Workspace dirty checks and auto-stash/checkpointing).
+   - `[CORE]` The Workspace Code-Map Generator (Repo Map) (AST code layout mapping).
+   - `[CORE]` The Progressive Disclosure Skill Registry (Dynamically hiding advanced tools to prevent prompt bloat).
+4. **Subsystem 4 (Security Subsystem)**:
+   - `[CORE]` The Interactive Permission Gate (TUI loop suspension and confirmation gate).
+   - `[CORE]` The Stateful Mode Cycler (Cycling `chat`, `plan`, and `vibe` via `SHIFT+TAB`).
+5. **Subsystem 5 (Operator Interface)**:
+   - `[CORE]` The Output Truncator & ANSI Stripper (formatting logs and cutting large terminal scrolls).
+   - `[CORE]` The Token Budget Watcher (Real-time context ratio visualization).
+   - `[CORE]` The Input Lock (Freezing terminal typing during streams).
+   - `[CORE]` The Audit Logger & Telemetry Monitor (Local logging of latency and token consumption metrics).
+6. **Subsystem 6 (Agent Session)**:
+   - `[CORE]` The Governance-Work Context Partitioner (Ensuring prompts are isolated from compactions).
+   - `[CORE]` The Prompt Cache Optimizer (Static prompt caching alignment).
+   - `[CORE]` The Conversational History Compactor (Sliding-window compaction).
+   - `[CORE]` The Turn Serializer (Real-time JSON session persistence).
+   - `[CORE]` The Session Exception Guard (API error catches to prevent UI lockups).
+   - `[CORE]` The Two-Layer Memory Registry (Project vs. Global memory index with relevance scoring).
+
+---
+
+## 2. How it Works: The Data Flow (Human-Readable Overview)
+
+When you run VoidRift, a single execution loop coordinates your terminal, the AI model, and your filesystem. Here is exactly what happens in plain developer terms when you type a message:
+
+1. **You type a message** in the React Ink terminal.
+2. **LangChain packages the message** alongside your conversational history and sends it to the AI model.
+3. **The model streams back a reply**. You see it typing in real-time in your terminal.
+4. **The model decides to run a tool** (e.g., editing a file or running a test).
+5. **Our Permission Gate intercepts the tool call** before it executes.
+6. **You see a prompt in the terminal** asking for approval.
+7. **If you approve**, the tool executes on your machine, the harness captures the output, strips out the junk (like ANSI colors), and feeds the clean text back to the model.
+8. **The model continues thinking** and responding until it's finished.
+9. **The harness saves the entire chat log** to a local JSON file so you never lose your history.
+
+---
+
+## 3. System Topology & Event Flow
+
+The application container initializes the parallel modules and wires them together through a central message bus. Subsystems do not import or call each other directly; they communicate by publishing and subscribing to lifecycle events.
+
+```
+                  ┌────────────────────────────────────────┐
+                  │           Application Container        │
+                  │            [Composition Root]          │
+                  └───────────────────┬────────────────────┘
+                                      │
+            ┌───────────────┬─────────┴─────────┬───────────────┐
+            │               │                   │               │
+            ▼               ▼                   ▼               ▼
+     ┌─────────────┐ ┌─────────────┐     ┌─────────────┐ ┌─────────────┐
+     │  Operator   │ │    Model    │     │ Capability  │ │ Security &  │
+     │  Interface  │ │ Connectivity│     │  Registry   │ │ Governance  │
+     │ (TUI/Console)││  (Adapters) │     │   (Tools)   │ │  (Policies) │
+     └──────┬──────┘ └──────┬──────┘     └──────┬──────┘ └──────┬──────┘
+            │               │                   │               │
+            └───────────────┼─────────┬─────────┼───────────────┘
+                            │         │         │
+                            ▼         ▼         ▼
+                  ┌────────────────────────────────────────┐
+                  │             Central Event Bus          │
+                  │   [Token Stream, Confirms, Errors]     │
+                  └───────────────────┬────────────────────┘
+                                      ▼
+                  ┌────────────────────────────────────────┐
+                  │             Agent Session              │
+                  │         [Active State & History]       │
+                  └───────────────────\────────────────────┘
+```
+
+---
+
+## 4. High-Level Subsystem Breakdown & Tool Nesting
+
+To maintain ultimate clarity, every capability, safeguard, and tool in VoidRift is nested directly under the conceptual subsystem that owns it, and explicitly labeled as **`[CORE]`** (native to the base harness).
+
+---
+
+### Subsystem 1: The Application Container (Composition Root)
+*   **The Concept**: The bootstrap shell of the harness. Its only job is to initialize the central Event Bus, instantiate the parallel feature modules, and inject them into the active Agent Session. It acts as the composition point that starts the application without hardcoding dependencies between individual subsystems.
+
+#### Nested Harness-Driven Tools (Harness-Activated)
+*   **`[CORE]` The Environment Bootstrap Loader**
+    *   *Trigger*: Fires automatically once during process startup.
+    *   *Action*: Locates and reads `.voidrift/models.json` or `~/.config/voidrift/models.json`, resolves environment variables nested inside API keys, and registers them.
+    *   *Outcome*: Zero-config startup for the developer.
+*   **`[CORE]` The Workspace File System Watcher**
+    *   *Trigger*: Runs continuously in the background.
+    *   *Action*: Monitors local directories for file additions, modifications, or deletions, automatically triggering the vector indexer to keep semantic memory perfectly fresh.
+    *   *Outcome*: Ensures the model's codebase knowledge remains synchronized with external editor saves or git branch switches in real-time.
+
+---
+
+### Subsystem 2: The Model Connectivity Subsystem (Adapters & Routing)
+*   **The Concept**: A provider-agnostic Model Connectivity Gateway. Rather than writing custom serialization or API wrappers, VoidRift leverages the unified LangChain `BaseChatModel` interface and standard message classes (`SystemMessage`, `HumanMessage`, `AIMessage`, `ToolMessage`). The subsystem is completely decoupled from provider wire formats: it exposes a standard factory that dynamically instantiates, configures, and swaps LLM clients based on active workspace configurations and user instructions.
+*   **Unified BaseChatModel Integration**: Connects dynamically to any compliant provider adapter:
+    *   **OpenAI-Compatible (`ChatOpenAI`)**: Integrates with local vLLM instances (Ollama, vLLM), as well as third-party APIs (Groq, DeepSeek, Fireworks).
+    *   **Anthropic Native (`ChatAnthropic`)**: Connects directly to the Messages API for high-reasoning, long-context tasks.
+    *   **Google Gemini (`ChatGoogleGenAI` / `ChatVertexAI`)**: Accesses Gemini models directly for high-throughput, static system instructions.
+*   **Harness-Driven Network Resilience**: Natively leverages LangChain's retry mechanisms (exponential backoff on rate-limit errors) and configurable timeouts, safeguarding TUI rendering loops from dropped connection hangs.
+
+#### Nested Harness-Driven Tools (Harness-Activated)
+*   **`[CORE] The Unified Model Adapter Factory`**
+    *   *Trigger*: Fires automatically during workspace bootstrap or dynamic `/model` selection.
+    *   *Action*: Resolves configuration schemas from the local `.voidrift/models.json` or global `~/.config/voidrift/config.json`, matches the active `provider`, instantiates the corresponding LangChain adapter, and registers it as the active executor in the Agent Session.
+    *   *Design Separation of Concerns*: To prevent duplicate metadata setups across workspaces, **all master model configurations (protocols, providers, context limits) and the default tier selections (`flash`, `utility`, `dense`) are declared globally** in the user's global config `~/.config/voidrift/config.json`. Project-level token costs are excluded from tracking, as API providers do not supply cost structures dynamically. The local config at `<proj_root>/.voidrift/models.json` is **strictly optional** and used only when a specific workspace needs to override the default global tier mappings or configuration parameters.
+    *   *Specification: Global `~/.config/voidrift/config.json` (Default Setup)*:
+        ```json
+        {
+          "tiers": {
+            "flash": "qwen-local",
+            "utility": "claude-sonnet",
+            "dense": "claude-opus"
+          },
+          "models": {
+            "qwen-local": {
+              "provider": "openai",
+              "model": "qwen2.5-coder-7b-instruct",
+              "baseUrl": "http://localhost:11434/v1",
+              "apiKeyEnv": "OLLAMA_API_KEY",
+              "contextLimit": 32768,
+              "temperature": 0.2
+            },
+            "claude-sonnet": {
+              "provider": "anthropic",
+              "model": "claude-3-5-sonnet-latest",
+              "apiKeyEnv": "ANTHROPIC_API_KEY",
+              "contextLimit": 200000,
+              "temperature": 0.0
+            },
+            "claude-opus": {
+              "provider": "anthropic",
+              "model": "claude-3-opus-latest",
+              "apiKeyEnv": "ANTHROPIC_API_KEY",
+              "contextLimit": 200000,
+              "temperature": 0.2
+            }
+          }
+        }
+        ```
+    *   *Specification: Local `<proj_root>/.voidrift/models.json` (Optional Workspace Overrides)*:
+        ```json
+        {
+          "tiers": {
+            "flash": "local-llama"
+          },
+          "models": {
+            "local-llama": {
+              "provider": "openai",
+              "model": "llama-3-8b-instruct",
+              "baseUrl": "http://localhost:8080/v1",
+              "apiKeyEnv": "LOCAL_API_KEY",
+              "contextLimit": 8192,
+              "temperature": 0.1
+            }
+          }
+        }
+        ```
+    *   *Outcome*: Flawless model-agnostic modularity. Adding a new LLM provider requires only instantiating a standard LangChain wrapper class.
+*   **`[CORE] The Dynamic Three-Tier Model Router`**
+    *   *Trigger*: Fires automatically whenever the orchestrator prepares a new LLM generation turn or schedules a sub-task.
+    *   *Action*: Classifies the incoming task's complexity, scope, and context requirements, then dynamically routes execution payloads through a three-tier model framework:
+        
+        | Tier | Role | Targets | Core Task Types |
+        | :--- | :--- | :--- | :--- |
+        | **Flash** | The Scout | Fast, cheap (local) | File reads, directory globs, text summarizations, web scrapes, basic markdown formatting. |
+        | **Utility** | The Collaborator | Mid-tier local MoE | Chat interactions, codebase analysis, code reviews, and medium-sized refactoring tasks. |
+        | **Dense** | The Architect | Heavy cloud model | Long-term planning, multi-file architecture design, deep debugging, and complex feature implementation. |
+
+    *   *Escalation & Delegation*:
+        *   *Escalation*: If a lower-tier model discovers a task requires wider context or deeper reasoning than its threshold allows, the harness automatically preserves its progress, bundles the context, and escalates the turn upward to a higher tier transparently.
+        *   *Delegation*: The Utility (Collaborator) model acts as the supervisor, dynamically delegating simple, read-only sub-tasks (e.g., "summarize this file") to the Flash (Scout) model.
+    *   *Outcome*: Drastically reduces execution latency and cuts API costs by reserving expensive cloud compute only for complex design work.
+
+---
+
+### Subsystem 3: The Capability Subsystem (Tools & Safeties)
+*   **The Concept**: A modular registry for local actions. Tools are registered as individual, standalone plugins. The agent loop queries this registry to discover available capabilities and route execution payloads to the appropriate handler.
+
+#### Nested Model-Called Tools (Model-Activated)
+*   **`[CORE] read_file`**: Opens and reads the raw text contents of a specific file in the workspace. (Safe, read-only; auto-approved).
+*   **`[CORE] glob_files`**: Scans the workspace directory tree using standard glob patterns to locate files. (Safe, read-only; auto-approved).
+*   **`[CORE] write_file`**: Creates a new file or completely overwrites an existing file with new content. (Active modification; requires explicit permission).
+*   **`[CORE] edit_file`**: Makes precise, surgical search-and-replace block changes in an existing file without rewriting the whole file. (Active modification; requires explicit permission).
+*   **`[CORE] execute_command` (Bash)**: Executes terminal commands (e.g., test runners, compilers, linters) using a local subprocess. (Active execution; requires explicit permission).
+*   **`[CORE] web_search` & `[CORE] web_fetch`**: Searches the web for external library documentation and fetches public web pages, converting HTML to Markdown on-the-fly. (Safe, read-only; auto-approved).
+*   **`[CORE] connect_mcp_server` (External Bridge)**: Dynamically connects to remote or local Model Context Protocol (MCP) servers to acquire specialized, community-driven tools on-the-fly. (Allows advanced integrations like Slack, GitHub, or Postgres).
+
+#### Nested Harness-Driven Tools (Harness-Activated)
+*   **`[CORE]` The Git Safeguard (Source Control Guard)**
+    *   *Trigger*: Fires automatically right before any model-called file-writing tool (`write_file` or `edit_file`) executes.
+    *   *Action*: Runs a local Git status check. If uncommitted changes exist, it warns the developer or creates an automatic stash/temporary checkpoint commit.
+    *   *Outcome*: Absolute protection against model-generated code regressions.
+*   **`[CORE] The Workspace Code-Map Generator (Repo Map)`**
+    *   *Trigger*: Fires automatically on session startup.
+    *   *Action*: Scans the workspace files and AST structures to compile a highly compressed, token-efficient structure tree (excluding function bodies).
+    *   *Outcome*: Gives the model complete high-level project awareness for under 1,000 tokens, avoiding the cost of reading entire source files prematurely.
+*   **`[CORE] The Progressive Disclosure Skill Registry`**
+    *   *Trigger*: Monitors the active execution path or LangGraph workflow node.
+    *   *Action*: Dynamically registers or hides advanced tools from the core's active tool schema based on the current context.
+    *   *Outcome*: Prevents the model's active tool schema from becoming bloated, keeping token usage low and reducing model decision-making errors.
+
+---
+
+### Subsystem 4: The Security Subsystem (Governance & Policies)
+*   **The Concept**: An independent safety interceptor sitting on the Event Bus. It evaluates proposed actions against defined security profiles (e.g., safe read-only operations vs. destructive modifications) and suspends the execution loop to request approval.
+
+#### Nested Harness-Driven Tools (Harness-Activated)
+*   **`[CORE]` The Interactive Permission Gate (Approval Manager)**
+    *   *Trigger*: Fires automatically right before any unsafe model-called tool (`write_file`, `edit_file`, or `execute_command`) runs.
+    *   *Action*: Intercepts the execution flow, suspends the active loop, and publishes a confirmation request to the Event Bus, prompting the Operator Interface to render an approval overlay.
+    *   *Outcome*: Ensures no destructive changes land on the developer's system without explicit consent.
+*   **`[CORE] The Stateful Mode Cycler`**
+    *   *Trigger*: Fires when the developer presses `SHIFT+TAB` in the Operator Interface.
+    *   *Action*: Cycles the harness through three core execution modes, dynamically swapping system instruction templates and updating tool execution boundaries:
+        
+        | Mode | Role / Prompt Template | Approval Mode | Write Permission Boundary |
+        | :--- | :--- | :--- | :--- |
+        | **`chat`** | Standard conversation | `DEFAULT` (Confirm on writes) | Full workspace access. |
+        | **`plan`** | Principal System Architect | `PLAN` (Read-only) | strictly **disabled** (no writes or bash). |
+        | **`vibe`** | Rapid Prototyping (YOLO) | `YOLO` (Auto-approve) | Full workspace access with no TUI prompts. |
+
+    *   *Outcome*: Provides a highly specialized, task-driven sandbox environment. Each mode switch rebuilds the active prompt context dynamically while preserving the structural session memory.
+
+---
+
+### Subsystem 5: The Operator Interface Subsystem (TUI & Headless Output)
+*   **The Concept**: A view layer that subscribes to the Event Bus. It is entirely passive: it renders text streams, maps status indicators, and draws prompt confirmation overlays. When running in interactive mode, it displays the visual TUI; when running in headless mode, it maps the same stream events straight to standard console output.
+
+#### Nested Harness-Driven Tools (Harness-Activated)
+*   **`[CORE] The Output Truncator & ANSI Stripper`**
+    *   *Trigger*: Processes the raw execution output returned by `execute_command` or `web_fetch` before it is returned to the model.
+    *   *Action*: Strips out terminal ANSI color codes and progress characters, then truncates large logs (keeping only the first and last 50 lines).
+    *   *Outcome*: Prevents verbose test scrolls or heavy HTML code from devouring the model's active context window.
+*   **`[CORE]` The Token Budget Watcher**
+    *   *Trigger*: Runs in real-time as tokens stream or messages are complete.
+    *   *Action*: Measures active session token usage against the model's context window limit and calculates the color-coded state (green, yellow, red) for the footer status bar.
+    *   *Outcome*: Visual alert to the developer as the session approaches context limits.
+*   **`[CORE]` The Input Lock (Concurrency Guard)**
+    *   *Trigger*: Fires automatically when a `USER_INPUT` event is published.
+    *   *Action*: Visually disables the terminal input prompt and ignores all keyboard keystrokes while the model stream is active.
+    *   *Outcome*: Prevents the developer from typing and submitting overlapping messages that would corrupt the session state.
+*   **`[CORE]` The Audit Logger & Telemetry Monitor**
+    *   *Trigger*: Captures events in the background throughout the execution loop.
+    *   *Action*: Records exact execution durations, API latencies, and token consumption metrics locally for developer access.
+    *   *Outcome*: Total operational transparency for performance, token usage, and API tracking.
+
+---
+
+### Subsystem 6: The Agent Session (Active State & Memory)
+*   **The Concept**: The state tracker. It maintains the active log of conversational turns, manages session files, and tracks context utilization.
+
+#### Nested Harness-Driven Tools (Harness-Activated)
+*   **`[CORE]` The Governance-Work Context Partitioner**
+    *   *Trigger*: Pre-formats the active prompt payload before every LLM invocation.
+    *   *Action*: Divides the context window into two strictly isolated, logical boundaries:
+        1.  **Governance Layer** (Never compacted): System prompt, active mode prompt, memory index, and active Git snapshot.
+        2.  **Work Layer** (Compactable): Conversational messages and raw tool call results.
+    *   *Outcome*: Guarantees that active instructions and workspace snapshots are never lost or corrupted when the conversation history is summarized.
+*   **`[CORE] The Prompt Cache Optimizer (Prompt Cache Alignment)`**
+    *   *Trigger*: Formats the active prompt payload on every conversation turn.
+    *   *Action*: Places static prompts, instructions, and workspace layout diagrams at the absolute beginning of the message history (inside the Governance Layer).
+    *   *Outcome*: Aligns the payload with API providers' static boundaries to trigger cheap, low-latency prompt caching automatically.
+*   **`[CORE] The Conversational History Compactor (Episodic Summary Compactor)`**
+    *   *Trigger*: Fires automatically when conversation token usage in the **Work Layer** exceeds 75% of context limits.
+    *   *Action*: Keeps the most recent 10 turns at full fidelity, while asynchronously condensing older turns inside the Work Layer into a highly compact, bullet-point chronological session recap.
+    *   *Outcome*: Prevents the active history token size from growing exponentially over long sessions.
+*   **`[CORE]` The Turn Serializer (Session State Writer)**
+    *   *Trigger*: Fires automatically on the `TURN_COMPLETE` event.
+    *   *Action*: Serializes the active message array and writes it to a local JSON session log file to protect against data loss.
+    *   *Outcome*: Automatic transaction-level state saving across process restarts.
+*   **`[CORE]` The Session Exception Guard (Error Handler)**
+    *   *Trigger*: Intercepts uncaught exceptions thrown during stream generation or tool execution.
+    *   *Action*: Catches LangChain network or API errors, pushes a clean error block to the active conversation history, publishes an `ERROR_OCCURRED` event to notify the TUI, and triggers the Input Lock to release control.
+    *   *Outcome*: Prevents process crashes or permanent TUI lockups during dropped API connections.
+*   **`[CORE]` The Two-Layer Memory Registry**
+    *   *Trigger*: Fires automatically on session startup.
+    *   *Action*: Registers both **Project-level memory** (`.voidrift/memory/`) and **Global memory** (`~/.voidrift/memory/`). Builds a memory index, runs relevance scoring (keyword matching) against conversation context, and injects relevant entries on-demand.
+    *   *Outcome*: Allows the system to accumulate project-specific and cross-project learned lessons without polluting the context window.
+
+---
+
+## 5. File System Architecture & Directory Layout
+
+To prevent configuration drift, namespace collisions, and bootstrap conflicts, VoidRift maintains a strict separation of concerns between local project workspaces and global system configurations:
+
+### A. The Project Working Directory: `<proj_root>/.voidrift/`
+This folder is created locally within each workspace root directory, containing project-specific configurations, memories, and session logs. Rather than forcing a blanket ignore, VoidRift supports a flexible Git integration policy, giving developers direct control over their `.gitignore` configurations:
+
+*   **Model Config overrides (`.voidrift/models.json`)**: *[Optional to Commit]* Custom workspace-specific role mapping selectors (mapping the local `flash`, `utility`, and `dense` tiers to specific global model names), or local overrides for unique repository-specific endpoints. Committing this allows teams to share unified workspace model setups.
+*   **Active Session Registry (`.voidrift/sessions/`)**: *[Recommended to Git-Ignore]* Stores transaction-level JSON history for active and historical turns specific to this repository (`session-<uuid>.json`). Prevents polluting source control with volatile session logs.
+*   **Project Semantic Memory (`.voidrift/memory/`)**: *[Optional to Commit]* Houses local vector/keyword indexes and serialized episodic learned lessons unique to this codebase's development journey.
+*   **Volatile Caches & Telemetry Logs (`.voidrift/cache/`)**: *[Must be Git-Ignored]* Temporary stores such as the Workspace Code-Map AST cache, transient tool logs, and cost/telemetry audit files.
+
+### B. The Global CLI Directory: `~/.config/voidrift/`
+This folder resides in the user's home directory. It contains all settings, templates, and cross-project knowledge that govern the entire harness installation.
+
+*   **Global Harness Configuration (`~/.config/voidrift/config.json`)**: Holds the primary user settings, global model catalog specifications (protocols, providers, context limits, and token cost pricing rates), global model API keys, default endpoints, custom TUI theme overrides, and tool approval boundaries.
+*   **Global Episodic Memory (`~/.config/voidrift/memory/`)**: Houses cross-project learned lessons and architectural patterns accumulated over time across all workspaces.
+*   **Global Session Registry Tracker (`~/.config/voidrift/history.json`)**: An index tracking all active workspaces and their historical session IDs, allowing session recovery from any directory path.
+*   **Global Prompt & Persona Resources (`~/.config/voidrift/resources/`)**: Centralized editable prompt files, system instruction templates, and custom mode definitions.
+
+---
+
+## 6. The Slash Command Registry
+
+Slash commands are executed directly in the Operator Interface terminal input line. They allow the operator to manage the harness session, view performance metrics, and perform local-only actions without consuming LLM context window budget.
+
+*   **`/help` — Help Directory**
+    *   *Action*: Lists all available slash commands with high-level descriptions.
+    *   *Outcome*: Instant command discovery.
+*   **`/model [alias]` — Model Switcher**
+    *   *Action*: Switches the active LLM dynamically. When run without arguments, it displays all available models in the current project or global config.
+    *   *Outcome*: Allows the operator to dynamically scale between Flash, Utility, and Dense models without restarting the session.
+*   **`/stats` — Session Analytics**
+    *   *Action*: Opens a detailed panel rendering real-time metrics: session ID, active turn counts, total session duration, performance wall-time breakdowns (API network vs. local tool execution), tool success/failure counts, and active context token utilization.
+    *   *Outcome*: Full transparency for tracking operational latency and token costs.
+*   **`/tools` — Capability Discovery**
+    *   *Action*: Lists all registered tools available to the model under the currently active execution mode (`chat`, `plan`, `vibe`).
+    *   *Outcome*: Immediate auditing of the active security permission boundary.
+*   **`/compact` — Manual History Compaction**
+    *   *Action*: Manually triggers conversational history compaction, compressing older conversational turns inside the Work Layer into a chronological recap while leaving the Governance Layer untouched.
+    *   *Outcome*: Reclaims valuable context window space on-demand.
+*   **`/clear` — State Reset**
+    *   *Action*: Deletes the active session JSON log from disk and resets the conversational history, returning the harness to a pristine boot state.
+    *   *Outcome*: Starts a clean chat sheet instantly.
+*   **`/memory` — Memory Management**
+    *   *Action*: Performs operations on local and global memory layers (e.g., query, list, add, delete, or re-index).
+    *   *Outcome*: Direct operator control over the agent's long-term recall buffer.
+*   **`/exit` — Session Termination**
+    *   *Action*: Safely serializes the final active turn and exits the TUI process.
+    *   *Outcome*: Graceful shutdown.
+
+---
+
+## 7. The Central Event Lifecycle
+
+Communication across these feature modules is governed by six high-level lifecycle events:
+
+1.  `USER_INPUT`: Published by the Operator Interface when the developer submits a prompt, telling the Agent Session to start a new execution turn.
+2.  `TOKEN_STREAM`: Published by the Model Connectivity module, carrying real-time text fragments from the active stream. The Operator Interface renders these tokens as they arrive.
+3.  `TOOL_CONFIRMATION_REQUEST`: Published by the Security Subsystem when an unsafe tool is proposed. It carries the tool name, arguments, and diff details, prompting the Operator Interface to render an approval overlay.
+4.  `TOOL_CONFIRMATION_RESPONSE`: Published by the Operator Interface when the developer approves or denies a blocked action, signaling the Security Subsystem to resume or abort.
+5.  `ERROR_OCCURRED`: Published by the Agent Session when an API connection or execution exception is caught, telling the Operator Interface to display the error inline and release the Input Lock.
+6.  `TURN_COMPLETE`: Published by the Agent Session when the model completes its response and no further tools are queued, triggering the Session State writer to persist the chat logs to disk.
+
+---
+
+## 8. High-Level Planning Roadmap (Future Research & Design)
+
+The following architectural items represent the core research and high-level design backlog to be addressed in subsequent collaborative sessions.
+
+*   `[ ]` **LangGraph Multi-Agent State-Graph Schema Design**
+    *   *Objective*: Define the exact node structures (Architect, Coder, Auditor), the shared state schema (the variables passed between nodes), and the conditional edges governing the workflow cycle.
+*   `[ ]` **Dynamic Model Routing & Task Classification Heuristics**
+    *   *Objective*: Research semantic routing standards and map out the exact trigger rules, cost-benefit thresholds, and context-preservation mechanics when escalating between the Flash, Utility, and Dense models.
+*   `[ ]` **Progressive Disclosure Skill System & Tool Binding**
+    *   *Objective*: Research LangChain and LangGraph patterns for dynamically loading and unloading tool schemas from the active context buffer during runtime based on active graph states.
+*   `[ ]` **Two-Layer Memory System Relevance Scoring**
+    *   *Objective*: Define the mathematical or keyword-matching heuristic that determines memory relevance scores to prevent token pollution.
+*   `[ ]` **Isolated Subagent Git Worktree Orchestration**
+    *   *Objective*: Design the workspace hand-off and file-conflict resolution mechanics when the primary agent spawns isolated background subagents.
