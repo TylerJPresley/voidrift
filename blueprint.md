@@ -22,7 +22,7 @@ This index provides a compact, high-level map of the entire harness feature set,
    - `[CORE]` The Progressive Disclosure Skill Registry (Dynamically hiding advanced tools to prevent prompt bloat).
 4. **Subsystem 4 (Security Subsystem)**:
    - `[CORE]` The Interactive Permission Gate (TUI loop suspension and confirmation gate).
-   - `[CORE]` The Stateful Mode Cycler (Cycling `chat`, `plan`, and `vibe` via `SHIFT+TAB`).
+   - `[CORE]` The Stateful Mode Cycler (Cycling `chat`, `plan`, and `vibe` via `TAB`).
 5. **Subsystem 5 (Operator Interface)**:
    - `[CORE]` The Output Truncator & ANSI Stripper (formatting logs and cutting large terminal scrolls).
    - `[CORE]` The Token Budget Watcher (Real-time context ratio visualization).
@@ -230,7 +230,7 @@ To maintain ultimate clarity, every capability, safeguard, and tool in VoidRift 
     *   *Action*: Intercepts the execution flow, suspends the active loop, and publishes a confirmation request to the Event Bus, prompting the Operator Interface to render an approval overlay.
     *   *Outcome*: Ensures no destructive changes land on the developer's system without explicit consent.
 *   **`[CORE] The Stateful Mode Cycler`**
-    *   *Trigger*: Fires when the developer presses `SHIFT+TAB` in the Operator Interface.
+    *   *Trigger*: Fires when the developer presses `TAB` in the Operator Interface.
     *   *Action*: Cycles the harness through three core execution modes, dynamically swapping system instruction templates and updating tool execution boundaries:
         
         | Mode | Role / Prompt Template | Approval Mode | Write Permission Boundary |
