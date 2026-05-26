@@ -313,6 +313,14 @@ To maintain ultimate clarity, every capability, safeguard, and tool in VoidRift 
             ```
     *   *Outcome*: Drastically reduces execution latency and cuts API costs by reserving expensive cloud compute only for complex design work.
     *   *Rationale*: Optimizes context usage, execution speeds, and operational costs by delegating simple tasks to cheap local models (Flash) and reserving heavy, expensive cloud intelligence (Dense) only for high-complexity architectural decisions.
+*   **`[CORE] The Standardized Event-Streaming Engine`**
+    *   *Trigger*: Fires dynamically when a LangGraph node invokes a standardized `.stream()` call on a resolved model adapter.
+    *   *Action*: Orchestrates chunk translation and argument accumulation, translating raw, provider-specific HTTP streaming chunk structures into standard harness events:
+        1.  **Unified Chunk Schema**: Converts disparate payloads (OpenAI, Anthropic, Gemini candidate streams) into a single, predictable event structure containing a `type` (`"content"`, `"tool_call"`, or `"done"`) and the resolved target payload.
+        2.  **Tool-Call Accumulator Protocol**: Because API providers emit tool call arguments as partial fragmented tokens over the stream, the engine accumulates these partial blocks internally and only yields the completed tool call block when the stream terminates.
+        3.  **Graceful Stream Exception Mapping**: Intercepts mid-stream network dropouts, rate-limiting HTTP errors, and API connection terminations, converting them into standardized error payloads to prevent terminal blitting hangs.
+    *   *Outcome*: Ensures the Operator TUI and core graph nodes receive a single, predictable, and robust stream of complete events, completely shielding the rendering layers from raw JSON fragments or provider API changes.
+    *   *Rationale*: Sanitizes and standardizes disparate provider streaming protocols into a single, high-fidelity contract while isolating the TUI rendering loop from partial JSON parsing crashes.
 
 ---
 
