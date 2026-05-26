@@ -157,6 +157,10 @@ To maintain ultimate clarity, every capability, safeguard, and tool in VoidRift 
     *   *Trigger*: Runs continuously in the background.
     *   *Action*: Monitors local directories for file additions, modifications, or deletions, automatically triggering the vector indexer to keep semantic memory perfectly fresh.
     *   *Outcome*: Ensures the model's codebase knowledge remains synchronized with external editor saves or git branch switches in real-time.
+*   **`[CORE]` The Harness Boot Clean-up Guard**
+    *   *Trigger*: Runs automatically once during application bootstrap.
+    *   *Action*: Scans the local `.voidrift/worktrees/` directory. If it detects any orphaned, crashed, or stale Git worktrees left behind by previous process terminations, it programmatically removes them (`git worktree prune`) and purges their corresponding locks from the active session's `activeLocks` state.
+    *   *Outcome*: Ensures the harness starts in a clean, predictable state across runs, completely preventing stale file locks or directory leaks.
 
 ---
 
@@ -398,10 +402,18 @@ To maintain ultimate clarity, every capability, safeguard, and tool in VoidRift 
     *   *Trigger*: Fires automatically when a `USER_INPUT` event is published.
     *   *Action*: Visually disables the terminal input prompt and ignores all keyboard keystrokes while the model stream is active.
     *   *Outcome*: Prevents the developer from typing and submitting overlapping messages that would corrupt the session state.
-*   **`[CORE]` The Audit Logger & Telemetry Monitor**
-    *   *Trigger*: Captures events in the background throughout the execution loop.
-    *   *Action*: Records exact execution durations, API latencies, and token consumption metrics locally for developer access.
-    *   *Outcome*: Total operational transparency for performance, token usage, and API tracking.
+*   **`[CORE]` The Audit Logger & Telemetry Monitor (Dual-Layer Logging)**
+    *   *Trigger*: Captures events asynchronously throughout the entire execution loop.
+    *   *Action*: Orchestrates a rigid **Dual-Layer Logging Specification** dividing application events into two strictly segregated scopes:
+        *   **Level 1: Local Project Audit Log (`.voidrift/logs/session-<uuid>.log`)**:
+            - *Scope*: Local workspace and model interactions.
+            - *Details*: Records chronological conversation turns, exact model prompts/completions (the full raw token payloads), git worktree provisions, file mutations, tool execution results, and linter diagnostics.
+            - *Outcome*: Ensures complete, local accountability for everything written or executed inside the workspace.
+        *   **Level 2: Global CLI System Log (`~/.config/voidrift/logs/error.log`)**:
+            - *Scope*: Harness application errors and telemetry.
+            - *Details*: Records low-level CLI/TUI crashes, model connectivity timeouts, API authentication issues, theme engine failures, and startup bootstrapping exceptions.
+            - *Outcome*: Provides standard telemetry logs for debugging the CLI engine and model configurations without cluttering the local workspace.
+    *   *Outcome*: Total operational transparency for both project-level edits and global system stability.
 
 ---
 
@@ -489,6 +501,7 @@ This folder is created locally within each workspace root directory, containing 
 *   **Active Session Registry (`.voidrift/sessions/`)**: *[Recommended to Git-Ignore]* Stores transaction-level JSON history for active and historical turns specific to this repository (`session-<uuid>.json`). Prevents polluting source control with volatile session logs.
 *   **Project Semantic Memory (`.voidrift/memory/`)**: *[Optional to Commit]* Houses local vector/keyword indexes and serialized episodic learned lessons unique to this codebase's development journey.
 *   **Volatile Caches & Telemetry Logs (`.voidrift/cache/`)**: *[Must be Git-Ignored]* Temporary stores such as the Workspace Code-Map AST cache, transient tool logs, and cost/telemetry audit files.
+*   **Project Audit Logs (`.voidrift/logs/`)**: *[Recommended to Git-Ignore]* Local storage for transaction-level session logs and raw model interaction histories (`session-<uuid>.log`).
 
 ### B. The Global CLI Directory: `~/.config/voidrift/`
 This folder resides in the user's home directory. It contains all settings, templates, and cross-project knowledge that govern the entire harness installation.
@@ -497,6 +510,7 @@ This folder resides in the user's home directory. It contains all settings, temp
 *   **Global Episodic Memory (`~/.config/voidrift/memory/`)**: Houses cross-project learned lessons and architectural patterns accumulated over time across all workspaces.
 *   **Global Session Registry Tracker (`~/.config/voidrift/history.json`)**: An index tracking all active workspaces and their historical session IDs, allowing session recovery from any directory path.
 *   **Global Prompt & Persona Resources (`~/.config/voidrift/resources/`)**: Centralized editable prompt files, system instruction templates, and custom mode definitions.
+*   **Global System Logs (`~/.config/voidrift/logs/`)**: Stores CLI/TUI application error logs (`error.log`) and core system crash dumps.
 *   **Global Custom Agents Registry (`~/.config/voidrift/agents/`)**: Centrally stores standard JSON configurations declaring custom, developer-configured agent nodes:
     ```json
     {
@@ -568,7 +582,7 @@ The state object is the single source of truth passed between all nodes:
 | `focusedFiles` | `string[]` | Engineer (write) | Absolute paths of files currently under active edit or review. |
 | `diagnostics` | `string \| null` | Auditor (write) | Raw compiler/linter output captured after Engineer execution. |
 | `routingFlag` | `Pass \| Rework \| null` | Auditor (write) | Routing decision produced by the Auditor. Null during Architect and Engineer phases. |
-| `messages` | `BaseMessage[]` | All nodes (append) | Chronological conversation log. All nodes may append but never delete. |
+| `messages` | `BaseMessage[]` | All nodes (append) | Chronological log. Utilizes the standard LangGraph `messagesStateReducer` (append-only) to prevent node transitions from overwriting the turn history. |
 | `activeMode` | `plan \| chat \| vibe` | Harness (write) | Active sandbox boundary set by `TAB`. `plan` = read-only, no writes; `chat` = full access + permission gate ON; `vibe` = full access + permission gate OFF. |
 | `activePersona` | `string` | Harness (write) | The system prompt injected into the Governance Partition for the currently active node. |
 
