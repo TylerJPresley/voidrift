@@ -188,7 +188,7 @@ To maintain ultimate clarity, every capability, safeguard, and tool in VoidRift 
         | **`protocol`** | `"openai" \| "anthropic" \| "google"` | Yes (All) | All | Directs factory routing (instantiates transport layer). |
         | **`model`** | `string` | Yes (All) | All | **Pass-Through Payload Identifier** (forwarded directly to API without internal parsing). |
         | **`contextLimit`** | `number` | Yes (All) | All | Hard tokens ceiling for budget calculations. |
-        | **`baseUrl`** | `string` | No | All | Destination endpoint (defaults to official cloud APIs if omitted). |
+        | **`baseUrl`** | `string` | Yes | All | Destination endpoint (must be explicitly declared; e.g. official cloud endpoint or local host). |
         | **`apiKeyEnv`** | `string` | No | All | Env var name resolved dynamically to `apiKey`. |
         | **`temperature`** | `number` | No | All | Controls generation creativity (default `0.2`). |
         | **`maxOutputTokens`** | `number` | No | All | Standardizes `max_tokens` / `maxTokensToSample` constructor parameters. |
