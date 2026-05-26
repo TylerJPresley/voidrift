@@ -276,22 +276,23 @@ To maintain ultimate clarity, every capability, safeguard, and tool in VoidRift 
 #### Nested Harness-Driven Tools (Harness-Activated)
 *   **`[CORE]` The Governance-Work Context Partitioner**
     *   *Trigger*: Pre-formats the active prompt payload before every LLM invocation.
-    *   *Action*: Compiles and maps the internal active LangGraph state variables directly into two strictly isolated, logical boundaries inside the active prompt context:
+    *   *Action*: Enforces the core directive of **Context Progressive Disclosure**. To prevent token bloating in low-context models, the partitioner avoids loading raw context payloads. Instead, it compiles the internal active LangGraph state variables into highly compressed "Directory Indexes" inside the Governance Partition, allowing the model to progressively query and expose raw content on-demand:
         ```text
-        [Agent State Graph Schema]
-         ├── Governance Partition (Never Compacted)
-         │    ├── activePlan ───► The persistent markdown implementation roadmap.
-         │    ├── focusedFiles ──► The list of active/dirty file paths in the workspace.
-         │    ├── activeMode ────► The security boundary rules (chat, plan, vibe).
-         │    ├── activePersona ─► The persistent system instruction prompt for the active role (Architect/Coder/Auditor).
-         │    ├── activeSkills ──► The dynamically bound tool schemas from the Skill Registry.
-         │    ├── activeMemory ──► The relevant project/global episodic memories retrieved.
-         │    └── gitStatus ─────► The local workspace checkpoint or source control state.
-         └── Work Partition (Compactable)
-              ├── messages ──────► The chronological conversation log of turns and tool results.
-              └── diagnostics ───► The transient syntax/linter compile errors.
+        [Agent State Graph Schema - Progressive Disclosure Directory]
+         ├── Governance Partition (Never Compacted - Index Directories)
+         │    ├── activePlan ───────► The persistent step-by-step markdown roadmap.
+         │    ├── workspaceCodeMap ─► Ultra-compressed folder tree index (LSP tools explore details).
+         │    ├── focusedFiles ─────► The list of active/dirty file paths in focus.
+         │    ├── activeMode ───────► The security boundary rules (chat, plan, vibe).
+         │    ├── activePersona ────► Persistent system instruction prompt for the active role.
+         │    ├── activeSkills ─────► Directory of bound tool schemas (dynamically loaded by active node).
+         │    ├── activeMemory ─────► Topics/relevance index (loaded into workspace only on-demand).
+         │    └── gitStatus ────────► The local workspace checkpoint or source control state.
+         └── Work Partition (Compactable - Active Workload)
+              ├── messages ─────────► The chronological conversation log of turns and tool results.
+              └── diagnostics ──────► The transient syntax/linter compile errors.
         ```
-    *   *Outcome*: Guarantees that active instructions, workspace snapshots, bound capabilities, and active role identity are never lost or corrupted when the conversation history is summarized.
+    *   *Outcome*: Minimizes the baseline Governance Partition footprint to under 1.5k tokens (releasing remaining context for reasoning/generation), while guaranteeing active role identity, structural code-maps, and available skills are never lost.
 *   **`[CORE] The Prompt Cache Optimizer (Prompt Cache Alignment)`**
     *   *Trigger*: Formats the active prompt payload on every conversation turn.
     *   *Action*: Places static prompts, instructions, and workspace layout diagrams at the absolute beginning of the message history (inside the Governance Layer).
