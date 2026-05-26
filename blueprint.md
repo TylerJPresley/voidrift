@@ -740,8 +740,7 @@ This section lists the immediate actionable steps to build the VoidRift Core Har
 
 
 
-*   `[ ]` **Phase 2.3: Streaming Adapter Engine**
-    *   *Task*: Build the standard `stream()` generator in the adapters yielding standardized `StreamChunk` events for real-time TUI rendering.
+
 *   `[ ]` **Phase 2.4: Progressive Tool Registry & Tool Executor**
     *   *Task*: Implement the safe execution primitives (`read_file`, `edit_file`, `execute_command`) and bind tool subsets dynamically to node personas.
 *   `[ ]` **Phase 2.5: Central Event Bus & Handoff Session Manager**
