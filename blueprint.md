@@ -180,6 +180,21 @@ To maintain ultimate clarity, every capability, safeguard, and tool in VoidRift 
     *   *Trigger*: Fires automatically during workspace bootstrap or dynamic `/model` selection.
     *   *Action*: Resolves configuration schemas from the local `.voidrift/models.json` or global `~/.config/voidrift/config.json`, matches the active `provider`, instantiates the corresponding LangChain adapter, and registers it as the active executor in the Agent Session.
     *   *Rationale*: Standardizes all API communications using LangChain's unified classes, ensuring the core agent logic is 100% provider-agnostic and that switching providers (e.g., from local Qwen to Anthropic Claude) requires zero codebase changes.
+    *   *Provider-Specific Configuration Field Mapping Matrix*:
+        To ensure the schema validation is strictly bounded by the `provider` selection, the table below defines every valid parameter inside the `models` block, its data type, and which providers it is allowed or required to map to at runtime:
+
+        | Field | Type | Required | Allowed Providers | Target SDK Translation |
+        | :--- | :--- | :--- | :--- | :--- |
+        | **`provider`** | `"openai" \| "anthropic" \| "google"` | Yes (All) | All | Directs factory routing. |
+        | **`model`** | `string` | Yes (All) | All | The physical model ID (e.g. `claude-3-5-sonnet-latest`). |
+        | **`contextLimit`** | `number` | Yes (All) | All | Hard tokens ceiling for budget calculations. |
+        | **`baseUrl`** | `string` | No | `openai` | Custom endpoint (e.g. local Ollama/vLLM/OpenAI API). |
+        | **`apiKeyEnv`** | `string` | No | All | Env var name resolved dynamically to `apiKey`. |
+        | **`temperature`** | `number` | No | All | Controls generation creativity (default `0.2`). |
+        | **`maxOutputTokens`** | `number` | No | All | Standardizes `max_tokens` / `maxTokensToSample` constructor parameters. |
+        | **`topP`** | `number` | No | All | Nucleus sampling parameter. |
+        | **`topK`** | `number` | No | `google`, `anthropic` | Limits top-K token selection bounds. |
+        | **`additionalHeaders`** | `Record<string, string>` | No | `anthropic` | Injected into API request headers (e.g., custom cache breakpoints). |
     *   *Design Separation of Concerns*: To prevent duplicate metadata setups across workspaces, **all master model configurations (protocols, providers, context limits) and the default tier selections (`flash`, `utility`, `dense`) are declared globally** in the user's global config `~/.config/voidrift/config.json`. Project-level token costs are excluded from tracking, as API providers do not supply cost structures dynamically. The local config at `<proj_root>/.voidrift/models.json` is **strictly optional** and used only when a specific workspace needs to override the default global tier mappings or configuration parameters.
     *   *Specification: Global `~/.config/voidrift/config.json` (Default Setup)*:
         ```json
