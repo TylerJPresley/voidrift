@@ -685,24 +685,9 @@ The plugin registers five high-level slash commands to automate the entire engin
 
 ---
 
-## 10. Foundation Implementation TODOs
-
-This section lists the immediate actionable steps to build the VoidRift Core Harness foundation as defined in the Phase 2 build order.
-
-*   `[ ]` **Phase 2.1: Config Bridge**
-    *   *Task*: Create the unified configuration loader resolving `~/.config/voidrift/config.json` with project-level overrides in `.voidrift/models.json`.
-*   `[ ]` **Phase 2.2: Unified Model Adapter Factory**
-    *   *Task*: Implement the `ModelAdapterFactory` in `@voidrift/core` wrapping OpenAI, Anthropic, and Gemini SDKs via standard LangChain clients.
-*   `[ ]` **Phase 2.3: Streaming Adapter Engine**
-    *   *Task*: Build the standard `stream()` generator in the adapters yielding standardized `StreamChunk` events for real-time TUI rendering.
-*   `[ ]` **Phase 2.4: Progressive Tool Registry & Tool Executor**
-    *   *Task*: Implement the safe execution primitives (`read_file`, `edit_file`, `execute_command`) and bind tool subsets dynamically to node personas.
-*   `[ ]` **Phase 2.5: Central Event Bus & Handoff Session Manager**
-    *   *Task*: Wire together the central LangGraph multi-agent orchestration graph (Architect -> Engineer -> Auditor) and serialize state turns to disk on `TURN_COMPLETE`.
-
 ---
 
-## Appendix: Architectural Decision Directory (Defensive Design Pillars)
+## 10. Appendix: Architectural Decision Directory (Defensive Design Pillars)
 
 This directory serves as the definitive reference for the critical architectural decisions that govern VoidRift's codebase. Other developer models implementing or extending this codebase must adhere to the core rationales and intents outlined below to maintain the structural safety, caching efficiency, and absolute decoupling of the Core Harness.
 
@@ -725,3 +710,22 @@ This directory serves as the definitive reference for the critical architectural
 ### Pillar 5: Segregated Dual-Layer Logging (Workspace Cleanliness & Telemetry Isolation)
 *   **Decision**: Log outputs are split into local project audit logs under `.voidrift/logs/` (containing raw prompt payloads and Git mutations) and global CLI system logs under `~/.config/voidrift/logs/` (containing CLI runtimes and connection crashes).
 *   **Rationale**: Developers need a granular, local audit trail of what the AI model did to their codebase (essential for accountability and git reviews). However, low-level engine exceptions, adapter network timeouts, and theme failures are completely irrelevant to the repository and would pollute the local workspace if written there. Segregating these layers preserves repo cleanliness while providing full diagnostics.
+
+---
+
+## Next Steps & Implementation TODOs
+
+This section lists the immediate actionable steps to build the VoidRift Core Harness foundation as defined in the Phase 2 build order.
+
+*   `[ ]` **Phase 2.1: Config Bridge**
+    *   *Task*: Create the unified configuration loader resolving `~/.config/voidrift/config.json` with project-level overrides in `.voidrift/models.json`.
+*   `[ ]` **Phase 2.2: Unified Model Adapter Factory**
+    *   *Task*: Implement the `ModelAdapterFactory` in `@voidrift/core` wrapping OpenAI, Anthropic, and Gemini SDKs via standard LangChain clients.
+*   `[ ]` **Phase 2.3: Streaming Adapter Engine**
+    *   *Task*: Build the standard `stream()` generator in the adapters yielding standardized `StreamChunk` events for real-time TUI rendering.
+*   `[ ]` **Phase 2.4: Progressive Tool Registry & Tool Executor**
+    *   *Task*: Implement the safe execution primitives (`read_file`, `edit_file`, `execute_command`) and bind tool subsets dynamically to node personas.
+*   `[ ]` **Phase 2.5: Central Event Bus & Handoff Session Manager**
+    *   *Task*: Wire together the central LangGraph multi-agent orchestration graph (Architect -> Engineer -> Auditor) and serialize state turns to disk on `TURN_COMPLETE`.
+
+---
