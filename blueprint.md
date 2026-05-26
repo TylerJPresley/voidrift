@@ -685,8 +685,6 @@ The plugin registers five high-level slash commands to automate the entire engin
 
 ---
 
----
-
 ## 10. Appendix: Architectural Decision Directory (Defensive Design Pillars)
 
 This directory serves as the definitive reference for the critical architectural decisions that govern VoidRift's codebase. Other developer models implementing or extending this codebase must adhere to the core rationales and intents outlined below to maintain the structural safety, caching efficiency, and absolute decoupling of the Core Harness.
