@@ -178,17 +178,17 @@ To maintain ultimate clarity, every capability, safeguard, and tool in VoidRift 
 #### Nested Harness-Driven Tools (Harness-Activated)
 *   **`[CORE] The Unified Model Adapter Factory`**
     *   *Trigger*: Fires automatically during workspace bootstrap or dynamic `/model` selection.
-    *   *Action*: Resolves configuration schemas from the local `.voidrift/models.json` or global `~/.config/voidrift/config.json`, matches the active `provider`, instantiates the corresponding LangChain adapter, and registers it as the active executor in the Agent Session.
+    *   *Action*: Resolves configuration schemas from the local `.voidrift/models.json` or global `~/.config/voidrift/config.json`, matches the active `protocol`, instantiates the corresponding LangChain adapter, and registers it as the active executor in the Agent Session.
     *   *Rationale*: Standardizes all API communications using LangChain's unified classes, ensuring the core agent logic is 100% provider-agnostic and that switching providers (e.g., from local Qwen to Anthropic Claude) requires zero codebase changes.
     *   *Provider-Specific Configuration Field Mapping Matrix*:
-        To ensure the schema validation is strictly bounded by the `provider` selection, the table below defines every valid parameter inside the `models` block, its data type, and which providers it is allowed or required to map to at runtime:
+        To ensure the schema validation is strictly bounded by the `protocol` selection, the table below defines every valid parameter inside the `models` block, its data type, and which providers it is allowed or required to map to at runtime:
 
-        | Field | Type | Required | Allowed Providers | Target SDK Translation |
+        | Field | Type | Required | Allowed Protocols | Target SDK Translation |
         | :--- | :--- | :--- | :--- | :--- |
-        | **`provider`** | `"openai" \| "anthropic" \| "google"` | Yes (All) | All | Directs factory routing. |
-        | **`model`** | `string` | Yes (All) | All | The physical model ID (e.g. `claude-3-5-sonnet-latest`). |
+        | **`protocol`** | `"openai" \| "anthropic" \| "google"` | Yes (All) | All | Directs factory routing (instantiates transport layer). |
+        | **`model`** | `string` | Yes (All) | All | **Pass-Through Payload Identifier** (forwarded directly to API without internal parsing). |
         | **`contextLimit`** | `number` | Yes (All) | All | Hard tokens ceiling for budget calculations. |
-        | **`baseUrl`** | `string` | No | `openai` | Custom endpoint (e.g. local Ollama/vLLM/OpenAI API). |
+        | **`baseUrl`** | `string` | No | All | Destination endpoint (defaults to official cloud APIs if omitted). |
         | **`apiKeyEnv`** | `string` | No | All | Env var name resolved dynamically to `apiKey`. |
         | **`temperature`** | `number` | No | All | Controls generation creativity (default `0.2`). |
         | **`maxOutputTokens`** | `number` | No | All | Standardizes `max_tokens` / `maxTokensToSample` constructor parameters. |
