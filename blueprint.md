@@ -267,24 +267,22 @@ To maintain ultimate clarity, every capability, safeguard, and tool in VoidRift 
     *   *Trigger*: Fires automatically on session startup.
     *   *Action*: Scans the workspace files and AST structures to compile a highly compressed, token-efficient structure tree (excluding function bodies).
     *   *Outcome*: Gives the model complete high-level project awareness for under 1,000 tokens, avoiding the cost of reading entire source files prematurely.
-*   **`[CORE] The Progressive Disclosure Skill Registry`**
+*   **`[CORE] The Progressive Disclosure Tool Registry`**
     *   *Trigger*: Fires whenever a LangGraph node activates or the active sandbox mode changes.
-    *   *Action*: Dynamically binds a highly targeted subset of tool schemas to the model using LangChain's `.bind_tools()` in-flight, preventing context bloat and keeping baseline schemas under 1.5k tokens.
-    *   *Tool Classification Sets*:
-        *   **Research & Design Skills**: `web_search`, `web_fetch`, LSP navigation (`lsp_go_to_definition`, `lsp_find_references`), read-only MCP.
-        *   **Execution Skills**: `execute_command` (limited to test/linter runs for the Auditor), `lsp_diagnostics`.
-        *   **Mutation Skills**: `write_file`, `edit_file`, mutating MCP tools.
-        *   **Workspace Read Skills**: `read_file`, `glob_files`, `lsp_hover`, read-only MCP.
-    *   *Persona & Mode Dynamic Binding Matrix*:
+    *   *Action*: Dynamically binds a targeted, minimal subset of tool schemas to the active node persona using LangChain's `.bind_tools()`. This keeps the action-space context footprint under 1.5k tokens and prevents model tool selection hallucinations.
+    *   *Persona & Mode Dynamic Tool Binding Matrix*:
         
-        | Mode / Active Node | Allowed Skill Sets | Bound Tool Schemas |
+        | Mode / Active Node | Allowed Tool Schemas | Scope & Boundaries |
         | :--- | :--- | :--- |
-        | **`plan` mode (Any Node)** | Read & Research only | Workspace Read + Research & Design. All mutators and command execution tools are completely unloaded. |
-        | **`Architect` Node** (Chat/Vibe) | Read & Research only | Workspace Read + Research & Design. Focuses purely on repository exploration and planning. |
-        | **`Engineer` Node** (Chat/Vibe) | All Skills | Workspace Read + Execution + Mutation. Full file editing and shell execution enabled. |
-        | **`Auditor` Node** (Chat/Vibe) | Read & Execute only | Workspace Read + Execution. Unloads mutating tools and web search to act as a strict, low-cost local testing oracle. |
+        | **`plan` mode (Any Node)** | `read_file`, `glob_files`, `web_search`, `web_fetch`, LSP navigation, read-only MCP | **Strict Sandbox**: All mutation (write/edit) and terminal execution tool schemas are completely unloaded. |
+        | **`Architect` Node** (Chat/Vibe) | `read_file`, `glob_files`, `web_search`, `web_fetch`, LSP navigation, read-only MCP | **Read & Design Only**: Loaded tools focus strictly on repository research. No file mutators or shell triggers are visible. |
+        | **`Engineer` Node** (Chat/Vibe) | `read_file`, `glob_files`, `write_file`, `edit_file`, `execute_command`, LSP tools, all MCP | **Full Workspace Control**: Full mutators and terminal command executions are loaded. |
+        | **`Auditor` Node** (Chat/Vibe) | `read_file`, `execute_command` (limited to test/linter runners), `lsp_diagnostics` | **Strict Local Oracle**: Mutation and web search tools are completely unloaded to isolate local test executions. |
 
-    *   *Outcome*: Eliminates tool selection hallucinations, keeps active tool token footprints extremely small, and prevents nodes from executing out-of-scope actions (like the Auditor accidentally attempting to write code).
+*   **`[PLUGIN] The Progressive Disclosure Skill Manager`**
+    *   *Trigger*: Fires when the active file in focus (`focusedFiles`) changes or plan step requirements shift.
+    *   *Action*: Dynamically reads framework-specific markdown guides (residing in `.voidrift/resources/skills/` or local `.voidrift/skills/`) and injects only the relevant technology-specific guidelines into the **activeSkills** slot inside the Governance Partition.
+    *   *Outcome*: Ensures framework-specific best practices (e.g., Next.js layout guidelines, Prisma optimization tips) are loaded dynamically on-demand, preventing the Governance Partition from becoming bloated with irrelevant tech instructions.
 
 ---
 
@@ -345,7 +343,7 @@ To maintain ultimate clarity, every capability, safeguard, and tool in VoidRift 
          ├── 1. Governance Partition (Immutable & Rules-Driven)
          │    ├── activePersona ──► System instruction prompt for the active role (Architect/Coder/Auditor).
          │    ├── activeMode ─────► Sandbox boundary and approval rules (chat, plan, vibe).
-         │    └── activeSkills ───► Standard tool schema overrides dynamically bound to the active node.
+         │    └── activeSkills ───► Dynamically loaded markdown skill/prompt guides (Next.js, Prisma guidelines) relevant to focused files.
          ├── 2. Workspace Partition (Semi-Dynamic & Context-Driven)
          │    ├── activePlan ─────► The persistent step-by-step markdown implementation roadmap.
          │    ├── focusedFiles ───► Raw, full-text contents of files currently under edit/review.
@@ -519,8 +517,8 @@ The following architectural items represent the core research and high-level des
     *   *Objective*: Research semantic routing standards and map out the exact trigger rules, cost-benefit thresholds, and context-preservation mechanics when escalating between the Flash, Utility, and Dense models.
     *   *Status*: Complete. Defined 3-signal routing stack (Node -> Mode -> Complexity fallback) and the lightweight Direct Chat Path vs Active Task Path entry splits.
 *   `[x]` **Progressive Disclosure Skill System & Tool Binding**
-    *   *Objective*: Research LangChain and LangGraph patterns for dynamically loading and unloading tool schemas from the active context buffer during runtime based on active graph states.
-    *   *Status*: Complete. Established 4-tier skill binding matrix (plan mode / Architect / Engineer / Auditor) dynamically calling LangChain's `.bind_tools()` in-flight. Unloaded mutation and web search tools from the Auditor to act as a strict local oracle.
+    *   *Objective*: Research LangChain and LangGraph patterns for dynamically loading and unloading tool schemas and skill files from the active context buffer during runtime based on active graph states.
+    *   *Status*: Complete. Decoupled **Tools** (functional TS execution primitives bound via `.bind_tools()`) from **Skills** (markdown prompt guides loaded dynamically based on focused file extensions). Formally specified the tool-binding matrix and skill manager loading rules in Subsystem 3.
 *   `[ ]` **Two-Layer Memory System Relevance Scoring**
     *   *Objective*: Define the mathematical or keyword-matching heuristic that determines memory relevance scores to prevent token pollution.
 *   `[ ]` **Isolated Subagent Git Worktree Orchestration**
