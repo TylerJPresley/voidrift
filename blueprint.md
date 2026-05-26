@@ -195,19 +195,6 @@ To maintain ultimate clarity, every capability, safeguard, and tool in VoidRift 
         | **`topP`** | `number` | No | All | Nucleus sampling parameter. |
         | **`topK`** | `number` | No | `google`, `anthropic` | Limits top-K token selection bounds. |
         | **`additionalHeaders`** | `Record<string, string>` | No | `anthropic` | Injected into API request headers (e.g., custom cache breakpoints). |
-
-    *   *Reference List of Covered `baseUrl` Configurations*:
-        When utilizing the `openai` provider to route requests to local engines, alternative cloud providers, or unified proxy gateways, the table below provides the standard `baseUrl` endpoint mapping:
-
-        | Target Model Provider | standard `baseUrl` Endpoint | Typical Protocol / Engine |
-        | :--- | :--- | :--- |
-        | **Local Ollama Server** | `http://localhost:11434/v1` | OpenAI compatibility layer on Ollama local port. |
-        | **Local vLLM Engine** | `http://localhost:8000/v1` | Fast local GPU inference runner default port. |
-        | **Local llama.cpp Server** | `http://localhost:8080/v1` | CPU/Metal optimized local runner default port. |
-        | **DeepSeek Cloud API** | `https://api.deepseek.com/v1` | Official DeepSeek endpoint (requires custom DeepSeek key). |
-        | **Groq Cloud API** | `https://api.groq.com/openai/v1` | High-speed Groq LPU endpoint (requires Groq key). |
-        | **OpenRouter Gateway** | `https://openrouter.ai/api/v1` | Unified cloud proxy accessing hundreds of open-source models. |
-        | **OpenAI Cloud (Default)** | `https://api.openai.com/v1` | Official OpenAI server endpoint (used if `baseUrl` is omitted). |
     *   *Design Separation of Concerns*: To prevent duplicate metadata setups across workspaces, **all master model configurations (protocols, providers, context limits) and the default tier selections (`flash`, `utility`, `dense`) are declared globally** in the user's global config `~/.config/voidrift/config.json`. Project-level token costs are excluded from tracking, as API providers do not supply cost structures dynamically. The local config at `<proj_root>/.voidrift/models.json` is **strictly optional** and used only when a specific workspace needs to override the default global tier mappings or configuration parameters.
     *   *Specification: Global `~/.config/voidrift/config.json` (Default Setup)*:
         ```json
