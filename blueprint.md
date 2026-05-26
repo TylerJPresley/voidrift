@@ -276,10 +276,22 @@ To maintain ultimate clarity, every capability, safeguard, and tool in VoidRift 
 #### Nested Harness-Driven Tools (Harness-Activated)
 *   **`[CORE]` The Governance-Work Context Partitioner**
     *   *Trigger*: Pre-formats the active prompt payload before every LLM invocation.
-    *   *Action*: Divides the context window into two strictly isolated, logical boundaries:
-        1.  **Governance Layer** (Never compacted): System prompt, active mode prompt, memory index, and active Git snapshot.
-        2.  **Work Layer** (Compactable): Conversational messages and raw tool call results.
-    *   *Outcome*: Guarantees that active instructions and workspace snapshots are never lost or corrupted when the conversation history is summarized.
+    *   *Action*: Compiles and maps the internal active LangGraph state variables directly into two strictly isolated, logical boundaries inside the active prompt context:
+        ```text
+        [Agent State Graph Schema]
+         ├── Governance Partition (Never Compacted)
+         │    ├── activePlan ───► The persistent markdown implementation roadmap.
+         │    ├── focusedFiles ──► The list of active/dirty file paths in the workspace.
+         │    ├── activeMode ────► The security boundary rules (chat, plan, vibe).
+         │    ├── activePersona ─► The persistent system instruction prompt for the active role (Architect/Coder/Auditor).
+         │    ├── activeSkills ──► The dynamically bound tool schemas from the Skill Registry.
+         │    ├── activeMemory ──► The relevant project/global episodic memories retrieved.
+         │    └── gitStatus ─────► The local workspace checkpoint or source control state.
+         └── Work Partition (Compactable)
+              ├── messages ──────► The chronological conversation log of turns and tool results.
+              └── diagnostics ───► The transient syntax/linter compile errors.
+        ```
+    *   *Outcome*: Guarantees that active instructions, workspace snapshots, bound capabilities, and active role identity are never lost or corrupted when the conversation history is summarized.
 *   **`[CORE] The Prompt Cache Optimizer (Prompt Cache Alignment)`**
     *   *Trigger*: Formats the active prompt payload on every conversation turn.
     *   *Action*: Places static prompts, instructions, and workspace layout diagrams at the absolute beginning of the message history (inside the Governance Layer).
