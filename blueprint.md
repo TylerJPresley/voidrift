@@ -280,9 +280,24 @@ To maintain ultimate clarity, every capability, safeguard, and tool in VoidRift 
         | **`Auditor` Node** (Chat/Vibe) | `read_file`, `execute_command` (limited to test/linter runners), `lsp_diagnostics` | **Strict Local Oracle**: Mutation and web search tools are completely unloaded to isolate local test executions. |
 
 *   **`[PLUGIN] The Progressive Disclosure Skill Manager`**
-    *   *Trigger*: Fires when the active file in focus (`focusedFiles`) changes or plan step requirements shift.
-    *   *Action*: Dynamically reads framework-specific markdown guides (residing in `.voidrift/resources/skills/` or local `.voidrift/skills/`) and injects only the relevant technology-specific guidelines into the **activeSkills** slot inside the Governance Partition.
-    *   *Outcome*: Ensures framework-specific best practices (e.g., Next.js layout guidelines, Prisma optimization tips) are loaded dynamically on-demand, preventing the Governance Partition from becoming bloated with irrelevant tech instructions.
+    *   *Trigger*: Fires on session startup (for registry indexing) and on every conversational turn (for dynamic context injection).
+    *   *Action*: Natively implements the **Hybrid Context Anchor Engine** using a zero-maintenance **YAML Frontmatter Auto-Discovery** pattern:
+        *   **YAML Frontmatter Indexing**: On startup, the manager parses the header of all markdown guides in `.voidrift/resources/skills/` and local `.voidrift/skills/` paths to build an in-memory trigger index (mapping file extensions, explicit filenames, and keywords to skills) in under 5ms:
+            ```yaml
+            ---
+            name: NextJS App Router Guidelines
+            description: RSC and App Routing standards
+            triggers:
+              extensions: [".tsx", ".jsx"]
+              files: ["next.config.js"]
+              keywords: ["nextjs", "server component", "layout", "page"]
+            ---
+            ```
+        *   **Hybrid Anchor Resolution**: On every turn, the manager evaluates the active session context:
+            1.  *File Anchors*: Extracts extensions and names of all files currently inside `focusedFiles`.
+            2.  *Task Anchors*: Scans the active step in `activePlan` and the last user input for registered keywords.
+        *   **Governance Partition Injection**: Merges matching skills and injects the curated, relevant markdown guides directly into the **activeSkills** slot inside the Governance Partition.
+    *   *Outcome*: Ensures framework-specific guidelines (e.g., Next.js rendering tips, Prisma indexing rules) are loaded dynamically and exactly when needed, keeping the baseline Governance Partition lightweight, cheap, and extremely precise.
 
 ---
 
