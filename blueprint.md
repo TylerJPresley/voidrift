@@ -383,12 +383,97 @@ Communication across these feature modules is governed by six high-level lifecyc
 
 ---
 
-## 8. High-Level Planning Roadmap (Future Research & Design)
+## 8. LangGraph Multi-Agent State-Graph Schema
+
+VoidRift's agent execution cycle is governed by a **LangGraph StateGraph** — a directed, conditional graph of three specialized node personas sharing a single typed state object. Each node reads from and writes to that shared state; conditional edges route execution forward based on state slot values.
+
+### 8.1 Shared State Schema
+
+The state object is the single source of truth passed between all nodes:
+
+| Slot | Type | Owner | Description |
+|---|---|---|---|
+| `activePlan` | `string \| null` | Architect (write) | Step-by-step markdown implementation plan. Null until the Architect node populates it. |
+| `focusedFiles` | `string[]` | Engineer (write) | Absolute paths of files currently under active edit or review. |
+| `diagnostics` | `string \| null` | Auditor (write) | Raw compiler/linter output captured after Engineer execution. |
+| `routingFlag` | `Pass \| Rework \| null` | Auditor (write) | Routing decision produced by the Auditor. Null during Architect and Engineer phases. |
+| `messages` | `BaseMessage[]` | All nodes (append) | Chronological conversation log. All nodes may append but never delete. |
+| `activeMode` | `chat \| plan \| vibe` | Harness (write) | Active sandbox boundary. Determines which tools each node may invoke. |
+| `activePersona` | `string` | Harness (write) | The system prompt injected into the Governance Partition for the currently active node. |
+
+### 8.2 Node Personas
+
+#### `Architect` — Design & Planning Node
+*Evaluates the operator's intent and produces or revises the implementation plan.*
+
+*   **Responsibilities**: Reads the full request, assesses scope, creates or updates `activePlan` with discrete, auditable steps.
+*   **Allowed Tools**: `read_file`, `glob_files`, `web_search`.
+*   **Prohibited**: `write_file`, `edit_file`, `execute_command`. The Architect cannot touch the file system or shell.
+*   **Exits when**: `activePlan` is written and the node signals completion.
+
+#### `Engineer` — Execution Node
+*Performs the file edits and shell operations required to implement `activePlan`.*
+
+*   **Responsibilities**: Iterates through `activePlan` steps, performs targeted `write_file`/`edit_file` calls, runs build or test commands via `execute_command`, and appends paths to `focusedFiles`.
+*   **Allowed Tools**: `read_file`, `glob_files`, `write_file`, `edit_file`, `execute_command`.
+*   **Prohibited**: Modifying `activePlan`. The Engineer executes the plan; it does not revise it.
+*   **Exits when**: All plan steps for the current turn are executed.
+
+#### `Auditor` — Verification Node
+*Validates Engineer output and produces the routing decision.*
+
+*   **Responsibilities**: Reads `focusedFiles`, runs diagnostics (`execute_command` in read-only/test mode), captures output into `diagnostics`, and sets `routingFlag`.
+*   **Allowed Tools**: `read_file`, `execute_command` (test/lint invocations only).
+*   **Prohibited**: `write_file`, `edit_file`. The Auditor never mutates the workspace.
+*   **Exits when**: `routingFlag` is set to `Pass` or `Rework`.
+
+### 8.3 Conditional Routing Edges
+
+```text
+[USER_INPUT]
+      │
+      ▼
+ ┌─────────────────────────────────────────┐
+ │ Entry Router (Conditional)              │
+ │  activePlan == null OR design-scoped?   │
+ │  ├── YES ──► Architect                  │
+ │  └── NO  ──► Engineer                   │
+ └─────────────────────────────────────────┘
+      │                    │
+      ▼                    ▼
+ [Architect]          [Engineer]
+  writes plan          executes plan
+      │                    │
+      └────────┬───────────┘
+               ▼
+          [Auditor]
+      sets routingFlag
+               │
+    ┌──────────┴──────────┐
+    ▼                     ▼
+routingFlag=Rework   routingFlag=Pass
+    │                     │
+    ▼                     ▼
+[Engineer]             [END]
+(retry with            (emit TURN_COMPLETE)
+ diagnostics injected)
+```
+
+*   **Entry → Architect**: No `activePlan` exists, or the operator's message is design/research-scoped (e.g., in `plan` mode).
+*   **Entry → Engineer**: A valid `activePlan` exists and the operator's message is execution-scoped.
+*   **Engineer → Auditor**: Always. Every execution pass is verified.
+*   **Auditor → Engineer**: `routingFlag = Rework`. Diagnostics are injected into the Work Partition before the retry.
+*   **Auditor → END**: `routingFlag = Pass`. Triggers `TURN_COMPLETE`, serializes state, releases Input Lock.
+
+---
+
+## 9. High-Level Planning Roadmap (Future Research & Design)
 
 The following architectural items represent the core research and high-level design backlog to be addressed in subsequent collaborative sessions.
 
-*   `[ ]` **LangGraph Multi-Agent State-Graph Schema Design**
-    *   *Objective*: Define the exact node structures (Architect, Coder, Auditor), the shared state schema (the variables passed between nodes), and the conditional edges governing the workflow cycle.
+*   `[x]` **LangGraph Multi-Agent State-Graph Schema Design**
+    *   *Objective*: Define the exact node structures (Architect, Engineer, Auditor), the shared state schema (the variables passed between nodes), and the conditional edges governing the workflow cycle.
+    *   *Status*: Complete. See Section 8.
 *   `[ ]` **Dynamic Model Routing & Task Classification Heuristics**
     *   *Objective*: Research semantic routing standards and map out the exact trigger rules, cost-benefit thresholds, and context-preservation mechanics when escalating between the Flash, Utility, and Dense models.
 *   `[ ]` **Progressive Disclosure Skill System & Tool Binding**
