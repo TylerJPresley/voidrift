@@ -38,19 +38,69 @@ This index provides a compact, high-level map of the entire harness feature set,
 
 ---
 
-## 2. How it Works: The Data Flow (Human-Readable Overview)
+## 2. Architectural Pipeline & Layer Interaction
 
-When you run VoidRift, a single execution loop coordinates your terminal, the AI model, and your filesystem. Here is exactly what happens in plain developer terms when you type a message:
+VoidRift organizes its execution pipeline into six distinct, modular layers. Instead of forcing a monolithic prompt or single execution loop, the harness coordinates operator interaction, multi-agent scheduling, context recycling, safe local operations, and physical model connectivity:
 
-1. **You type a message** in the React Ink terminal.
-2. **LangChain packages the message** alongside your conversational history and sends it to the AI model.
-3. **The model streams back a reply**. You see it typing in real-time in your terminal.
-4. **The model decides to run a tool** (e.g., editing a file or running a test).
-5. **Our Permission Gate intercepts the tool call** before it executes.
-6. **You see a prompt in the terminal** asking for approval.
-7. **If you approve**, the tool executes on your machine, the harness captures the output, strips out the junk (like ANSI colors), and feeds the clean text back to the model.
-8. **The model continues thinking** and responding until it's finished.
-9. **The harness saves the entire chat log** to a local JSON file so you never lose your history.
+```text
+    ┌─────────────────────────────────────────────────────────────────────────┐
+    │                       1. OPERATOR INTERFACE (TUI)                       │
+    │  User Input (TAB Mode Swap) ◄──► Live Streams, Stats, Theme Engine      │
+    └────────────────────────────────────┬────────────────────────────────────┘
+                                         │ USER_INPUT Event
+                                         ▼
+    ┌─────────────────────────────────────────────────────────────────────────┐
+    │                  2. MULTI-AGENT ORCHESTRATION (LangGraph)               │
+    │  [Active State Graph] ──► Entry Router splits:                          │
+    │    ├── Direct Chat (Bypass)                                             │
+    │    └── Active Task: [Architect Agent] ──► [Engineer] ──► [Auditor]      │
+    │  *Custom Agents* dynamically loaded from Global JSON Config.            │
+    └────────────────────────────────────┬────────────────────────────────────┘
+                                         │ Sets Node, Persona, & Allowed Tools
+                                         ▼
+    ┌─────────────────────────────────────────────────────────────────────────┐
+    │             3. PROGRESSIVE DISCLOSURE & CONTEXT PIPELINE                │
+    │  [Three-Partition Context Manager] formats payload dynamically:          │
+    │                                                                         │
+    │  a) GOVERNANCE PARTITION (Immutable Rules & Guidelines)                 │
+    │     ├── activePersona (Current active agent prompt instructions)        │
+    │     └── activeSkills (YAML Frontmatter auto-discovered framework guides)│
+    │                                                                         │
+    │  b) WORKSPACE PARTITION (Semi-Dynamic Task Context)                     │
+    │     ├── activePlan (Markdown implementation roadmap)                    │
+    │     ├── focusedFiles (LRU Cache: max 3 full-text source files)          │
+    │     └── activeMemory (Stage 1 Metadata Index. Stage 2 load/unload)      │
+    │                                                                         │
+    │  c) WORK PARTITION (Volatile History & Errors)                          │
+    │     ├── messages (Episodic history compactor maintains budget)          │
+    │     └── diagnostics (Transient linter outputs - cleared on test Pass)   │
+    └────────────────────────────────────┬────────────────────────────────────┘
+                                         │ Assembles & binds narrow tools
+                                         ▼
+    ┌─────────────────────────────────────────────────────────────────────────┐
+    │              4. DYNAMIC TOOL BINDING & EXECUTION LAYER                  │
+    │  [Progressive Tool Registry] binds narrow schema sets to active node:   │
+    │    ├── plan mode / Architect ──► Read-only tools                        │
+    │    ├── Engineer Agent ─────────► Full Mutate + Execute tools            │
+    │    └── Auditor Agent ──────────► Test execution only (No writes)        │
+    └────────────────────────────────────┬────────────────────────────────────┘
+                                         │ Evaluated actions
+                                         ▼
+    ┌─────────────────────────────────────────────────────────────────────────┐
+    │               5. SOURCE ISOLATION & SCHEDULE MUTEX (Git)                │
+    │  [Worktree Concurrency Engine] schedules subagents via activeLocks:     │
+    │    ├── Disjoint Targets ──► Asynchronous parallel git worktrees         │
+    │    └── Overlapping Targets ──► Synchronous queued sequential execution   │
+    └────────────────────────────────────┬────────────────────────────────────┘
+                                         │ Safe physical executions
+                                         ▼
+    ┌─────────────────────────────────────────────────────────────────────────┐
+    │                  6. MODEL CONNECTIVITY KERNEL (Adapters)                │
+    │  [Three-Tier Router] escalates/routes payload via LangChain:           │
+    │    ├── Flash (Scout/Local) ──► Utility (Collaborator) ──► Dense (Cloud) │
+    │    └── Target Models: Gemini, Claude, Qwen Coder, Ollama Local          │
+    └─────────────────────────────────────────────────────────────────────────┘
+```
 
 ---
 
@@ -447,6 +497,16 @@ This folder resides in the user's home directory. It contains all settings, temp
 *   **Global Episodic Memory (`~/.config/voidrift/memory/`)**: Houses cross-project learned lessons and architectural patterns accumulated over time across all workspaces.
 *   **Global Session Registry Tracker (`~/.config/voidrift/history.json`)**: An index tracking all active workspaces and their historical session IDs, allowing session recovery from any directory path.
 *   **Global Prompt & Persona Resources (`~/.config/voidrift/resources/`)**: Centralized editable prompt files, system instruction templates, and custom mode definitions.
+*   **Global Custom Agents Registry (`~/.config/voidrift/agents/`)**: Centrally stores standard JSON configurations declaring custom, developer-configured agent nodes:
+    ```json
+    {
+      "name": "SecurityExpert",
+      "persona": "resources/personas/security-expert.md",
+      "defaultModelTier": "dense",
+      "allowedTools": ["read_file", "glob_files", "web_search"]
+    }
+    ```
+    Allows developers to dynamically extend the baseline engineering graph with custom analytical or auditing personas (e.g., Security, Performance, or Documentation Specialists) without modifying core engine source code.
 
 ---
 
