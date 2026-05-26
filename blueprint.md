@@ -234,16 +234,16 @@ To maintain ultimate clarity, every capability, safeguard, and tool in VoidRift 
     *   *Action*: Intercepts the execution flow, suspends the active loop, and publishes a confirmation request to the Event Bus, prompting the Operator Interface to render an approval overlay.
     *   *Outcome*: Ensures no destructive changes land on the developer's system without explicit consent.
 *   **`[CORE] The Stateful Mode Cycler`**
-    *   *Trigger*: Fires when the developer presses `TAB` in the Operator Interface.
+    *   *Trigger*: Fires when the developer presses `TAB` in the Operator Interface, cycling forward through the three modes.
     *   *Action*: Cycles the harness through three core execution modes, dynamically swapping system instruction templates and updating tool execution boundaries:
-        
-        | Mode | Role / Prompt Template | Approval Mode | Write Permission Boundary |
-        | :--- | :--- | :--- | :--- |
-        | **`chat`** | Standard conversation | `DEFAULT` (Confirm on writes) | Full workspace access. |
-        | **`plan`** | Principal System Architect | `PLAN` (Read-only) | strictly **disabled** (no writes or bash). |
-        | **`vibe`** | Rapid Prototyping (YOLO) | `YOLO` (Auto-approve) | Full workspace access with no TUI prompts. |
 
-    *   *Outcome*: Provides a highly specialized, task-driven sandbox environment. Each mode switch rebuilds the active prompt context dynamically while preserving the structural session memory.
+        | Mode | Permission Gate | Write Tools | Description |
+        | :--- | :--- | :--- | :--- |
+        | **`plan`** | N/A — writes blocked entirely | ❌ Disabled | Read-only planning sandbox. Architect produces `activePlan`. No file writes or shell execution permitted. Operator must switch to `chat` or `vibe` to execute. |
+        | **`chat`** | ✅ ON — approval prompt before each unsafe call | ✅ Available | Full tool access. The Interactive Permission Gate intercepts `write_file`, `edit_file`, and `execute_command` calls for explicit operator approval before execution. |
+        | **`vibe`** | ❌ OFF — fully autonomous | ✅ Available | Full tool access, no interruptions. All tool calls execute immediately without approval prompts. |
+
+    *   *Outcome*: Provides a highly specialized, task-driven sandbox environment. Each mode switch rebuilds the active prompt context dynamically while preserving the structural session memory. The typical operator workflow is: author a plan in `plan` mode, then switch to `chat` or `vibe` to execute it.
 
 ---
 
@@ -398,7 +398,7 @@ The state object is the single source of truth passed between all nodes:
 | `diagnostics` | `string \| null` | Auditor (write) | Raw compiler/linter output captured after Engineer execution. |
 | `routingFlag` | `Pass \| Rework \| null` | Auditor (write) | Routing decision produced by the Auditor. Null during Architect and Engineer phases. |
 | `messages` | `BaseMessage[]` | All nodes (append) | Chronological conversation log. All nodes may append but never delete. |
-| `activeMode` | `chat \| plan \| vibe` | Harness (write) | Active sandbox boundary. Determines which tools each node may invoke. |
+| `activeMode` | `plan \| chat \| vibe` | Harness (write) | Active sandbox boundary set by `TAB`. `plan` = read-only, no writes; `chat` = full access + permission gate ON; `vibe` = full access + permission gate OFF. |
 | `activePersona` | `string` | Harness (write) | The system prompt injected into the Governance Partition for the currently active node. |
 
 ### 8.2 Node Personas
