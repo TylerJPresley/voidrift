@@ -327,19 +327,43 @@ To maintain ultimate clarity, every capability, safeguard, and tool in VoidRift 
 ### Subsystem 3: The Capability Subsystem (Tools & Safeties)
 *   **The Concept**: A modular registry for local actions. Tools are registered as individual, standalone plugins. The agent loop queries this registry to discover available capabilities and route execution payloads to the appropriate handler.
 
-#### Nested Model-Called Tools (Model-Activated)
-*   **`[CORE] read_file`**: Opens and reads the raw text contents of a specific file in the workspace. (Safe, read-only; auto-approved).
-*   **`[CORE] glob_files`**: Scans the workspace directory tree using standard glob patterns to locate files. (Safe, read-only; auto-approved).
-*   **`[CORE] write_file`**: Creates a new file or completely overwrites an existing file with new content. (Active modification; requires explicit permission).
-*   **`[CORE] edit_file`**: Makes precise, surgical search-and-replace block changes in an existing file without rewriting the whole file. (Active modification; requires explicit permission).
-*   **`[CORE] execute_command` (Bash)**: Executes terminal commands (e.g., test runners, compilers, linters) using a local subprocess. (Active execution; requires explicit permission).
-*   **`[CORE] web_search` & `[CORE] web_fetch`**: Searches the web for external library documentation and fetches public web pages, converting HTML to Markdown on-the-fly. (Safe, read-only; auto-approved).
-*   **`[CORE] connect_mcp_server` (External Bridge)**: Dynamically connects to remote or local Model Context Protocol (MCP) servers to acquire specialized, community-driven tools on-the-fly. (Allows advanced integrations like Slack, GitHub, or Postgres).
-*   **`[CORE] lsp_go_to_definition`**: Resolves the definition location of a code symbol inside the workspace using the local Language Server. (Safe, read-only; auto-approved).
-*   **`[CORE] lsp_find_references`**: Locates all references/occurrences of a symbol across the project using the local Language Server. (Safe, read-only; auto-approved).
-*   **`[CORE] lsp_diagnostics`**: Retrieves active compile-time errors, syntax warnings, and linter diagnostics for a specific file. (Safe, read-only; auto-approved).
-*   **`[CORE] lsp_hover`**: Retrieves type signatures, interface parameters, and documentation hover tips for a symbol. (Safe, read-only; auto-approved).
-*   **`[CORE] spawn_subagent`**: Spawns an isolated background subagent session to perform a dedicated sub-task, passing targeted instructions and a declared array of files it is authorized to edit. (Enforces isolated execution via Git worktrees).
+### 3.1 Unified Action-Space & Tool Registration Guidelines
+
+To maintain absolute security, context efficiency, and safe terminal execution, any tool integrated into VoidRift's core capability registry must adhere to the following four architectural design principles:
+
+1.  **The Safe Primitive Contract (Surgical Mutation Only)**: 
+    *   *filesystem mutations*: Blind overwrites are strictly prohibited. File edits must be designed around a **Surgical Block-Replacement Schema** (providing exact search target blocks and replacement contents) to prevent models from truncating or corrupting codebase files.
+    *   *terminal command execution*: Terminal commands via `execute_command` must run as isolated subprocesses with hardcoded execution timeouts (defaulting to 30,000ms) to prevent hanging background loops from locking the harness.
+2.  **Context Isolation & Token Hygiene (Asset Stripping)**: 
+    *   *ingestion tools*: Tools that read text into the prompt context (specifically `read_file` and `web_fetch`) must actively strip out non-semantic token bloat:
+        *   *Terminal Output*: Must strip all ANSI escape color/formatting codes.
+        *   *Web Payloads*: Must parse HTML directly into plain Markdown, completely stripping heavy CSS styles, script tags, images, and non-semantic headers.
+    *   *truncation guidelines*: Ingest tools must enforce a strict maximum lines cutoff (e.g. keeping first and last 50 lines) to prevent massive compiler dumps or heavy documentation from devouring the context budget.
+3.  **Progressive Handoff (Dynamic Bindings)**: 
+    *   *narrow tool schemas*: Tool schemas must never be bound statically. The harness must dynamically select and bind specific, restricted tool subsets using `BaseChatModel.bind_tools()` matching the active LangGraph node (Architect, Engineer, Auditor) and sandbox mode. This prevents models from experiencing tool selection hallucinations (e.g. the Architect attempting to execute a bash command).
+4.  **The Permission Gate Mandate**: 
+    *   *interception rule*: Any tool classified as an **Active Mutation** (`write_file`, `edit_file`) or **System Execution** (`execute_command`) must programmatically trigger the central Event Bus to suspend the execution loop. The tool cannot execute until the Operator Interface returns an explicit approval signal.
+
+---
+
+### 3.2 Action-Space & Tool Security Mapping Matrix
+
+The table below defines every native capability registered in the harness action space, its operational category, its core responsibility, and its safety profile:
+
+| Tool Name | Action Layer | Core Responsibility | Safety Profile (Approval Gate) |
+| :--- | :--- | :--- | :--- |
+| **`read_file`** | File Operations | Reads raw file text from the workspace. | **Auto-Approved** (Read-Only) |
+| **`glob_files`** | File Operations | Scans the workspace directory using glob patterns. | **Auto-Approved** (Read-Only) |
+| **`write_file`** | File Operations | Creates a new file or overwrites an empty target. | **Gated** (Active Mutation) |
+| **`edit_file`** | File Operations | Performs surgical search-and-replace block edits. | **Gated** (Active Mutation) |
+| **`execute_command`** | System Execution | Runs terminal commands (tests, compilers, linters). | **Gated** (Active Execution) |
+| **`web_search`** | Web Discovery | Queries search engines for library documentation. | **Auto-Approved** (Read-Only) |
+| **`web_fetch`** | Web Discovery | Fetches a URL, stripping HTML and assets to Markdown. | **Auto-Approved** (Read-Only) |
+| **`lsp_definition`** | LSP Navigation | Resolves definition locations using Language Server. | **Auto-Approved** (Read-Only) |
+| **`lsp_references`** | LSP Navigation | Locates symbol references/occurrences across project. | **Auto-Approved** (Read-Only) |
+| **`lsp_hover`** | LSP Navigation | Retrieves type signatures and signatures hover tips. | **Auto-Approved** (Read-Only) |
+| **`spawn_subagent`** | Orchestration | Spawns background subagents in isolated worktrees. | **Gated** (Resource Provisioning) |
+| **`connect_mcp_server`** | External Bridge | Connects dynamically to local/remote MCP servers. | **Gated** (External Integration) |
 
 #### Nested Harness-Driven Tools (Harness-Activated)
 *   **`[CORE]` The Git Safeguard (Source Control Guard)**
