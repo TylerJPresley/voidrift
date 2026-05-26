@@ -153,14 +153,17 @@ To maintain ultimate clarity, every capability, safeguard, and tool in VoidRift 
     *   *Trigger*: Fires automatically once during process startup.
     *   *Action*: Locates and reads `.voidrift/models.json` or `~/.config/voidrift/models.json`, resolves environment variables nested inside API keys, and registers them.
     *   *Outcome*: Zero-config startup for the developer.
+    *   *Rationale*: Decouples workspace settings from user-specific credentials by loading global configurations first, preventing developers from accidentally committing sensitive API keys to public repositories.
 *   **`[CORE]` The Workspace File System Watcher**
     *   *Trigger*: Runs continuously in the background.
     *   *Action*: Monitors local directories for file additions, modifications, or deletions, automatically triggering the vector indexer to keep semantic memory perfectly fresh.
     *   *Outcome*: Ensures the model's codebase knowledge remains synchronized with external editor saves or git branch switches in real-time.
+    *   *Rationale*: Automatically synchronizes changes made by external text editors (like VS Code or Helix) directly into the agent's memory index without requiring manual reload commands.
 *   **`[CORE]` The Harness Boot Clean-up Guard**
     *   *Trigger*: Runs automatically once during application bootstrap.
     *   *Action*: Scans the local `.voidrift/worktrees/` directory. If it detects any orphaned, crashed, or stale Git worktrees left behind by previous process terminations, it programmatically removes them (`git worktree prune`) and purges their corresponding locks from the active session's `activeLocks` state.
     *   *Outcome*: Ensures the harness starts in a clean, predictable state across runs, completely preventing stale file locks or directory leaks.
+    *   *Rationale*: Automatically repairs the workspace state on startup after system crashes or forced exits, preventing dangling temporary files, crashed git worktrees, or locked files from poisoning future runs.
 
 ---
 
@@ -176,6 +179,7 @@ To maintain ultimate clarity, every capability, safeguard, and tool in VoidRift 
 *   **`[CORE] The Unified Model Adapter Factory`**
     *   *Trigger*: Fires automatically during workspace bootstrap or dynamic `/model` selection.
     *   *Action*: Resolves configuration schemas from the local `.voidrift/models.json` or global `~/.config/voidrift/config.json`, matches the active `provider`, instantiates the corresponding LangChain adapter, and registers it as the active executor in the Agent Session.
+    *   *Rationale*: Standardizes all API communications using LangChain's unified classes, ensuring the core agent logic is 100% provider-agnostic and that switching providers (e.g., from local Qwen to Anthropic Claude) requires zero codebase changes.
     *   *Design Separation of Concerns*: To prevent duplicate metadata setups across workspaces, **all master model configurations (protocols, providers, context limits) and the default tier selections (`flash`, `utility`, `dense`) are declared globally** in the user's global config `~/.config/voidrift/config.json`. Project-level token costs are excluded from tracking, as API providers do not supply cost structures dynamically. The local config at `<proj_root>/.voidrift/models.json` is **strictly optional** and used only when a specific workspace needs to override the default global tier mappings or configuration parameters.
     *   *Specification: Global `~/.config/voidrift/config.json` (Default Setup)*:
         ```json
@@ -293,6 +297,7 @@ To maintain ultimate clarity, every capability, safeguard, and tool in VoidRift 
                               results back to UTILITY
             ```
     *   *Outcome*: Drastically reduces execution latency and cuts API costs by reserving expensive cloud compute only for complex design work.
+    *   *Rationale*: Optimizes context usage, execution speeds, and operational costs by delegating simple tasks to cheap local models (Flash) and reserving heavy, expensive cloud intelligence (Dense) only for high-complexity architectural decisions.
 
 ---
 
@@ -318,13 +323,16 @@ To maintain ultimate clarity, every capability, safeguard, and tool in VoidRift 
     *   *Trigger*: Fires automatically right before any model-called file-writing tool (`write_file` or `edit_file`) executes.
     *   *Action*: Runs a local Git status check. If uncommitted changes exist, it warns the developer or creates an automatic stash/temporary checkpoint commit.
     *   *Outcome*: Absolute protection against model-generated code regressions.
+    *   *Rationale*: Establishes an automated "undo" safety net by stashing or checkpointing unstaged work before executing unsafe model writes, protecting the developer's manual contributions from destructive overwrites.
 *   **`[CORE] The Workspace Code-Map Generator (Repo Map)`**
     *   *Trigger*: Fires automatically on session startup.
     *   *Action*: Scans the workspace files and AST structures to compile a highly compressed, token-efficient structure tree (excluding function bodies).
     *   *Outcome*: Gives the model complete high-level project awareness for under 1,000 tokens, avoiding the cost of reading entire source files prematurely.
+    *   *Rationale*: Compiles a structural, AST-based layout of the entire codebase, giving the model top-level repository awareness for under 1,000 tokens and eliminating the prompt bloat of reading raw files prematurely.
 *   **`[CORE] The Progressive Disclosure Tool Registry`**
     *   *Trigger*: Fires whenever a LangGraph node activates or the active sandbox mode changes.
     *   *Action*: Dynamically binds a targeted, minimal subset of tool schemas to the active node persona using LangChain's `.bind_tools()`. This keeps the action-space context footprint under 1.5k tokens and prevents model tool selection hallucinations.
+    *   *Rationale*: Restricts the visible tool schemas on a per-node and per-mode basis, preventing models from hallucinating execution tools during planning phases and keeping tool prompt overhead minimal.
     *   *Persona & Mode Dynamic Tool Binding Matrix*:
         
         | Mode / Active Node | Allowed Tool Schemas | Scope & Boundaries |
@@ -337,6 +345,7 @@ To maintain ultimate clarity, every capability, safeguard, and tool in VoidRift 
 *   **`[PLUGIN] The Progressive Disclosure Skill Manager`**
     *   *Trigger*: Fires on session startup (for registry indexing) and on every conversational turn (for dynamic context injection).
     *   *Action*: Natively implements the **Hybrid Context Anchor Engine** using a zero-maintenance **YAML Frontmatter Auto-Discovery** pattern:
+    *   *Rationale*: Dynamically injects technology guidelines (e.g., React or Prisma standards) based on the specific files in focus, preventing the prompt window from being choked by hundreds of lines of irrelevant documentation.
         *   **YAML Frontmatter Indexing**: On startup, the manager parses the header of all markdown guides in `.voidrift/resources/skills/` and local `.voidrift/skills/` paths to build an in-memory trigger index (mapping file extensions, explicit filenames, and keywords to skills) in under 5ms:
             ```yaml
             ---
@@ -356,6 +365,7 @@ To maintain ultimate clarity, every capability, safeguard, and tool in VoidRift 
 *   **`[CORE] The Git Worktree Orchestration & Concurrency Engine`**
     *   *Trigger*: Fires automatically when a model invokes the `spawn_subagent` tool.
     *   *Action*: Coordinates concurrent and sequential subagent tasks using isolated Git worktrees and a low-level File-Locking Scheduler:
+    *   *Rationale*: Allows concurrent subagent tasks to run in parallel without ever colliding or generating Git merge conflicts by isolating their execution spaces into physical, disjoint file-locked directories.
         *   **activeLocks Tracking**: Tracks a global array of absolute file paths currently assigned to running subagents.
         *   **Asynchronous Parallelism**: If the requested mutation files do *not* overlap with `activeLocks`, the engine programmatically provisions a separate Git worktree (e.g., `git worktree add -b sub-branch-<uuid> .voidrift/worktrees/<uuid>`), locks the subagent's write boundaries to those files, and executes the session asynchronously in the background.
         *   **Synchronous Queueing**: If any requested mutation file overlaps with `activeLocks`, the engine locks execution and queues the subagent to run **synchronously** (sequentially) once the owning subagent merges and releases its locks.
@@ -372,9 +382,11 @@ To maintain ultimate clarity, every capability, safeguard, and tool in VoidRift 
     *   *Trigger*: Fires automatically right before any unsafe model-called tool (`write_file`, `edit_file`, or `execute_command`) runs.
     *   *Action*: Intercepts the execution flow, suspends the active loop, and publishes a confirmation request to the Event Bus, prompting the Operator Interface to render an approval overlay.
     *   *Outcome*: Ensures no destructive changes land on the developer's system without explicit consent.
+    *   *Rationale*: Suspends the central event loop before executing any filesystem mutations or shell commands, ensuring the developer maintains complete control over the safety of their local environment.
 *   **`[CORE] The Stateful Mode Cycler`**
     *   *Trigger*: Fires when the developer presses `TAB` in the Operator Interface, cycling forward through the three modes.
     *   *Action*: Cycles the harness through three core execution modes, dynamically swapping system instruction templates and updating tool execution boundaries:
+    *   *Rationale*: Synchronizes the active user persona and harness security parameters to match the operator's current task phase (`plan` for safe roadmap drafting, `chat` for standard interaction, `vibe` for autonomous coding).
 
         | Mode | Permission Gate | Write Tools | Description |
         | :--- | :--- | :--- | :--- |
@@ -394,17 +406,21 @@ To maintain ultimate clarity, every capability, safeguard, and tool in VoidRift 
     *   *Trigger*: Processes the raw execution output returned by `execute_command` or `web_fetch` before it is returned to the model.
     *   *Action*: Strips out terminal ANSI color codes and progress characters, then truncates large logs (keeping only the first and last 50 lines).
     *   *Outcome*: Prevents verbose test scrolls or heavy HTML code from devouring the model's active context window.
+    *   *Rationale*: Sanitizes and truncates huge terminal dumps or compiler logs before returning them to the model, preventing verbose output scrolls from overwhelming the agent's context window.
 *   **`[CORE]` The Token Budget Watcher**
     *   *Trigger*: Runs in real-time as tokens stream or messages are complete.
     *   *Action*: Measures active session token usage against the model's context window limit and calculates the color-coded state (green, yellow, red) for the footer status bar.
     *   *Outcome*: Visual alert to the developer as the session approaches context limits.
+    *   *Rationale*: Provides real-time visual warnings of prompt-to-context ratios in the TUI footer, preventing unexpected context window overflows or model generation cutoffs.
 *   **`[CORE]` The Input Lock (Concurrency Guard)**
     *   *Trigger*: Fires automatically when a `USER_INPUT` event is published.
     *   *Action*: Visually disables the terminal input prompt and ignores all keyboard keystrokes while the model stream is active.
     *   *Outcome*: Prevents the developer from typing and submitting overlapping messages that would corrupt the session state.
+    *   *Rationale*: Freezes keyboard input during active model streams, preventing race conditions where user text and model responses interleave and corrupt the conversation state.
 *   **`[CORE]` The Audit Logger & Telemetry Monitor (Dual-Layer Logging)**
     *   *Trigger*: Captures events asynchronously throughout the entire execution loop.
     *   *Action*: Orchestrates a rigid **Dual-Layer Logging Specification** dividing application events into two strictly segregated scopes:
+    *   *Rationale*: Separates local developer audit trails from global runtime error telemetry, ensuring codebase mutations are fully trackable locally while engine crashes don't pollute the repository.
         *   **Level 1: Local Project Audit Log (`.voidrift/logs/session-<uuid>.log`)**:
             - *Scope*: Local workspace and model interactions.
             - *Details*: Records chronological conversation turns, exact model prompts/completions (the full raw token payloads), git worktree provisions, file mutations, tool execution results, and linter diagnostics.
@@ -424,6 +440,7 @@ To maintain ultimate clarity, every capability, safeguard, and tool in VoidRift 
 *   **`[CORE] The Three-Partition Context Manager`**
     *   *Trigger*: Pre-formats the active prompt payload before every LLM invocation.
     *   *Action*: Natively implements VoidRift's **Context Progressive Disclosure** directive by dividing the context window into three logical, decoupled partitions, balancing strict safety, workspace awareness, and low-token runtime compactions:
+    *   *Rationale*: Implements Context Progressive Disclosure by separating static governance, dynamic workspace maps, and volatile history, preventing token window exhaustion while keeping rules and file contexts intact.
         ```text
         [Agent State Graph Schema - Three-Partition Context Architecture]
          ├── 1. Governance Partition (Immutable & Rules-Driven)
@@ -459,14 +476,17 @@ To maintain ultimate clarity, every capability, safeguard, and tool in VoidRift 
     *   *Trigger*: Fires automatically when conversation token usage in the **Work Layer** exceeds 75% of context limits.
     *   *Action*: Keeps the most recent 10 turns at full fidelity, while asynchronously condensing older turns inside the Work Layer into a highly compact, bullet-point chronological session recap.
     *   *Outcome*: Prevents the active history token size from growing exponentially over long sessions.
+    *   *Rationale*: Condenses older conversation turns into compact summaries while preserving recent turns, preventing linear history growth from exhausting the remaining token window over long sessions.
 *   **`[CORE]` The Turn Serializer (Session State Writer)**
     *   *Trigger*: Fires automatically on the `TURN_COMPLETE` event.
     *   *Action*: Serializes the active message array and writes it to a local JSON session log file to protect against data loss.
     *   *Outcome*: Automatic transaction-level state saving across process restarts.
+    *   *Rationale*: Automatically saves session state to disk on every turn, protecting conversational progress against process crashes, power failures, or unexpected network dropouts.
 *   **`[CORE]` The Session Exception Guard (Error Handler)**
     *   *Trigger*: Intercepts uncaught exceptions thrown during stream generation or tool execution.
     *   *Action*: Catches LangChain network or API errors, pushes a clean error block to the active conversation history, publishes an `ERROR_OCCURRED` event to notify the TUI, and triggers the Input Lock to release control.
     *   *Outcome*: Prevents process crashes or permanent TUI lockups during dropped API connections.
+    *   *Rationale*: Intercepts API failures, connection losses, and rate limits gracefully, injecting readable error messages into the chat history rather than crashing the TUI process.
 *   **`[PLUGIN] The Two-Layer Memory Registry`**
     *   *Trigger*: Session startup (indexing) and conversational turn complete.
     *   *Action*: Maintains both **Project-level memory** (`.voidrift/memory/`) and **Global memory** (`~/.config/voidrift/memory/`) using a highly disciplined **Two-Stage Progressive Disclosure** lifecycle:
@@ -487,6 +507,7 @@ To maintain ultimate clarity, every capability, safeguard, and tool in VoidRift 
             *   `load_memory(id)`: Fetches the full-text body of a discovered memory and injects it into the `activeMemory` Workspace Partition.
             *   `unload_memory(id)`: Purges the full-text body from the active context immediately.
     *   *Outcome*: Gives the model complete, active control over its own context budget. If the model loads a memory and realizes it is irrelevant to the active task, it unloads it, keeping subsequent turns completely free of context pollution.
+    *   *Rationale*: Implements a two-stage relevance index that lets the model dynamically load and unload context on-demand, preventing token bloat while keeping vital historical learnings discoverable.
 
 ---
 
@@ -649,3 +670,30 @@ The following architectural items represent the core research and high-level des
 *   `[x]` **Isolated Subagent Git Worktree Orchestration**
     *   *Objective*: Design the workspace hand-off and file-conflict resolution mechanics when the primary agent spawns isolated background subagents.
     *   *Status*: Complete. Defined the **Git Worktree Orchestration & Concurrency Engine** using a low-level File-Locking Mutex Scheduler (`activeLocks`). Allows asynchronous execution for disjoint file sets, enforces synchronous execution for overlapping sets, and guarantees conflict-free git merges at handoff.
+
+
+---
+
+## 11. Appendix: Architectural Decision Directory (Defensive Design Pillars)
+
+This directory serves as the definitive reference for the critical architectural decisions that govern VoidRift's codebase. Other developer models implementing or extending this codebase must adhere to the core rationales and intents outlined below to maintain the structural safety, caching efficiency, and absolute decoupling of the Core Harness.
+
+### Pillar 1: Absolute Harness-to-Plugin Decoupling (The Core Purity Principle)
+*   **Decision**: The `@voidrift/core` package contains zero definitions, references, or imports related to Project Management concepts like **Ideas**, **Change Requests (CRs)**, or **Tasks**.
+*   **Rationale**: Hardcoding development workflows into the core model orchestration loop leads to fragile code that cannot easily adapt to alternative engineering methodologies (e.g., Scrum, Kanban, or simple raw chat). Instead, `@voidrift/core` exposes general-purpose model routing, workspace locking, and security mode hooks. `@voidrift/plugin-dev` programmatically registers its custom schemas and routing nodes into the core's central composition root on boot.
+
+### Pillar 2: The Concurrency Guard (File-Level Git Worktree Lock Scheduler)
+*   **Decision**: Spawning subagents defaults to creating isolated physical Git worktrees under `.voidrift/worktrees/<uuid>`, governed by a low-level File-Locking Scheduler (`activeLocks`).
+*   **Rationale**: Multi-agent workspaces risk massive code corruption and destructive write collisions if multiple subagents modify the same directory concurrently. Memory-based execution queues are insufficient because files are physically written to the disk. By physically locking individual file paths, the scheduler permits asynchronous parallel execution for disjoint file sets, forces sequential/synchronous execution for overlapping file sets, and guarantees a 100% conflict-free Git merge loop on subagent handoff.
+
+### Pillar 3: Strict Ascending Volatility Serialization (The Caching Shield)
+*   **Decision**: Prompt context compilation strictly enforces the serialization of the Three-Partition Context from least volatile (least mutable) at the top of the prompt to most volatile (most mutable) at the bottom.
+*   **Rationale**: Modern LLM prompt caching (DeepSeek, OpenAI, Anthropic, Gemini) works by prefix-matching. If a mutating block (such as live file contents under active edit or current system time) is placed *upstream* of a static block (such as core system guidelines or technical skills), a single byte change in the file will invalidate the cache for all subsequent data in the request. Placing the ephemerally changing elements (diagnostics, turns, user input) at the absolute tail guarantees up to 90% cache reuse across turns.
+
+### Pillar 4: Progressive Skill Disclosure (Anti-Prompt Bloat Anchor)
+*   **Decision**: Guidelines and technology guides (e.g., Next.js standards, Prisma indexing rules) are stored in separate markdown files and loaded dynamically into the prompt only when the file watcher detects matching file extensions or active plan keywords.
+*   **Rationale**: Statically loading all coding standards and engineering guides into the base system prompt chokes the LLM's context window, spikes costs, increases generation latency, and triggers tool selection hallucinations. Dynamically anchoring skills to focused files ensures that the model only receives the exact advice it needs for the active task.
+
+### Pillar 5: Segregated Dual-Layer Logging (Workspace Cleanliness & Telemetry Isolation)
+*   **Decision**: Log outputs are split into local project audit logs under `.voidrift/logs/` (containing raw prompt payloads and Git mutations) and global CLI system logs under `~/.config/voidrift/logs/` (containing CLI runtimes and connection crashes).
+*   **Rationale**: Developers need a granular, local audit trail of what the AI model did to their codebase (essential for accountability and git reviews). However, low-level engine exceptions, adapter network timeouts, and theme failures are completely irrelevant to the repository and would pollute the local workspace if written there. Segregating these layers preserves repo cleanliness while providing full diagnostics.
