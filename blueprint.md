@@ -651,26 +651,37 @@ To remain fast and reliable in multi-turn, fluid conversations, VoidRift's entry
        * `Pass` ──► transitions to **END** (publishes `TURN_COMPLETE`, serializes state, and releases the Input Lock).
 ---
 
-## 9. High-Level Planning Roadmap (Future Research & Design)
+## 10. Core Extension Specification (The Development Addons Plugin)
 
-The following architectural items represent the core research and high-level design backlog to be addressed in subsequent collaborative sessions.
+To preserve the absolute purity and decoupling of the Core Harness, all specialized software development tracking features, command workflows, and lifecycle state files are segregated out of `@voidrift/core` and deferred to a dedicated plugin: `@voidrift/plugin-dev`. 
 
-*   `[x]` **LangGraph Multi-Agent State-Graph Schema Design**
-    *   *Objective*: Define the exact node structures (Architect, Engineer, Auditor), the shared state schema (the variables passed between nodes), and the conditional edges governing the workflow cycle.
-    *   *Status*: Complete. See Section 8.
-*   `[x]` **Dynamic Model Routing & Task Classification Heuristics**
-    *   *Objective*: Research semantic routing standards and map out the exact trigger rules, cost-benefit thresholds, and context-preservation mechanics when escalating between the Flash, Utility, and Dense models.
-    *   *Status*: Complete. Defined 3-signal routing stack (Node -> Mode -> Complexity fallback) and the lightweight Direct Chat Path vs Active Task Path entry splits.
-*   `[x]` **Progressive Disclosure Skill System & Tool Binding**
-    *   *Objective*: Research LangChain and LangGraph patterns for dynamically loading and unloading tool schemas and skill files from the active context buffer during runtime based on active graph states.
-    *   *Status*: Complete. Decoupled **Tools** (functional TS execution primitives bound via `.bind_tools()`) from **Skills** (markdown prompt guides loaded dynamically based on focused file extensions). Formally specified the tool-binding matrix and skill manager loading rules in Subsystem 3.
-*   `[x]` **Two-Layer Memory System Relevance Scoring**
-    *   *Objective*: Define the mathematical or keyword-matching heuristic that determines memory relevance scores to prevent token pollution.
-    *   *Status*: Complete. Established the **Discovered -> Disclosed -> Recycled** Memory Sandbox Lifecycle, utilizing YAML Frontmatter metadata anchors for Stage 1 indexing and providing the model `load_memory(id)` and `unload_memory(id)` primitives for Stage 2 dynamic context management.
-*   `[x]` **Isolated Subagent Git Worktree Orchestration**
-    *   *Objective*: Design the workspace hand-off and file-conflict resolution mechanics when the primary agent spawns isolated background subagents.
-    *   *Status*: Complete. Defined the **Git Worktree Orchestration & Concurrency Engine** using a low-level File-Locking Mutex Scheduler (`activeLocks`). Allows asynchronous execution for disjoint file sets, enforces synchronous execution for overlapping sets, and guarantees conflict-free git merges at handoff.
+This section defines the exact **boundary interface** outlining how the Core Harness is designed to be extended by this plugin without ever modifying the core harness codebase.
 
+### 10.1 Core Extension Hooks (The Plugin Interface)
+The Core Harness (`@voidrift/core`) exposes three dynamic registration hooks that the development plugin taps into on bootstrap:
+1.  **Slash Command Hook**: Registers custom development commands (e.g., `/develop`, `/verify`) into the Operator Interface command router.
+2.  **Sandbox Mode Hook**: Registers specialized sandboxed execution modes (e.g., `idea`, `cr`, `dev`) that dynamically override the active `activeMode` slot and inject targeted file-writing constraint rules into the harness tools.
+3.  **Node Injection Hook**: Programmatically registers custom execution nodes and conditional routing edges into the active LangGraph StateGraph on application startup.
+
+### 10.2 Development Workflow Objects (State Schemas)
+The development plugin introduces three highly structured markdown and YAML state files stored inside the repository to track the engineering lifecycle:
+*   **Ideas (`.voidrift/ideas/IDEA-<id>.md`)**: Captures PM-level briefs, feature concepts, and requirements.
+*   **Change Requests / CRs (`.voidrift/changes/CR-<id>.md`)**: Defines the systems architecture plan, file change boundaries, test specs, and dependency trees.
+*   **Tasks (`.voidrift/tasks/TASK-<id>.md`)**: Atomic, single-file code changes linked directly to an active CR.
+
+### 10.3 The Custom Mode Sandboxes
+The development plugin overrides the Core Harness's security boundaries to strictly enforce safety and focus during planning, design, and execution turns:
+*   **`idea` Mode**: System prompt shifts to PM. Writing tools (`write_file`/`edit_file`) are locked dynamically by the harness to *only* allow modifications inside `.voidrift/ideas/`.
+*   **`cr` Mode**: System prompt shifts to Architect. Writing tools are locked strictly to `.voidrift/changes/`.
+*   **`dev` Mode**: System prompt shifts to Engineer. Writing tools are locked strictly to the files declared in the active CR's `focusedFiles` array, preventing the model from wandering or corrupting unrelated files.
+
+### 10.4 The 5-Stage Dev Command Pipeline
+The plugin registers five high-level slash commands to automate the entire engineering lifecycle:
+*   **`/import [path]`**: Scans a codebase directory or single file and generates a clean structural import report.
+*   **`/analyze --idea <id>`**: Spawns a PM agent to evaluate an active Idea, assess architectural fit, and automatically decompose it into CRs and Tasks.
+*   **`/develop --cr <id>`**: Spawns isolated Engineer subagents inside concurrent Git worktrees to implement each Task declared inside a target CR.
+*   **`/verify --cr <id>`**: Spawns Auditor subagents to test the acceptance criteria of a finished CR in the worktree, producing a markdown verification report.
+*   **`/deploy --cr <id>`**: Commits the verified changes, generates a markdown changelog, tags the commit, and executes the deployment scripts.
 
 ---
 
