@@ -327,7 +327,7 @@ To maintain ultimate clarity, every capability, safeguard, and tool in VoidRift 
 ### Subsystem 3: The Capability Subsystem (Tools & Safeties)
 *   **The Concept**: A modular registry for local actions. Tools are registered as individual, standalone plugins. The agent loop queries this registry to discover available capabilities and route execution payloads to the appropriate handler.
 
-### 3.1 Unified Action-Space & Tool Registration Guidelines
+### 4.3.1 Unified Action-Space & Tool Registration Guidelines
 
 To maintain absolute security, context efficiency, and safe terminal execution, any tool integrated into VoidRift's core capability registry must adhere to the following four architectural design principles:
 
@@ -346,7 +346,7 @@ To maintain absolute security, context efficiency, and safe terminal execution, 
 
 ---
 
-### 3.2 Action-Space & Tool Security Mapping Matrix
+### 4.3.2 Action-Space & Tool Security Mapping Matrix
 
 The table below defines every native capability registered in the harness action space, its operational category, its core responsibility, and its safety profile:
 
