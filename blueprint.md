@@ -429,42 +429,20 @@ The state object is the single source of truth passed between all nodes:
 
 ### 8.3 Conditional Routing Edges
 
-```text
-[USER_INPUT]
-      │
-      ▼
- ┌─────────────────────────────────────────┐
- │ Entry Router (Conditional)              │
- │  activePlan == null OR design-scoped?   │
- │  ├── YES ──► Architect                  │
- │  └── NO  ──► Engineer                   │
- └─────────────────────────────────────────┘
-      │                    │
-      ▼                    ▼
- [Architect]          [Engineer]
-  writes plan          executes plan
-      │                    │
-      └────────┬───────────┘
-               ▼
-          [Auditor]
-      sets routingFlag
-               │
-    ┌──────────┴──────────┐
-    ▼                     ▼
-routingFlag=Rework   routingFlag=Pass
-    │                     │
-    ▼                     ▼
-[Engineer]             [END]
-(retry with            (emit TURN_COMPLETE)
- diagnostics injected)
-```
+To remain fast and reliable in multi-turn, fluid conversations, VoidRift's entry router splits incoming turns into either a lightweight **Direct Chat Path** or a structured **Active Task Path** based on active task context:
 
-*   **Entry → Architect**: No `activePlan` exists, or the operator's message is design/research-scoped (e.g., in `plan` mode).
-*   **Entry → Engineer**: A valid `activePlan` exists and the operator's message is execution-scoped.
-*   **Engineer → Auditor**: Always. Every execution pass is verified.
-*   **Auditor → Engineer**: `routingFlag = Rework`. Diagnostics are injected into the Work Partition before the retry.
-*   **Auditor → END**: `routingFlag = Pass`. Triggers `TURN_COMPLETE`, serializes state, releases Input Lock.
-
+1. **Direct Chat Path (Bypass)**: If `activePlan` is null and `activeMode` is not `plan`, the user's message is processed as a standard conversational turn. No node transitions or multi-agent graphs are activated.
+2. **Active Task Path (Orchestrated)**:
+   * **Entry Route**: The user's input determines which node boots up:
+     * *Plan / Design Intent* (or `activePlan` is null & mode is `plan`) ──► **Architect Node**
+     * *Execution Intent* (or continuation of active plan) ──► **Engineer Node**
+     * *Verification / Test Intent* (explicit test instruction) ──► **Auditor Node**
+   * **Execution Loop**:
+     * **Architect** writes/updates the plan ──► exits to operator (in `plan` mode) or hands off to **Engineer**
+     * **Engineer** executes step edits ──► always transitions to **Auditor**
+     * **Auditor** verifies results and sets the `routingFlag`:
+       * `Rework` ──► returns to **Engineer with diagnostics** injected into the Work Partition.
+       * `Pass` ──► transitions to **END** (publishes `TURN_COMPLETE`, serializes state, and releases the Input Lock).
 ---
 
 ## 9. High-Level Planning Roadmap (Future Research & Design)
@@ -474,8 +452,9 @@ The following architectural items represent the core research and high-level des
 *   `[x]` **LangGraph Multi-Agent State-Graph Schema Design**
     *   *Objective*: Define the exact node structures (Architect, Engineer, Auditor), the shared state schema (the variables passed between nodes), and the conditional edges governing the workflow cycle.
     *   *Status*: Complete. See Section 8.
-*   `[ ]` **Dynamic Model Routing & Task Classification Heuristics**
+*   `[x]` **Dynamic Model Routing & Task Classification Heuristics**
     *   *Objective*: Research semantic routing standards and map out the exact trigger rules, cost-benefit thresholds, and context-preservation mechanics when escalating between the Flash, Utility, and Dense models.
+    *   *Status*: Complete. Defined 3-signal routing stack (Node -> Mode -> Complexity fallback) and the lightweight Direct Chat Path vs Active Task Path entry splits.
 *   `[ ]` **Progressive Disclosure Skill System & Tool Binding**
     *   *Objective*: Research LangChain and LangGraph patterns for dynamically loading and unloading tool schemas from the active context buffer during runtime based on active graph states.
 *   `[ ]` **Two-Layer Memory System Relevance Scoring**
