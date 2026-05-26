@@ -257,6 +257,7 @@ To maintain ultimate clarity, every capability, safeguard, and tool in VoidRift 
 *   **`[CORE] lsp_find_references`**: Locates all references/occurrences of a symbol across the project using the local Language Server. (Safe, read-only; auto-approved).
 *   **`[CORE] lsp_diagnostics`**: Retrieves active compile-time errors, syntax warnings, and linter diagnostics for a specific file. (Safe, read-only; auto-approved).
 *   **`[CORE] lsp_hover`**: Retrieves type signatures, interface parameters, and documentation hover tips for a symbol. (Safe, read-only; auto-approved).
+*   **`[CORE] spawn_subagent`**: Spawns an isolated background subagent session to perform a dedicated sub-task, passing targeted instructions and a declared array of files it is authorized to edit. (Enforces isolated execution via Git worktrees).
 
 #### Nested Harness-Driven Tools (Harness-Activated)
 *   **`[CORE]` The Git Safeguard (Source Control Guard)**
@@ -298,6 +299,14 @@ To maintain ultimate clarity, every capability, safeguard, and tool in VoidRift 
             2.  *Task Anchors*: Scans the active step in `activePlan` and the last user input for registered keywords.
         *   **Governance Partition Injection**: Merges matching skills and injects the curated, relevant markdown guides directly into the **activeSkills** slot inside the Governance Partition.
     *   *Outcome*: Ensures framework-specific guidelines (e.g., Next.js rendering tips, Prisma indexing rules) are loaded dynamically and exactly when needed, keeping the baseline Governance Partition lightweight, cheap, and extremely precise.
+*   **`[CORE] The Git Worktree Orchestration & Concurrency Engine`**
+    *   *Trigger*: Fires automatically when a model invokes the `spawn_subagent` tool.
+    *   *Action*: Coordinates concurrent and sequential subagent tasks using isolated Git worktrees and a low-level File-Locking Scheduler:
+        *   **activeLocks Tracking**: Tracks a global array of absolute file paths currently assigned to running subagents.
+        *   **Asynchronous Parallelism**: If the requested mutation files do *not* overlap with `activeLocks`, the engine programmatically provisions a separate Git worktree (e.g., `git worktree add -b sub-branch-<uuid> .voidrift/worktrees/<uuid>`), locks the subagent's write boundaries to those files, and executes the session asynchronously in the background.
+        *   **Synchronous Queueing**: If any requested mutation file overlaps with `activeLocks`, the engine locks execution and queues the subagent to run **synchronously** (sequentially) once the owning subagent merges and releases its locks.
+        *   **Handoff & Merge Loop**: On subagent completion and test verification pass, the engine programmatically tears down the worktree (`git worktree remove`), merges the sub-branch cleanly back into main (guaranteed conflict-free due to the disjoint locks), and purges the file locks.
+    *   *Outcome*: Enforces absolute context isolation across concurrent subagent tasks while mathematically eliminating the risk of Git merge conflicts.
 
 ---
 
@@ -563,5 +572,6 @@ The following architectural items represent the core research and high-level des
 *   `[x]` **Two-Layer Memory System Relevance Scoring**
     *   *Objective*: Define the mathematical or keyword-matching heuristic that determines memory relevance scores to prevent token pollution.
     *   *Status*: Complete. Established the **Discovered -> Disclosed -> Recycled** Memory Sandbox Lifecycle, utilizing YAML Frontmatter metadata anchors for Stage 1 indexing and providing the model `load_memory(id)` and `unload_memory(id)` primitives for Stage 2 dynamic context management.
-*   `[ ]` **Isolated Subagent Git Worktree Orchestration**
+*   `[x]` **Isolated Subagent Git Worktree Orchestration**
     *   *Objective*: Design the workspace hand-off and file-conflict resolution mechanics when the primary agent spawns isolated background subagents.
+    *   *Status*: Complete. Defined the **Git Worktree Orchestration & Concurrency Engine** using a low-level File-Locking Mutex Scheduler (`activeLocks`). Allows asynchronous execution for disjoint file sets, enforces synchronous execution for overlapping sets, and guarantees conflict-free git merges at handoff.
