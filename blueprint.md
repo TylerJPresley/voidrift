@@ -651,31 +651,31 @@ To remain fast and reliable in multi-turn, fluid conversations, VoidRift's entry
        * `Pass` ──► transitions to **END** (publishes `TURN_COMPLETE`, serializes state, and releases the Input Lock).
 ---
 
-## 10. Core Extension Specification (The Development Addons Plugin)
+## 9. Core Extension Specification (The Development Addons Plugin)
 
 To preserve the absolute purity and decoupling of the Core Harness, all specialized software development tracking features, command workflows, and lifecycle state files are segregated out of `@voidrift/core` and deferred to a dedicated plugin: `@voidrift/plugin-dev`. 
 
 This section defines the exact **boundary interface** outlining how the Core Harness is designed to be extended by this plugin without ever modifying the core harness codebase.
 
-### 10.1 Core Extension Hooks (The Plugin Interface)
+### 9.1 Core Extension Hooks (The Plugin Interface)
 The Core Harness (`@voidrift/core`) exposes three dynamic registration hooks that the development plugin taps into on bootstrap:
 1.  **Slash Command Hook**: Registers custom development commands (e.g., `/develop`, `/verify`) into the Operator Interface command router.
 2.  **Sandbox Mode Hook**: Registers specialized sandboxed execution modes (e.g., `idea`, `cr`, `dev`) that dynamically override the active `activeMode` slot and inject targeted file-writing constraint rules into the harness tools.
 3.  **Node Injection Hook**: Programmatically registers custom execution nodes and conditional routing edges into the active LangGraph StateGraph on application startup.
 
-### 10.2 Development Workflow Objects (State Schemas)
+### 9.2 Development Workflow Objects (State Schemas)
 The development plugin introduces three highly structured markdown and YAML state files stored inside the repository to track the engineering lifecycle:
 *   **Ideas (`.voidrift/ideas/IDEA-<id>.md`)**: Captures PM-level briefs, feature concepts, and requirements.
 *   **Change Requests / CRs (`.voidrift/changes/CR-<id>.md`)**: Defines the systems architecture plan, file change boundaries, test specs, and dependency trees.
 *   **Tasks (`.voidrift/tasks/TASK-<id>.md`)**: Atomic, single-file code changes linked directly to an active CR.
 
-### 10.3 The Custom Mode Sandboxes
+### 9.3 The Custom Mode Sandboxes
 The development plugin overrides the Core Harness's security boundaries to strictly enforce safety and focus during planning, design, and execution turns:
 *   **`idea` Mode**: System prompt shifts to PM. Writing tools (`write_file`/`edit_file`) are locked dynamically by the harness to *only* allow modifications inside `.voidrift/ideas/`.
 *   **`cr` Mode**: System prompt shifts to Architect. Writing tools are locked strictly to `.voidrift/changes/`.
 *   **`dev` Mode**: System prompt shifts to Engineer. Writing tools are locked strictly to the files declared in the active CR's `focusedFiles` array, preventing the model from wandering or corrupting unrelated files.
 
-### 10.4 The 5-Stage Dev Command Pipeline
+### 9.4 The 5-Stage Dev Command Pipeline
 The plugin registers five high-level slash commands to automate the entire engineering lifecycle:
 *   **`/import [path]`**: Scans a codebase directory or single file and generates a clean structural import report.
 *   **`/analyze --idea <id>`**: Spawns a PM agent to evaluate an active Idea, assess architectural fit, and automatically decompose it into CRs and Tasks.
@@ -685,7 +685,24 @@ The plugin registers five high-level slash commands to automate the entire engin
 
 ---
 
-## 11. Appendix: Architectural Decision Directory (Defensive Design Pillars)
+## 10. Foundation Implementation TODOs
+
+This section lists the immediate actionable steps to build the VoidRift Core Harness foundation as defined in the Phase 2 build order.
+
+*   `[ ]` **Phase 2.1: Config Bridge**
+    *   *Task*: Create the unified configuration loader resolving `~/.config/voidrift/config.json` with project-level overrides in `.voidrift/models.json`.
+*   `[ ]` **Phase 2.2: Unified Model Adapter Factory**
+    *   *Task*: Implement the `ModelAdapterFactory` in `@voidrift/core` wrapping OpenAI, Anthropic, and Gemini SDKs via standard LangChain clients.
+*   `[ ]` **Phase 2.3: Streaming Adapter Engine**
+    *   *Task*: Build the standard `stream()` generator in the adapters yielding standardized `StreamChunk` events for real-time TUI rendering.
+*   `[ ]` **Phase 2.4: Progressive Tool Registry & Tool Executor**
+    *   *Task*: Implement the safe execution primitives (`read_file`, `edit_file`, `execute_command`) and bind tool subsets dynamically to node personas.
+*   `[ ]` **Phase 2.5: Central Event Bus & Handoff Session Manager**
+    *   *Task*: Wire together the central LangGraph multi-agent orchestration graph (Architect -> Engineer -> Auditor) and serialize state turns to disk on `TURN_COMPLETE`.
+
+---
+
+## Appendix: Architectural Decision Directory (Defensive Design Pillars)
 
 This directory serves as the definitive reference for the critical architectural decisions that govern VoidRift's codebase. Other developer models implementing or extending this codebase must adhere to the core rationales and intents outlined below to maintain the structural safety, caching efficiency, and absolute decoupling of the Core Harness.
 
