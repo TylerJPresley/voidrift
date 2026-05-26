@@ -715,8 +715,7 @@ This directory serves as the definitive reference for the critical architectural
 
 This section lists the immediate actionable steps to build the VoidRift Core Harness foundation as defined in the Phase 2 build order.
 
-*   `[x]` **Phase 2.1: Config Bridge**
-    *   *Task*: Create the unified configuration loader resolving `~/.config/voidrift/config.json` with project-level overrides in `.voidrift/models.json`.
+
 *   `[ ]` **Phase 2.2: Unified Model Adapter Factory**
     *   *Task*: Implement the `ModelAdapterFactory` in `@voidrift/core` wrapping OpenAI, Anthropic, and Gemini SDKs via standard LangChain clients.
 *   `[ ]` **Phase 2.3: Streaming Adapter Engine**
