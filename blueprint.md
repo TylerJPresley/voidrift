@@ -369,6 +369,16 @@ To maintain ultimate clarity, every capability, safeguard, and tool in VoidRift 
               ├── messages ───────► Chronological conversation log of turns and tool results.
               └── diagnostics ────► Transient compile/linter errors captured in-flight.
         ```
+    *   *Unified Context Recycling Policy*:
+        To prevent context window bloat and keep token usage in check, every dynamic context slot implements a strict loading and unloading strategy:
+        
+        | Partition Slot | Disclose / Load Trigger | Unload / Recycle Trigger | Action Driver |
+        | :--- | :--- | :--- | :--- |
+        | **Memory** (`activeMemory`) | Model calls `load_memory(id)` | Model calls `unload_memory(id)` | **Model-Driven** |
+        | **Skills** (`activeSkills`) | Environment File/Keyword Anchor match | Match no longer active | **Harness-Driven (Auto)** |
+        | **Focused Files** | File edited or model focuses it | Exceeds focus buffer limit (max 3) | **Hybrid / LRU Cache** |
+        | **Diagnostics** | Test or compilation build fails | Auditor node sets `Pass` | **Harness-Driven (Auto)** |
+
     *   *Outcome*: Ensures core identities, security sandboxes, and active files are never lost or corrupted during history compactions, while keeping the volatile Work Partition completely isolated and summarizable when token usage exceeds boundaries.
 *   **`[CORE] The Prompt Cache Optimizer (Prompt Cache Alignment)`**
     *   *Trigger*: Formats the active prompt payload on every conversation turn.
@@ -386,10 +396,26 @@ To maintain ultimate clarity, every capability, safeguard, and tool in VoidRift 
     *   *Trigger*: Intercepts uncaught exceptions thrown during stream generation or tool execution.
     *   *Action*: Catches LangChain network or API errors, pushes a clean error block to the active conversation history, publishes an `ERROR_OCCURRED` event to notify the TUI, and triggers the Input Lock to release control.
     *   *Outcome*: Prevents process crashes or permanent TUI lockups during dropped API connections.
-*   **`[CORE]` The Two-Layer Memory Registry**
-    *   *Trigger*: Fires automatically on session startup.
-    *   *Action*: Registers both **Project-level memory** (`.voidrift/memory/`) and **Global memory** (`~/.voidrift/memory/`). Builds a memory index, runs relevance scoring (keyword matching) against conversation context, and injects relevant entries on-demand.
-    *   *Outcome*: Allows the system to accumulate project-specific and cross-project learned lessons without polluting the context window.
+*   **`[PLUGIN] The Two-Layer Memory Registry`**
+    *   *Trigger*: Session startup (indexing) and conversational turn complete.
+    *   *Action*: Maintains both **Project-level memory** (`.voidrift/memory/`) and **Global memory** (`~/.config/voidrift/memory/`) using a highly disciplined **Two-Stage Progressive Disclosure** lifecycle:
+        *   **YAML Frontmatter Indexing**: Memory files are written by the agent as markdown containing context headers:
+            ```yaml
+            ---
+            id: mem-db-pool-01
+            title: Connection Pool Limit in Serverless Environments
+            summary: Limits prisma client pool size to 1 to prevent DB exhaustion.
+            context:
+              extensions: [".ts", ".js"]
+              files: ["schema.prisma", "prisma.ts"]
+              keywords: ["prisma", "pool", "exhaustion", "serverless"]
+            ---
+            ```
+        *   **Stage 1: Discovered (Metadata Indexing)**: On turn start, the registry matches active workspace extensions, focused files, and user keywords against trigger criteria. Matching items are loaded into the Governance Partition ONLY as lightweight metadata structures (ID, title, summary) inside `activeMemoryIndex`, consuming <100 tokens.
+        *   **Stage 2: Disclosed (Model-Controlled Load/Unload)**: The model is provided two native primitive tools:
+            *   `load_memory(id)`: Fetches the full-text body of a discovered memory and injects it into the `activeMemory` Workspace Partition.
+            *   `unload_memory(id)`: Purges the full-text body from the active context immediately.
+    *   *Outcome*: Gives the model complete, active control over its own context budget. If the model loads a memory and realizes it is irrelevant to the active task, it unloads it, keeping subsequent turns completely free of context pollution.
 
 ---
 
@@ -534,7 +560,8 @@ The following architectural items represent the core research and high-level des
 *   `[x]` **Progressive Disclosure Skill System & Tool Binding**
     *   *Objective*: Research LangChain and LangGraph patterns for dynamically loading and unloading tool schemas and skill files from the active context buffer during runtime based on active graph states.
     *   *Status*: Complete. Decoupled **Tools** (functional TS execution primitives bound via `.bind_tools()`) from **Skills** (markdown prompt guides loaded dynamically based on focused file extensions). Formally specified the tool-binding matrix and skill manager loading rules in Subsystem 3.
-*   `[ ]` **Two-Layer Memory System Relevance Scoring**
+*   `[x]` **Two-Layer Memory System Relevance Scoring**
     *   *Objective*: Define the mathematical or keyword-matching heuristic that determines memory relevance scores to prevent token pollution.
+    *   *Status*: Complete. Established the **Discovered -> Disclosed -> Recycled** Memory Sandbox Lifecycle, utilizing YAML Frontmatter metadata anchors for Stage 1 indexing and providing the model `load_memory(id)` and `unload_memory(id)` primitives for Stage 2 dynamic context management.
 *   `[ ]` **Isolated Subagent Git Worktree Orchestration**
     *   *Objective*: Design the workspace hand-off and file-conflict resolution mechanics when the primary agent spawns isolated background subagents.
