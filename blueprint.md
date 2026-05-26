@@ -204,6 +204,10 @@ To maintain ultimate clarity, every capability, safeguard, and tool in VoidRift 
 *   **`[CORE] execute_command` (Bash)**: Executes terminal commands (e.g., test runners, compilers, linters) using a local subprocess. (Active execution; requires explicit permission).
 *   **`[CORE] web_search` & `[CORE] web_fetch`**: Searches the web for external library documentation and fetches public web pages, converting HTML to Markdown on-the-fly. (Safe, read-only; auto-approved).
 *   **`[CORE] connect_mcp_server` (External Bridge)**: Dynamically connects to remote or local Model Context Protocol (MCP) servers to acquire specialized, community-driven tools on-the-fly. (Allows advanced integrations like Slack, GitHub, or Postgres).
+*   **`[CORE] lsp_go_to_definition`**: Resolves the definition location of a code symbol inside the workspace using the local Language Server. (Safe, read-only; auto-approved).
+*   **`[CORE] lsp_find_references`**: Locates all references/occurrences of a symbol across the project using the local Language Server. (Safe, read-only; auto-approved).
+*   **`[CORE] lsp_diagnostics`**: Retrieves active compile-time errors, syntax warnings, and linter diagnostics for a specific file. (Safe, read-only; auto-approved).
+*   **`[CORE] lsp_hover`**: Retrieves type signatures, interface parameters, and documentation hover tips for a symbol. (Safe, read-only; auto-approved).
 
 #### Nested Harness-Driven Tools (Harness-Activated)
 *   **`[CORE]` The Git Safeguard (Source Control Guard)**
