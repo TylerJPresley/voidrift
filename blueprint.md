@@ -186,9 +186,58 @@ To maintain ultimate clarity, every capability, safeguard, and tool in VoidRift 
         | **Utility** | The Collaborator | Mid-tier local MoE | Chat interactions, codebase analysis, code reviews, and medium-sized refactoring tasks. |
         | **Dense** | The Architect | Heavy cloud model | Long-term planning, multi-file architecture design, deep debugging, and complex feature implementation. |
 
+    *   *Task Classification & Tier Routing Logic*:
+        ```text
+        USER_INPUT Arrives
+               │
+               ▼
+        ┌─────────────────────────────────┐
+        │  Signal 1: What node is active? │
+        └─────────────────────────────────┘
+               │
+               ├── Auditor ──────────────────────────────► FLASH
+               │
+               ├── Engineer ──────────────────────────────► UTILITY
+               │
+               └── Architect / No active task yet
+                          │
+                          ▼
+               ┌──────────────────────────┐
+               │ Signal 2: What mode?     │
+               └──────────────────────────┘
+                          │
+                          ├── plan ───────────────────────► DENSE
+                          │
+                          └── chat / vibe
+                                     │
+                                     ▼
+                          ┌───────────────────────────┐
+                          │ Signal 3: How complex?    │
+                          └───────────────────────────┘
+                                     │
+                                     ├── Simple / short ─► FLASH
+                                     ├── Medium ─────────► UTILITY
+                                     └── Large / multi-file► DENSE
+        ```
+
     *   *Escalation & Delegation*:
         *   *Escalation*: If a lower-tier model discovers a task requires wider context or deeper reasoning than its threshold allows, the harness automatically preserves its progress, bundles the context, and escalates the turn upward to a higher tier transparently.
+            ```text
+            FLASH hits limit ──► escalate ──► UTILITY
+            UTILITY hits limit ──► escalate ──► DENSE
+            ```
         *   *Delegation*: The Utility (Collaborator) model acts as the supervisor, dynamically delegating simple, read-only sub-tasks (e.g., "summarize this file") to the Flash (Scout) model.
+            ```text
+            UTILITY running ──► "summarize these 5 files"
+                                      │
+                        ┌─────────────┼─────────────┐
+                        ▼             ▼             ▼
+                     FLASH          FLASH         FLASH
+                   (file 1)        (file 2)      (file 3) ...
+                        └─────────────┼─────────────┘
+                                      ▼
+                              results back to UTILITY
+            ```
     *   *Outcome*: Drastically reduces execution latency and cuts API costs by reserving expensive cloud compute only for complex design work.
 
 ---
