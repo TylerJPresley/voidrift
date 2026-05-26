@@ -731,8 +731,7 @@ This directory serves as the definitive reference for the critical architectural
 This section lists the immediate actionable steps to build the VoidRift Core Harness foundation as defined in the Phase 2 build order.
 
 
-*   `[ ]` **Phase 2.2: Unified Model Adapter Factory**
-    *   *Task*: Implement the `ModelAdapterFactory` in `@voidrift/core` wrapping OpenAI, Anthropic, and Gemini SDKs via standard LangChain clients.
+
 *   `[ ]` **Phase 2.3: Streaming Adapter Engine**
     *   *Task*: Build the standard `stream()` generator in the adapters yielding standardized `StreamChunk` events for real-time TUI rendering.
 *   `[ ]` **Phase 2.4: Progressive Tool Registry & Tool Executor**
