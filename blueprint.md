@@ -268,9 +268,23 @@ To maintain ultimate clarity, every capability, safeguard, and tool in VoidRift 
     *   *Action*: Scans the workspace files and AST structures to compile a highly compressed, token-efficient structure tree (excluding function bodies).
     *   *Outcome*: Gives the model complete high-level project awareness for under 1,000 tokens, avoiding the cost of reading entire source files prematurely.
 *   **`[CORE] The Progressive Disclosure Skill Registry`**
-    *   *Trigger*: Monitors the active execution path or LangGraph workflow node.
-    *   *Action*: Dynamically registers or hides advanced tools from the core's active tool schema based on the current context.
-    *   *Outcome*: Prevents the model's active tool schema from becoming bloated, keeping token usage low and reducing model decision-making errors.
+    *   *Trigger*: Fires whenever a LangGraph node activates or the active sandbox mode changes.
+    *   *Action*: Dynamically binds a highly targeted subset of tool schemas to the model using LangChain's `.bind_tools()` in-flight, preventing context bloat and keeping baseline schemas under 1.5k tokens.
+    *   *Tool Classification Sets*:
+        *   **Research & Design Skills**: `web_search`, `web_fetch`, LSP navigation (`lsp_go_to_definition`, `lsp_find_references`), read-only MCP.
+        *   **Execution Skills**: `execute_command` (limited to test/linter runs for the Auditor), `lsp_diagnostics`.
+        *   **Mutation Skills**: `write_file`, `edit_file`, mutating MCP tools.
+        *   **Workspace Read Skills**: `read_file`, `glob_files`, `lsp_hover`, read-only MCP.
+    *   *Persona & Mode Dynamic Binding Matrix*:
+        
+        | Mode / Active Node | Allowed Skill Sets | Bound Tool Schemas |
+        | :--- | :--- | :--- |
+        | **`plan` mode (Any Node)** | Read & Research only | Workspace Read + Research & Design. All mutators and command execution tools are completely unloaded. |
+        | **`Architect` Node** (Chat/Vibe) | Read & Research only | Workspace Read + Research & Design. Focuses purely on repository exploration and planning. |
+        | **`Engineer` Node** (Chat/Vibe) | All Skills | Workspace Read + Execution + Mutation. Full file editing and shell execution enabled. |
+        | **`Auditor` Node** (Chat/Vibe) | Read & Execute only | Workspace Read + Execution. Unloads mutating tools and web search to act as a strict, low-cost local testing oracle. |
+
+    *   *Outcome*: Eliminates tool selection hallucinations, keeps active tool token footprints extremely small, and prevents nodes from executing out-of-scope actions (like the Auditor accidentally attempting to write code).
 
 ---
 
@@ -504,8 +518,9 @@ The following architectural items represent the core research and high-level des
 *   `[x]` **Dynamic Model Routing & Task Classification Heuristics**
     *   *Objective*: Research semantic routing standards and map out the exact trigger rules, cost-benefit thresholds, and context-preservation mechanics when escalating between the Flash, Utility, and Dense models.
     *   *Status*: Complete. Defined 3-signal routing stack (Node -> Mode -> Complexity fallback) and the lightweight Direct Chat Path vs Active Task Path entry splits.
-*   `[ ]` **Progressive Disclosure Skill System & Tool Binding**
+*   `[x]` **Progressive Disclosure Skill System & Tool Binding**
     *   *Objective*: Research LangChain and LangGraph patterns for dynamically loading and unloading tool schemas from the active context buffer during runtime based on active graph states.
+    *   *Status*: Complete. Established 4-tier skill binding matrix (plan mode / Architect / Engineer / Auditor) dynamically calling LangChain's `.bind_tools()` in-flight. Unloaded mutation and web search tools from the Auditor to act as a strict local oracle.
 *   `[ ]` **Two-Layer Memory System Relevance Scoring**
     *   *Objective*: Define the mathematical or keyword-matching heuristic that determines memory relevance scores to prevent token pollution.
 *   `[ ]` **Isolated Subagent Git Worktree Orchestration**
