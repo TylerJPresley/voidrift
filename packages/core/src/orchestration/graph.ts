@@ -1,0 +1,330 @@
+import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
+import type { BaseMessage } from "@langchain/core/messages";
+import { HumanMessage, AIMessage, SystemMessage, ToolMessage } from "@langchain/core/messages";
+import { readFileSync } from "fs";
+import { join } from "path";
+import type { EventBus } from "../events/bus.js";
+import type { OnChunk } from "../adapters/stream.js";
+import type { ModelResponse } from "../adapters/types.js";
+import { streamModel } from "../adapters/stream.js";
+import { executeNode, getPersona, type GraphState, type RoutingFlag, type NodeResult } from "./nodes.js";
+import { bindTools } from "../tools/binding.js";
+import { readFile, globFiles, writeFile, editFile, executeCommand } from "../tools/executors.js";
+import { summarizeFileWithFlash } from "../codemap/summarizer.js";
+import { IndexCache } from "../codemap/cache.js";
+import type { ContextManager } from "../session/context.js";
+import type { VoidRiftConfig } from "../config/loader.js";
+import type { NodeType, Mode } from "../router/index.js";
+
+// Workspace root — set by the harness on bootstrap
+let _workspaceRoot = process.cwd();
+let _cache: IndexCache | null = null;
+function getCache(root: string): IndexCache {
+  if (!_cache) {
+    _cache = new IndexCache(root);
+  }
+  return _cache;
+}
+export function setWorkspaceRoot(root: string) {
+  _workspaceRoot = root;
+  _cache = null; // Reset cache reference if workspace root changes
+}
+
+const MAX_RETRIES = 3;
+const BACKOFF_BASE_MS = 1000;
+
+async function streamWithRetry(client: BaseChatModel, messages: BaseMessage[], onChunk: OnChunk, signal?: AbortSignal): Promise<ModelResponse> {
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    if (signal?.aborted) return { text: "", toolCalls: [], usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 } };
+    const response = await streamModel(client, messages, onChunk, signal);
+    // If no error or not retryable, return immediately
+    if (response.text || response.toolCalls.length > 0) return response;
+    // Check if the last chunk was a retryable error (indicated by empty response)
+    // The streamModel function already emitted the error chunk; we retry silently
+    if (attempt < MAX_RETRIES) {
+      await new Promise(r => setTimeout(r, BACKOFF_BASE_MS * 2 ** attempt));
+    } else {
+      return response;
+    }
+  }
+  return { text: "", toolCalls: [], usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 } };
+}
+
+async function executeToolCall(toolName: string, argsJson: string, mode: Mode, workspaceRoot: string): Promise<string> {
+  let args: Record<string, any>;
+  try {
+    args = JSON.parse(argsJson);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return `Error: Failed to parse tool arguments: ${msg}`;
+  }
+
+  switch (toolName) {
+    case "read_file":
+      const rf = readFile(workspaceRoot, args.path ?? "", args.offset ?? 0, args.limit ?? 200);
+      return rf.output || rf.error || "";
+    case "glob_files":
+      return globFiles(workspaceRoot, args.pattern ?? "").output;
+    case "write_file":
+      if (mode === "plan") return "Error: write_file blocked in plan mode.";
+      return writeFile(workspaceRoot, args.path ?? "", args.content ?? "").output;
+    case "edit_file":
+      if (mode === "plan") return "Error: edit_file blocked in plan mode.";
+      return editFile(workspaceRoot, args.path ?? "", args.search ?? "", args.replace ?? "").output;
+    case "execute_command":
+      if (mode === "plan") return "Error: execute_command blocked in plan mode.";
+      return executeCommand(workspaceRoot, args.command ?? "", args.timeout).output;
+    default:
+      return `Error: Tool "${toolName}" not implemented.`;
+  }
+}
+
+export interface OrchestrationInput {
+  userMessage: string;
+  client: BaseChatModel;
+  systemPrompt: string;
+  history: BaseMessage[];
+  state: GraphState;
+  onChunk: OnChunk;
+  signal?: AbortSignal;
+  context?: ContextManager;
+  config?: VoidRiftConfig;
+}
+
+export interface OrchestrationResult {
+  response: ModelResponse;
+  stateUpdates: Partial<GraphState>;
+  path: "direct" | "orchestrated";
+}
+
+const MAX_REWORK_CYCLES = 3;
+
+/**
+ * Entry Router.
+ *
+ * Determines whether to use the Direct Chat Path or the Active Task Path:
+ * - Direct Chat: activePlan is null AND mode is not "plan" → simple conversational turn
+ * - Active Task: activePlan exists OR mode is "plan" → orchestrated multi-node graph
+ */
+export function routeEntry(state: GraphState): "direct" | "orchestrated" {
+  if (state.activeMode === "plan") return "orchestrated";
+  if (state.activePlan !== null) return "orchestrated";
+  return "direct";
+}
+
+/**
+ * Determines which node to start with based on intent and state.
+ */
+export function resolveEntryNode(userMessage: string, state: GraphState): NodeType {
+  if (state.activeMode === "plan") return "architect";
+  if (state.activePlan === null) return "architect";
+  if (isVerificationIntent(userMessage)) return "auditor";
+  return "engineer";
+}
+
+/**
+ * Direct Chat Path.
+ * Simple conversational turn — no multi-agent graph, just stream the model.
+ */
+export async function directChat(input: OrchestrationInput, bus?: EventBus): Promise<OrchestrationResult> {
+  const messages: BaseMessage[] = [
+    new SystemMessage(input.systemPrompt),
+    ...input.history,
+    new HumanMessage(input.userMessage),
+  ];
+
+  // Bind tools in OpenAI function-calling format
+  const tools = bindTools(null, input.state.activeMode);
+  const toolDefs = tools.map((t) => ({
+    type: "function" as const,
+    function: {
+      name: t.name,
+      description: t.description,
+      parameters: {
+        type: "object",
+        properties: Object.fromEntries(t.parameters.map((p) => [p.name, { type: p.type, description: p.description }])),
+        required: t.parameters.filter((p) => p.required).map((p) => p.name),
+      },
+    },
+  }));
+
+  let client = input.client;
+  try {
+    if (toolDefs.length > 0) client = input.client.bindTools(toolDefs);
+  } catch {
+    // Model doesn't support tool binding — fall back to raw client
+  }
+
+  // Tool execution loop: stream, execute any tool calls, feed results back
+  let currentMessages = [...messages];
+  let finalResponse: ModelResponse | null = null;
+  const maxToolRounds = 10;
+  const executedCalls = new Set<string>();
+
+  for (let round = 0; round < maxToolRounds; round++) {
+    if (input.signal?.aborted) break;
+    const response = await streamWithRetry(client, currentMessages, input.onChunk, input.signal);
+    finalResponse = response;
+
+    if (input.signal?.aborted) break;
+    if (response.toolCalls.length === 0) break;
+
+    // Deduplicate: if we've already executed this exact call, stop looping
+    const callKey = response.toolCalls.map((tc) => `${tc.name}:${tc.args}`).join("|");
+    if (executedCalls.has(callKey)) break;
+    executedCalls.add(callKey);
+
+    // Add the AI message with tool calls
+    currentMessages.push(new AIMessage({ content: response.text || "", tool_calls: response.toolCalls.map((tc) => ({ id: tc.id, name: tc.name, args: JSON.parse(tc.args || "{}") })) }));
+
+    for (const tc of response.toolCalls) {
+      const args = JSON.parse(tc.args || "{}");
+      bus?.publish("BEFORE_TOOL_EXECUTE", { toolName: tc.name, arguments: args });
+
+      let result: string;
+
+      // Progressive disclosure: read_file without explicit offset → summarize full file
+      if (tc.name === "read_file" && args.offset === undefined && input.context && input.config) {
+        const filePath = args.path;
+        try {
+          const cacheInstance = getCache(_workspaceRoot);
+          const fullContent = readFileSync(join(_workspaceRoot, filePath), "utf-8");
+          const currentHash = cacheInstance.computeHash(fullContent);
+          const cached = cacheInstance.get(filePath, currentHash);
+          const totalLines = fullContent.split("\n").length;
+
+          if (cached) {
+            input.context.focusFile(filePath, cached.summary, cached.totalLines);
+            result = cached.summary;
+          } else {
+            if (totalLines > (input.config.summarizeThreshold ?? 500)) {
+              input.onChunk({ type: "status", message: `Indexing ${filePath} (${totalLines} lines)...` });
+            }
+            const { summary, totalLines: tl } = await summarizeFileWithFlash(filePath, fullContent, input.config);
+            cacheInstance.set(filePath, currentHash, summary, tl);
+            input.context.focusFile(filePath, summary, tl);
+            result = summary;
+          }
+        } catch {
+          result = await executeToolCall(tc.name, tc.args, input.state.activeMode, _workspaceRoot);
+        }
+      } else {
+        result = await executeToolCall(tc.name, tc.args, input.state.activeMode, _workspaceRoot);
+
+        // Track focused files for write/edit and targeted reads
+        if (input.context && input.config && (tc.name === "read_file" || tc.name === "write_file" || tc.name === "edit_file")) {
+          const filePath = args.path;
+          if (filePath) {
+            try {
+              const cacheInstance = getCache(_workspaceRoot);
+              const fullContent = readFileSync(join(_workspaceRoot, filePath), "utf-8");
+              const totalLines = fullContent.split("\n").length;
+              const existing = input.context.context.workspace.focusedFiles.find(f => f.path === filePath);
+              if (existing) {
+                // Update read ranges for targeted reads
+                if (tc.name === "read_file" && args.offset !== undefined) {
+                  const range: [number, number] = [args.offset, args.offset + (args.limit ?? 200)];
+                  input.context.focusFile(filePath, existing.summary, totalLines, range);
+                }
+              } else {
+                // New file focused via write/edit — summarize it
+                const currentHash = cacheInstance.computeHash(fullContent);
+                const cached = cacheInstance.get(filePath, currentHash);
+                if (cached) {
+                  input.context.focusFile(filePath, cached.summary, cached.totalLines);
+                } else {
+                  const { summary, totalLines: tl } = await summarizeFileWithFlash(filePath, fullContent, input.config);
+                  cacheInstance.set(filePath, currentHash, summary, tl);
+                  input.context.focusFile(filePath, summary, tl);
+                }
+              }
+            } catch {}
+          }
+        }
+      }
+
+      bus?.publish("AFTER_TOOL_EXECUTE", { toolName: tc.name, arguments: args, status: result.startsWith("Error:") ? "error" : "success", output: result });
+      currentMessages.push(new ToolMessage({ content: result, tool_call_id: tc.id }));
+    }
+  }
+
+  // If the last response was a tool call (no text), make one final call to get text response
+  if (finalResponse && finalResponse.toolCalls.length > 0 && !finalResponse.text.trim()) {
+    // Add a nudge to get the model to respond with text instead of more tool calls
+    currentMessages.push(new SystemMessage("Based on the tool results above, provide your response to the user. Do not call any more tools."));
+    const textResponse = await streamWithRetry(input.client, currentMessages, input.onChunk, input.signal);
+    finalResponse = textResponse;
+  }
+
+  return { response: finalResponse!, stateUpdates: {}, path: "direct" };
+}
+
+/**
+ * Active Task Path.
+ * Orchestrated execution: Architect → Engineer → Auditor with conditional routing.
+ */
+export async function orchestratedTask(input: OrchestrationInput): Promise<OrchestrationResult> {
+  let currentNode = resolveEntryNode(input.userMessage, input.state);
+  let state = { ...input.state };
+  let lastResponse: ModelResponse | null = null;
+  let reworkCount = 0;
+  const allUpdates: Partial<GraphState> = {};
+
+  while (currentNode !== null && reworkCount < MAX_REWORK_CYCLES) {
+    const persona = getPersona(currentNode);
+    const messages: BaseMessage[] = [
+      new SystemMessage(persona),
+      ...input.history,
+    ];
+
+    // Inject diagnostics for rework cycles
+    if (currentNode === "engineer" && state.diagnostics) {
+      messages.push(new SystemMessage(`--- Rework Required ---\n${state.diagnostics}`));
+    }
+
+    messages.push(new HumanMessage(input.userMessage));
+
+    const result: NodeResult = await executeNode(
+      currentNode,
+      input.client,
+      messages,
+      state,
+      input.onChunk
+    );
+
+    // Apply state updates
+    Object.assign(state, result.stateUpdates);
+    Object.assign(allUpdates, result.stateUpdates);
+    lastResponse = result.response;
+
+    if (result.nextNode === "end") break;
+    if (result.nextNode === "engineer" && currentNode === "auditor") reworkCount++;
+    currentNode = result.nextNode;
+  }
+
+  return {
+    response: lastResponse!,
+    stateUpdates: allUpdates,
+    path: "orchestrated",
+  };
+}
+
+/**
+ * Main orchestration entry point.
+ * Routes to direct chat or orchestrated task based on state.
+ */
+export async function runTurn(input: OrchestrationInput, bus: EventBus): Promise<OrchestrationResult> {
+  const route = routeEntry(input.state);
+
+  const result = route === "direct"
+    ? await directChat(input, bus)
+    : await orchestratedTask(input);
+
+  bus.publish("TURN_COMPLETE", { turnId: `turn-${Date.now()}` });
+  return result;
+}
+
+function isVerificationIntent(message: string): boolean {
+  const patterns = [/\btests?\b/i, /\bverify\b/i, /\blint\b/i, /\bcheck\b/i, /\baudit\b/i];
+  return patterns.some((p) => p.test(message));
+}

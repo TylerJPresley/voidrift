@@ -1,0 +1,114 @@
+import type { CoreRegistry } from "../registry/core.js";
+import type { EventBus } from "../events/bus.js";
+import type { WorktreeEngine } from "../worktree/engine.js";
+import { generateCodeMap } from "../codemap/index.js";
+import { executeCommand } from "../tools/executors.js";
+
+export type PathGuard = (targetPath: string) => boolean;
+
+export interface SandboxMode {
+  name: string;
+  systemPrompt: string;
+  pathGuard: PathGuard;
+}
+
+export interface GraphNodeDef {
+  name: string;
+  persona: string;
+  allowedTools: string[];
+  handler: (args: Record<string, unknown>) => Promise<unknown>;
+}
+
+export interface GraphEdgeDef {
+  source: string;
+  target: string;
+  condition: (state: Record<string, unknown>) => boolean;
+}
+
+/**
+ * Plugin Registration Interface (Section 9.1).
+ *
+ * Exposes hooks for plugins to register commands, modes, nodes, and edges.
+ */
+export class PluginInterface {
+  private sandboxModes = new Map<string, SandboxMode>();
+  private graphNodes = new Map<string, GraphNodeDef>();
+  private graphEdges: GraphEdgeDef[] = [];
+
+  constructor(
+    private registry: CoreRegistry,
+    private bus: EventBus,
+    private worktree: WorktreeEngine,
+    private workspaceRoot: string
+  ) {}
+
+  /** Register a custom slash command. */
+  registerCommand(name: string, description: string, handler: (args: string[]) => Promise<void>): void {
+    this.registry.registerSlashCommand({ name, description, execute: handler });
+  }
+
+  /** Register a sandbox mode with path-guard restrictions. */
+  registerSandboxMode(name: string, systemPrompt: string, pathGuard: PathGuard): void {
+    this.sandboxModes.set(name, { name, systemPrompt, pathGuard });
+    this.registry.registerMode({ name, allowedTools: ["read_file", "glob_files", "write_file", "edit_file"], permissionGate: false });
+  }
+
+  /** Register a custom node in the orchestration graph. */
+  registerGraphNode(name: string, persona: string, allowedTools: string[], handler: (args: Record<string, unknown>) => Promise<unknown>): void {
+    this.graphNodes.set(name, { name, persona, allowedTools, handler });
+  }
+
+  /** Register a custom routing edge between graph nodes. */
+  registerGraphEdge(source: string, target: string, condition: (state: Record<string, unknown>) => boolean): void {
+    this.graphEdges.push({ source, target, condition });
+  }
+
+  /** Subscribe to event bus events. */
+  subscribeEvent(eventType: string, handler: (event: any) => void): () => void {
+    return this.bus.subscribe(eventType as any, handler);
+  }
+
+  /** Check if a path is allowed by the active sandbox mode's guard. */
+  isPathAllowed(modeName: string, targetPath: string): boolean {
+    const mode = this.sandboxModes.get(modeName);
+    if (!mode) return true; // No guard = allowed
+    return mode.pathGuard(targetPath);
+  }
+
+  getMode(name: string): SandboxMode | undefined { return this.sandboxModes.get(name); }
+  getNode(name: string): GraphNodeDef | undefined { return this.graphNodes.get(name); }
+  getEdges(): GraphEdgeDef[] { return this.graphEdges; }
+}
+
+/**
+ * Core Service Interface (Section 9.2).
+ *
+ * Exposes execution primitives for plugins to invoke.
+ */
+export class CoreServices {
+  constructor(
+    private bus: EventBus,
+    private worktree: WorktreeEngine,
+    private workspaceRoot: string
+  ) {}
+
+  /** Provisions a worktree and returns the path. */
+  async spawnSubagent(fileBoundaries: string[], execute: (wtPath: string) => Promise<"success" | "failed">) {
+    return this.worktree.schedule(fileBoundaries, execute);
+  }
+
+  /** Runs a sandboxed command. */
+  executeCommand(cmd: string, cwd?: string, timeout?: number) {
+    return executeCommand(cwd ?? this.workspaceRoot, cmd, timeout);
+  }
+
+  /** Returns the workspace code-map. */
+  getWorkspaceMap(): string {
+    return generateCodeMap(this.workspaceRoot);
+  }
+
+  /** Publishes a custom event. */
+  emitEvent(key: string, payload: Record<string, unknown>): void {
+    this.bus.publish(key as any, payload as any);
+  }
+}

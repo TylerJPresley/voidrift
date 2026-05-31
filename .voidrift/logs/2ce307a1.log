@@ -1,0 +1,6 @@
+{"timestamp":"2026-05-30T21:58:38.293Z","level":"info","source":"model","message":"prompt","data":{"model":"qwen36-35b","messageCount":2,"systemPromptLength":344}}
+{"timestamp":"2026-05-30T21:58:39.921Z","level":"info","source":"session","message":"turn_complete","data":{"turnId":"turn-1780178319921"}}
+{"timestamp":"2026-05-30T21:58:39.938Z","level":"info","source":"model","message":"response","data":{"model":"qwen36-35b","text":"\n\nHello! 👋 How can I help you today? I can assist with code analysis, file exploration, searching for references, and more.","toolCalls":[],"usage":{"promptTokens":930,"completionTokens":61,"totalTokens":991}}}
+{"timestamp":"2026-05-30T22:17:08.227Z","level":"info","source":"model","message":"prompt","data":{"model":"qwen36-35b","messageCount":4,"systemPromptLength":344}}
+{"timestamp":"2026-05-30T22:17:58.264Z","level":"info","source":"session","message":"turn_complete","data":{"turnId":"turn-1780179478264"}}
+{"timestamp":"2026-05-30T22:17:58.267Z","level":"info","source":"model","message":"response","data":{"model":"qwen36-35b","text":"","toolCalls":[],"usage":{"promptTokens":0,"completionTokens":0,"totalTokens":0}}}

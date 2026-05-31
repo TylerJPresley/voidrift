@@ -2,32 +2,8 @@
   "name": "voidrift",
   "version": "0.1.0",
   "private": true,
-  "type": "module",
-  "bin": {
-    "voidrift": "./packages/cli/bin/voidrift.js"
-  },
   "scripts": {
-    "start": "tsx packages/cli/src/app.tsx",
-    "mockup": "tsx mockup/index.tsx",
-    "test": "vitest",
-    "typecheck": "tsc --noEmit -p packages/cli/tsconfig.json"
-  },
-  "dependencies": {
-    "ink": "^5.0.0",
-    "ink-testing-library": "^3.0.0",
-    "ink-text-input": "^6.0.0",
-    "lowlight": "^3.3.0",
-    "react": "^18.2.0"
-  },
-  "devDependencies": {
-    "@types/bun": "^1.1.0",
-    "@types/ink-text-input": "^2.0.5",
-    "@types/react": "^18.2.0",
-    "tsx": "^4.7.0",
-    "vitest": "^1.1.0"
-  },
-  "engines": {
-    "node": ">=18",
-    "bun": ">=1.0"
+    "start": "bun packages/core/src/main.tsx",
+    "test": "bun --cwd packages/core vitest run"
   }
 }

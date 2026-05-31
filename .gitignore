@@ -1,7 +1,4 @@
 node_modules/
 dist/
-_CUR/
-_BAK/
-.voidrift/session.json
-.voidrift/cache/
 *.DS_Store
+mockup/node_modules/

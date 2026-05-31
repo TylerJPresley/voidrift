@@ -1,0 +1,61 @@
+{
+  "sessionId": "68ad0c5c",
+  "turnIndex": 3,
+  "timestamp": 1780229646603,
+  "gitState": {
+    "currentBranch": "unknown",
+    "checkpointSha": "unknown",
+    "isDirty": false
+  },
+  "harnessState": {
+    "activeMode": "chat",
+    "activeLocks": []
+  },
+  "graphState": {
+    "activeNode": "idle",
+    "currentNodeState": {
+      "retryCount": 0,
+      "lastExecutionStatus": "complete"
+    }
+  },
+  "contextSnapshot": {
+    "governance": {
+      "loadedSkills": []
+    },
+    "workspace": {
+      "activePlan": null,
+      "focusedFiles": [
+        {
+          "path": "blueprint.md",
+          "totalLines": 2051,
+          "readRanges": []
+        }
+      ]
+    },
+    "work": {
+      "messages": [
+        {
+          "role": "user",
+          "content": "Hello"
+        },
+        {
+          "role": "assistant",
+          "content": "Hello! How can I help you today? I'm VoidRift, your AI coding assistant. I have access to your workspace and can help with debugging, coding, and project exploration."
+        },
+        {
+          "role": "user",
+          "content": "What's up?"
+        },
+        {
+          "role": "assistant",
+          "content": "Not much! Just hanging out in your workspace, ready to help you build, debug, or explore your codebase. \n\nI've already scanned your project structure and see you're working on a multi-package monorepo (looks like a sophisticated system with an engine, orchestration, and custom tools). \n\nHow can I jump in? Are we debugging something, implementing a new feature, or just exploring the code?"
+        },
+        {
+          "role": "user",
+          "content": "Load blueprint"
+        }
+      ],
+      "diagnostics": null
+    }
+  }
+}
