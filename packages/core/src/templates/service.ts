@@ -58,41 +58,70 @@ export interface ValidationDiagnostic {
  * - Context enrichment with session telemetry
  */
 export class TemplateService {
-  private registry = new Map<string, TemplateEntry>();
+  private registry = new Map<string, TemplateEntry[]>();
+  private activePlugins: string[] = [];
 
-  constructor(private workspaceRoot: string) {
+  constructor(private workspaceRoot: string, activePlugins?: string[]) {
+    this.activePlugins = activePlugins ?? [];
     this.registerBuiltins();
   }
 
+  setActivePlugins(plugins: string[]): void {
+    this.activePlugins = plugins;
+  }
+
   register(key: string, type: TemplateType, defaultContent: string, sourcePlugin: string): void {
-    this.registry.set(key, { key, type, defaultContent, sourcePlugin });
+    const entries = this.registry.get(key) ?? [];
+    // Replace if same plugin re-registers, otherwise append
+    const idx = entries.findIndex(e => e.sourcePlugin === sourcePlugin);
+    const entry = { key, type, defaultContent, sourcePlugin };
+    if (idx >= 0) entries[idx] = entry;
+    else entries.push(entry);
+    this.registry.set(key, entries);
   }
 
   resolve(key: string): ResolvedTemplate | null {
-    const entry = this.registry.get(key);
-    if (!entry) return null;
+    const entries = this.registry.get(key);
+    if (!entries || entries.length === 0) return null;
 
-    const subdir = entry.type === "template" ? "templates" : "prompts";
+    const type = entries[0].type;
+    const subdir = type === "template" ? "templates" : "prompts";
 
-    // 1. Workspace override
+    // 1. Workspace override (highest — operator always wins)
     const wsPath = join(this.workspaceRoot, ".voidrift", subdir, ...key.split("/")) + ".md";
     if (existsSync(wsPath)) {
       const raw = readFileSync(wsPath, "utf-8");
       const { frontmatter, body } = parseFrontmatter(raw);
-      return { key, type: entry.type, content: raw, body, frontmatter, source: "workspace", overridePath: wsPath };
+      return { key, type, content: raw, body, frontmatter, source: "workspace", overridePath: wsPath };
     }
 
-    // 2. Global override
+    // 2. Global user override
     const globalPath = join(homedir(), ".config", "voidrift", subdir, ...key.split("/")) + ".md";
     if (existsSync(globalPath)) {
       const raw = readFileSync(globalPath, "utf-8");
       const { frontmatter, body } = parseFrontmatter(raw);
-      return { key, type: entry.type, content: raw, body, frontmatter, source: "global", overridePath: globalPath };
+      return { key, type, content: raw, body, frontmatter, source: "global", overridePath: globalPath };
     }
 
-    // 3. Default
-    const { frontmatter, body } = parseFrontmatter(entry.defaultContent);
-    return { key, type: entry.type, content: entry.defaultContent, body, frontmatter, source: "default" };
+    // 3. Active plugin override (walk active plugins in order, first match wins)
+    for (const plugin of this.activePlugins) {
+      const match = entries.find(e => e.sourcePlugin === plugin);
+      if (match) {
+        const { frontmatter, body } = parseFrontmatter(match.defaultContent);
+        return { key, type, content: match.defaultContent, body, frontmatter, source: "default" };
+      }
+    }
+
+    // 4. Core fallback (lowest priority)
+    const coreEntry = entries.find(e => e.sourcePlugin === "core");
+    if (coreEntry) {
+      const { frontmatter, body } = parseFrontmatter(coreEntry.defaultContent);
+      return { key, type, content: coreEntry.defaultContent, body, frontmatter, source: "default" };
+    }
+
+    // 5. Any registered entry as last resort
+    const { frontmatter, body } = parseFrontmatter(entries[0].defaultContent);
+    return { key, type, content: entries[0].defaultContent, body, frontmatter, source: "default" };
   }
 
   /** Extract agent runtime config from a prompt template's frontmatter */
@@ -141,10 +170,11 @@ export class TemplateService {
     }
 
     // Phase 2: Schema validation per template type
-    const entry = this.registry.get(key);
-    if (!entry) return diagnostics;
+    const entries = this.registry.get(key);
+    if (!entries || entries.length === 0) return diagnostics;
+    const type = entries[0].type;
 
-    if (entry.type === "prompt") {
+    if (type === "prompt") {
       if (frontmatter.tier && !["flash", "utility", "dense"].includes(frontmatter.tier as string)) {
         diagnostics.push({ phase: "schema", key, message: `Invalid tier "${frontmatter.tier}". Must be flash|utility|dense.` });
       }
@@ -159,7 +189,7 @@ export class TemplateService {
       }
     }
 
-    if (entry.type === "template") {
+    if (type === "template") {
       if (frontmatter.depends && !Array.isArray(frontmatter.depends)) {
         diagnostics.push({ phase: "schema", key, message: `depends must be an array` });
       }
@@ -169,17 +199,20 @@ export class TemplateService {
   }
 
   createOverride(key: string, scope: "workspace" | "global"): string | null {
-    const entry = this.registry.get(key);
-    if (!entry) return null;
+    const entries = this.registry.get(key);
+    if (!entries || entries.length === 0) return null;
 
-    const subdir = entry.type === "template" ? "templates" : "prompts";
+    const type = entries[0].type;
+    const subdir = type === "template" ? "templates" : "prompts";
     const base = scope === "workspace"
       ? join(this.workspaceRoot, ".voidrift", subdir)
       : join(homedir(), ".config", "voidrift", subdir);
 
     const filePath = join(base, `${key}.md`);
     mkdirSync(dirname(filePath), { recursive: true });
-    if (!existsSync(filePath)) writeFileSync(filePath, entry.defaultContent);
+    // Use resolved content (respects active plugin priority)
+    const resolved = this.resolve(key);
+    if (!existsSync(filePath)) writeFileSync(filePath, resolved?.content ?? entries[0].defaultContent);
     return filePath;
   }
 
@@ -204,25 +237,41 @@ export class TemplateService {
   }
 
   get all(): TemplateEntry[] {
-    return [...this.registry.values()];
+    const result: TemplateEntry[] = [];
+    for (const entries of this.registry.values()) {
+      // Return the entry that would resolve (active plugin > core)
+      const resolved = this.resolveEntry(entries);
+      if (resolved) result.push(resolved);
+    }
+    return result;
+  }
+
+  private resolveEntry(entries: TemplateEntry[]): TemplateEntry | null {
+    for (const plugin of this.activePlugins) {
+      const match = entries.find(e => e.sourcePlugin === plugin);
+      if (match) return match;
+    }
+    return entries.find(e => e.sourcePlugin === "core") ?? entries[0] ?? null;
   }
 
   private registerBuiltins(): void {
     this.register("dev/task", "template", BUILTIN_DEV_TASK, "core");
     this.register("dev/idea", "template", BUILTIN_DEV_IDEA, "core");
     this.register("dev/cr", "template", BUILTIN_DEV_CR, "core");
-    this.register("prompts/plan-arch", "prompt", BUILTIN_PLAN_ARCH, "core");
-    this.register("prompts/develop-task", "prompt", BUILTIN_DEVELOP_TASK, "core");
-    this.register("prompts/auditor", "prompt", BUILTIN_AUDITOR, "core");
     this.register("prompts/chat", "prompt", BUILTIN_CHAT, "core");
+    this.register("prompts/mode-plan", "prompt", BUILTIN_MODE_PLAN, "core");
+    this.register("prompts/mode-vibe", "prompt", BUILTIN_MODE_VIBE, "core");
+    this.register("prompts/agent-architect", "prompt", BUILTIN_PLAN_ARCH, "core");
+    this.register("prompts/agent-engineer", "prompt", BUILTIN_DEVELOP_TASK, "core");
+    this.register("prompts/agent-auditor", "prompt", BUILTIN_AUDITOR, "core");
     this.register("prompts/compact", "prompt", BUILTIN_COMPACT, "core");
   }
 
   /** Delete an override file, falling back to the next level in the cascade */
   deleteOverride(key: string, scope: "workspace" | "global"): boolean {
-    const entry = this.registry.get(key);
-    if (!entry) return false;
-    const subdir = entry.type === "template" ? "templates" : "prompts";
+    const entries = this.registry.get(key);
+    if (!entries || entries.length === 0) return false;
+    const subdir = entries[0].type === "template" ? "templates" : "prompts";
     const base = scope === "workspace"
       ? join(this.workspaceRoot, ".voidrift", subdir)
       : join(homedir(), ".config", "voidrift", subdir);
@@ -425,12 +474,77 @@ tier: utility
 temperature: 0.2
 allowed_tools: [read_file, glob_files, write_file, edit_file, execute_command]
 ---
-You are a helpful AI coding assistant. You have tools to interact with the user's codebase.
+You are VoidRift, a local-first AI engineering harness running inside the developer's workspace. You operate with direct filesystem access, shell execution, and full codebase awareness.
 
-Use read_file(path) to read files directly by their relative path.
-Use glob_files(pattern) to search for files.
-Use execute_command(command) to run shell commands.
-Always use read_file first if the user mentions a specific filename.
+## Workspace Map
+
+Below your system prompt you will see a Workspace Map — a structural index of the entire project. It shows:
+- 📁 Directories
+- Code files with exported symbols (functions, classes, types)
+- 📝 Markdown files with heading outlines and line counts
+- ⚙️ Config files with top-level keys and line counts
+
+Use this map to navigate. You already know what exists — don't glob unless searching for something not in the map.
+
+## Tools
+
+- \`read_file(path)\` — Read a file. Large files return a cached summary with line ranges. Use \`read_file(path, offset, limit)\` to read specific sections.
+- \`glob_files(pattern)\` — Search for files by pattern. Use only when the workspace map doesn't show what you need.
+- \`write_file(path, content)\` — Create a new file or overwrite entirely.
+- \`edit_file(path, search, replace)\` — Surgical block replacement. Provide the exact text to find and its replacement.
+- \`execute_command(command)\` — Run shell commands (build, test, lint, git). Timeout: 30s default.
+
+## Progressive Disclosure
+
+You don't need to load entire files. Work in layers:
+1. The workspace map tells you what exists and where.
+2. \`read_file(path)\` gives you a summary with line ranges for large files, or full content for small ones.
+3. \`read_file(path, offset, limit)\` gives you exact lines when you need implementation details.
+
+Only load what you need for the current task.
+
+## Behavior
+
+- Read before claiming. Read before editing.
+- Use edit_file for targeted changes — never rewrite entire files unless creating new ones.
+- Be direct and concise. Provide complete, working solutions.
+- When in chat mode, file writes and command execution require operator approval.
+`;
+
+const BUILTIN_MODE_PLAN = `---
+tier: dense
+temperature: 0.1
+allowed_tools: [read_file, glob_files, web_search, web_fetch]
+---
+You are in PLAN mode. You are a read-only planning sandbox.
+
+Constraints:
+- You CANNOT write files, edit files, or execute commands.
+- You CAN read files, search the workspace, and browse documentation.
+- Your job is to analyze, design, and produce implementation plans.
+
+Output structured plans with:
+1. Clear objective
+2. Files to create or modify (with paths)
+3. Step-by-step implementation tasks
+4. Acceptance criteria
+
+Be precise. Reference specific file paths from the workspace map. Do not implement — only plan.
+`;
+
+const BUILTIN_MODE_VIBE = `---
+tier: utility
+temperature: 0.2
+allowed_tools: [read_file, glob_files, write_file, edit_file, execute_command]
+---
+You are in VIBE mode. Full autonomous execution — no permission gates.
+
+All tool calls execute immediately without operator approval. You have complete workspace control.
+
+Work efficiently:
+- Read the relevant code, implement changes, run tests, and verify.
+- If tests fail, diagnose and fix without waiting for input.
+- Keep going until the task is complete and verified.
 `;
 
 const BUILTIN_COMPACT = `---

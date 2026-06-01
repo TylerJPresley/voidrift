@@ -40,7 +40,7 @@ VoidRift resolves these issues with five defensive architectural paradigms:
 2.  **Three-Partition Context Partitioning**: Segregates context into static *Governance* (immutable guidelines), semi-dynamic *Workspace* (focused files, plan roadmaps), and volatile *Work* (recent chat history, linter errors). Serializing this context from least volatile at the top to most volatile at the tail guarantees **up to 90% prompt cache reuse** across turns.
 3.  **Path-Mutex Concurrency Scheduler**: Spawns concurrent subagents in physically isolated Git worktrees under `<workspace>/.voidrift/worktrees/<uuid>`. The engine matches requested targets against a persistent lock ledger (`locks.json`). Disjoint changes run in parallel; overlapping targets queue sequentially in a persistent FIFO `lock_queue.json`, guaranteeing a **100% conflict-free Git merge loop** upon verification.
 4.  **Asynchronous Promise Gating**: Suspends dangerous operations (like file writes and shell execution) using native JavaScript Promises. A pending tool yields execution back to Node's microtask queue, allowing the TUI to remain responsive while waiting for the developer's keyboard confirmation.
-5.  **Dynamic Progressive Disclosure**: Uses an in-memory TF-IDF keyword relevance index to dynamically load only relevant guidelines (skills) and memory summaries into the prompt based on focused files and keywords, immediately unloading them when the task finishes to keep subsequent turns lightweight.
+5.  **Four-Layer Progressive Content Discovery**: Implements a tiered content awareness pipeline — (1) a **RAG Vector Index** for semantic file discovery across the entire workspace, (2) an **AST Code-Map** for structural code navigation, (3) **Flash Summarization** for content-agnostic file comprehension with line-range indexing, and (4) **Surgical `read_file`** with offset/limit for implementation-level access. Each layer serves a distinct purpose: RAG answers "which files are relevant?", AST answers "what code structures exist?", summarization answers "what does this file do?", and surgical reads provide raw content for editing.
 
 ---
 
@@ -57,6 +57,8 @@ This index provides a compact, high-level map of the entire harness feature set,
 3. **Subsystem 3 (Capability Subsystem)**:
    - `[CORE]` The Git Safeguard (Workspace dirty checks and auto-stash/checkpointing).
    - `[CORE]` The Workspace Code-Map Generator (Repo Map) (AST code layout mapping).
+   - `[CORE]` The RAG Vector Indexer (Semantic file discovery across the entire workspace).
+   - `[CORE]` The Flash File Summarizer (Content-agnostic file comprehension with line-range indexing).
    - `[CORE]` The Progressive Disclosure Skill Registry (Dynamically hiding advanced tools to prevent prompt bloat).
    - `[CORE]` The Harness-Level Template & Prompt Service (Unified rendering registry & override cascade for files and system prompts).
 4. **Subsystem 4 (Security Subsystem)**:
@@ -108,7 +110,8 @@ VoidRift organizes its execution pipeline into six distinct, modular layers. Ins
     │                                                                         │
     │  b) WORKSPACE PARTITION (Semi-Dynamic Task Context)                     │
     │     ├── activePlan (Markdown implementation roadmap)                    │
-    │     ├── focusedFiles (LRU Cache: max 3 full-text source files)          │
+    │     ├── suggestedContext (RAG pre-load: top-K relevant file summaries)  │
+    │     ├── focusedFiles (LRU Cache: summaries + read ranges, not raw text) │
     │     └── activeMemory (Stage 1 Metadata Index. Stage 2 load/unload)      │
     │                                                                         │
     │  c) WORK PARTITION (Volatile History & Errors)                          │
@@ -491,6 +494,52 @@ The table below defines every native capability registered in the harness action
     *   *Action*: Scans the workspace files and AST structures to compile a highly compressed, token-efficient structure tree (excluding function bodies).
     *   *Outcome*: Gives the model complete high-level project awareness for under 1,000 tokens, avoiding the cost of reading entire source files prematurely.
     *   *Rationale*: Compiles a structural, AST-based layout of the entire codebase, giving the model top-level repository awareness for under 1,000 tokens and eliminating the prompt bloat of reading raw files prematurely.
+*   **`[CORE] The RAG Vector Indexer`**
+    *   *Trigger*: Runs on session startup (full index build) and incrementally on `WORKSPACE_CHANGED` events from the File System Watcher.
+    *   *Action*: Embeds file summaries into a local vector store for semantic retrieval. Operates as the **discovery layer** — answering "which files are relevant to this query?" across the entire workspace regardless of file type.
+        *   **Indexing Pipeline**:
+            1. On startup, scans all text-based workspace files (respecting `.gitignore`).
+            2. For each file, generates or retrieves a cached Flash summary (see Flash File Summarizer below).
+            3. Embeds the summary text using a local embedding model (e.g., `nomic-embed-text` via Ollama or configurable provider).
+            4. Stores embeddings in a lightweight in-process vector index (HNSW-based, persisted to `<workspace>/.voidrift/cache/rag_index/`).
+        *   **Incremental Updates**: When the File System Watcher detects changes, only the affected files are re-summarized and re-embedded — not the full corpus.
+        *   **Query & Retrieval**:
+            1. On each turn, the harness builds a query from the user's input + active plan step + focused file names.
+            2. Embeds the query and retrieves the top-K (default 5) most semantically similar file summaries.
+            3. Results are injected into the `suggestedContext` slot of the Workspace Partition as lightweight cards (path, relevance score, one-line summary), consuming ~200-400 tokens total.
+        *   **Suggested Context Contract**:
+            ```text
+            --- Suggested Context (RAG pre-load, may not be relevant) ---
+            Based on your query, these files may be relevant:
+
+            1. src/auth/session.ts (score: 0.87) — Manages session tokens, refresh logic
+            2. src/middleware/guard.ts (score: 0.72) — Route protection middleware
+            3. tests/auth/session.test.ts (score: 0.68) — Session token unit tests
+
+            Use read_file() to inspect any of these, or ignore if not relevant.
+            ---
+            ```
+        *   **Eviction Rule**: Suggested context is ephemeral. It is evicted on the next turn unless the model explicitly acts on a suggested file (reads it, edits it, or references it in a response), at which point that file promotes to `focusedFiles`.
+    *   *Outcome*: Content-agnostic semantic discovery across the entire workspace. Works equally well on code, markdown, config, SQL, and prose files.
+    *   *Rationale*: Provides the model with proactive file discovery at scale without requiring manual `glob_files` exploration, while keeping context cost minimal by injecting only lightweight reference cards rather than raw content.
+*   **`[CORE] The Flash File Summarizer`**
+    *   *Trigger*: Fires on-demand when a file enters focus (via `read_file`, `write_file`, `edit_file`) or when the RAG Indexer needs to index a new/changed file.
+    *   *Action*: Sends the full file content to the Flash-tier model in an isolated call, producing a structured natural-language summary with line-range annotations.
+        *   **Summary Output Format**:
+            ```text
+            [src/db/connection.ts] 245 lines (Flash summary)
+            Database connection pool manager. Handles:
+            - L1-30: Config loading and validation
+            - L32-89: Pool initialization with retry logic
+            - L91-180: Query execution with transaction support
+            - L182-245: Graceful shutdown and connection draining
+            Use read_file("src/db/connection.ts", offset, limit) to read specific sections.
+            ```
+        *   **Small File Bypass**: Files under the `summarizeThreshold` (default 500 lines) are pinned in full rather than summarized — the summary would cost more tokens than the raw content.
+        *   **Caching**: Summaries are cached by file path + content hash in `<workspace>/.voidrift/cache/index_cache.json`. Cache invalidates only when file content changes.
+        *   **Content-Agnostic**: Works on any text file — code, markdown, YAML, SQL, prose. The Flash model interprets structure regardless of format.
+    *   *Outcome*: Gives the model intent-aware comprehension of any file with line-range pointers for surgical follow-up reads, without loading raw content into the context window.
+    *   *Rationale*: Bridges the gap between structural awareness (AST) and raw content access (`read_file`), providing the model with enough understanding to decide *where* to read without paying the full token cost of loading entire files.
 *   **`[CORE] The Progressive Disclosure Tool Registry`**
     *   *Trigger*: Fires whenever a LangGraph node activates or the active sandbox mode changes.
     *   *Action*: Dynamically binds a targeted, minimal subset of tool schemas to the active node persona using LangChain's `.bind_tools()`. This keeps the action-space context footprint under 1.5k tokens and prevents model tool selection hallucinations.
@@ -640,7 +689,15 @@ The table below defines every native capability registered in the harness action
             *   *Document Templates* (e.g. `dev/task`, `dev/idea`): Rendered with session telemetry and saved as physical markdown files in the workspace.
             *   *Agent Prompts* (e.g. `prompts/plan-arch`, `prompts/develop-task`): Rendered with session telemetry and dynamically injected into the **Governance Partition** of the prompt context.
         *   **The Registration Registry**: Exposes core registration hooks (`core.templates.register(key, type, defaultContent, sourcePlugin)`) for plugins to declare their packaged defaults on startup.
-        *   **The Override Resolution Cascade**: Resolves asset requests by checking local and global directories before falling back to in-memory code fallbacks:
+        *   **Namespaced Plugin Resolution**: All registered prompts and templates are namespaced by their source plugin (e.g., `core:prompts/chat`, `plugin-dev:prompts/mode-idea`). When multiple plugins register assets for the same logical key (e.g., two plugins both define a `mode-plan` prompt), the **active plugin context** determines which namespace resolves at runtime. This prevents collisions and allows plugins to coexist without overwriting each other's assets.
+            *   *Resolution Priority*:
+                1. Workspace Override: `<workspace>/.voidrift/prompts/{key}.md` (highest — operator always wins).
+                2. Global User Override: `~/.config/voidrift/prompts/{key}.md` (user preference).
+                3. Active Plugin Override: The prompt registered by the currently active plugin for this key.
+                4. Core Default: The prompt registered by `@voidrift/core` (lowest fallback).
+            *   *Plugin Activation*: The workspace config (`<workspace>/.voidrift/config.json`) declares which plugins are active via an `activePlugins` array. When resolving a prompt, the service walks the active plugins in order and returns the first match.
+            *   *Separation Guarantee*: A plugin can **override** a core prompt (replace it), **extend** a core mode (register additional modes that don't exist in core), or **register new agents** (entirely new graph nodes). Two plugins can both define `prompts/mode-plan` — only the one active in the current workspace resolves.
+        *   **The Override Resolution Cascade**: Resolves asset requests by checking local and global directories before falling back to plugin and core defaults:
             *   *For Document Templates*:
                 1. Workspace Override: `<workspace>/.voidrift/templates/{key}.md` (highest priority).
                 2. Global User Override: `~/.config/voidrift/templates/{key}.md` (mid priority).
@@ -795,8 +852,9 @@ The table below defines every native capability registered in the harness action
          │    └── activeSkills ───► Dynamically loaded markdown skill/prompt guides (Next.js, Prisma guidelines) relevant to focused files.
          ├── 2. Workspace Partition (Semi-Dynamic & Context-Driven)
          │    ├── activePlan ─────► The persistent step-by-step markdown implementation roadmap.
-         │    ├── focusedFiles ───► Raw, full-text contents of files currently under edit/review.
-         │    ├── workspaceCodeMap► Ultra-compressed folder tree index (LSP tools resolve details).
+         │    ├── suggestedContext► RAG pre-load: top-K relevant file summaries (heuristic, may not be relevant).
+         │    ├── focusedFiles ───► LRU cache of file summaries with tracked read ranges (not raw full-text).
+         │    ├── workspaceCodeMap► Ultra-compressed AST folder tree index (code files only, structural skeleton).
          │    ├── activeMemory ───► Memory topics directory index (relevance-loaded on-demand).
          │    └── gitStatus ──────► Local workspace checkpoint or active source control state.
          └── 3. Work Partition (Volatile & Compactable)
@@ -810,6 +868,7 @@ The table below defines every native capability registered in the harness action
         | :--- | :--- | :--- | :--- |
         | **Memory** (`activeMemory`) | Model calls `load_memory(id)` | Model calls `unload_memory(id)` | **Model-Driven** |
         | **Skills** (`activeSkills`) | Environment File/Keyword Anchor match | Match no longer active | **Harness-Driven (Auto)** |
+        | **Suggested Context** (`suggestedContext`) | RAG retrieval on turn start | Next turn (unless model acts on it) | **Harness-Driven (Auto)** |
         | **Focused Files** | File edited or model focuses it | Exceeds focus buffer limit (max 3) | **Hybrid / LRU Cache** |
         | **Diagnostics** | Test or compilation build fails | Auditor node sets `Pass` | **Harness-Driven (Auto)** |
 
@@ -1404,6 +1463,12 @@ Plugins utilize the following core-exposed methods to register hooks, extend act
     *   *Parameters*: Unique node name (e.g., `Architect`), agent persona instructions, an array of allowed tool schema names, and the node's async execution handler.
 *   **`registerGraphEdge`**: Wires custom routing edges between graph nodes.
     *   *Parameters*: Source node name, target node name, and a conditional routing function that evaluates session state to determine the transition.
+*   **`registerPrompt`**: Registers a namespaced prompt or template into the Template & Prompt Service.
+    *   *Parameters*: Logical key (e.g., `prompts/mode-plan`, `prompts/agent-pm`), asset type (`"prompt"` or `"template"`), default content string (with YAML frontmatter), and source plugin name (used as namespace).
+    *   *Behavior*: The prompt is stored under `{pluginName}:{key}`. Multiple plugins can register the same logical key without collision. Resolution is determined by the active plugin context at runtime.
+*   **`overridePrompt`**: Declares that this plugin's version of a prompt should take priority over core's default for the same key.
+    *   *Parameters*: Logical key to override (e.g., `prompts/mode-plan`).
+    *   *Behavior*: When this plugin is active, its registered version resolves before core's fallback. The operator can still override both via workspace/global files.
 *   **`subscribeEvent`**: Registers event interceptors on the Event Bus.
     *   *Parameters*: Event type key (e.g., `ON_BEFORE_TOOL`, `ON_TURN_END`), and an event handler callback to inspect or transform context.
 

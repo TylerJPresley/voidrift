@@ -8,6 +8,7 @@ const TMP = join(tmpdir(), "voidrift-codemap-test-" + Date.now());
 
 beforeEach(() => {
   mkdirSync(join(TMP, "src", "utils"), { recursive: true });
+  mkdirSync(join(TMP, "docs"), { recursive: true });
   mkdirSync(join(TMP, "node_modules", "pkg"), { recursive: true });
   mkdirSync(join(TMP, ".git"), { recursive: true });
   writeFileSync(join(TMP, "src", "index.ts"), `
@@ -32,7 +33,9 @@ export interface Config {
 
 type Internal = string;
 `);
-  writeFileSync(join(TMP, "package.json"), "{}");
+  writeFileSync(join(TMP, "package.json"), JSON.stringify({ name: "test", version: "1.0", scripts: { build: "tsc" } }));
+  writeFileSync(join(TMP, "docs", "architecture.md"), `# Architecture\n\n## Subsystem 1\n\nContent here.\n\n## Subsystem 2\n\n### Nested Section\n\nMore content.\n`);
+  writeFileSync(join(TMP, "config.yaml"), `database:\n  host: localhost\nserver:\n  port: 3000\nlogging:\n  level: info\n`);
   writeFileSync(join(TMP, "node_modules", "pkg", "index.js"), "module.exports = {}");
   writeFileSync(join(TMP, ".git", "config"), "");
 });
@@ -78,8 +81,6 @@ describe("Code-Map Generator", () => {
 
   it("does not extract non-exported indented symbols", () => {
     const map = generateCodeMap(TMP);
-    // Internal type is not at column 0 in the test file (it's indented by the template literal)
-    // but "type Internal" at top level should be captured
     expect(map).toContain("type Internal");
   });
 
@@ -91,10 +92,44 @@ describe("Code-Map Generator", () => {
     expect(indexEntry!.symbols).toContain("function bootstrap");
   });
 
-  it("non-code files have no symbols", () => {
+  it("extracts markdown headings", () => {
+    const map = generateCodeMap(TMP);
+    expect(map).toContain("📝");
+    expect(map).toContain("# Architecture");
+    expect(map).toContain("## Subsystem 1");
+    expect(map).toContain("## Subsystem 2");
+    expect(map).toContain("### Nested Section");
+  });
+
+  it("extracts markdown line count", () => {
+    const entries = getCodeMapEntries(TMP);
+    const doc = entries.find((e) => e.path === "docs/architecture.md");
+    expect(doc).toBeDefined();
+    expect(doc!.lines).toBeGreaterThan(0);
+    expect(doc!.symbols).toContain("# Architecture");
+  });
+
+  it("extracts JSON top-level keys", () => {
     const entries = getCodeMapEntries(TMP);
     const pkg = entries.find((e) => e.path === "package.json");
-    expect(pkg?.symbols).toBeUndefined();
+    expect(pkg).toBeDefined();
+    expect(pkg!.symbols).toContain("name");
+    expect(pkg!.symbols).toContain("version");
+    expect(pkg!.symbols).toContain("scripts");
+  });
+
+  it("extracts YAML top-level keys", () => {
+    const entries = getCodeMapEntries(TMP);
+    const cfg = entries.find((e) => e.path === "config.yaml");
+    expect(cfg).toBeDefined();
+    expect(cfg!.symbols).toContain("database");
+    expect(cfg!.symbols).toContain("server");
+    expect(cfg!.symbols).toContain("logging");
+  });
+
+  it("shows data file icon for config files", () => {
+    const map = generateCodeMap(TMP);
+    expect(map).toContain("⚙️");
   });
 
   it("handles empty directories", () => {

@@ -4,11 +4,14 @@ import { join, relative, extname } from "path";
 const IGNORED = new Set(["node_modules", ".git", ".voidrift", "dist", "build", ".next", "coverage"]);
 const MAX_DEPTH = 5;
 const CODE_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".mts", ".mjs", ".py", ".rs", ".go"]);
+const MARKDOWN_EXTENSIONS = new Set([".md", ".mdx"]);
+const DATA_EXTENSIONS = new Set([".json", ".yaml", ".yml", ".toml"]);
 
 export interface CodeMapEntry {
   path: string;
   type: "file" | "dir";
   symbols?: string[];
+  lines?: number;
 }
 
 /**
@@ -54,10 +57,25 @@ function walk(dir: string, root: string, depth: number): CodeMapEntry[] {
       entries.push({ path: relPath + "/", type: "dir" });
       entries.push(...walk(fullPath, root, depth + 1));
     } else {
-      const symbols = CODE_EXTENSIONS.has(extname(item).toLowerCase())
-        ? extractSymbols(fullPath)
-        : undefined;
-      entries.push({ path: relPath, type: "file", symbols });
+      const ext = extname(item).toLowerCase();
+      let symbols: string[] | undefined;
+      let lines: number | undefined;
+
+      if (CODE_EXTENSIONS.has(ext)) {
+        symbols = extractSymbols(fullPath);
+      } else if (MARKDOWN_EXTENSIONS.has(ext)) {
+        const result = extractMarkdownHeadings(fullPath);
+        symbols = result.headings;
+        lines = result.lines;
+      } else if (DATA_EXTENSIONS.has(ext)) {
+        const result = extractDataKeys(fullPath, ext);
+        symbols = result.keys;
+        lines = result.lines;
+      } else {
+        lines = countLines(fullPath);
+      }
+
+      entries.push({ path: relPath, type: "file", symbols, lines });
     }
   }
 
@@ -110,12 +128,84 @@ function extractSymbols(filePath: string): string[] {
   }
 }
 
+/**
+ * Extracts headings from markdown files (## level and above).
+ * Gives the model a table of contents for docs, specs, and prose.
+ */
+function extractMarkdownHeadings(filePath: string): { headings: string[]; lines: number } {
+  try {
+    const content = readFileSync(filePath, "utf-8");
+    const lines = content.split("\n");
+    const headings: string[] = [];
+
+    for (const line of lines) {
+      const match = line.match(/^(#{1,3})\s+(.+)/);
+      if (match) {
+        const depth = match[1].length;
+        const title = match[2].trim();
+        if (title.length > 0 && title.length < 100) {
+          headings.push(`${"#".repeat(depth)} ${title}`);
+        }
+      }
+    }
+
+    return { headings: headings.length > 0 ? headings : [], lines: lines.length };
+  } catch {
+    return { headings: [], lines: 0 };
+  }
+}
+
+/**
+ * Extracts top-level keys from JSON/YAML files.
+ * Gives the model awareness of config structure without loading values.
+ */
+function extractDataKeys(filePath: string, ext: string): { keys: string[]; lines: number } {
+  try {
+    const content = readFileSync(filePath, "utf-8");
+    const lines = content.split("\n");
+    const keys: string[] = [];
+
+    if (ext === ".json") {
+      // Extract top-level keys from JSON
+      const parsed = JSON.parse(content);
+      if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+        keys.push(...Object.keys(parsed).slice(0, 15));
+      }
+    } else {
+      // YAML/TOML: extract non-indented keys
+      for (const line of lines) {
+        const match = line.match(/^([a-zA-Z_][\w-]*):/);
+        if (match) {
+          keys.push(match[1]);
+          if (keys.length >= 15) break;
+        }
+      }
+    }
+
+    return { keys: keys.length > 0 ? keys : [], lines: lines.length };
+  } catch {
+    return { keys: [], lines: 0 };
+  }
+}
+
+function countLines(filePath: string): number {
+  try {
+    const content = readFileSync(filePath, "utf-8");
+    return content.split("\n").length;
+  } catch {
+    return 0;
+  }
+}
+
 function formatTree(entries: CodeMapEntry[]): string {
   return entries
     .map((e) => {
       if (e.type === "dir") return `📁 ${e.path}`;
+      const ext = extname(e.path).toLowerCase();
+      const icon = MARKDOWN_EXTENSIONS.has(ext) ? "📝" : DATA_EXTENSIONS.has(ext) ? "⚙️" : "  ";
+      const lineInfo = e.lines ? ` (${e.lines}L)` : "";
       const symbolStr = e.symbols?.length ? ` [${e.symbols.join(", ")}]` : "";
-      return `   ${e.path}${symbolStr}`;
+      return `${icon} ${e.path}${lineInfo}${symbolStr}`;
     })
     .join("\n");
 }
