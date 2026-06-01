@@ -1,6 +1,7 @@
 import type { CoreRegistry } from "../registry/core.js";
 import type { EventBus } from "../events/bus.js";
 import type { WorktreeEngine } from "../worktree/engine.js";
+import type { TemplateService, TemplateType } from "../templates/service.js";
 import { generateCodeMap } from "../codemap/index.js";
 import { executeCommand } from "../tools/executors.js";
 
@@ -39,7 +40,9 @@ export class PluginInterface {
     private registry: CoreRegistry,
     private bus: EventBus,
     private worktree: WorktreeEngine,
-    private workspaceRoot: string
+    private workspaceRoot: string,
+    private templateService?: TemplateService,
+    private pluginName: string = "plugin"
   ) {}
 
   /** Register a custom slash command. */
@@ -66,6 +69,18 @@ export class PluginInterface {
   /** Subscribe to event bus events. */
   subscribeEvent(eventType: string, handler: (event: any) => void): () => void {
     return this.bus.subscribe(eventType as any, handler);
+  }
+
+  /** Register a namespaced prompt or template into the Template & Prompt Service. */
+  registerPrompt(key: string, type: TemplateType, content: string): void {
+    this.templateService?.register(key, type, content, this.pluginName);
+  }
+
+  /** Declare that this plugin's version of a prompt takes priority over core's default. */
+  overridePrompt(key: string, content: string): void {
+    const resolved = this.templateService?.resolve(key);
+    const type = resolved?.type ?? "prompt";
+    this.templateService?.register(key, type, content, this.pluginName);
   }
 
   /** Check if a path is allowed by the active sandbox mode's guard. */
