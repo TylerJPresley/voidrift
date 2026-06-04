@@ -70,7 +70,7 @@ export async function executeTurn(engine: EngineContext, userMessage: string, ca
     .slice(0, -1) // exclude the current user message (already passed as userMessage)
     .map(m => m.role === "user" ? new HumanMessage(m.content) : new AIMessage(m.content));
 
-  engine.logger.logModelPrompt(resolved.name, history.length + 2, systemPrompt.length);
+  engine.logger.logModelPrompt(resolved.name, compiled);
 
   const result = await engine.guard.run(async () => {
     return runTurn({

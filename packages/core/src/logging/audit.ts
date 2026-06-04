@@ -129,8 +129,8 @@ export class AuditLogger {
   }
 
   /** Log the full prompt sent to the model */
-  logModelPrompt(model: string, messageCount: number, systemPromptLength: number): void {
-    this.local("info", "model", "prompt", { model, messageCount, systemPromptLength });
+  logModelPrompt(model: string, messages: Array<{ role: string; content: string }>): void {
+    this.local("info", "model", "prompt", { model, messageCount: messages.length, messages });
   }
 
   /** Log when a file is focused with its summary */
