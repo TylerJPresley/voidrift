@@ -135,24 +135,47 @@ export function ToolsPanel({ agents, onClose }: { agents: AgentRegistry; onClose
 
 // ─── /model ──────────────────────────────────────────────────────────────────
 
-export function ModelPanel({ config, onAssign, onClose }: { config: VoidRiftConfig; onAssign: (model: string, tier: string) => void; onClose: () => void }) {
+export function ModelPanel({ config, agents, onClose }: { config: VoidRiftConfig; agents: AgentRegistry; onClose: () => void }) {
   const models = Object.keys(config.models);
+  const items = ["auto", ...models];
   const [selected, setSelected] = useState(0);
+
+  const activeAgent = agents.active;
+  const currentTier = activeAgent.modelTier;
+
   useInput((ch, key) => {
     if (key.escape) onClose();
     if (key.upArrow) setSelected((s) => Math.max(0, s - 1));
-    if (key.downArrow) setSelected((s) => Math.min(models.length - 1, s + 1));
-    if (ch === "d") { onAssign(models[selected], "dense"); }
-    if (ch === "u") { onAssign(models[selected], "utility"); }
-    if (ch === "f") { onAssign(models[selected], "flash"); }
+    if (key.downArrow) setSelected((s) => Math.min(items.length - 1, s + 1));
+    if (key.return) {
+      const picked = items[selected];
+      if (picked === "auto") {
+        activeAgent.modelTier = "auto";
+      } else {
+        activeAgent.modelTier = picked as any;
+      }
+      onClose();
+    }
   });
 
   return (
     <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1}>
       <Text bold>Models</Text>
+      <Text dimColor>Active agent: {activeAgent.name} (current: {currentTier})</Text>
       <Text color="#5a6aa8">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
       <Text> </Text>
-      {models.map((name, i) => {
+      {items.map((name, i) => {
+        const isActive = name === currentTier || (name === "auto" && currentTier === "auto");
+        if (name === "auto") {
+          return (
+            <Text key="auto">
+              <Text color={i === selected ? "#4ec9b0" : undefined}>{i === selected ? "▸ " : "  "}</Text>
+              <Text color="#c678dd">auto</Text>
+              <Text dimColor>  (model router decides per turn)</Text>
+              {isActive && <Text color="green"> ✓</Text>}
+            </Text>
+          );
+        }
         const cfg = config.models[name];
         const tiers = Object.entries(config.tiers).filter(([, v]) => v === name).map(([k]) => k[0]);
         const tierTag = tiers.length ? ` [${tiers.join(",")}]` : "";
@@ -162,11 +185,12 @@ export function ModelPanel({ config, onAssign, onClose }: { config: VoidRiftConf
             <Text color="#61afef">{name.padEnd(20)}</Text>
             <Text dimColor>{cfg.protocol}/{cfg.model}</Text>
             <Text color="green">{tierTag}</Text>
+            {isActive && <Text color="green"> ✓</Text>}
           </Text>
         );
       })}
       <Text> </Text>
-      <Text dimColor>  <Text color="#61afef" bold>↑↓</Text> Navigate  <Text color="#61afef" bold>d</Text> Dense  <Text color="#61afef" bold>u</Text> Utility  <Text color="#61afef" bold>f</Text> Flash  <Text color="#61afef" bold>esc</Text> Close</Text>
+      <Text dimColor>  <Text color="#61afef" bold>↑↓</Text> Navigate  <Text color="#61afef" bold>enter</Text> Select  <Text color="#61afef" bold>esc</Text> Close</Text>
     </Box>
   );
 }
