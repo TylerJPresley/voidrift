@@ -1,6 +1,12 @@
 ---
 name: SYSTEMS-ENG
 description: CLI conventions, stdout/stderr separation, POSIX compliance, signal handling, and packaging for systems engineering.
+triggers:
+  extensions: [".sh",".bash"]
+  files: []
+  keywords: ["cli","posix","signal","stdout","stderr","daemon"]
+agents: []
+active: true
 ---
 
 # Domain: Systems Engineering (SYSTEMS-ENG)

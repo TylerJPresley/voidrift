@@ -1,6 +1,12 @@
 ---
 name: RELIABILITY-ENG
 description: Eliminate toil, observability, retry logic, error budgets, and SLO-based reliability engineering principles.
+triggers:
+  extensions: []
+  files: []
+  keywords: ["slo","observability","retry","circuit breaker","monitoring","alerting"]
+agents: []
+active: true
 ---
 
 # Domain: Reliability Engineering (RELIABILITY-ENG)

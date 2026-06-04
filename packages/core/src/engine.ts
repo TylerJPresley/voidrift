@@ -4,7 +4,6 @@
  */
 import type { ContextManager } from "./session/context.js";
 import type { TokenBudgetWatcher } from "./output/budget.js";
-import type { ModeCycler } from "./security/mode-cycler.js";
 import type { ExceptionGuard } from "./session/guard.js";
 import type { StatsTracker } from "./session/stats.js";
 import type { MemoryRegistry } from "./session/memory.js";
@@ -15,12 +14,15 @@ import type { Container } from "./bootstrap/container.js";
 import type { AuditLogger } from "./logging/audit.js";
 import type { WorktreeEngine } from "./worktree/engine.js";
 import type { TaskScheduler } from "./orchestration/scheduler.js";
+import type { AgentRegistry } from "./agents/registry.js";
+import type { PromptRegistry } from "./prompts/registry.js";
 
 export interface EngineContext {
   container: Container;
   context: ContextManager;
   budget: TokenBudgetWatcher;
-  cycler: ModeCycler;
+  agents: AgentRegistry;
+  prompts: PromptRegistry;
   guard: ExceptionGuard;
   stats: StatsTracker;
   memory: MemoryRegistry;

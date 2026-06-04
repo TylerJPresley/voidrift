@@ -1,6 +1,12 @@
 ---
 name: BACKEND-ENG
 description: Backend engineering principles — API design, service boundaries, data flow, error handling, and testing patterns.
+triggers:
+  extensions: [".py",".go",".rs",".java"]
+  files: []
+  keywords: ["api","endpoint","server","backend","database"]
+agents: []
+active: true
 ---
 
 # Domain: Backend Engineering (BACKEND-ENG)

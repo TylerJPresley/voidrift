@@ -2,6 +2,7 @@
   "name": "voidrift",
   "version": "0.1.0",
   "private": true,
+  "workspaces": ["packages/*"],
   "scripts": {
     "start": "bun packages/core/src/main.tsx",
     "test": "bun --cwd packages/core vitest run"

@@ -122,6 +122,43 @@ export const TOOL_SCHEMAS: ToolSchema[] = [
       { name: "uri", type: "string", description: "MCP server URI", required: true },
     ],
   },
+  {
+    name: "run_task_agent",
+    description: "Delegate a background, isolated engineering task to a specialized task agent",
+    actionLayer: "orchestration",
+    safetyProfile: "gated",
+    parameters: [
+      { name: "agentId", type: "string", description: "The ID of the task agent to run", required: true },
+      { name: "instruction", type: "string", description: "Task-specific instruction for the agent", required: true },
+      { name: "files", type: "string[]", description: "Target file paths for worktree isolation", required: false },
+    ],
+  },
+  {
+    name: "read_plan",
+    description: "Read the current active plan from the workspace",
+    actionLayer: "partition",
+    safetyProfile: "auto-approved",
+    parameters: [],
+  },
+  {
+    name: "write_plan",
+    description: "Write or overwrite the active plan",
+    actionLayer: "partition",
+    safetyProfile: "auto-approved",
+    parameters: [
+      { name: "content", type: "string", description: "The full plan content (markdown)", required: true },
+    ],
+  },
+  {
+    name: "update_plan",
+    description: "Update a specific section of the active plan",
+    actionLayer: "partition",
+    safetyProfile: "auto-approved",
+    parameters: [
+      { name: "search", type: "string", description: "Exact text to find in the current plan", required: true },
+      { name: "replace", type: "string", description: "Replacement text", required: true },
+    ],
+  },
 ];
 
 export function getToolSchema(name: string): ToolSchema | undefined {

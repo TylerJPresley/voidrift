@@ -1,6 +1,12 @@
 ---
 name: EMBEDDED-ENG
 description: Embedded systems constraints, real-time requirements, hardware interface patterns, and resource management principles.
+triggers:
+  extensions: [".c",".h",".ino"]
+  files: []
+  keywords: ["embedded","firmware","gpio","interrupt","real-time"]
+agents: []
+active: true
 ---
 
 # Domain: Embedded Engineering (EMBEDDED-ENG)

@@ -2,8 +2,8 @@ import type { CoreRegistry } from "../registry/core.js";
 import type { VoidRiftConfig } from "../config/loader.js";
 import type { ContextManager } from "../session/context.js";
 import type { TokenBudgetWatcher } from "../output/budget.js";
-import type { ModeCycler } from "../security/mode-cycler.js";
-import type { TurnSerializer } from "../session/serializer.js";
+import type { AgentRegistry } from "../agents/registry.js";
+import type { SessionBrain } from "../session/brain.js";
 import type { MemoryRegistry } from "../session/memory.js";
 import type { StatsTracker } from "../session/stats.js";
 import type { SkillManager } from "../skills/manager.js";
@@ -20,8 +20,8 @@ export interface CommandDeps {
   config: VoidRiftConfig;
   context: ContextManager;
   budget: TokenBudgetWatcher;
-  cycler: ModeCycler;
-  serializer: TurnSerializer;
+  agents: AgentRegistry;
+  brain: SessionBrain;
   memory: MemoryRegistry;
   stats: StatsTracker;
   skills: SkillManager;
@@ -43,8 +43,8 @@ export interface CommandDeps {
  */
 export function registerCommands(registry: CoreRegistry, deps: CommandDeps): void {
   // --- Session & Navigation ---
-  registry.registerSlashCommand({ name: "help", description: "Interactive help overlay", execute: async () => deps.openPanel("help") });
-  registry.registerSlashCommand({ name: "exit", description: "Save session and exit", execute: async () => { deps.serializer.save(deps.context.context); deps.output("Session saved. Goodbye."); deps.exit(); } });
+  registry.registerSlashCommand({ name: "help", description: "Interactive help utility panel", execute: async () => deps.openPanel("help") });
+  registry.registerSlashCommand({ name: "exit", description: "Save session and exit", execute: async () => { deps.brain.save(deps.context.context, deps.agents.active.id); deps.output("Session saved. Goodbye."); deps.exit(); } });
   registry.registerSlashCommand({ name: "clear", description: "Reset session state", execute: async () => { deps.context.setMessages([]); deps.context.setDiagnostics(null); deps.budget.reset(); deps.output("Session cleared."); } });
   registry.registerSlashCommand({ name: "compact", description: "Compact conversation history", execute: async () => {
     const msgs = deps.context.getMessages();
@@ -81,9 +81,9 @@ export function registerCommands(registry: CoreRegistry, deps: CommandDeps): voi
   // --- Memory ---
   registry.registerSlashCommand({ name: "memory", description: "Memory manager", execute: async () => deps.openPanel("memory") });
 
-  // --- Templates ---
-  registry.registerSlashCommand({ name: "templates", description: "Template & prompt manager", execute: async () => deps.openPanel("templates") });
-  registry.registerSlashCommand({ name: "prompts", description: "Template & prompt manager", execute: async () => deps.openPanel("templates") });
+  // --- Templates & Prompts ---
+  registry.registerSlashCommand({ name: "templates", description: "Template manager", execute: async () => deps.openPanel("templates") });
+  registry.registerSlashCommand({ name: "prompts", description: "Prompt manager", execute: async () => deps.openPanel("prompts") });
 
   // --- Tasks & Automation ---
   registry.registerSlashCommand({ name: "tasks", description: "Background task monitor", execute: async () => deps.openPanel("tasks") });
@@ -129,7 +129,7 @@ export function registerCommands(registry: CoreRegistry, deps: CommandDeps): voi
     }
   }});
 
-  // --- Dev Workflow (Plugin-Dev) ---
+  // --- Dev Workflow (Plugins) ---
   registry.registerSlashCommand({ name: "ideas", description: "Ideas manager", execute: async () => deps.openPanel("ideas") });
   registry.registerSlashCommand({ name: "idea", description: "Open/create an idea", execute: async (args) => {
     if (!args.length) deps.openPanel("ideas");

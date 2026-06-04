@@ -1,8 +1,29 @@
 import { randomUUID } from "crypto";
+import { resolve, join } from "path";
 import type { EventBus } from "../events/bus.js";
-import { getToolSchema } from "../tools/definitions.js";
 import { computeDiff, computeEditDiff } from "../safeguards/diff.js";
-import type { Mode } from "../router/index.js";
+import type { AgentManifest, ApprovalMode } from "../agents/registry.js";
+
+/** Simple helper to convert glob pattern string to RegExp */
+function matchGlob(pathStr: string, pattern: string): boolean {
+  const regexStr = pattern
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*\*/g, ".*")
+    .replace(/\*/g, "[^/]*")
+    .replace(/\?/g, ".");
+  const regex = new RegExp(`^${regexStr}$`);
+  return regex.test(pathStr);
+}
+
+function resolveGlobToAbsolute(pattern: string, workspaceRoot: string): string {
+  let resolved = pattern;
+  if (pattern.startsWith("./")) {
+    resolved = join(workspaceRoot, pattern.slice(2));
+  } else if (pattern.startsWith("~/")) {
+    resolved = join(process.env.HOME || "", pattern.slice(2));
+  }
+  return resolved;
+}
 
 export interface PendingRequest {
   requestId: string;
@@ -25,19 +46,17 @@ const REJECTION_MESSAGE = "Error: Operation rejected by user permission gate.";
  * Uses async Promise suspension to pause tool execution without blocking Node's event loop.
  * Maintains a pendingRequests registry keyed by requestId (UUID).
  *
- * Behavior per mode:
- * - plan: Gated tools rejected outright
- * - chat: Suspends via Promise, publishes TOOL_CONFIRMATION_REQUEST with requestId, awaits response
- * - vibe: All tools auto-approved
+ * Behavior per approvalMode:
+ * - deny: All mutating tools rejected outright
+ * - prompt: Suspends via Promise if tool is not in allowedTools
+ * - autonomous: All tools auto-approved
  */
 export class PermissionGate {
   private pendingRequests = new Map<string, { resolve: (approved: boolean) => void }>();
 
   constructor(private bus: EventBus, private workspaceRoot?: string) {
-    // Listen for responses and resolve matching pending requests
     this.bus.subscribe("TOOL_CONFIRMATION_RESPONSE", (event) => {
       const { requestId, approved } = event.payload as any;
-      // Support both requestId-based and simple responses
       if (requestId) {
         const pending = this.pendingRequests.get(requestId);
         if (pending) {
@@ -45,7 +64,6 @@ export class PermissionGate {
           pending.resolve(approved);
         }
       } else {
-        // Legacy: resolve the oldest pending request
         const first = this.pendingRequests.entries().next().value;
         if (first) {
           this.pendingRequests.delete(first[0]);
@@ -64,21 +82,43 @@ export class PermissionGate {
     }));
   }
 
-  async check(tool: string, args: Record<string, unknown>, mode: Mode): Promise<GateResult> {
-    // Vibe mode: fully autonomous
-    if (mode === "vibe") return { approved: true };
-
-    const schema = getToolSchema(tool);
-    if (!schema || schema.safetyProfile === "auto-approved") {
-      return { approved: true };
+  async check(tool: string, args: Record<string, unknown>, agent: { approvalMode: ApprovalMode; allowedTools: string[]; toolsSettings?: Record<string, any> }): Promise<GateResult> {
+    // 1. Enforce allowedPaths glob constraints for file mutation tools
+    if ((tool === "write_file" || tool === "edit_file") && this.workspaceRoot) {
+      const allowedPaths: string[] = agent.toolsSettings?.[tool]?.allowedPaths || [];
+      if (allowedPaths.length > 0 && typeof args.path === "string") {
+        const absolutePath = resolve(this.workspaceRoot, args.path);
+        const isAllowed = allowedPaths.some(p => {
+          const absPattern = resolveGlobToAbsolute(p, this.workspaceRoot!);
+          return matchGlob(absolutePath, absPattern);
+        });
+        if (!isAllowed) {
+          return { approved: false, reason: `Error: Write path "${args.path}" violates agent write boundaries.` };
+        }
+      }
     }
 
-    // Plan mode: gated tools rejected outright
-    if (mode === "plan") {
-      return { approved: false, reason: `Tool "${tool}" is blocked in plan mode` };
+    // 2. Bypass gate if execute_command is read-only and autoAllowReadonly is true
+    if (tool === "execute_command" && typeof args.command === "string") {
+      const autoAllowReadonly = agent.toolsSettings?.execute_command?.autoAllowReadonly;
+      if (autoAllowReadonly) {
+        const isReadOnly = /^(git status|git log|git diff|cat|ls|pwd|echo|find|grep)\b/.test(args.command.trim());
+        if (isReadOnly) return { approved: true };
+      }
     }
 
-    // Chat mode: suspend via Promise with requestId
+    // Autonomous: all tools auto-approved
+    if (agent.approvalMode === "autonomous") return { approved: true };
+
+    // Tool is in allowedTools: auto-approved regardless of mode
+    if (agent.allowedTools.includes(tool)) return { approved: true };
+
+    // Deny mode: reject anything not in allowedTools
+    if (agent.approvalMode === "deny") {
+      return { approved: false, reason: `Tool "${tool}" is blocked by agent` };
+    }
+
+    // Prompt mode: suspend and ask the operator
     const requestId = randomUUID();
 
     return new Promise<GateResult>((resolve) => {

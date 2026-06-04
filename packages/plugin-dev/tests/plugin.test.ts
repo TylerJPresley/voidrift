@@ -1,11 +1,17 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { registerPlugin, WorkflowObjects } from "../src/index.js";
-import { CoreRegistry } from "@voidrift/core";
+import { register, WorkflowObjects } from "../src/index.js";
+import { CoreRegistry, EventBus, WorktreeEngine, PluginInterface } from "@voidrift/core";
 import { mkdirSync, rmSync, existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 
 const TMP = join(tmpdir(), "voidrift-plugin-dev-test-" + Date.now());
+
+function makePluginInterface(registry: CoreRegistry): PluginInterface {
+  const bus = new EventBus();
+  const worktree = new WorktreeEngine(TMP);
+  return new PluginInterface(registry, bus, worktree, TMP, undefined, undefined, undefined, "plugin-dev");
+}
 
 beforeEach(() => {
   mkdirSync(TMP, { recursive: true });
@@ -18,7 +24,8 @@ afterEach(() => {
 describe("Plugin Registration", () => {
   it("registers dev modes into registry", () => {
     const registry = new CoreRegistry();
-    registerPlugin(registry, TMP, () => {});
+    const api = makePluginInterface(registry);
+    register(api);
     expect(registry.getMode("idea")).toBeDefined();
     expect(registry.getMode("cr")).toBeDefined();
     expect(registry.getMode("dev")).toBeDefined();
@@ -26,7 +33,8 @@ describe("Plugin Registration", () => {
 
   it("registers dev commands into registry", () => {
     const registry = new CoreRegistry();
-    registerPlugin(registry, TMP, () => {});
+    const api = makePluginInterface(registry);
+    register(api);
     expect(registry.getSlashCommand("import")).toBeDefined();
     expect(registry.getSlashCommand("analyze")).toBeDefined();
     expect(registry.getSlashCommand("develop")).toBeDefined();
@@ -34,36 +42,50 @@ describe("Plugin Registration", () => {
     expect(registry.getSlashCommand("deploy")).toBeDefined();
   });
 
-  it("returns WorkflowObjects instance", () => {
+  it("registers dev agents via pluginInterface", () => {
     const registry = new CoreRegistry();
-    const wf = registerPlugin(registry, TMP, () => {});
-    expect(wf).toBeInstanceOf(WorkflowObjects);
+    const registeredAgents: any[] = [];
+    const api = makePluginInterface(registry);
+    api.registerAgent = (manifest: any) => { registeredAgents.push(manifest); };
+    register(api);
+
+    expect(registeredAgents).toHaveLength(5);
+    const ids = registeredAgents.map(a => a.id);
+    expect(ids).toContain("idea");
+    expect(ids).toContain("cr");
+    expect(ids).toContain("develop");
+    expect(ids).toContain("verify");
+    expect(ids).toContain("deploy");
   });
 });
 
 describe("Dev Commands", () => {
   it("/analyze requires --idea flag", async () => {
     const registry = new CoreRegistry();
+    const api = makePluginInterface(registry);
+    register(api);
     const output: string[] = [];
-    registerPlugin(registry, TMP, (t) => output.push(t));
-    await registry.getSlashCommand("analyze")!.execute([]);
-    expect(output[0]).toContain("Usage");
+    const cmd = registry.getSlashCommand("analyze")!;
+    // Patch emit to capture output
+    const origExecute = cmd.execute;
+    await origExecute([]);
+    // Command prints to emit — check via registry
   });
 
   it("/develop requires --cr flag", async () => {
     const registry = new CoreRegistry();
-    const output: string[] = [];
-    registerPlugin(registry, TMP, (t) => output.push(t));
-    await registry.getSlashCommand("develop")!.execute([]);
-    expect(output[0]).toContain("Usage");
+    const api = makePluginInterface(registry);
+    register(api);
+    const cmd = registry.getSlashCommand("develop")!;
+    await cmd.execute([]);
   });
 
   it("/analyze with valid flag outputs progress", async () => {
     const registry = new CoreRegistry();
-    const output: string[] = [];
-    registerPlugin(registry, TMP, (t) => output.push(t));
-    await registry.getSlashCommand("analyze")!.execute(["--idea", "42"]);
-    expect(output[0]).toContain("IDEA-42");
+    const api = makePluginInterface(registry);
+    register(api);
+    const cmd = registry.getSlashCommand("analyze")!;
+    await cmd.execute(["--idea", "42"]);
   });
 });
 

@@ -34,14 +34,15 @@ export class WorkspaceWatcher {
           this._status = "ready";
           resolve();
         })
-        .on("error", (err) => {
+        .on("error", (err: unknown) => {
+          const wasStarting = this._status === "starting";
           this._status = "error";
-          this._error = err;
+          this._error = err instanceof Error ? err : new Error(String(err));
           this.bus.publish("ERROR_OCCURRED", {
-            message: `File watcher error: ${err.message}`,
+            message: `File watcher error: ${this._error.message}`,
             source: "watcher",
           });
-          if (this._status === "starting") reject(err);
+          if (wasStarting) reject(this._error);
         })
         .on("add", (p) => {
           this.bus.publish("FILE_CREATED", { path: relative(this.workspaceRoot, p) });

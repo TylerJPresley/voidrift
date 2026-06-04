@@ -1,6 +1,12 @@
 ---
 name: CLOUD-OPS
 description: Container lifecycle management, secrets handling, SSH operations, and environment parity for cloud infrastructure operations.
+triggers:
+  extensions: [".yml",".yaml"]
+  files: ["Dockerfile","docker-compose.yml"]
+  keywords: ["docker","kubernetes","deploy","container","cloud","ssh"]
+agents: []
+active: true
 ---
 
 # Domain: Cloud Operations (CLOUD-OPS)

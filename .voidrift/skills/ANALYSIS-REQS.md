@@ -1,6 +1,12 @@
 ---
 name: ANALYSIS-REQS
 description: Requirements authoring using EARS notation, BDD acceptance criteria, and traceability for evidence-based requirement discovery.
+triggers:
+  extensions: []
+  files: ["REQUIREMENTS.md"]
+  keywords: ["requirements","user story","acceptance criteria","ears","bdd"]
+agents: []
+active: true
 ---
 
 # Analysis & Requirements (ANALYSIS-REQS)

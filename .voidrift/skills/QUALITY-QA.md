@@ -1,6 +1,12 @@
 ---
 name: QUALITY-QA
 description: Test-driven development, evidence-based completion, regression testing, and quality assurance patterns.
+triggers:
+  extensions: [".test.ts",".spec.ts",".test.js"]
+  files: []
+  keywords: ["test","tdd","coverage","regression","qa"]
+agents: []
+active: true
 ---
 
 # Domain: Quality & Verification (QUALITY-QA)

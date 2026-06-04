@@ -3,16 +3,15 @@ import { ContextManager } from "../../src/session/context.js";
 
 describe("ContextManager", () => {
   it("initializes with governance, workspace, and work partitions", () => {
-    const ctx = new ContextManager("You are an engineer.", "chat", "src/\n  index.ts");
+    const ctx = new ContextManager("You are an engineer.", "src/\n  index.ts");
     const s = ctx.context;
     expect(s.governance.activePersona).toBe("You are an engineer.");
-    expect(s.governance.activeMode).toBe("chat");
     expect(s.workspace.workspaceCodeMap).toContain("src/");
     expect(s.work.messages).toHaveLength(0);
   });
 
   it("focuses files with LRU eviction at max 3", () => {
-    const ctx = new ContextManager("", "chat", "");
+    const ctx = new ContextManager("", "");
     ctx.focusFile("a.ts", "summary-a", 100);
     ctx.focusFile("b.ts", "summary-b", 200);
     ctx.focusFile("c.ts", "summary-c", 300);
@@ -22,7 +21,7 @@ describe("ContextManager", () => {
   });
 
   it("re-focusing a file moves it to end", () => {
-    const ctx = new ContextManager("", "chat", "");
+    const ctx = new ContextManager("", "");
     ctx.focusFile("a.ts", "summary-a", 100);
     ctx.focusFile("b.ts", "summary-b", 200);
     ctx.focusFile("a.ts", "summary-a-updated", 100, [50, 100]);
@@ -33,14 +32,14 @@ describe("ContextManager", () => {
   });
 
   it("adds messages with timestamps", () => {
-    const ctx = new ContextManager("", "chat", "");
+    const ctx = new ContextManager("", "");
     ctx.addMessage({ role: "user", content: "hello" });
     expect(ctx.getMessages()).toHaveLength(1);
     expect(ctx.getMessages()[0].timestamp).toBeTypeOf("number");
   });
 
   it("manages memory load/unload", () => {
-    const ctx = new ContextManager("", "chat", "");
+    const ctx = new ContextManager("", "");
     ctx.loadMemory("lesson 1");
     ctx.loadMemory("lesson 2");
     expect(ctx.context.workspace.activeMemory).toHaveLength(2);
@@ -49,7 +48,7 @@ describe("ContextManager", () => {
   });
 
   it("evicts files when cumulative summary token count exceeds budget", () => {
-    const ctx = new ContextManager("", "chat", "");
+    const ctx = new ContextManager("", "");
     const largeSummaryA = "a".repeat(16000); // 4000 tokens
     const largeSummaryB = "b".repeat(16000); // 4000 tokens
     const largeSummaryC = "c".repeat(8000);  // 2000 tokens

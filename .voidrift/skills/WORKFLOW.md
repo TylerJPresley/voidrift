@@ -1,6 +1,12 @@
 ---
 name: WORKFLOW
 description: Agent loop patterns, tool dispatch sequencing, pipeline stage design, and task execution for VoidRift automated commands.
+triggers:
+  extensions: []
+  files: []
+  keywords: ["workflow", "pipeline", "dispatch", "tool loop", "agent loop"]
+agents: []
+active: true
 ---
 
 # Domain: Agent Workflow (WORKFLOW)

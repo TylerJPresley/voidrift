@@ -29,9 +29,6 @@ export class CoreRegistry {
   }
 
   registerSlashCommand(hook: SlashCommandHook): void {
-    if (this.slashCommands.has(hook.name)) {
-      throw new Error(`Slash command "/${hook.name}" already registered`);
-    }
     this.slashCommands.set(hook.name, hook);
   }
 
@@ -61,7 +58,7 @@ export class CoreRegistry {
   }
 
   listSlashCommands(): string[] {
-    return [...this.slashCommands.keys()];
+    return [...this.slashCommands.keys()].sort();
   }
 
   listModes(): string[] {

@@ -3,8 +3,8 @@ import { registerCommands, type CommandDeps } from "../../src/commands/index.js"
 import { CoreRegistry } from "../../src/registry/core.js";
 import { ContextManager } from "../../src/session/context.js";
 import { TokenBudgetWatcher } from "../../src/output/budget.js";
-import { ModeCycler } from "../../src/security/mode-cycler.js";
-import { TurnSerializer } from "../../src/session/serializer.js";
+import { AgentRegistry } from "../../src/agents/registry.js";
+import { SessionBrain } from "../../src/session/brain.js";
 import { MemoryRegistry } from "../../src/session/memory.js";
 import { StatsTracker } from "../../src/session/stats.js";
 import { SkillManager } from "../../src/skills/manager.js";
@@ -28,10 +28,10 @@ function makeDeps(): { registry: CoreRegistry; deps: CommandDeps; output: string
 
   const deps: CommandDeps = {
     config: { tiers: { flash: "local", utility: "local", dense: "local" }, models: { local: { protocol: "openai", model: "test", baseUrl: "http://localhost", contextLimit: 32768, temperature: 0.2 } } },
-    context: new ContextManager("persona", "chat", ""),
+    context: new ContextManager("persona", ""),
     budget: new TokenBudgetWatcher(32768),
-    cycler: new ModeCycler(),
-    serializer: new TurnSerializer(TMP, "test", bus),
+    agents: new AgentRegistry(),
+    brain: new SessionBrain(TMP, "test", bus),
     memory: new MemoryRegistry(),
     stats: new StatsTracker("test"),
     skills: new SkillManager(),

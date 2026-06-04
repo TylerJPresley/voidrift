@@ -3,7 +3,7 @@ import { TOOL_SCHEMAS, getToolSchema } from "../../src/tools/definitions.js";
 
 describe("Tool Definitions", () => {
   it("has exactly 12 tools", () => {
-    expect(TOOL_SCHEMAS.length).toBe(12);
+    expect(TOOL_SCHEMAS.length).toBe(16);
   });
 
   it("all gated tools are mutations or executions", () => {

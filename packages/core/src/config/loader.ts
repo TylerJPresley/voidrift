@@ -31,6 +31,11 @@ export const ConfigSchema = z.object({
   models: z.record(ModelSchema),
   editor: EditorSchema,
   summarizeThreshold: z.number().positive().default(500),
+  plugins: z.array(z.string()).default([]),
+  search: z.object({
+    provider: z.enum(["duckduckgo", "tavily", "google"]).default("duckduckgo"),
+    apiKey: z.string().optional(),
+  }).default({ provider: "duckduckgo" }),
 }).refine(
   (cfg) => {
     const modelNames = Object.keys(cfg.models);
@@ -63,6 +68,9 @@ const DEFAULT_CONFIG: VoidRiftConfig = {
       temperature: 0.2,
     },
   },
+  summarizeThreshold: 500,
+  plugins: [],
+  search: { provider: "duckduckgo" as const },
 };
 
 /**

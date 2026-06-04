@@ -13,15 +13,14 @@ import type { MemoryRegistry } from "./session/memory.js";
 import type { TemplateService } from "./templates/service.js";
 import type { MCPEngine } from "./mcp/engine.js";
 import type { CoreRegistry } from "./registry/core.js";
-import type { ModeCycler } from "./security/mode-cycler.js";
+import type { AgentRegistry } from "./agents/registry.js";
+import type { PromptRegistry } from "./prompts/registry.js";
 import type { ContextManager } from "./session/context.js";
 import { openInEditor } from "./utils/editor.js";
-import { readdirSync, readFileSync, existsSync } from "fs";
-import { join } from "path";
+import { readdirSync, readFileSync, existsSync, mkdirSync, writeFileSync, unlinkSync, renameSync } from "fs";
+import { join, dirname } from "path";
 import { TOOL_SCHEMAS } from "./tools/definitions.js";
-import type { WorktreeEngine } from "./worktree/engine.js";
 import type { TaskScheduler } from "./orchestration/scheduler.js";
-import { execSync } from "child_process";
 
 // ─── /stats ──────────────────────────────────────────────────────────────────
 
@@ -31,8 +30,10 @@ export function StatsPanel({ stats, budget, onClose }: { stats: StatsTracker; bu
   const b = budget.state;
   const ctxColor = b.percentage < 50 ? "green" : b.percentage < 80 ? "yellow" : "red";
   return (
-    <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1} paddingY={1}>
+    <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1}>
       <Text bold>Session Summary</Text>
+      <Text color="#5a6aa8">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
+      <Text> </Text>
       <Text><Text color="#61afef">Session:   </Text><Text dimColor>{s.sessionId}</Text></Text>
       <Text><Text color="#61afef">Duration:  </Text>{stats.durationFormatted}</Text>
       <Text><Text color="#61afef">Turns:     </Text>{s.turns}</Text>
@@ -47,7 +48,7 @@ export function StatsPanel({ stats, budget, onClose }: { stats: StatsTracker; bu
       <Text> </Text>
       <Text bold>Model Usage</Text>
       <Text dimColor>{"Model".padEnd(28)}{"Turns".padStart(6)}{"Input".padStart(8)}{"Output".padStart(8)}{"tok/s".padStart(7)}</Text>
-      <Text dimColor>{"─".repeat(57)}</Text>
+      <Text dimColor color="#333333">{"─".repeat(57)}</Text>
       {[...s.modelUsage.entries()].map(([name, u]) => (
         <Text key={name}>{name.padEnd(28)}{String(u.turns).padStart(6)}{String(u.inputTokens).padStart(8)}{String(u.outputTokens).padStart(8)}{(u.totalTimeMs > 0 ? (u.outputTokens / (u.totalTimeMs / 1000)).toFixed(1) : "—").padStart(7)}</Text>
       ))}
@@ -66,15 +67,18 @@ export function HelpPanel({ registry, sessionId, workspace, onClose }: { registr
   const pages = ["general", "commands", "shortcuts"];
   useInput((_, key) => {
     if (key.escape) onClose();
-    if (key.leftArrow || (key.tab && key.shift)) setPage((p) => (p - 1 + 3) % 3);
-    if (key.rightArrow || key.tab) setPage((p) => (p + 1) % 3);
+    if (key.leftArrow) setPage((p) => (p - 1 + 3) % 3);
+    if (key.rightArrow) setPage((p) => (p + 1) % 3);
   });
 
   const cmds = registry.listSlashCommands().map((name) => ({ name, desc: registry.getSlashCommand(name)?.description ?? "" }));
 
   return (
-    <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1} paddingY={1}>
-      <Box><Text bold color={page === 0 ? "#4ec9b0" : undefined}> general </Text><Text bold color={page === 1 ? "#4ec9b0" : undefined}> commands </Text><Text bold color={page === 2 ? "#4ec9b0" : undefined}> shortcuts </Text></Box>
+    <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1}>
+      <Text bold>Help</Text>
+      <Text color="#5a6aa8">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
+      <Box><Text bold color={page === 0 ? "#4ec9b0" : undefined}>{page === 0 ? "[ general ]" : "  general  "}</Text><Text>  </Text><Text bold color={page === 1 ? "#4ec9b0" : undefined}>{page === 1 ? "[ commands ]" : "  commands  "}</Text><Text>  </Text><Text bold color={page === 2 ? "#4ec9b0" : undefined}>{page === 2 ? "[ shortcuts ]" : "  shortcuts  "}</Text></Box>
+      <Text dimColor color="#333333">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
       <Text> </Text>
       {page === 0 && <>
         <Text>VoidRift — AI Engineering Harness</Text>
@@ -107,16 +111,18 @@ export function HelpPanel({ registry, sessionId, workspace, onClose }: { registr
 
 // ─── /tools ──────────────────────────────────────────────────────────────────
 
-export function ToolsPanel({ cycler, onClose }: { cycler: ModeCycler; onClose: () => void }) {
+export function ToolsPanel({ agents, onClose }: { agents: AgentRegistry; onClose: () => void }) {
   useInput((_, key) => { if (key.escape) onClose(); });
-  const tools = cycler.getTools(null);
+  const agent = agents.active;
+  const tools = TOOL_SCHEMAS.filter(t => agent.tools.includes(t.name));
   return (
-    <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1} paddingY={1}>
-      <Text bold>Tools <Text dimColor>({cycler.mode} mode)</Text></Text>
+    <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1}>
+      <Text bold>Tools <Text dimColor>({agent.name})</Text></Text>
+      <Text color="#5a6aa8">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
       <Text> </Text>
       {tools.map((t) => (
         <Text key={t.name}>
-          <Text color={t.safetyProfile === "gated" ? "yellow" : "green"}>{t.safetyProfile === "gated" ? "🔒" : "✓ "} </Text>
+          <Text color={agent.allowedTools.includes(t.name) ? "green" : "yellow"}>{agent.allowedTools.includes(t.name) ? "✓ " : "🔒"} </Text>
           <Text color="#61afef">{t.name.padEnd(18)}</Text>
           <Text dimColor>{t.description}</Text>
         </Text>
@@ -142,8 +148,9 @@ export function ModelPanel({ config, onAssign, onClose }: { config: VoidRiftConf
   });
 
   return (
-    <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1} paddingY={1}>
+    <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1}>
       <Text bold>Models</Text>
+      <Text color="#5a6aa8">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
       <Text> </Text>
       {models.map((name, i) => {
         const cfg = config.models[name];
@@ -166,35 +173,142 @@ export function ModelPanel({ config, onAssign, onClose }: { config: VoidRiftConf
 
 // ─── /skills ─────────────────────────────────────────────────────────────────
 
-export function SkillsPanel({ skills, onClose }: { skills: SkillManager; onClose: () => void }) {
-  const indexed = skills.indexed;
-  const [selected, setSelected] = useState(0);
-  const [viewing, setViewing] = useState<string | null>(null);
-  useInput((_, key) => {
-    if (key.escape) { if (viewing) setViewing(null); else onClose(); }
-    if (key.upArrow) setSelected((s) => Math.max(0, s - 1));
-    if (key.downArrow) setSelected((s) => Math.min(indexed.length - 1, s + 1));
-    if (key.return && indexed[selected]) setViewing(indexed[selected].content);
+export function SkillsPanel({ skills, config, workspaceRoot, agents, onClose }: { skills: SkillManager; config: VoidRiftConfig; workspaceRoot: string; agents: AgentRegistry; onClose: () => void }) {
+  const [cursor, setCursor] = useState(0);
+  const [message, setMessage] = useState<string | null>(null);
+  const [createState, setCreateState] = useState<{ step: "scope" | "name"; scope?: "global" | "workspace" } | null>(null);
+  const [createName, setCreateName] = useState("");
+  const [renaming, setRenaming] = useState(false);
+  const [renameName, setRenameName] = useState("");
+
+  // Use indexed skills from the manager (already parsed with agents/active)
+  const allAgentIds = [...agents.listInteractive(), ...agents.listTask()].map(a => a.id);
+  const skillList = skills.indexed.map(s => {
+    const hasInvalidAgents = s.agents.some(id => !allAgentIds.includes(id));
+    const missingMeta = !s.name || !s.description;
+    const raw = readFileSync(s.filePath, "utf-8");
+    const missingStructure = !raw.includes("triggers:") || !raw.includes("agents:") || !raw.includes("active:");
+    return {
+      name: s.name,
+      path: s.filePath,
+      location: s.filePath.includes(".config/voidrift") ? "global" : "workspace",
+      active: s.active,
+      invalid: hasInvalidAgents || missingMeta || missingStructure,
+    };
   });
-  if (viewing) return (
-    <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1} paddingY={1}>
-      <Text bold>Skill Content</Text>
-      <Text> </Text>
-      {viewing.split("\n").slice(0, 20).map((line, i) => <Text key={i} dimColor>{line}</Text>)}
-      <Text> </Text>
-      <Text dimColor>  <Text color="#61afef" bold>esc</Text> Back</Text>
-    </Box>
-  );
+
+  useInput((input, key) => {
+    if (createState) {
+      if (key.escape) { setCreateState(null); setCreateName(""); setMessage(null); return; }
+      if (createState.step === "scope") {
+        if (input === "g") { setCreateState({ step: "name", scope: "global" }); setMessage("Enter skill id (lower-case, hyphens only):"); }
+        if (input === "w") { setCreateState({ step: "name", scope: "workspace" }); setMessage("Enter skill id (lower-case, hyphens only):"); }
+      } else if (createState.step === "name") {
+        if (key.return && createName.length > 0) {
+          const dir = createState.scope === "workspace"
+            ? join(workspaceRoot, ".voidrift", "skills")
+            : join(process.env.HOME || "", ".config", "voidrift", "skills");
+          mkdirSync(dir, { recursive: true });
+          const filePath = join(dir, `${createName}.md`);
+          if (!existsSync(filePath)) {
+            writeFileSync(filePath, `---\nname: "${createName}"\ndescription: ""\ntriggers:\n  extensions: []\n  files: []\n  keywords: []\nagents: []\nactive: true\n---\n\n`, "utf-8");
+          }
+          setCreateState(null);
+          setCreateName("");
+          if (config.editor) {
+            openInEditor(filePath, config.editor);
+            setMessage(`Created ${createName} — editing`);
+          } else {
+            setMessage(`Created: ${filePath.replace(process.env.HOME || "", "~")} (set "editor" in config)`);
+          }
+        } else if (key.backspace || key.delete) {
+          setCreateName(n => n.slice(0, -1));
+        } else if (input && /^[a-z0-9-]$/.test(input)) {
+          setCreateName(n => n + input);
+        }
+      }
+      return;
+    }
+
+    if (renaming) {
+      if (key.escape) { setRenaming(false); setRenameName(""); setMessage(null); return; }
+      if (key.return && renameName.length > 0) {
+        const item = skillList[cursor];
+        if (item) {
+          const newPath = join(dirname(item.path), `${renameName}.md`);
+          if (!existsSync(newPath)) {
+            renameSync(item.path, newPath);
+            setMessage(`Renamed: ${item.name} → ${renameName}`);
+          } else {
+            setMessage(`"${renameName}" already exists`);
+          }
+        }
+        setRenaming(false);
+        setRenameName("");
+      } else if (key.backspace || key.delete) {
+        setRenameName(n => n.slice(0, -1));
+      } else if (input && /^[a-z0-9-]$/.test(input)) {
+        setRenameName(n => n + input);
+      }
+      return;
+    }
+
+    if (key.escape) onClose();
+    if (key.upArrow) setCursor(c => Math.max(0, c - 1));
+    if (key.downArrow) setCursor(c => Math.min(skillList.length - 1, c + 1));
+    if (key.return && skillList[cursor]) {
+      if (config.editor) {
+        const result = openInEditor(skillList[cursor].path, config.editor);
+        setMessage(result.success ? `Opened: ${skillList[cursor].path.replace(process.env.HOME || "", "~")}` : result.error || "Failed");
+      }
+    }
+    if (input === "c") {
+      setCreateState({ step: "scope" });
+      setMessage("Create skill — scope: (g) global  (w) workspace");
+    }
+    if (input === "r" && skillList[cursor]) {
+      setRenaming(true);
+      setRenameName("");
+      setMessage(`Rename "${skillList[cursor].name}" — enter new id:`);
+    }
+    if (key.delete && skillList[cursor]) {
+      unlinkSync(skillList[cursor].path);
+      setMessage(`Deleted: ${skillList[cursor].name}`);
+    }
+  });
+
   return (
-    <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1} paddingY={1}>
+    <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1}>
       <Text bold>Skills</Text>
+      <Text color="#5a6aa8">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
       <Text> </Text>
-      {indexed.length === 0 && <Text dimColor>No skills indexed.</Text>}
-      {indexed.map((s, i) => (
-        <Text key={s.name}><Text color={i === selected ? "#4ec9b0" : undefined}>{i === selected ? "▸ " : "  "}</Text><Text color="#61afef">{s.name.padEnd(28)}</Text><Text dimColor>{s.description}</Text></Text>
-      ))}
+      {skillList.length === 0 ? (
+        <Text dimColor>No skills found.</Text>
+      ) : (<>
+        <Text dimColor>{"  "}{"Name".padEnd(25)}{"Location".padEnd(15)}</Text>
+        <Text dimColor color="#333333">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
+        {skillList.map((s, i) => (
+          <Box key={`${s.location}-${s.name}`} flexDirection="column">
+            <Text>
+              <Text color={i === cursor ? "#4ec9b0" : undefined}>{i === cursor ? "▸ " : "  "}</Text>
+              <Text bold color={s.invalid ? "red" : "#61afef"}>{s.invalid ? "[X] " : ""}{s.name.slice(0, 20).padEnd(25)}</Text>
+              <Text>{s.location.padEnd(15)}</Text>
+            </Text>
+            {i < skillList.length - 1 && <Text dimColor color="#333333">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>}
+            {i === skillList.length - 1 && <Text dimColor color="#333333">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>}
+          </Box>
+        ))}
+      </>)}
       <Text> </Text>
-      <Text dimColor>  <Text color="#61afef" bold>↑↓</Text> Navigate  <Text color="#61afef" bold>enter</Text> View  <Text color="#61afef" bold>esc</Text> Close</Text>
+      <Text bold>Locations</Text>
+      <Text dimColor>  Workspace:  .voidrift/skills/</Text>
+      <Text dimColor>  Global:     ~/.config/voidrift/skills/</Text>
+      <Text> </Text>
+      <Text dimColor>  <Text color="#61afef" bold>↑↓</Text> Navigate  <Text color="#61afef" bold>enter</Text> Open  <Text color="#61afef" bold>esc</Text> Close  │  <Text color="#61afef" bold>c</Text> create  <Text color="#61afef" bold>r</Text> rename  <Text color="#61afef" bold>del</Text> delete</Text>
+      {message && <Text color="#4ec9b0">{message}</Text>}
+      {createState?.step === "name" && <Text color="#61afef">  &gt; {createName}<Text color="#4ec9b0">█</Text></Text>}
+      {renaming && <Text color="#61afef">  &gt; {renameName}<Text color="#4ec9b0">█</Text></Text>}
+      <Text> </Text>
     </Box>
   );
 }
@@ -235,8 +349,9 @@ export function MemoryPanel({ memory, context, onClose }: { memory: MemoryRegist
     }
   });
   return (
-    <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1} paddingY={1}>
+    <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1}>
       <Text bold>Memory</Text>
+      <Text color="#5a6aa8">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
       <Text> </Text>
       {entries.length === 0 && <Text dimColor>No memories indexed.</Text>}
       {entries.map((m, i) => (
@@ -264,8 +379,9 @@ export function MCPPanel({ mcp, onClose }: { mcp: MCPEngine; onClose: () => void
     if (key.downArrow) setSelected((s) => Math.min(servers.length - 1, s + 1));
   });
   return (
-    <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1} paddingY={1}>
+    <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1}>
       <Text bold>MCP Servers</Text>
+      <Text color="#5a6aa8">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
       <Text> </Text>
       {servers.length === 0 && <Text dimColor>No MCP servers configured.</Text>}
       {servers.map((s, i) => (
@@ -284,98 +400,435 @@ export function MCPPanel({ mcp, onClose }: { mcp: MCPEngine; onClose: () => void
 
 // ─── /templates ──────────────────────────────────────────────────────────────
 
-export function TemplatesPanel({ templates, config, onClose }: { templates: TemplateService; config: VoidRiftConfig; onClose: () => void }) {
+// ─── /templates ──────────────────────────────────────────────────────────────
+
+export function TemplatesPanel({ templates, config, workspaceRoot, onClose }: { templates: TemplateService; config: VoidRiftConfig; workspaceRoot: string; onClose: () => void }) {
+  const [page, setPage] = useState(0);
   const [cursor, setCursor] = useState(0);
+  const [detail, setDetail] = useState<string | null>(null);
+  const [detailCursor, setDetailCursor] = useState(0);
   const [message, setMessage] = useState<string | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [createState, setCreateState] = useState<{ step: "scope" | "name"; scope?: "global" | "workspace" } | null>(null);
+  const [createName, setCreateName] = useState("");
+  const [renaming, setRenaming] = useState(false);
+  const [renameName, setRenameName] = useState("");
+  const pages = ["system", "custom"];
+
+  const systemSlots = templates.slotsByType("template").filter(s => s.sourcePlugin !== "custom");
+  
+  // Discover custom templates from filesystem
+  const customTemplates: Array<{ key: string; path: string; location: string }> = [];
+  const customDirs = [
+    { dir: join(process.env.HOME || "", ".config", "voidrift", "templates"), location: "global" },
+    { dir: join(workspaceRoot, ".voidrift", "templates"), location: "workspace" },
+  ];
+  for (const { dir, location } of customDirs) {
+    if (!existsSync(dir)) continue;
+    try {
+      for (const entry of readdirSync(dir)) {
+        if (entry.endsWith(".md")) {
+          const key = entry.slice(0, -3);
+          if (!systemSlots.find(s => s.key === key)) {
+            customTemplates.push({ key, path: join(dir, entry), location });
+          }
+        }
+      }
+    } catch {}
+  }
+
+  const isCustomPage = page === 1;
+  const list = isCustomPage ? customTemplates : systemSlots;
 
   useInput((input, key) => {
-    if (confirmDelete) {
-      if (input === "y") {
-        const resolved = templates.resolve(entries[cursor].key);
-        if (resolved && resolved.source !== "default") {
-          const deleted = templates.deleteOverride(entries[cursor].key, resolved.source === "workspace" ? "workspace" : "global");
-          setMessage(deleted ? `Deleted override for ${entries[cursor].key}` : "No override to delete");
+    if (createState) {
+      if (key.escape) { setCreateState(null); setCreateName(""); setMessage(null); return; }
+      if (createState.step === "scope") {
+        if (input === "g") { setCreateState({ step: "name", scope: "global" }); setMessage("Enter template id (lower-case, hyphens only):"); }
+        if (input === "w") { setCreateState({ step: "name", scope: "workspace" }); setMessage("Enter template id (lower-case, hyphens only):"); }
+      } else if (createState.step === "name") {
+        if (key.return && createName.length > 0) {
+          const dir = createState.scope === "workspace"
+            ? join(workspaceRoot, ".voidrift", "templates")
+            : join(process.env.HOME || "", ".config", "voidrift", "templates");
+          mkdirSync(dir, { recursive: true });
+          const filePath = join(dir, `${createName}.md`);
+          if (!existsSync(filePath)) {
+            writeFileSync(filePath, `---\nname: "${createName}"\ndescription: ""\ntriggers:\n  extensions: []\n  files: []\n  keywords: []\n---\n\n`, "utf-8");
+          }
+          setCreateState(null);
+          setCreateName("");
+          if (config.editor) {
+            openInEditor(filePath, config.editor);
+            setMessage(`Created ${createName} — editing`);
+          } else {
+            setMessage(`Created: ${filePath.replace(process.env.HOME || "", "~")} (set "editor" in config)`);
+          }
+        } else if (key.backspace || key.delete) {
+          setCreateName(n => n.slice(0, -1));
+        } else if (input && /^[a-z0-9-]$/.test(input)) {
+          setCreateName(n => n + input);
         }
-        setConfirmDelete(false);
-      } else {
-        setConfirmDelete(false);
-        setMessage(null);
       }
       return;
     }
+
+    if (renaming) {
+      if (key.escape) { setRenaming(false); setRenameName(""); setMessage(null); return; }
+      if (key.return && renameName.length > 0) {
+        const item = customTemplates[cursor];
+        if (item) {
+          const newPath = join(dirname(item.path), `${renameName}.md`);
+          if (!existsSync(newPath)) {
+            renameSync(item.path, newPath);
+            setMessage(`Renamed: ${item.key} → ${renameName}`);
+          } else {
+            setMessage(`"${renameName}" already exists`);
+          }
+        }
+        setRenaming(false);
+        setRenameName("");
+      } else if (key.backspace || key.delete) {
+        setRenameName(n => n.slice(0, -1));
+      } else if (input && /^[a-z0-9-]$/.test(input)) {
+        setRenameName(n => n + input);
+      }
+      return;
+    }
+
+    if (detail) {
+      if (key.escape) { setDetail(null); setDetailCursor(0); setMessage(null); return; }
+      if (isCustomPage) {
+        // Custom detail: just open the file
+        if (key.return) {
+          const item = customTemplates.find(t => t.key === detail);
+          if (item && config.editor) {
+            const result = openInEditor(item.path, config.editor);
+            setMessage(result.success ? `Opened: ${item.path.replace(process.env.HOME || "", "~")}` : result.error || "Failed");
+          }
+        }
+      } else {
+        // System detail: override cascade
+        if (key.upArrow) setDetailCursor(c => Math.max(0, c - 1));
+        if (key.downArrow) setDetailCursor(c => Math.min(2, c + 1));
+        if (key.return) {
+          const slot = systemSlots.find(s => s.key === detail);
+          if (slot) {
+            if (detailCursor === 0) {
+              // View default (built-in) — write to temp and open read-only
+              const resolved = templates.resolveSlot(slot);
+              const tmpDir = join(workspaceRoot, ".voidrift", "cache", "view");
+              mkdirSync(tmpDir, { recursive: true });
+              const tmpPath = join(tmpDir, `${detail.replace(/\//g, "_")}.md`);
+              writeFileSync(tmpPath, resolved.content, "utf-8");
+              if (config.editor) {
+                const result = openInEditor(tmpPath, config.editor);
+                setMessage(result.success ? `Viewing default (read-only): ${detail}` : result.error || "Failed");
+              } else {
+                setMessage(`Default written to: ${tmpPath.replace(workspaceRoot, ".")} (set "editor" in config)`);
+              }
+            } else {
+              const scope = detailCursor === 1 ? "global" : "workspace";
+              const path = templates.createOverrideForSlot(slot, scope as any);
+              if (path && config.editor) {
+                const result = openInEditor(path, config.editor);
+                setMessage(result.success ? `Opened: ${path.replace(process.env.HOME || "", "~")}` : result.error || "Failed");
+              } else if (path) {
+                setMessage(`Created: ${path.replace(process.env.HOME || "", "~")} (set "editor" in config)`);
+              }
+            }
+          }
+        }
+      }
+      return;
+    }
+
+    if (key.escape) onClose();
+    if (key.leftArrow) { setPage((p) => (p - 1 + 2) % 2); setCursor(0); setMessage(null); }
+    if (key.rightArrow) { setPage((p) => (p + 1) % 2); setCursor(0); setMessage(null); }
+    if (key.upArrow) setCursor(c => Math.max(0, c - 1));
+    if (key.downArrow) setCursor(c => Math.min(list.length - 1, c + 1));
+    if (key.return && list[cursor]) {
+      if (isCustomPage) {
+        const item = customTemplates[cursor];
+        if (item && config.editor) {
+          const result = openInEditor(item.path, config.editor);
+          setMessage(result.success ? `Opened: ${item.path.replace(process.env.HOME || "", "~")}` : result.error || "Failed");
+        }
+      } else {
+        const item = list[cursor];
+        setDetail("key" in item ? item.key : (item as any).key);
+        setDetailCursor(0);
+        setMessage(null);
+      }
+    }
+    if (input === "c" && isCustomPage) {
+      setCreateState({ step: "scope" });
+      setMessage("Create template — scope: (g) global  (w) workspace");
+    }
+    if (input === "r" && isCustomPage && customTemplates[cursor]) {
+      setRenaming(true);
+      setRenameName("");
+      setMessage(`Rename "${customTemplates[cursor].key}" — enter new id:`);
+    }
+    if (key.delete && isCustomPage && customTemplates[cursor]) {
+      const item = customTemplates[cursor];
+      unlinkSync(item.path);
+      setMessage(`Deleted: ${item.key}`);
+    }
+  });
+
+  // ─── Detail View ───
+  if (detail) {
+    if (isCustomPage) {
+      const item = customTemplates.find(t => t.key === detail);
+      return (
+        <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1}>
+          <Text bold>Template Details: {detail}</Text>
+          <Text color="#5a6aa8">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
+          <Text> </Text>
+          <Text dimColor>{"  "}{"File".padEnd(15)}{"Path"}</Text>
+          <Text dimColor color="#333333">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
+          <Text>
+            <Text color="#4ec9b0">{"▸ "}</Text>
+            <Text>{"Template".padEnd(15)}</Text>
+            <Text dimColor>{item?.path.replace(process.env.HOME || "", "~").replace(workspaceRoot, ".") || ""}</Text>
+          </Text>
+          <Text> </Text>
+          <Text dimColor>  <Text color="#61afef" bold>enter</Text> Open  <Text color="#61afef" bold>esc</Text> Back</Text>
+          {message && <Text color="#4ec9b0">{message}</Text>}
+        </Box>
+      );
+    }
+
+    const slot = systemSlots.find(s => s.key === detail);
+    const wsPath = join(workspaceRoot, ".voidrift", "templates", `${detail}.md`);
+    const globalPath = join(process.env.HOME || "", ".config", "voidrift", "templates", `${detail}.md`);
+    const wsExists = existsSync(wsPath);
+    const globalExists = existsSync(globalPath);
+    const activeLevel = wsExists ? "workspace" : globalExists ? "global" : "default";
+
+    const rows = [
+      { level: "Default", active: activeLevel === "default", path: "(built-in)", scope: "default" as const },
+      { level: "Global", active: activeLevel === "global", path: globalExists ? globalPath.replace(process.env.HOME || "", "~") : undefined, scope: "global" as const },
+      { level: "Workspace", active: activeLevel === "workspace", path: wsExists ? wsPath.replace(workspaceRoot, ".") : undefined, scope: "workspace" as const },
+    ];
+
+    return (
+      <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1}>
+        <Text bold>Template Details: {detail}</Text>
+        <Text dimColor>{slot?.description}</Text>
+        <Text color="#5a6aa8">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
+        <Text> </Text>
+        <Text dimColor>{"Level".padEnd(17)}{"Status".padEnd(12)}{"Path"}</Text>
+        <Text dimColor color="#333333">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
+        {rows.map((row, idx) => (
+          <Text key={row.level}>
+            <Text color={idx === detailCursor ? "#4ec9b0" : undefined}>{idx === detailCursor ? "▸ " : "  "}</Text>
+            <Text>{row.level.padEnd(15)}</Text>
+            <Text>{(row.active ? "active" : "—").padEnd(12)}</Text>
+            <Text dimColor>{row.path || ""}</Text>
+          </Text>
+        ))}
+        <Text> </Text>
+        <Text dimColor>  <Text color="#61afef" bold>↑↓</Text> Navigate  <Text color="#61afef" bold>enter</Text> {detailCursor === 0 ? "View" : "Open/Create"}  <Text color="#61afef" bold>esc</Text> Back</Text>
+        {message && <Text color="#4ec9b0">{message}</Text>}
+      </Box>
+    );
+  }
+
+  // ─── List View ───
+  return (
+    <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1}>
+      <Text bold>Templates</Text>
+      <Text color="#5a6aa8">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
+      <Box>
+        {pages.map((p, i) => (
+          <React.Fragment key={p}>
+            <Text bold color={page === i ? "#4ec9b0" : undefined}>{page === i ? `[ ${p} ]` : `  ${p}  `}</Text>
+            {i < pages.length - 1 && <Text>  </Text>}
+          </React.Fragment>
+        ))}
+      </Box>
+      <Text dimColor color="#333333">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
+      <Text> </Text>
+      {list.length === 0 ? (
+        <Text dimColor>No {pages[page]} templates registered.</Text>
+      ) : (<>
+        {!isCustomPage ? (
+          <>
+            <Text dimColor>{"  "}{"Label".padEnd(25)}{"Source".padEnd(25)}{"Override"}</Text>
+            <Text dimColor color="#333333">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
+            {systemSlots.map((slot, i) => {
+              const resolved = templates.resolveSlot(slot);
+              const override = resolved.source;
+              return (
+                <Box key={`${slot.sourcePlugin}-${slot.key}`} flexDirection="column">
+                  <Text>
+                    <Text color={i === cursor ? "#4ec9b0" : undefined}>{i === cursor ? "▸ " : "  "}</Text>
+                    <Text bold color="#61afef">{slot.label.slice(0, 20).padEnd(25)}</Text>
+                    <Text>{slot.sourcePlugin.slice(0, 20).padEnd(25)}</Text>
+                    <Text>{override}</Text>
+                  </Text>
+                  {i < systemSlots.length - 1 && <Text dimColor color="#333333">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>}
+                  {i === systemSlots.length - 1 && <Text dimColor color="#333333">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>}
+                </Box>
+              );
+            })}
+          </>
+        ) : (
+          <>
+            <Text dimColor>{"  "}{"Name".padEnd(25)}{"Location".padEnd(15)}</Text>
+            <Text dimColor color="#333333">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
+            {customTemplates.map((t, i) => (
+              <Box key={t.key} flexDirection="column">
+                <Text>
+                  <Text color={i === cursor ? "#4ec9b0" : undefined}>{i === cursor ? "▸ " : "  "}</Text>
+                  <Text bold color="#61afef">{t.key.slice(0, 20).padEnd(25)}</Text>
+                  <Text>{t.location.padEnd(15)}</Text>
+                </Text>
+                {i < customTemplates.length - 1 && <Text dimColor color="#333333">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>}
+                {i === customTemplates.length - 1 && <Text dimColor color="#333333">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>}
+              </Box>
+            ))}
+          </>
+        )}
+      </>)}
+      <Text> </Text>
+      <Text bold>Locations</Text>
+      <Text dimColor>  Workspace:  .voidrift/templates/</Text>
+      <Text dimColor>  Global:     ~/.config/voidrift/templates/</Text>
+      <Text> </Text>
+      <Text dimColor>  <Text color="#61afef" bold>←/→</Text> pages  <Text color="#61afef" bold>↑↓</Text> Navigate  <Text color="#61afef" bold>enter</Text> {isCustomPage ? "Open" : "Details"}  <Text color="#61afef" bold>esc</Text> Close{isCustomPage && <>  │  <Text color="#61afef" bold>c</Text> create  <Text color="#61afef" bold>r</Text> rename  <Text color="#61afef" bold>del</Text> delete</>}</Text>
+      {message && <Text color="#4ec9b0">{message}</Text>}
+      {createState?.step === "name" && <Text color="#61afef">  &gt; {createName}<Text color="#4ec9b0">█</Text></Text>}
+      {renaming && <Text color="#61afef">  &gt; {renameName}<Text color="#4ec9b0">█</Text></Text>}
+      <Text> </Text>
+    </Box>
+  );
+}
+
+// ─── /prompts ────────────────────────────────────────────────────────────────
+
+export function PromptsPanel({ prompts, config, workspaceRoot, onClose }: { prompts: PromptRegistry; config: VoidRiftConfig; workspaceRoot: string; onClose: () => void }) {
+  const [cursor, setCursor] = useState(0);
+  const [detail, setDetail] = useState<string | null>(null);
+  const [detailCursor, setDetailCursor] = useState(0);
+  const [message, setMessage] = useState<string | null>(null);
+
+  const entries = prompts.list();
+
+  useInput((_, key) => {
+    if (detail) {
+      if (key.escape) { setDetail(null); setDetailCursor(0); setMessage(null); return; }
+      if (key.upArrow) setDetailCursor(c => Math.max(0, c - 1));
+      if (key.downArrow) setDetailCursor(c => Math.min(2, c + 1));
+      if (key.return) {
+        if (detailCursor === 0) {
+          // View default (built-in)
+          const resolved = prompts.resolve(detail!);
+          const tmpDir = join(workspaceRoot, ".voidrift", "cache", "view");
+          mkdirSync(tmpDir, { recursive: true });
+          const tmpPath = join(tmpDir, `${detail!.replace(/\//g, "_")}_prompt.md`);
+          writeFileSync(tmpPath, resolved?.body || "", "utf-8");
+          if (config.editor) {
+            const result = openInEditor(tmpPath, config.editor);
+            setMessage(result.success ? `Viewing default (read-only): ${detail}` : result.error || "Failed");
+          } else {
+            setMessage(`Default written to: ${tmpPath.replace(workspaceRoot, ".")} (set "editor" in config)`);
+          }
+        } else {
+          const scope = detailCursor === 1 ? "global" : "workspace";
+          const path = prompts.createOverride(detail!, scope as any);
+          if (path && config.editor) {
+            const result = openInEditor(path, config.editor);
+            setMessage(result.success ? `Opened: ${path.replace(process.env.HOME || "", "~")}` : result.error || "Failed");
+          } else if (path) {
+            setMessage(`Created: ${path.replace(process.env.HOME || "", "~")} (set "editor" in config)`);
+          }
+        }
+      }
+      return;
+    }
+
     if (key.escape) onClose();
     if (key.upArrow) setCursor(c => Math.max(0, c - 1));
     if (key.downArrow) setCursor(c => Math.min(entries.length - 1, c + 1));
-    if (key.return && entries.length > 0) {
-      const resolved = templates.resolve(entries[cursor].key);
-      const path = resolved?.overridePath || templates.createOverride(entries[cursor].key, "workspace");
-      if (path && config.editor) {
-        const result = openInEditor(path, config.editor);
-        setMessage(result.success ? `Opened: ${path}` : result.error || "Failed");
-      } else if (path) {
-        setMessage(`Created: ${path} (set "editor" in config to open automatically)`);
-      }
-    }
-    if (input === "o" && entries.length > 0) {
-      const path = templates.createOverride(entries[cursor].key, "workspace");
-      if (path && config.editor) {
-        const result = openInEditor(path, config.editor);
-        setMessage(result.success ? `Opened: ${path}` : result.error || "Failed");
-      } else if (path) {
-        setMessage(`Created: ${path} (set "editor" in config to open automatically)`);
-      }
-    }
-    if (input === "g" && entries.length > 0) {
-      const path = templates.createOverride(entries[cursor].key, "global");
-      if (path && config.editor) {
-        const result = openInEditor(path, config.editor);
-        setMessage(result.success ? `Opened: ${path}` : result.error || "Failed");
-      } else if (path) {
-        setMessage(`Created: ${path} (set "editor" in config to open automatically)`);
-      }
-    }
-    if (input === "d" && entries.length > 0) {
-      const resolved = templates.resolve(entries[cursor].key);
-      if (resolved && resolved.source !== "default") {
-        setConfirmDelete(true);
-        setMessage(`Delete ${resolved.source} override for "${entries[cursor].key}"? (y/n)`);
-      } else {
-        setMessage("No override to delete — using built-in default");
-      }
-    }
+    if (key.return && entries[cursor]) { setDetail(entries[cursor].key); setDetailCursor(0); setMessage(null); }
   });
-  const entries = templates.all;
 
-  const getStatus = (key: string): { label: string; path?: string } => {
-    const resolved = templates.resolve(key);
-    if (!resolved) return { label: "[default]" };
-    if (resolved.source === "workspace") return { label: "[override: local]", path: resolved.overridePath };
-    if (resolved.source === "global") return { label: "[override: global]", path: resolved.overridePath };
-    return { label: "[default]" };
-  };
+  // ─── Detail View ───
+  if (detail) {
+    const entry = entries.find(e => e.key === detail);
+    const resolved = prompts.resolve(detail);
+    const wsPath = join(workspaceRoot, ".voidrift", "prompts", `${detail}.md`);
+    const globalPath = join(process.env.HOME || "", ".config", "voidrift", "prompts", `${detail}.md`);
+    const wsExists = existsSync(wsPath);
+    const globalExists = existsSync(globalPath);
+    const activeLevel = wsExists ? "workspace" : globalExists ? "global" : "default";
 
-  return (
-    <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1} paddingY={1}>
-      <Text bold>Templates & Prompts</Text>
-      <Text> </Text>
-      <Text dimColor>{"Key".padEnd(24)}{"Type".padEnd(10)}{"Source".padEnd(12)}{"Status"}</Text>
-      <Text dimColor>{"─".repeat(70)}</Text>
-      {entries.map((t, i) => {
-        const { label, path } = getStatus(t.key);
-        const selected = i === cursor;
-        return (
-          <Text key={t.key} inverse={selected}>
-            {t.key.padEnd(24)}{t.type.padEnd(10)}{t.sourcePlugin.padEnd(12)}{label}{path ? `  ${path.replace(process.env.HOME || "", "~")}` : ""}
+    const rows = [
+      { level: "Default", active: activeLevel === "default", path: "(built-in)" },
+      { level: "Global", active: activeLevel === "global", path: globalExists ? globalPath.replace(process.env.HOME || "", "~") : undefined },
+      { level: "Workspace", active: activeLevel === "workspace", path: wsExists ? wsPath.replace(workspaceRoot, ".") : undefined },
+    ];
+
+    return (
+      <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1}>
+        <Text bold>Prompt Details: {detail}</Text>
+        <Text dimColor>{entry?.description}</Text>
+        <Text color="#5a6aa8">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
+        <Text> </Text>
+        <Text dimColor>{"Level".padEnd(17)}{"Status".padEnd(12)}{"Path"}</Text>
+        <Text dimColor color="#333333">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
+        {rows.map((row, idx) => (
+          <Text key={row.level}>
+            <Text color={idx === detailCursor ? "#4ec9b0" : undefined}>{idx === detailCursor ? "▸ " : "  "}</Text>
+            <Text>{row.level.padEnd(15)}</Text>
+            <Text>{(row.active ? "active" : "—").padEnd(12)}</Text>
+            <Text dimColor>{row.path || ""}</Text>
           </Text>
-        );
-      })}
+        ))}
+        <Text> </Text>
+        <Text dimColor>  <Text color="#61afef" bold>↑↓</Text> Navigate  <Text color="#61afef" bold>enter</Text> {detailCursor === 0 ? "View" : "Open/Create"}  <Text color="#61afef" bold>del</Text> Delete  <Text color="#61afef" bold>esc</Text> Back</Text>
+        {message && <Text color="#4ec9b0">{message}</Text>}
+      </Box>
+    );
+  }
+
+  // ─── List View ───
+  return (
+    <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1}>
+      <Text bold>Prompts</Text>
+      <Text color="#5a6aa8">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
       <Text> </Text>
-      <Text bold>Override Locations</Text>
-      <Text dimColor>  Workspace:  .voidrift/templates/  .voidrift/prompts/</Text>
-      <Text dimColor>  Global:     ~/.config/voidrift/templates/  ~/.config/voidrift/prompts/</Text>
+      {entries.length === 0 ? (
+        <Text dimColor>No prompts registered.</Text>
+      ) : (<>
+        <Text dimColor>{"  "}{"Label".padEnd(25)}{"Source".padEnd(25)}{"Override"}</Text>
+        <Text dimColor color="#333333">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
+        {entries.map((entry, i) => {
+          const resolved = prompts.resolve(entry.key);
+          const override = resolved?.source || "default";
+          return (
+            <Box key={entry.key} flexDirection="column">
+              <Text>
+                <Text color={i === cursor ? "#4ec9b0" : undefined}>{i === cursor ? "▸ " : "  "}</Text>
+                <Text bold color="#61afef">{entry.label.slice(0, 20).padEnd(25)}</Text>
+                <Text>{entry.sourcePlugin.slice(0, 20).padEnd(25)}</Text>
+                <Text>{override}</Text>
+              </Text>
+              {i < entries.length - 1 && <Text dimColor color="#333333">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>}
+              {i === entries.length - 1 && <Text dimColor color="#333333">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>}
+            </Box>
+          );
+        })}
+      </>)}
       <Text> </Text>
-      <Text dimColor>  <Text color="#61afef" bold>↑↓</Text> Navigate  <Text color="#61afef" bold>enter</Text> Open  <Text color="#61afef" bold>o</Text> Override local  <Text color="#61afef" bold>g</Text> Override global  <Text color="#61afef" bold>d</Text> Delete override  <Text color="#61afef" bold>esc</Text> Close</Text>
+      <Text bold>Locations</Text>
+      <Text dimColor>  Workspace:  .voidrift/prompts/</Text>
+      <Text dimColor>  Global:     ~/.config/voidrift/prompts/</Text>
+      <Text> </Text>
+      <Text dimColor>  <Text color="#61afef" bold>↑↓</Text> Navigate  <Text color="#61afef" bold>enter</Text> Details  <Text color="#61afef" bold>esc</Text> Close</Text>
       {message && <Text color="#4ec9b0">{message}</Text>}
     </Box>
   );
@@ -389,9 +842,6 @@ export function ContextPanel({
   stats,
   modelName,
   skills,
-  mcp,
-  worktree,
-  workspaceRoot,
   onClose,
 }: {
   budget: TokenBudgetWatcher;
@@ -399,240 +849,122 @@ export function ContextPanel({
   stats: StatsTracker;
   modelName: string;
   skills: SkillManager;
-  mcp: MCPEngine;
-  worktree: WorktreeEngine;
-  workspaceRoot?: string;
   onClose: () => void;
 }) {
-  useInput((ch, key) => {
-    if (key.escape) onClose();
-  });
+  useInput((_, key) => { if (key.escape) onClose(); });
 
   const b = budget.state;
   const totalLimit = b.limit;
-  const totalTurns = stats.current.turns;
 
-  // 1. Dynamic Category token calculation
   const messages = context.getMessages();
-  const rawUserTokens = messages
-    .filter(m => m.role === "user")
-    .reduce((acc, m) => acc + Math.ceil(m.content.length / 4), 0);
-  const rawAgentTokens = messages
-    .filter(m => m.role === "assistant")
-    .reduce((acc, m) => acc + Math.ceil(m.content.length / 4), 0);
-  const rawToolTokens = messages
-    .filter(m => m.role === "tool")
-    .reduce((acc, m) => acc + Math.ceil(m.content.length / 4), 0);
-
-  // Focus files and skills token estimates
   const focusedFiles = context.context.workspace.focusedFiles;
   const activeSkills = context.context.governance.activeSkills;
 
-  const rawFileTokens = focusedFiles.reduce((acc, f) => acc + Math.ceil(f.summary.length / 4), 0);
-  const rawSkillsTokens = activeSkills.reduce((acc, content) => acc + Math.ceil(content.length / 4), 0) || activeSkills.length * 1000;
-  const rawSystemPromptTokens = Math.ceil(context.context.governance.activePersona.length / 4) || 2000;
-  const rawSystemToolsTokens = Math.ceil(JSON.stringify(TOOL_SCHEMAS).length / 4) + (mcp ? mcp.all.reduce((acc, s) => acc + s.tools.length, 0) * 500 : 1500);
-  const rawSubagentTokens = worktree ? worktree.locks.length * 4000 : 0;
+  // Token estimates
+  const promptTokens = Math.ceil(context.context.governance.activePersona.length / 4);
+  const toolsTokens = Math.ceil(JSON.stringify(TOOL_SCHEMAS).length / 4);
+  const skillsTokens = activeSkills.reduce((acc, s) => acc + Math.ceil(s.length / 4), 0);
+  const filesTokens = focusedFiles.reduce((acc, f) => acc + Math.ceil(f.summary.length / 4), 0);
+  const codeMapTokens = Math.ceil(context.context.workspace.workspaceCodeMap.length / 4);
+  const memoryTokens = context.context.workspace.activeMemory.reduce((acc, m) => acc + Math.ceil(m.length / 4), 0);
+  const planTokens = context.context.workspace.activePlan ? Math.ceil(context.context.workspace.activePlan.length / 4) : 0;
+  const msgTokens = messages.filter(m => m.role === "user" || m.role === "assistant").reduce((acc, m) => acc + Math.ceil(m.content.length / 4), 0);
+  const toolResultTokens = messages.filter(m => m.role === "tool").reduce((acc, m) => acc + Math.ceil(m.content.length / 4), 0);
+  const diagTokens = context.context.work.diagnostics ? Math.ceil(context.context.work.diagnostics.length / 4) : 0;
 
-  // Sum estimated used tokens
-  const estUsed = rawUserTokens + rawAgentTokens + rawToolTokens + rawFileTokens + rawSkillsTokens + rawSystemPromptTokens + rawSystemToolsTokens + rawSubagentTokens;
+  const govTotal = promptTokens + toolsTokens + skillsTokens;
+  const wsTotal = filesTokens + codeMapTokens + memoryTokens + planTokens;
+  const workTotal = msgTokens + toolResultTokens + diagTokens;
+  const totalUsed = govTotal + wsTotal + workTotal;
+  const freeTokens = Math.max(0, totalLimit - totalUsed);
 
-  // Proportional scaling to match budget.used exactly
-  const scale = estUsed > 0 ? b.used / estUsed : 1;
-  const userTokens = Math.round(rawUserTokens * scale);
-  const agentTokens = Math.round(rawAgentTokens * scale);
-  const toolTokens = Math.round(rawToolTokens * scale);
-  const fileTokens = Math.round(rawFileTokens * scale);
-  const skillsTokens = Math.round(rawSkillsTokens * scale);
-  const systemPromptTokens = Math.round(rawSystemPromptTokens * scale);
-  const systemToolsTokens = Math.round(rawSystemToolsTokens * scale);
-  const subagentTokens = Math.round(rawSubagentTokens * scale);
+  const fmt = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`;
+  const pct = (n: number) => ((n / totalLimit) * 100).toFixed(1);
 
-  const activeUsed = b.used;
-  const freeTokens = Math.max(0, totalLimit - activeUsed);
+  // Grid: each partition's grid shows fill relative to totalLimit
+  // blocks filled = (partitionTokens / totalLimit) * totalBlocks
+  const renderGrid = (rows: number, items: Array<{ tokens: number; char: string; color: string }>) => {
+    const totalBlocks = rows * 30;
+    const blocks: Array<{ char: string; color: string }> = [];
 
-  let checkpointBufferTokens = 0;
-  if (totalTurns > 0 && workspaceRoot) {
-    try {
-      const gitStatus = execSync("git status --porcelain", { cwd: workspaceRoot, encoding: "utf-8" });
-      checkpointBufferTokens = gitStatus.trim().length > 0 ? Math.min(2000, Math.ceil(gitStatus.length / 4)) : 0;
-    } catch {
-      checkpointBufferTokens = totalTurns * 200; // fallback estimate
+    for (const item of items) {
+      const count = Math.round((item.tokens / totalLimit) * totalBlocks);
+      for (let i = 0; i < count && blocks.length < totalBlocks; i++) {
+        blocks.push({ char: item.char, color: item.color });
+      }
     }
-  }
+    while (blocks.length < totalBlocks) blocks.push({ char: "□", color: "grey" });
 
-  // Percentages relative to total limit
-  const getPctStr = (val: number) => ((val / totalLimit) * 100).toFixed(1);
-  const usedPct = getPctStr(activeUsed);
-  const userPct = getPctStr(userTokens);
-  const agentPct = getPctStr(agentTokens);
-  const toolPct = getPctStr(toolTokens);
-  const systemPromptPct = getPctStr(systemPromptTokens);
-  const systemToolsPct = getPctStr(systemToolsTokens);
-  const skillsPct = getPctStr(skillsTokens);
-  const subagentPct = getPctStr(subagentTokens);
-  const freePct = getPctStr(freeTokens);
-
-  // 2. Grid matrix calculations (30 columns x 12 rows = 360 total blocks)
-  const totalBlocks = 360;
-  
-  // Calculate blocks proportionally
-  const getBlocks = (val: number) => {
-    if (val === 0) return 0;
-    return Math.max(1, Math.round((val / totalLimit) * totalBlocks));
-  };
-
-  const systemBlocks = getBlocks(systemPromptTokens + systemToolsTokens + skillsTokens + subagentTokens) || 2;
-  const fileBlocks = getBlocks(fileTokens);
-  const userBlocks = getBlocks(userTokens);
-  const agentBlocks = getBlocks(agentTokens);
-  const toolBlocks = getBlocks(toolTokens);
-  const freeBlocks = Math.max(0, totalBlocks - systemBlocks - fileBlocks - userBlocks - agentBlocks - toolBlocks);
-
-  const blocks: Array<{ char: string; color: string }> = [];
-  // System blocks (⚙)
-  for (let i = 0; i < systemBlocks; i++) blocks.push({ char: "⚙", color: "grey" });
-  // File blocks (cyan bullseye "◎")
-  for (let i = 0; i < fileBlocks; i++) blocks.push({ char: "◎", color: "cyan" });
-  // User blocks (blue bullseye "◎")
-  for (let i = 0; i < userBlocks; i++) blocks.push({ char: "◎", color: "#61afef" });
-  // Agent blocks (green bullseye "◎")
-  for (let i = 0; i < agentBlocks; i++) blocks.push({ char: "◎", color: "#98c379" });
-  // Tool blocks (yellow bullseye "◎")
-  for (let i = 0; i < toolBlocks; i++) blocks.push({ char: "◎", color: "#e5c07b" });
-  // Free blocks (grey square "□")
-  for (let i = 0; i < freeBlocks; i++) blocks.push({ char: "□", color: "grey" });
-
-  // Ensure blocks matches exactly 360 length
-  while (blocks.length < totalBlocks) {
-    blocks.push({ char: "□", color: "grey" });
-  }
-  if (blocks.length > totalBlocks) {
-    blocks.length = totalBlocks;
-  }
-
-  const renderGrid = () => {
-    const rows = [];
-    for (let r = 0; r < 12; r++) {
+    const gridRows = [];
+    for (let r = 0; r < rows; r++) {
       const cols = [];
       for (let c = 0; c < 30; c++) {
-        const idx = r * 30 + c;
-        if (idx < blocks.length) {
-          const bl = blocks[idx];
-          cols.push(<Text key={c} color={bl.color}>{bl.char} </Text>);
-        }
+        const bl = blocks[r * 30 + c];
+        cols.push(<Text key={c} color={bl.color}>{bl.char} </Text>);
       }
-      rows.push(<Box key={r}>{cols}</Box>);
+      gridRows.push(<Box key={r}>{cols}</Box>);
     }
-    return rows;
-  };
-
-  // Helper for formatting token sizes human-readably
-  const formatTokens = (val: number) => {
-    if (val >= 1000) return `${(val / 1000).toFixed(1)}k`;
-    return `${val}`;
+    return gridRows;
   };
 
   return (
-    <Box flexDirection="column" paddingX={1} paddingY={1}>
-      <Text bold>L Context Usage</Text>
+    <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1}>
+      <Text bold>Context</Text>
+      <Text color="#5a6aa8">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
       <Text> </Text>
+      <Text bold>Governance <Text dimColor>({fmt(govTotal)} · {pct(govTotal)}%)</Text></Text>
       <Box flexDirection="row">
-        {/* Left Side: Grid Matrix */}
-        <Box flexDirection="column" width={62} marginRight={4}>
-          {renderGrid()}
+        <Box flexDirection="column" marginRight={4}>
+          {renderGrid(4, [
+            { tokens: promptTokens, char: "⚙", color: "#61afef" },
+            { tokens: toolsTokens, char: "●", color: "#e5c07b" },
+            { tokens: skillsTokens, char: "◎", color: "#c678dd" },
+          ])}
         </Box>
-
-        {/* Right Side: Legend & Statistics */}
-        <Box flexDirection="column" width={55}>
-          <Text bold color="white">
-            {modelName} · {formatTokens(activeUsed)}/{formatTokens(totalLimit)} tokens ({usedPct}%)
-          </Text>
-          <Text dimColor>Token usage by category</Text>
-          <Text>
-            <Text color="#61afef">◎</Text> User messages: {formatTokens(userTokens)} tokens ({userPct}%)
-          </Text>
-          <Text>
-            <Text color="#98c379">◎</Text> Agent responses: {formatTokens(agentTokens)} tokens ({agentPct}%)
-          </Text>
-          <Text>
-            <Text color="#e5c07b">◎</Text> Tool calls: {formatTokens(toolTokens)} tokens ({toolPct}%)
-          </Text>
-          <Text>
-            <Text color="grey">⚙</Text> System prompt: {formatTokens(systemPromptTokens)} tokens ({systemPromptPct}%)
-          </Text>
-          <Text>
-            <Text color="grey">⚙</Text> System tools: {formatTokens(systemToolsTokens)} tokens ({systemToolsPct}%)
-          </Text>
-          <Text>
-            <Text color="grey">⚙</Text> Skills: {formatTokens(skillsTokens)} tokens ({skillsPct}%)
-          </Text>
-          <Text>
-            <Text color="grey">⚙</Text> Subagents: {formatTokens(subagentTokens)} tokens ({subagentPct}%)
-          </Text>
-          <Text>
-            <Text color="grey">□</Text> Free space: {formatTokens(freeTokens)} tokens ({freePct}%)
-          </Text>
-          <Text>
-            <Text color="#c678dd">☒</Text> Checkpoint buffer: {checkpointBufferTokens} tokens (not counted in usage)
-          </Text>
+        <Box flexDirection="column">
+          <Text><Text color="#61afef">⚙</Text> Prompt: {fmt(promptTokens)}</Text>
+          <Text><Text color="#e5c07b">●</Text> Tools: {fmt(toolsTokens)}</Text>
+          <Text><Text color="#c678dd">◎</Text> Skills: {fmt(skillsTokens)}</Text>
         </Box>
       </Box>
-
-      {/* Checkpoints Section */}
       <Text> </Text>
-      <Text bold>Checkpoints ({totalTurns}) · /rewind</Text>
-      {totalTurns > 0 ? (
-        Array.from({ length: totalTurns }, (_, i) => i + 1)
-          .slice(-5)
-          .map(turn => (
-            <Text key={turn} dimColor>
-              L Checkpoint {turn} {turn === totalTurns ? "(active, in context)" : "(stored)"}: step {turn}
-            </Text>
-          ))
-      ) : (
-        <Text dimColor>No checkpoints recorded yet.</Text>
-      )}
-
-      {/* Artifact Files Section */}
-      <Text> </Text>
-      <Text bold>Artifact files · /artifact</Text>
-      {focusedFiles.length === 0 ? (
-        <Text dimColor>No active artifact files focused.</Text>
-      ) : (
-        focusedFiles.map(f => (
-          <Text key={f.path} dimColor>
-            L {f.path}: {formatTokens(Math.ceil(f.summary.length / 4))} tokens
-          </Text>
-        ))
-      )}
-
-      {/* System Files Section */}
-      <Text> </Text>
-      <Text bold>System files · auto-loaded</Text>
-      {activeSkills.length === 0 ? (
-        <Text dimColor>L ~/.config/voidrift/config.json</Text>
-      ) : (
-        activeSkills.map((s, idx) => {
-          const match = skills?.indexed.find(entry => entry.content === s);
-          const pathDisplay = match
-            ? match.filePath.replace(process.env.HOME || "", "~")
-            : `[dynamic skill ${idx + 1}]`;
-          return (
-            <Text key={idx} dimColor>
-              L {pathDisplay}
-            </Text>
-          );
-        })
-      )}
-
-      <Text> </Text>
-      <Text dimColor>Related: /artifact · /skill · /rewind</Text>
-      <Text> </Text>
-      <Box justifyContent="space-between">
-        <Text dimColor>esc to cancel</Text>
-        <Text dimColor>{modelName}</Text>
+      <Text bold>Workspace <Text dimColor>({fmt(wsTotal)} · {pct(wsTotal)}%)</Text></Text>
+      <Box flexDirection="row">
+        <Box flexDirection="column" marginRight={4}>
+          {renderGrid(4, [
+            { tokens: filesTokens, char: "◎", color: "cyan" },
+            { tokens: codeMapTokens, char: "●", color: "#98c379" },
+            { tokens: memoryTokens, char: "▪", color: "#e5c07b" },
+            { tokens: planTokens, char: "◆", color: "#61afef" },
+          ])}
+        </Box>
+        <Box flexDirection="column">
+          <Text><Text color="cyan">◎</Text> Files: {fmt(filesTokens)}</Text>
+          <Text><Text color="#98c379">●</Text> Code Map: {fmt(codeMapTokens)}</Text>
+          <Text><Text color="#e5c07b">▪</Text> Memory: {fmt(memoryTokens)}</Text>
+          <Text><Text color="#61afef">◆</Text> Plan: {fmt(planTokens)}</Text>
+        </Box>
       </Box>
+      <Text> </Text>
+      <Text bold>Work <Text dimColor>({fmt(workTotal)} · {pct(workTotal)}%)</Text></Text>
+      <Box flexDirection="row">
+        <Box flexDirection="column" marginRight={4}>
+          {renderGrid(12, [
+            { tokens: msgTokens, char: "◎", color: "#61afef" },
+            { tokens: toolResultTokens, char: "●", color: "#e5c07b" },
+            { tokens: diagTokens, char: "✗", color: "red" },
+          ])}
+        </Box>
+        <Box flexDirection="column">
+          <Text><Text color="#61afef">◎</Text> Messages: {fmt(msgTokens)}</Text>
+          <Text><Text color="#e5c07b">●</Text> Tool Results: {fmt(toolResultTokens)}</Text>
+          <Text><Text color="red">✗</Text> Diagnostics: {fmt(diagTokens)}</Text>
+        </Box>
+      </Box>
+      <Text> </Text>
+      <Text bold>{modelName} · {fmt(totalUsed)}/{fmt(totalLimit)} ({pct(totalUsed)}%) <Text dimColor>Free: {fmt(freeTokens)}</Text></Text>
+      <Text> </Text>
+      <Text dimColor>  <Text color="#61afef" bold>esc</Text> Close</Text>
     </Box>
   );
 }
@@ -649,8 +981,9 @@ export function TasksPanel({
   useInput((_, key) => { if (key.escape) onClose(); });
   const tasks = scheduler ? scheduler.all : [];
   return (
-    <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1} paddingY={1}>
+    <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1}>
       <Text bold>Background Tasks</Text>
+      <Text color="#5a6aa8">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
       <Text> </Text>
       {tasks.length === 0 ? (
         <Text dimColor>No active background tasks.</Text>
@@ -674,8 +1007,9 @@ export function TasksPanel({
 export function ResumePanel({ onClose }: { onClose: () => void }) {
   useInput((_, key) => { if (key.escape) onClose(); });
   return (
-    <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1} paddingY={1}>
+    <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1}>
       <Text bold>Conversations</Text>
+      <Text color="#5a6aa8">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
       <Text> </Text>
       <Text dimColor>No saved conversations found.</Text>
       <Text> </Text>
@@ -695,8 +1029,9 @@ export function RewindPanel({ turns, onRewind, onClose }: { turns: number; onRew
     if (key.return) { onRewind(selected); onClose(); }
   });
   return (
-    <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1} paddingY={1}>
+    <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1}>
       <Text bold>Rewind to Turn</Text>
+      <Text color="#5a6aa8">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
       <Text> </Text>
       {Array.from({ length: turns }, (_, i) => i + 1).reverse().map((t) => (
         <Text key={t}><Text color={t === selected ? "#4ec9b0" : undefined}>{t === selected ? "▸ " : "  "}Turn {t}</Text></Text>
@@ -740,8 +1075,9 @@ export function IdeasPanel({ workspaceRoot, onClose }: { workspaceRoot: string; 
   });
 
   return (
-    <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1} paddingY={1}>
+    <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1}>
       <Text bold>Ideas</Text>
+      <Text color="#5a6aa8">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
       <Text> </Text>
       {ideas.length === 0 ? (
         <Text dimColor>No ideas found. Use <Text color="#61afef">n</Text> to create one.</Text>
@@ -792,8 +1128,9 @@ export function ChangesPanel({ workspaceRoot, onClose }: { workspaceRoot: string
   });
 
   return (
-    <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1} paddingY={1}>
+    <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1}>
       <Text bold>Change Requests</Text>
+      <Text color="#5a6aa8">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
       <Text> </Text>
       {changes.length === 0 ? (
         <Text dimColor>No change requests found.</Text>
@@ -813,15 +1150,395 @@ export function ChangesPanel({ workspaceRoot, onClose }: { workspaceRoot: string
 
 // ─── /agents ─────────────────────────────────────────────────────────────────
 
-export function AgentsPanel({ onClose }: { onClose: () => void }) {
-  useInput((_, key) => { if (key.escape) onClose(); });
+export function AgentsPanel({
+  agents,
+  config,
+  workspaceRoot,
+  onClose,
+}: {
+  agents: AgentRegistry;
+  config: VoidRiftConfig;
+  workspaceRoot: string;
+  onClose: () => void;
+}) {
+  const [page, setPage] = useState(0);
+  const [selected, setSelected] = useState(0);
+  const [detail, setDetail] = useState<string | null>(null);
+  const [detailCursor, setDetailCursor] = useState(0);
+  const [message, setMessage] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
+  const [createState, setCreateState] = useState<{ step: "scope" | "name"; scope?: "global" | "workspace"; name?: string } | null>(null);
+  const [createName, setCreateName] = useState("");
+  const [renaming, setRenaming] = useState(false);
+  const [renameName, setRenameName] = useState("");
+  const pages = ["system interactive", "system task", "custom interactive", "custom task"];
+
+  const activeId = agents.active.id;
+
+  const getList = () => {
+    switch (page) {
+      case 0: return agents.listInteractive().filter(a => a.source !== "custom");
+      case 1: return agents.listTask().filter(a => a.source !== "custom");
+      case 2: return agents.listInteractive().filter(a => a.source === "custom");
+      case 3: return agents.listTask().filter(a => a.source === "custom");
+      default: return [];
+    }
+  };
+  const list = getList();
+  const isCustomPage = page >= 2;
+
+  const getDetailRows = (agentId: string) => {
+    const agent = agents.get(agentId);
+    const globalDir = join(process.env.HOME || "", ".config", "voidrift", "agents", agentId);
+    const wsDir = join(workspaceRoot, ".voidrift", "agents", agentId);
+    const globalConfig = join(globalDir, "agent.json");
+    const wsConfig = join(wsDir, "agent.json");
+    const globalPrompt = join(globalDir, "prompt.md");
+    const wsPrompt = join(wsDir, "prompt.md");
+    const gcExists = existsSync(globalConfig);
+    const wcExists = existsSync(wsConfig);
+    const gpExists = existsSync(globalPrompt);
+    const wpExists = existsSync(wsPrompt);
+    const hasBuiltIn = agent?.source !== "custom";
+
+    const configActive = wcExists ? "workspace" : gcExists ? "global" : "default";
+    const promptActive = wpExists ? "workspace" : gpExists ? "global" : "default";
+
+    const rows: Array<{ section: string; level: string; active: boolean; path?: string; editable: boolean; target?: string }> = [];
+
+    if (hasBuiltIn) {
+      rows.push({ section: "config", level: "Default", active: configActive === "default", path: "(built-in)", editable: true, target: undefined });
+      rows.push({ section: "config", level: "Global", active: configActive === "global", path: gcExists ? globalConfig.replace(process.env.HOME || "", "~") : undefined, editable: true, target: globalConfig });
+      rows.push({ section: "config", level: "Workspace", active: configActive === "workspace", path: wcExists ? wsConfig.replace(workspaceRoot, ".") : undefined, editable: true, target: wsConfig });
+      rows.push({ section: "prompt", level: "Default", active: promptActive === "default", path: "(built-in)", editable: true, target: undefined });
+      rows.push({ section: "prompt", level: "Global", active: promptActive === "global", path: gpExists ? globalPrompt.replace(process.env.HOME || "", "~") : undefined, editable: true, target: globalPrompt });
+      rows.push({ section: "prompt", level: "Workspace", active: promptActive === "workspace", path: wpExists ? wsPrompt.replace(workspaceRoot, ".") : undefined, editable: true, target: wsPrompt });
+    } else {
+      // Custom agents — just show config and prompt as rows
+      const configPath = gcExists ? globalConfig : wcExists ? wsConfig : undefined;
+      const promptPath_ = gpExists ? globalPrompt : wpExists ? wsPrompt : undefined;
+      rows.push({ section: "file", level: "Config", active: !!configPath, path: configPath ? configPath.replace(process.env.HOME || "", "~").replace(workspaceRoot, ".") : undefined, editable: true, target: configPath || wsConfig });
+      rows.push({ section: "file", level: "Prompt", active: !!promptPath_, path: promptPath_ ? promptPath_.replace(process.env.HOME || "", "~").replace(workspaceRoot, ".") : undefined, editable: true, target: promptPath_ || wsPrompt });
+    }
+    return rows;
+  };
+
+  useInput((input, key) => {
+    if (confirmDelete) {
+      if (input === "y") {
+        const agent = list[selected];
+        if (agent) {
+          agents.deleteOverride(agent.id, "workspace", workspaceRoot);
+          agents.deleteOverride(agent.id, "global", workspaceRoot);
+          agents.discover(workspaceRoot);
+          setMessage(`Deleted: ${agent.name}`);
+        }
+        setConfirmDelete(false);
+      } else {
+        setConfirmDelete(false);
+        setMessage(null);
+      }
+      return;
+    }
+
+    if (createState) {
+      if (key.escape) { setCreateState(null); setCreateName(""); setMessage(null); return; }
+      if (createState.step === "scope") {
+        if (input === "g") { setCreateState({ step: "name", scope: "global" }); setMessage("Enter agent id (lower-case, hyphens only):"); }
+        if (input === "w") { setCreateState({ step: "name", scope: "workspace" }); setMessage("Enter agent id (lower-case, hyphens only):"); }
+      } else if (createState.step === "name") {
+        if (key.return && createName.length > 0) {
+          const type = page === 2 ? "interactive" : "task";
+          const path = agents.createAgent(createName, type as any, workspaceRoot, createState.scope as any);
+          agents.discover(workspaceRoot);
+          setCreateState(null);
+          setCreateName("");
+          if (config.editor) {
+            openInEditor(path, config.editor);
+            setMessage(`Created ${createName} — editing config`);
+          } else {
+            setMessage(`Created: ${createName} (set "editor" in config)`);
+          }
+        } else if (key.backspace || key.delete) {
+          setCreateName(n => n.slice(0, -1));
+        } else if (input && /^[a-z0-9-]$/.test(input)) {
+          setCreateName(n => n + input);
+        }
+      }
+      return;
+    }
+
+    if (renaming) {
+      if (key.escape) { setRenaming(false); setRenameName(""); setMessage(null); return; }
+      if (key.return && renameName.length > 0) {
+        const agent = list[selected];
+        if (agent) {
+          const oldDir = agent.overridePath ? dirname(agent.overridePath) : join(workspaceRoot, ".voidrift", "agents", agent.id);
+          const parentDir = dirname(oldDir);
+          const newDir = join(parentDir, renameName);
+          if (existsSync(oldDir) && !existsSync(newDir)) {
+            renameSync(oldDir, newDir);
+            agents.discover(workspaceRoot);
+            setMessage(`Renamed: ${agent.id} → ${renameName}`);
+          } else {
+            setMessage(existsSync(newDir) ? `"${renameName}" already exists` : "Source folder not found");
+          }
+        }
+        setRenaming(false);
+        setRenameName("");
+      } else if (key.backspace || key.delete) {
+        setRenameName(n => n.slice(0, -1));
+      } else if (input && /^[a-z0-9-]$/.test(input)) {
+        setRenameName(n => n + input);
+      }
+      return;
+    }
+
+    if (detail) {
+      const rows = getDetailRows(detail).filter(r => r.editable);
+      if (key.escape) { setDetail(null); setDetailCursor(0); setMessage(null); agents.discover(workspaceRoot); return; }
+      if (key.upArrow) setDetailCursor(c => Math.max(0, c - 1));
+      if (key.downArrow) setDetailCursor(c => Math.min(rows.length - 1, c + 1));
+      if (key.return && rows[detailCursor]) {
+        const row = rows[detailCursor];
+        if (!row.target) {
+          // Default row — view built-in as read-only temp file
+          const agent = agents.get(detail!)!;
+          const tmpDir = join(workspaceRoot, ".voidrift", "cache", "view");
+          mkdirSync(tmpDir, { recursive: true });
+          const suffix = row.section === "prompt" ? "prompt.md" : "agent.json";
+          const tmpPath = join(tmpDir, `${detail}_default_${suffix}`);
+          if (row.section === "prompt") {
+            writeFileSync(tmpPath, agent.prompt, "utf-8");
+          } else {
+            const copy: Record<string, unknown> = { ...agent };
+            delete copy.source; delete copy.overrideStatus; delete copy.overridePath; delete copy.prompt;
+            writeFileSync(tmpPath, JSON.stringify(copy, null, 2), "utf-8");
+          }
+          if (config.editor) {
+            const result = openInEditor(tmpPath, config.editor);
+            setMessage(result.success ? `Viewing default (read-only): ${detail} ${row.section}` : result.error || "Failed");
+          } else {
+            setMessage(`Default written to: ${tmpPath.replace(workspaceRoot, ".")} (set "editor" in config)`);
+          }
+        } else {
+          const target = row.target;
+          mkdirSync(dirname(target), { recursive: true });
+          if (!existsSync(target)) {
+            const agent = agents.get(detail!)!;
+            if (target.endsWith(".json")) {
+              const copy: Record<string, unknown> = { ...agent };
+              delete copy.source; delete copy.overrideStatus; delete copy.overridePath; delete copy.prompt;
+              writeFileSync(target, JSON.stringify(copy, null, 2), "utf-8");
+            } else {
+              writeFileSync(target, agent.prompt, "utf-8");
+            }
+          }
+          agents.discover(workspaceRoot);
+          if (config.editor) {
+            const result = openInEditor(target, config.editor);
+            setMessage(result.success ? `Opened: ${target.replace(process.env.HOME || "", "~")}` : result.error || "Failed");
+          } else {
+            setMessage(`Created: ${target.replace(process.env.HOME || "", "~")} (set "editor" in config)`);
+          }
+        }
+      }
+      if (key.delete && rows[detailCursor]) {
+        const row = rows[detailCursor];
+        if (row.target && existsSync(row.target)) {
+          unlinkSync(row.target);
+          agents.discover(workspaceRoot);
+          setMessage(`Deleted: ${row.target.replace(process.env.HOME || "", "~")}`);
+        }
+      }
+      if (confirmReset) {
+        if (input === "y") {
+          const row = rows[detailCursor];
+          if (row?.target) {
+            const agentId = detail!;
+            if (row.target.endsWith(".json")) {
+              const defaultConfig = { id: agentId, name: agentId, description: "", type: "interactive", modelTier: "auto", tools: [] as string[], approvalMode: "prompt", allowedTools: [] as string[], active: false };
+              writeFileSync(row.target, JSON.stringify(defaultConfig, null, 2), "utf-8");
+            } else {
+              writeFileSync(row.target, `You are ${agentId}.\n`, "utf-8");
+            }
+            agents.discover(workspaceRoot);
+            setMessage(`Reset: ${row.target.replace(process.env.HOME || "", "~")}`);
+          }
+          setConfirmReset(false);
+        } else {
+          setConfirmReset(false);
+          setMessage(null);
+        }
+        return;
+      }
+      if (input === "r" && agents.get(detail!)?.source === "custom" && rows[detailCursor]) {
+        const row = rows[detailCursor];
+        if (row.target && existsSync(row.target)) {
+          setConfirmReset(true);
+          setMessage(`Reset ${row.target.endsWith(".json") ? "config" : "prompt"} to default? (y/n)`);
+        }
+      }
+      return;
+    }
+
+    // List view
+    if (key.escape) onClose();
+    if (key.leftArrow) { setPage((p) => (p - 1 + 4) % 4); setSelected(0); setMessage(null); }
+    if (key.rightArrow) { setPage((p) => (p + 1) % 4); setSelected(0); setMessage(null); }
+    if (key.upArrow) setSelected((s) => Math.max(0, s - 1));
+    if (key.downArrow) setSelected((s) => Math.min(list.length - 1, s + 1));
+    if (key.return && list[selected]) { setDetail(list[selected].id); setDetailCursor(0); setMessage(null); }
+    if (input === "a" && isCustomPage && list[selected]) {
+      const agent = list[selected];
+      if (agent.active !== false) {
+        agents.deactivate(agent.id, workspaceRoot);
+        agents.discover(workspaceRoot);
+        setMessage(`Deactivated: ${agent.name}`);
+      } else {
+        agents.activate(agent.id, workspaceRoot);
+        agents.discover(workspaceRoot);
+        setMessage(`Activated: ${agent.name}`);
+      }
+    }
+    if (input === "c" && isCustomPage) {
+      setCreateState({ step: "scope" });
+      setMessage("Create agent — scope: (g) global  (w) workspace");
+    }
+    if (input === "r" && isCustomPage && list[selected]) {
+      setRenaming(true);
+      setRenameName("");
+      setMessage(`Rename "${list[selected].id}" — enter new id:`);
+    }
+    if (key.delete && isCustomPage && list[selected]) {
+      const agent = list[selected];
+      setConfirmDelete(true);
+      setMessage(`Delete agent "${agent.name}"? (y/n)`);
+    }
+  });
+
+  // ─── Detail View ───
+  if (detail) {
+    const agent = agents.get(detail);
+    const allRows = getDetailRows(detail);
+    const editableRows = allRows.filter(r => r.editable);
+    let editIdx = 0;
+
+    const isCustomAgent = agent?.source === "custom";
+    const renderRow = (row: typeof allRows[0]) => {
+      const isEditable = row.editable;
+      const idx = isEditable ? editIdx++ : -1;
+      if (!isEditable) {
+        return (
+          <Text key={`${row.section}-${row.level}`}>
+            <Text>{row.level.padEnd(17)}</Text>
+            <Text>{(row.active ? "active" : "—").padEnd(12)}</Text>
+            <Text dimColor>{row.path || ""}</Text>
+          </Text>
+        );
+      }
+      if (isCustomAgent) {
+        return (
+          <Text key={`${row.section}-${row.level}`}>
+            <Text color={idx === detailCursor ? "#4ec9b0" : undefined}>{idx === detailCursor ? "▸ " : "  "}</Text>
+            <Text>{row.level.padEnd(15)}</Text>
+            <Text dimColor>{row.path || ""}</Text>
+          </Text>
+        );
+      }
+      return (
+        <Text key={`${row.section}-${row.level}`}>
+          <Text color={idx === detailCursor ? "#4ec9b0" : undefined}>{idx === detailCursor ? "▸ " : "  "}</Text>
+          <Text>{row.level.padEnd(15)}</Text>
+          <Text>{(row.active ? "active" : "—").padEnd(12)}</Text>
+          <Text dimColor>{row.path || ""}</Text>
+        </Text>
+      );
+    };
+
+    return (
+      <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1}>
+        <Text bold>Agent Details: {detail}</Text>
+        <Text dimColor>{agent?.description}</Text>
+        <Text color="#5a6aa8">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
+      <Text> </Text>
+        {agent?.source === "custom" ? (<>
+          <Text dimColor>{"  "}{"File".padEnd(15)}{"Path"}</Text>
+          <Text dimColor color="#333333">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
+          {allRows.map(renderRow)}
+        </>) : (<>
+          <Text bold>Config</Text>
+          <Text> </Text>
+          <Text dimColor>{"Level".padEnd(17)}{"Status".padEnd(12)}{"Path"}</Text>
+          <Text dimColor color="#333333">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
+          {allRows.filter(r => r.section === "config").map(renderRow)}
+          <Text> </Text>
+          <Text bold>Prompt</Text>
+          <Text> </Text>
+          <Text dimColor>{"Level".padEnd(17)}{"Status".padEnd(12)}{"Path"}</Text>
+          <Text dimColor color="#333333">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
+          {allRows.filter(r => r.section === "prompt").map(renderRow)}
+        </>)}
+        <Text> </Text>
+        <Text dimColor>  <Text color="#61afef" bold>↑↓</Text> Navigate  <Text color="#61afef" bold>enter</Text> {editableRows[detailCursor]?.level === "Default" ? "View" : "Open/Create"}  <Text color="#61afef" bold>esc</Text> Back{isCustomAgent && <>  │  <Text color="#61afef" bold>r</Text> Reset  <Text color="#61afef" bold>del</Text> Delete</>}{!isCustomAgent && <>  │  <Text color="#61afef" bold>del</Text> Delete</>}</Text>
+        {message && <Text color="#4ec9b0">{message}</Text>}
+      </Box>
+    );
+  }
+
+  // ─── List View ───
   return (
-    <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1} paddingY={1}>
+    <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1}>
       <Text bold>Agents</Text>
+      <Text color="#5a6aa8">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
+      <Box>
+        {pages.map((p, i) => (
+          <React.Fragment key={p}>
+            <Text bold color={page === i ? "#4ec9b0" : undefined}>{page === i ? `[ ${p} ]` : `  ${p}  `}</Text>
+            {i < pages.length - 1 && <Text>  </Text>}
+          </React.Fragment>
+        ))}
+      </Box>
+      <Text dimColor color="#333333">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
       <Text> </Text>
-      <Text dimColor>No custom agents configured.</Text>
+      {list.length === 0 ? (
+        <Text dimColor>No {pages[page]} agents registered.</Text>
+      ) : (<>
+        <Text dimColor>{"  "}{"Name".padEnd(25)}{!isCustomPage ? "Source".padEnd(15) : "Location".padEnd(15)}{isCustomPage ? "Active".padEnd(10) : ""}{!isCustomPage ? "Override (config/prompt)" : ""}</Text>
+        <Text dimColor color="#333333">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
+        {list.map((a, i) => {
+          const globalDir = join(process.env.HOME || "", ".config", "voidrift", "agents", a.id);
+          const wsDir = join(workspaceRoot, ".voidrift", "agents", a.id);
+          const configOverride = existsSync(join(wsDir, "agent.json")) ? "workspace" : existsSync(join(globalDir, "agent.json")) ? "global" : "default";
+          const promptOverride = existsSync(join(wsDir, "prompt.md")) ? "workspace" : existsSync(join(globalDir, "prompt.md")) ? "global" : "default";
+          return (
+            <Box key={a.id} flexDirection="column">
+              <Text>
+                <Text color={i === selected ? "#4ec9b0" : undefined}>{i === selected ? "▸ " : "  "}</Text>
+                <Text bold color="#61afef">{a.name.slice(0, 20).padEnd(25)}</Text>
+                <Text>{(isCustomPage
+                  ? (existsSync(join(workspaceRoot, ".voidrift", "agents", a.id)) ? "workspace" : "global")
+                  : (a.source || "core")).slice(0, 12).padEnd(15)}</Text>
+                {isCustomPage && <Text color={a.active !== false ? "green" : "red"}>{(a.active !== false ? "yes" : "no").padEnd(10)}</Text>}
+                {!isCustomPage && <Text>{configOverride} / {promptOverride}</Text>}
+              </Text>
+              {i < list.length - 1 && <Text dimColor color="#333333">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>}
+              {i === list.length - 1 && <Text dimColor color="#333333">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>}
+            </Box>
+          );
+        })}
+      </>)}
       <Text> </Text>
-      <Text dimColor>  <Text color="#61afef" bold>↑↓</Text> Navigate  <Text color="#61afef" bold>k</Text> Kill  <Text color="#61afef" bold>esc</Text> Close</Text>
+      <Text bold>Locations</Text>
+      <Text dimColor>  Workspace:  .voidrift/agents/</Text>
+      <Text dimColor>  Global:     ~/.config/voidrift/agents/</Text>
+      <Text> </Text>
+      <Text dimColor>  <Text color="#61afef" bold>←/→</Text> pages  <Text color="#61afef" bold>↑↓</Text> Navigate  <Text color="#61afef" bold>enter</Text> Details  <Text color="#61afef" bold>esc</Text> Close{isCustomPage && <>  │  <Text color="#61afef" bold>a</Text> toggle active  <Text color="#61afef" bold>c</Text> create  <Text color="#61afef" bold>r</Text> rename  <Text color="#61afef" bold>del</Text> delete</>}</Text>
+      {message && <Text color="#4ec9b0">{message}</Text>}
+      {createState?.step === "name" && <Text color="#61afef">  &gt; {createName}<Text color="#4ec9b0">█</Text></Text>}
+      {renaming && <Text color="#61afef">  &gt; {renameName}<Text color="#4ec9b0">█</Text></Text>}
+      <Text> </Text>
     </Box>
   );
 }
@@ -831,8 +1548,9 @@ export function AgentsPanel({ onClose }: { onClose: () => void }) {
 export function GenericPanel({ name, onClose }: { name: string; onClose: () => void }) {
   useInput((_, key) => { if (key.escape) onClose(); });
   return (
-    <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1} paddingY={1}>
+    <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1}>
       <Text bold>{name.charAt(0).toUpperCase() + name.slice(1)}</Text>
+      <Text color="#5a6aa8">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
       <Text> </Text>
       <Text dimColor>/{name}</Text>
       <Text> </Text>

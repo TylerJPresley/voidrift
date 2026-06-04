@@ -1,4 +1,4 @@
-import type { CoreRegistry } from "@voidrift/core";
+import type { PluginInterface } from "@voidrift/core";
 
 /**
  * Section 9.3: Custom Mode Sandboxes.
@@ -8,22 +8,8 @@ import type { CoreRegistry } from "@voidrift/core";
  * - cr: writes locked to .voidrift/changes/ only
  * - dev: writes locked to files declared in active CR's focusedFiles
  */
-export function registerDevModes(registry: CoreRegistry): void {
-  registry.registerMode({
-    name: "idea",
-    allowedTools: ["read_file", "glob_files", "write_file", "edit_file", "web_search"],
-    permissionGate: false,
-  });
-
-  registry.registerMode({
-    name: "cr",
-    allowedTools: ["read_file", "glob_files", "write_file", "edit_file", "web_search", "web_fetch"],
-    permissionGate: false,
-  });
-
-  registry.registerMode({
-    name: "dev",
-    allowedTools: ["read_file", "glob_files", "write_file", "edit_file", "execute_command"],
-    permissionGate: true,
-  });
+export function registerDevModes(api: PluginInterface): void {
+  api.registerSandboxMode("idea", "PM Idea refinement mode", (path) => path.includes(".voidrift/ideas"));
+  api.registerSandboxMode("cr", "Architecture planning mode", (path) => path.includes(".voidrift/changes"));
+  api.registerSandboxMode("dev", "Engineer execution mode", () => true);
 }

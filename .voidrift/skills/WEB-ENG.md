@@ -1,6 +1,12 @@
 ---
 name: WEB-ENG
 description: Web application architecture, REST API design, frontend patterns, performance, and browser constraints for web engineering.
+triggers:
+  extensions: [".tsx",".jsx",".html",".css",".vue",".svelte"]
+  files: []
+  keywords: ["react","nextjs","frontend","rest","web"]
+agents: []
+active: true
 ---
 
 # Domain: Web Engineering (WEB-ENG)

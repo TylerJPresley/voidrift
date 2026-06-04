@@ -20,7 +20,20 @@ export interface TurnCallbacks {
 export async function executeTurn(engine: EngineContext, userMessage: string, callbacks: TurnCallbacks): Promise<OrchestrationResult | null> {
   engine.context.addMessage({ role: "user", content: userMessage });
 
-  const tier = routeTier({ activeNode: null, activeMode: engine.cycler.mode, inputLength: userMessage.length, mentionedFiles: 0 });
+  // Derive mode from active agent's approvalMode
+  const modeMap = { deny: "plan", prompt: "chat", autonomous: "vibe" } as const;
+  const activeMode = modeMap[engine.agents.active.approvalMode] || "chat";
+
+  // Resolve the model tier: use static override if declared, otherwise delegate to the Model Router
+  let tier = engine.agents.active.modelTier || "auto";
+  if (tier === "auto") {
+    tier = routeTier({ 
+      activeNode: null, 
+      activeMode, 
+      inputLength: userMessage.length, 
+      mentionedFiles: 0 
+    });
+  }
   const resolved = createTierAdapter(tier, engine.container.config);
 
   const state: GraphState = {
@@ -29,20 +42,31 @@ export async function executeTurn(engine: EngineContext, userMessage: string, ca
     diagnostics: engine.context.context.work.diagnostics,
     routingFlag: null,
     messages: [],
-    activeMode: engine.cycler.mode,
+    activeMode,
     activePersona: engine.context.context.governance.activePersona,
   };
+
+  // Resolve skills for this turn (agent-bound + trigger-based)
+  const resolvedSkills = engine.skills.resolve(
+    {
+      focusedFiles: engine.context.context.workspace.focusedFiles.map(f => f.path),
+      userInput: userMessage,
+      activePlan: engine.context.context.workspace.activePlan,
+    },
+    engine.agents.active.id,
+  );
+  engine.context.setSkills(resolvedSkills);
 
   // Compile the full three-partition context via the Prompt Cache Optimizer
   const compiled = compilePrompt(engine.context.context);
 
   // Extract system prompt: merge all system messages (governance + workspace) into one block
   const systemParts = compiled.filter(m => m.role === "system").map(m => m.content);
-  const systemPrompt = systemParts.join("\n\n");
+  const systemPrompt = systemParts.join("\n\n") || engine.context.context.governance.activePersona;
 
-  // Extract conversation history (everything except system messages and the last user message we just added)
+  // Extract conversation history (only user/assistant messages, exclude current turn)
   const history = compiled
-    .filter(m => m.role !== "system")
+    .filter(m => m.role === "user" || m.role === "assistant")
     .slice(0, -1) // exclude the current user message (already passed as userMessage)
     .map(m => m.role === "user" ? new HumanMessage(m.content) : new AIMessage(m.content));
 
@@ -59,6 +83,8 @@ export async function executeTurn(engine: EngineContext, userMessage: string, ca
       signal: callbacks.signal,
       context: engine.context,
       config: engine.container.config,
+      tier,
+      agent: engine.agents.active,
     }, engine.container.bus);
   });
 

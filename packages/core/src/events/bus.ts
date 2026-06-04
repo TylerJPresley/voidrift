@@ -4,6 +4,7 @@ export type EventType =
   | "FILE_CREATED"
   | "FILE_MODIFIED"
   | "FILE_DELETED"
+  | "RESOURCE_CHANGED"
   | "USER_INPUT"
   | "TOKEN_STREAM"
   | "TOOL_CONFIRMATION_REQUEST"
@@ -28,6 +29,7 @@ export interface EventPayloadMap {
   FILE_CREATED: { path: string };
   FILE_MODIFIED: { path: string };
   FILE_DELETED: { path: string };
+  RESOURCE_CHANGED: { path: string; type: string };
   USER_INPUT: { text: string };
   TOKEN_STREAM: { token: string; done: boolean };
   TOOL_CONFIRMATION_REQUEST: { tool: string; args: Record<string, unknown>; requestId?: string; diff?: string[] };

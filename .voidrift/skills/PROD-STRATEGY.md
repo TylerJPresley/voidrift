@@ -1,6 +1,12 @@
 ---
 name: PROD-STRATEGY
 description: Documentation as code, user-centric product thinking, onboarding principles, and conventional commits for product strategy.
+triggers:
+  extensions: []
+  files: ["CHANGELOG.md","README.md"]
+  keywords: ["changelog","release","onboarding","documentation","conventional commit"]
+agents: []
+active: true
 ---
 
 # Domain: Product Strategy (PROD-STRATEGY)

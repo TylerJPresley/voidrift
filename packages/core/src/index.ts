@@ -17,6 +17,7 @@ export type { ToolSchema, ToolParameter, SafetyProfile, ActionLayer } from "./to
 export { TOOL_SCHEMAS, getToolSchema } from "./tools/definitions.js";
 export { bindTools } from "./tools/binding.js";
 export { readFile, globFiles, writeFile, editFile, executeCommand, type ToolResult } from "./tools/executors.js";
+export { webFetch, webSearch, type WebResult } from "./tools/web.js";
 export { gitSafeguard, restoreSafeguardStash, type SafeguardResult } from "./safeguards/git.js";
 export { GitCheckpointer } from "./safeguards/checkpoint.js";
 export { computeDiff, computeEditDiff, getWorkspaceDiff } from "./safeguards/diff.js";
@@ -26,13 +27,14 @@ export { IndexCache, type CacheEntry } from "./codemap/cache.js";
 export { SkillManager, type SkillEntry, type SkillTriggers, type AnchorContext } from "./skills/manager.js";
 export { getSkillTemplates, findRelevantTemplates } from "./skills/templates.js";
 export { WorktreeEngine, type SubagentTask, type LockEntry, type QueueEntry } from "./worktree/engine.js";
-export { TemplateService, type TemplateEntry, type ResolvedTemplate, type TemplateType, type TemplateContext, type AgentConfig, type ValidationDiagnostic } from "./templates/service.js";
+export { TemplateService, type TemplateSlot, type ResolvedSlot, type ResolvedTemplate, type TemplateType, type SlotAction, type TemplateContext, type AgentConfig, type ValidationDiagnostic } from "./templates/service.js";
 export { MCPEngine, type MCPServer, type MCPServerConfig, type MCPToolSchema } from "./mcp/engine.js";
 export { routeMCPToolCall, isMCPTool } from "./mcp/router.js";
 
 // Tier 4: Security Subsystem
 export { PermissionGate, type PendingRequest, type GateResult } from "./security/permission-gate.js";
-export { ModeCycler, type ModeChangeEvent } from "./security/mode-cycler.js";
+export { AgentRegistry, type AgentManifest, type AgentType, type ApprovalMode, type ModelTier, type ToolSettings, ALL_TOOLS, READ_TOOLS } from "./agents/registry.js";
+export { PromptRegistry, type PromptEntry, type ResolvedPrompt } from "./prompts/registry.js";
 
 // Tier 5: Operator Interface
 export { stripAnsi, truncateOutput } from "./output/truncator.js";
@@ -47,6 +49,7 @@ export { ContextManager, type SessionContext, type GovernancePartition, type Wor
 export { compilePrompt, type CompiledMessage } from "./session/compiler.js";
 export { compactHistory, buildCompactionPrompt, type CompactionResult } from "./session/compactor.js";
 export { TurnSerializer, type TurnStateJSON } from "./session/serializer.js";
+export { SessionBrain, type TurnSnapshot } from "./session/brain.js";
 export { ExceptionGuard } from "./session/guard.js";
 export { MemoryRegistry, type MemoryMeta, type MemoryDiscoveryContext } from "./session/memory.js";
 export { StatsTracker, type SessionStats, type ModelUsage, type ToolStats } from "./session/stats.js";

@@ -1,6 +1,12 @@
 ---
 name: GAME-ENG
 description: Game loop architecture, performance constraints, state management, and rendering patterns for game development.
+triggers:
+  extensions: []
+  files: []
+  keywords: ["game loop","renderer","physics","sprite","game engine"]
+agents: []
+active: true
 ---
 
 # Domain: Game Engineering (GAME-ENG)

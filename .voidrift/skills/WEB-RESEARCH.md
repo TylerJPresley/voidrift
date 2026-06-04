@@ -1,6 +1,12 @@
 ---
 name: WEB-RESEARCH
 description: Guidelines for effective web research using http(action="get") — URL construction, search strategy, multi-step navigation, and source selection for software development contexts.
+triggers:
+  extensions: []
+  files: []
+  keywords: ["research","search","documentation","web search","fetch"]
+agents: []
+active: true
 ---
 
 # WEB-RESEARCH

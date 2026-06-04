@@ -21,7 +21,7 @@ describe("TurnSerializer (G-10)", () => {
     setupGitRepo();
     const bus = new EventBus();
     const ser = new TurnSerializer(TMP, "s1", bus);
-    const ctx = new ContextManager("persona", "chat", "map");
+    const ctx = new ContextManager("persona", "map");
     ctx.addMessage({ role: "user", content: "hello" });
     ser.save(ctx.context);
 
@@ -32,7 +32,7 @@ describe("TurnSerializer (G-10)", () => {
     expect(raw.gitState.currentBranch).toBeDefined();
     expect(raw.gitState.checkpointSha).toBeDefined();
     expect(raw.gitState.isDirty).toBeTypeOf("boolean");
-    expect(raw.harnessState.activeMode).toBe("chat");
+    expect(raw.harnessState.approvalMode).toBe("prompt");
     expect(raw.graphState.activeNode).toBeDefined();
     expect(raw.contextSnapshot.work.messages).toHaveLength(1);
   });
@@ -41,7 +41,7 @@ describe("TurnSerializer (G-10)", () => {
     setupGitRepo();
     const bus = new EventBus();
     const ser = new TurnSerializer(TMP, "s2", bus);
-    const ctx = new ContextManager("p", "chat", "");
+    const ctx = new ContextManager("p", "");
     ctx.addMessage({ role: "user", content: "test" });
     ctx.addMessage({ role: "assistant", content: "reply" });
     ser.save(ctx.context);
@@ -63,7 +63,7 @@ describe("TurnSerializer (G-10)", () => {
     setupGitRepo();
     const bus = new EventBus();
     const ser = new TurnSerializer(TMP, "auto", bus);
-    const ctx = new ContextManager("p", "chat", "");
+    const ctx = new ContextManager("p", "");
     ctx.addMessage({ role: "user", content: "auto-saved" });
 
     ser.attach(() => ctx.context);
@@ -79,7 +79,7 @@ describe("TurnSerializer (G-10)", () => {
     setupGitRepo();
     const bus = new EventBus();
     const ser = new TurnSerializer(TMP, "inc", bus);
-    const ctx = new ContextManager("p", "chat", "");
+    const ctx = new ContextManager("p", "");
 
     ser.attach(() => ctx.context);
     bus.publish("TURN_COMPLETE", { turnId: "t1" });
@@ -95,7 +95,7 @@ describe("TurnSerializer (G-10)", () => {
     require("fs").writeFileSync(join(TMP, "dirty.txt"), "uncommitted");
     const bus = new EventBus();
     const ser = new TurnSerializer(TMP, "git", bus);
-    const ctx = new ContextManager("p", "chat", "");
+    const ctx = new ContextManager("p", "");
     ser.save(ctx.context);
 
     const loaded = ser.load();

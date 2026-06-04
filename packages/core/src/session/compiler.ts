@@ -20,7 +20,6 @@ export function compilePrompt(ctx: SessionContext): CompiledMessage[] {
   if (ctx.governance.activeSkills.length) {
     systemParts.push("\n--- Skills ---\n" + ctx.governance.activeSkills.join("\n\n"));
   }
-  systemParts.push(`\n[Mode: ${ctx.governance.activeMode}]`);
   messages.push({ role: "system", content: systemParts.join("\n") });
 
   // 2. Workspace partition (semi-dynamic — changes less frequently)

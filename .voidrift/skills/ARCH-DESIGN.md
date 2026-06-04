@@ -1,6 +1,12 @@
 ---
 name: ARCH-DESIGN
 description: Practical architecture decisions for VoidRift-generated projects: component boundaries, module grouping for concurrent develop dispatch, and ARCHITECTURE.md structure.
+triggers:
+  extensions: []
+  files: ["ARCHITECTURE.md"]
+  keywords: ["architecture","module","component","design"]
+agents: []
+active: true
 ---
 
 # Domain: Architecture & Design (ARCH-DESIGN)

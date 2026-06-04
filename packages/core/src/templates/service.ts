@@ -1,15 +1,31 @@
-import { existsSync, readFileSync, mkdirSync, writeFileSync } from "fs";
+import { existsSync, readFileSync, mkdirSync, writeFileSync, unlinkSync, readdirSync, statSync } from "fs";
 import { join, dirname } from "path";
 import { homedir } from "os";
 import { execSync } from "child_process";
 
 export type TemplateType = "template" | "prompt";
+export type SlotAction = "base" | "override" | "extends";
 
-export interface TemplateEntry {
+export interface TemplateSlot {
+  key: string;
+  label: string;
+  description: string;
+  type: TemplateType;
+  action: SlotAction;
+  sourcePlugin: string;
+  defaultContent: string;
+}
+
+export interface ResolvedSlot {
   key: string;
   type: TemplateType;
-  defaultContent: string;
+  action: SlotAction;
   sourcePlugin: string;
+  content: string;
+  body: string;
+  frontmatter: Record<string, unknown>;
+  source: "workspace" | "global" | "default";
+  overridePath?: string;
 }
 
 export interface ResolvedTemplate {
@@ -50,81 +66,148 @@ export interface ValidationDiagnostic {
 /**
  * Harness-Level Template & Prompt Service (G-14).
  *
- * Manages document templates and agent prompts with:
- * - Three-level override cascade (workspace → global → default)
- * - YAML frontmatter parsing and metadata extraction
- * - Agent config governance from prompt frontmatter
- * - Two-phase validation (YAML syntax + schema)
- * - Context enrichment with session telemetry
+ * Slot-based architecture:
+ * - Each registration is a "slot" with a key, source plugin, and action (base/override/extends)
+ * - Each slot independently resolves through the operator override cascade
+ * - Final content = resolved base (or override) + resolved extensions
+ * - Operator can override any slot via file on disk
  */
 export class TemplateService {
-  private registry = new Map<string, TemplateEntry[]>();
+  private slots: TemplateSlot[] = [];
   private activePlugins: string[] = [];
 
   constructor(private workspaceRoot: string, activePlugins?: string[]) {
     this.activePlugins = activePlugins ?? [];
     this.registerBuiltins();
+    this.discover();
   }
 
   setActivePlugins(plugins: string[]): void {
     this.activePlugins = plugins;
   }
 
-  register(key: string, type: TemplateType, defaultContent: string, sourcePlugin: string): void {
-    const entries = this.registry.get(key) ?? [];
-    // Replace if same plugin re-registers, otherwise append
-    const idx = entries.findIndex(e => e.sourcePlugin === sourcePlugin);
-    const entry = { key, type, defaultContent, sourcePlugin };
-    if (idx >= 0) entries[idx] = entry;
-    else entries.push(entry);
-    this.registry.set(key, entries);
+  /** Register a base prompt/template. */
+  register(key: string, type: TemplateType, defaultContent: string, sourcePlugin: string, label?: string, description?: string): void {
+    this.registerSlot(key, type, "base", sourcePlugin, defaultContent, label, description);
   }
 
-  resolve(key: string): ResolvedTemplate | null {
-    const entries = this.registry.get(key);
-    if (!entries || entries.length === 0) return null;
+  /** Register an override — replaces the base entirely. */
+  registerOverride(key: string, type: TemplateType, defaultContent: string, sourcePlugin: string): void {
+    this.registerSlot(key, type, "override", sourcePlugin, defaultContent);
+  }
 
-    const type = entries[0].type;
-    const subdir = type === "template" ? "templates" : "prompts";
+  /** Register an extension — appends to the resolved base. */
+  registerExtension(key: string, type: TemplateType, defaultContent: string, sourcePlugin: string): void {
+    this.registerSlot(key, type, "extends", sourcePlugin, defaultContent);
+  }
 
-    // 1. Workspace override (highest — operator always wins)
-    const wsPath = join(this.workspaceRoot, ".voidrift", subdir, ...key.split("/")) + ".md";
-    if (existsSync(wsPath)) {
-      const raw = readFileSync(wsPath, "utf-8");
-      const { frontmatter, body } = parseFrontmatter(raw);
-      return { key, type, content: raw, body, frontmatter, source: "workspace", overridePath: wsPath };
+  private registerSlot(key: string, type: TemplateType, action: SlotAction, sourcePlugin: string, defaultContent: string, label?: string, description?: string): void {
+    // Replace if same plugin + same action re-registers for same key
+    const idx = this.slots.findIndex(s => s.key === key && s.sourcePlugin === sourcePlugin && s.action === action);
+    const slot: TemplateSlot = { key, label: label || key, description: description || "", type, action, sourcePlugin, defaultContent };
+    if (idx >= 0) this.slots[idx] = slot;
+    else this.slots.push(slot);
+  }
+
+  /** Resolve a single slot through the operator override cascade. */
+  resolveSlot(slot: TemplateSlot): ResolvedSlot {
+    const subdir = slot.type === "template" ? "templates" : "prompts";
+    
+    // 1. Workspace override candidates
+    const wsPaths: string[] = [];
+    if (slot.sourcePlugin && slot.sourcePlugin !== "custom") {
+      wsPaths.push(join(this.workspaceRoot, ".voidrift", subdir, slot.sourcePlugin, `${slot.key}.md`));
     }
+    wsPaths.push(join(this.workspaceRoot, ".voidrift", subdir, `${slot.key}.md`));
 
-    // 2. Global user override
-    const globalPath = join(homedir(), ".config", "voidrift", subdir, ...key.split("/")) + ".md";
-    if (existsSync(globalPath)) {
-      const raw = readFileSync(globalPath, "utf-8");
-      const { frontmatter, body } = parseFrontmatter(raw);
-      return { key, type, content: raw, body, frontmatter, source: "global", overridePath: globalPath };
-    }
-
-    // 3. Active plugin override (walk active plugins in order, first match wins)
-    for (const plugin of this.activePlugins) {
-      const match = entries.find(e => e.sourcePlugin === plugin);
-      if (match) {
-        const { frontmatter, body } = parseFrontmatter(match.defaultContent);
-        return { key, type, content: match.defaultContent, body, frontmatter, source: "default" };
+    for (const wsPath of wsPaths) {
+      if (existsSync(wsPath)) {
+        const raw = readFileSync(wsPath, "utf-8");
+        const { frontmatter, body } = parseFrontmatter(raw);
+        return { ...slot, content: raw, body, frontmatter, source: "workspace", overridePath: wsPath };
       }
     }
 
-    // 4. Core fallback (lowest priority)
-    const coreEntry = entries.find(e => e.sourcePlugin === "core");
-    if (coreEntry) {
-      const { frontmatter, body } = parseFrontmatter(coreEntry.defaultContent);
-      return { key, type, content: coreEntry.defaultContent, body, frontmatter, source: "default" };
+    // 2. Global override candidates
+    const globalPaths: string[] = [];
+    if (slot.sourcePlugin && slot.sourcePlugin !== "custom") {
+      globalPaths.push(join(homedir(), ".config", "voidrift", subdir, slot.sourcePlugin, `${slot.key}.md`));
+    }
+    globalPaths.push(join(homedir(), ".config", "voidrift", subdir, `${slot.key}.md`));
+
+    for (const globalPath of globalPaths) {
+      if (existsSync(globalPath)) {
+        const raw = readFileSync(globalPath, "utf-8");
+        const { frontmatter, body } = parseFrontmatter(raw);
+        return { ...slot, content: raw, body, frontmatter, source: "global", overridePath: globalPath };
+      }
     }
 
-    // 5. Any registered entry as last resort
-    const { frontmatter, body } = parseFrontmatter(entries[0].defaultContent);
-    return { key, type, content: entries[0].defaultContent, body, frontmatter, source: "default" };
+    // 3. Default (in-memory registration)
+    const { frontmatter, body } = parseFrontmatter(slot.defaultContent);
+    return { ...slot, content: slot.defaultContent, body, frontmatter, source: "default" };
   }
 
-  /** Extract agent runtime config from a prompt template's frontmatter */
+  /**
+   * Resolve the final content for a key.
+   *
+   * Resolution order:
+   * 1. Find the base: plugin override → core base (first active plugin override wins)
+   * 2. Each slot resolves independently through operator file cascade
+   * 3. Final = resolved base + resolved extensions (concatenated)
+   */
+  resolve(key: string): ResolvedTemplate | null {
+    const keySlots = this.slots.filter(s => s.key === key);
+    if (keySlots.length === 0) return null;
+
+    const type = keySlots[0].type;
+
+    // Find the effective base slot: plugin override > core base
+    let baseSlot: TemplateSlot | undefined;
+    // Check active plugins for an override first
+    for (const plugin of this.activePlugins) {
+      const override = keySlots.find(s => s.action === "override" && s.sourcePlugin === plugin);
+      if (override) { baseSlot = override; break; }
+    }
+    // Fallback: any override from any plugin
+    if (!baseSlot) baseSlot = keySlots.find(s => s.action === "override");
+    // Fallback: core base
+    if (!baseSlot) baseSlot = keySlots.find(s => s.action === "base" && s.sourcePlugin === "core");
+    // Fallback: any base
+    if (!baseSlot) baseSlot = keySlots.find(s => s.action === "base");
+    if (!baseSlot) return null;
+
+    const resolvedBase = this.resolveSlot(baseSlot);
+
+    // Collect extensions from active plugins
+    const extensions = keySlots.filter(s => s.action === "extends");
+    const resolvedExtensions = extensions.map(s => this.resolveSlot(s));
+
+    // Concatenate
+    let finalBody = resolvedBase.body;
+    for (const ext of resolvedExtensions) {
+      finalBody += "\n\n" + ext.body;
+    }
+
+    // Merge frontmatter (base wins for conflicts)
+    let finalFrontmatter = { ...resolvedBase.frontmatter };
+
+    const finalContent = resolvedBase.frontmatter && Object.keys(resolvedBase.frontmatter).length > 0
+      ? serializeFrontmatter(finalFrontmatter) + finalBody
+      : finalBody;
+
+    return {
+      key,
+      type,
+      content: finalContent,
+      body: finalBody,
+      frontmatter: finalFrontmatter,
+      source: resolvedBase.source,
+      overridePath: resolvedBase.overridePath,
+    };
+  }
+
+  /** Extract agent runtime config from a prompt's frontmatter */
   extractAgentConfig(key: string): AgentConfig | null {
     const resolved = this.resolve(key);
     if (!resolved || resolved.type !== "prompt") return null;
@@ -147,7 +230,6 @@ export class TemplateService {
       content = content.replaceAll(`{{${k}}}`, v);
     }
 
-    // For document templates, stamp frontmatter metadata
     if (resolved.type === "template") {
       const fm = { ...resolved.frontmatter };
       if (!fm.created_at) fm.created_at = ctx["harness.timestamp"];
@@ -162,17 +244,15 @@ export class TemplateService {
   validate(key: string, content: string): ValidationDiagnostic[] {
     const diagnostics: ValidationDiagnostic[] = [];
 
-    // Phase 1: YAML syntax
     const { frontmatter, error, errorLine } = parseFrontmatter(content);
     if (error) {
       diagnostics.push({ phase: "yaml_syntax", key, message: error, line: errorLine });
-      return diagnostics; // Can't proceed to schema validation
+      return diagnostics;
     }
 
-    // Phase 2: Schema validation per template type
-    const entries = this.registry.get(key);
-    if (!entries || entries.length === 0) return diagnostics;
-    const type = entries[0].type;
+    const keySlots = this.slots.filter(s => s.key === key);
+    if (keySlots.length === 0) return diagnostics;
+    const type = keySlots[0].type;
 
     if (type === "prompt") {
       if (frontmatter.tier && !["flash", "utility", "dense"].includes(frontmatter.tier as string)) {
@@ -198,22 +278,105 @@ export class TemplateService {
     return diagnostics;
   }
 
-  createOverride(key: string, scope: "workspace" | "global"): string | null {
-    const entries = this.registry.get(key);
-    if (!entries || entries.length === 0) return null;
-
-    const type = entries[0].type;
-    const subdir = type === "template" ? "templates" : "prompts";
+  /** Create an override file for a specific slot. */
+  createOverrideForSlot(slot: TemplateSlot, scope: "workspace" | "global"): string | null {
+    const subdir = slot.type === "template" ? "templates" : "prompts";
     const base = scope === "workspace"
       ? join(this.workspaceRoot, ".voidrift", subdir)
       : join(homedir(), ".config", "voidrift", subdir);
 
-    const filePath = join(base, `${key}.md`);
+    const filePath = slot.sourcePlugin && slot.sourcePlugin !== "custom"
+      ? join(base, slot.sourcePlugin, `${slot.key}.md`)
+      : join(base, `${slot.key}.md`);
+
     mkdirSync(dirname(filePath), { recursive: true });
-    // Use resolved content (respects active plugin priority)
-    const resolved = this.resolve(key);
-    if (!existsSync(filePath)) writeFileSync(filePath, resolved?.content ?? entries[0].defaultContent);
+    if (!existsSync(filePath)) {
+      const resolved = this.resolveSlot(slot);
+      writeFileSync(filePath, resolved.content);
+    }
     return filePath;
+  }
+
+  /** Delete an override file for a specific slot. */
+  deleteOverrideForSlot(slot: TemplateSlot): boolean {
+    const resolved = this.resolveSlot(slot);
+    if (resolved.source === "default") return false;
+    if (resolved.overridePath && existsSync(resolved.overridePath)) {
+      unlinkSync(resolved.overridePath);
+      return true;
+    }
+    return false;
+  }
+
+  /** Discover custom template and prompt files from filesystem directories. */
+  discover(): void {
+    const types: { subdir: "prompts" | "templates"; type: TemplateType }[] = [
+      { subdir: "prompts", type: "prompt" },
+      { subdir: "templates", type: "template" },
+    ];
+    const bases = [
+      { path: join(homedir(), ".config", "voidrift"), scope: "global" },
+      { path: join(this.workspaceRoot, ".voidrift"), scope: "workspace" },
+    ];
+
+    for (const { path: baseDir, scope } of bases) {
+      for (const { subdir, type } of types) {
+        const dir = join(baseDir, subdir);
+        if (!existsSync(dir)) continue;
+        let entries: string[];
+        try { entries = readdirSync(dir); } catch { continue; }
+
+        for (const entry of entries) {
+          const filePath = join(dir, entry);
+          let stat;
+          try { stat = statSync(filePath); } catch { continue; }
+
+          if (stat.isFile() && entry.endsWith(".md")) {
+            const key = entry.slice(0, -3);
+            const content = readFileSync(filePath, "utf-8");
+            const exists = this.slots.some(s => s.key === key && s.type === type && s.action === "base");
+            if (!exists) {
+              this.register(key, type, content, "custom");
+            }
+          } else if (stat.isDirectory()) {
+            let subEntries: string[];
+            try { subEntries = readdirSync(filePath); } catch { continue; }
+            for (const subEntry of subEntries) {
+              const subFilePath = join(filePath, subEntry);
+              if (subEntry.endsWith(".md")) {
+                const key = subEntry.slice(0, -3);
+                const content = readFileSync(subFilePath, "utf-8");
+                const exists = this.slots.some(s => s.key === key && s.type === type && s.action === "base");
+                if (!exists) {
+                  this.register(key, type, content, entry);
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Legacy compat
+  createOverride(key: string, scope: "workspace" | "global"): string | null {
+    const keySlots = this.slots.filter(s => s.key === key);
+    const base = keySlots.find(s => s.action === "base") ?? keySlots[0];
+    if (!base) return null;
+    return this.createOverrideForSlot(base, scope);
+  }
+
+  deleteOverride(key: string, scope: "workspace" | "global"): boolean {
+    const keySlots = this.slots.filter(s => s.key === key);
+    const base = keySlots.find(s => s.action === "base") ?? keySlots[0];
+    if (!base) return false;
+    const subdir = base.type === "template" ? "templates" : "prompts";
+    const dir = scope === "workspace"
+      ? join(this.workspaceRoot, ".voidrift", subdir)
+      : join(homedir(), ".config", "voidrift", subdir);
+    const filePath = join(dir, base.sourcePlugin, `${base.key}.md`);
+    if (existsSync(filePath)) { unlinkSync(filePath); return true; }
+    return false;
   }
 
   buildContext(sessionId: string, model: string): TemplateContext {
@@ -236,52 +399,36 @@ export class TemplateService {
     };
   }
 
-  get all(): TemplateEntry[] {
-    const result: TemplateEntry[] = [];
-    for (const entries of this.registry.values()) {
-      // Return the entry that would resolve (active plugin > core)
-      const resolved = this.resolveEntry(entries);
-      if (resolved) result.push(resolved);
+  /** Get all slots for the TUI panel, sorted alphabetically by key. */
+  get allSlots(): TemplateSlot[] {
+    return [...this.slots].sort((a, b) => a.key.localeCompare(b.key) || a.sourcePlugin.localeCompare(b.sourcePlugin));
+  }
+
+  /** Get all unique keys. */
+  get allKeys(): string[] {
+    return [...new Set(this.slots.map(s => s.key))].sort();
+  }
+
+  /** Get slots for a specific type. */
+  slotsByType(type: TemplateType): TemplateSlot[] {
+    return this.allSlots.filter(s => s.type === type);
+  }
+
+  /** Legacy: get all entries (returns one per key for backward compat). */
+  get all(): TemplateSlot[] {
+    const seen = new Set<string>();
+    const result: TemplateSlot[] = [];
+    for (const slot of this.allSlots) {
+      if (!seen.has(slot.key)) {
+        seen.add(slot.key);
+        result.push(slot);
+      }
     }
     return result;
   }
 
-  private resolveEntry(entries: TemplateEntry[]): TemplateEntry | null {
-    for (const plugin of this.activePlugins) {
-      const match = entries.find(e => e.sourcePlugin === plugin);
-      if (match) return match;
-    }
-    return entries.find(e => e.sourcePlugin === "core") ?? entries[0] ?? null;
-  }
-
   private registerBuiltins(): void {
-    this.register("dev/task", "template", BUILTIN_DEV_TASK, "core");
-    this.register("dev/idea", "template", BUILTIN_DEV_IDEA, "core");
-    this.register("dev/cr", "template", BUILTIN_DEV_CR, "core");
-    this.register("prompts/chat", "prompt", BUILTIN_CHAT, "core");
-    this.register("prompts/mode-plan", "prompt", BUILTIN_MODE_PLAN, "core");
-    this.register("prompts/mode-vibe", "prompt", BUILTIN_MODE_VIBE, "core");
-    this.register("prompts/agent-architect", "prompt", BUILTIN_PLAN_ARCH, "core");
-    this.register("prompts/agent-engineer", "prompt", BUILTIN_DEVELOP_TASK, "core");
-    this.register("prompts/agent-auditor", "prompt", BUILTIN_AUDITOR, "core");
-    this.register("prompts/compact", "prompt", BUILTIN_COMPACT, "core");
-  }
-
-  /** Delete an override file, falling back to the next level in the cascade */
-  deleteOverride(key: string, scope: "workspace" | "global"): boolean {
-    const entries = this.registry.get(key);
-    if (!entries || entries.length === 0) return false;
-    const subdir = entries[0].type === "template" ? "templates" : "prompts";
-    const base = scope === "workspace"
-      ? join(this.workspaceRoot, ".voidrift", subdir)
-      : join(homedir(), ".config", "voidrift", subdir);
-    const filePath = join(base, `${key}.md`);
-    if (existsSync(filePath)) {
-      const { unlinkSync } = require("fs");
-      unlinkSync(filePath);
-      return true;
-    }
-    return false;
+    // Templates only — prompts are handled by PromptRegistry
   }
 }
 
@@ -294,7 +441,7 @@ interface ParseResult {
   errorLine?: number;
 }
 
-function parseFrontmatter(content: string): ParseResult {
+export function parseFrontmatter(content: string): ParseResult {
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/);
   if (!match) return { frontmatter: {}, body: content };
 
@@ -310,7 +457,6 @@ function parseFrontmatter(content: string): ParseResult {
   }
 }
 
-/** Minimal YAML parser for frontmatter (handles scalars, arrays, nested keys) */
 function parseSimpleYaml(text: string): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   const lines = text.split("\n");
@@ -321,7 +467,6 @@ function parseSimpleYaml(text: string): Record<string, unknown> {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith("#")) continue;
 
-    // Array item
     if (trimmed.startsWith("- ") && currentKey) {
       if (!currentArray) currentArray = [];
       currentArray.push(trimmed.slice(2).trim().replace(/^["']|["']$/g, ""));
@@ -329,23 +474,19 @@ function parseSimpleYaml(text: string): Record<string, unknown> {
       continue;
     }
 
-    // Flush array
     if (currentArray) currentArray = null;
 
-    // Key: value
     const kvMatch = trimmed.match(/^([^:]+):\s*(.*)/);
     if (kvMatch) {
       currentKey = kvMatch[1].trim();
       const rawVal = kvMatch[2].trim();
       if (rawVal === "" || rawVal === "[]") {
-        // Empty value or explicit empty array — wait for array items or leave empty
         if (rawVal === "[]") result[currentKey] = [];
       } else if (rawVal === "true") result[currentKey] = true;
       else if (rawVal === "false") result[currentKey] = false;
       else if (rawVal === "null") result[currentKey] = null;
       else if (/^\d+(\.\d+)?$/.test(rawVal)) result[currentKey] = parseFloat(rawVal);
       else if (rawVal.startsWith("[")) {
-        // Inline array: [a, b, c]
         const items = rawVal.slice(1, -1).split(",").map(s => s.trim().replace(/^["']|["']$/g, ""));
         result[currentKey] = items;
       } else {
@@ -371,196 +512,3 @@ function serializeFrontmatter(fm: Record<string, unknown>): string {
 }
 
 // ─── Built-in Templates ──────────────────────────────────────────────────────
-
-const BUILTIN_DEV_TASK = `---
-id: TASK-{{task.id}}
-title: ""
-priority: now
-status: pending
-created_at: {{harness.timestamp}}
-depends: []
----
-## Objective
-
-
-## Acceptance Criteria
-- [ ] 
-
-## Notes
-`;
-
-const BUILTIN_DEV_IDEA = `---
-id: IDEA-{{idea.id}}
-title: ""
-status: draft
-created_at: {{harness.timestamp}}
----
-## Problem
-
-
-## Proposed Solution
-
-
-## Open Questions
-`;
-
-const BUILTIN_PLAN_ARCH = `---
-tier: dense
-temperature: 0.1
-allowed_tools: [read_file, glob_files, web_search, web_fetch]
----
-You are the Architect agent. Your role is to analyze the user's intent and produce a structured implementation plan.
-
-Given the user's request, produce:
-1. A clear objective statement
-2. A list of files to create or modify
-3. Step-by-step implementation tasks
-4. Acceptance criteria for verification
-
-Be precise. Reference specific file paths. Do not implement — only plan.
-`;
-
-const BUILTIN_DEVELOP_TASK = `---
-tier: utility
-temperature: 0.2
-allowed_tools: [read_file, glob_files, write_file, edit_file, execute_command]
----
-You are the Engineer agent. Your role is to implement the task described below.
-
-Follow the plan exactly. Write code, run tests, and verify your work compiles.
-Use read_file before editing. Use edit_file for targeted changes.
-Run tests after every write to validate.
-`;
-
-const BUILTIN_DEV_CR = `---
-id: CR-{{cr.id}}
-title: ""
-status: draft
-priority: normal
-created_at: {{harness.timestamp}}
-depends: []
-modules: []
----
-## Summary
-
-
-## Motivation
-
-
-## Changes Required
-- [ ] 
-
-## Acceptance Criteria
-- [ ] 
-`;
-
-const BUILTIN_AUDITOR = `---
-tier: flash
-temperature: 0.0
-allowed_tools: [read_file, execute_command, glob_files]
----
-You are the Auditor agent. Verify the Engineer's work by reading modified files and running tests or linters.
-
-Evaluate:
-1. Do the changes compile without errors?
-2. Do tests pass?
-3. Does the implementation match the plan?
-
-Output your verdict: "pass" if everything works, "rework" with specific diagnostics if there are issues.
-`;
-
-const BUILTIN_CHAT = `---
-tier: utility
-temperature: 0.2
-allowed_tools: [read_file, glob_files, write_file, edit_file, execute_command]
----
-You are VoidRift, a local-first AI engineering harness running inside the developer's workspace. You operate with direct filesystem access, shell execution, and full codebase awareness.
-
-## Workspace Map
-
-Below your system prompt you will see a Workspace Map — a structural index of the entire project. It shows:
-- 📁 Directories
-- Code files with exported symbols (functions, classes, types)
-- 📝 Markdown files with heading outlines and line counts
-- ⚙️ Config files with top-level keys and line counts
-
-Use this map to navigate. You already know what exists — don't glob unless searching for something not in the map.
-
-## Tools
-
-- \`read_file(path)\` — Read a file. Large files return a cached summary with line ranges. Use \`read_file(path, offset, limit)\` to read specific sections.
-- \`glob_files(pattern)\` — Search for files by pattern. Use only when the workspace map doesn't show what you need.
-- \`write_file(path, content)\` — Create a new file or overwrite entirely.
-- \`edit_file(path, search, replace)\` — Surgical block replacement. Provide the exact text to find and its replacement.
-- \`execute_command(command)\` — Run shell commands (build, test, lint, git). Timeout: 30s default.
-
-## Progressive Disclosure
-
-You don't need to load entire files. Work in layers:
-1. The workspace map tells you what exists and where.
-2. \`read_file(path)\` gives you a summary with line ranges for large files, or full content for small ones.
-3. \`read_file(path, offset, limit)\` gives you exact lines when you need implementation details.
-
-Only load what you need for the current task.
-
-## Behavior
-
-- Read before claiming. Read before editing.
-- Use edit_file for targeted changes — never rewrite entire files unless creating new ones.
-- Be direct and concise. Provide complete, working solutions.
-- When in chat mode, file writes and command execution require operator approval.
-`;
-
-const BUILTIN_MODE_PLAN = `---
-tier: dense
-temperature: 0.1
-allowed_tools: [read_file, glob_files, web_search, web_fetch]
----
-You are in PLAN mode. You are a read-only planning sandbox.
-
-Constraints:
-- You CANNOT write files, edit files, or execute commands.
-- You CAN read files, search the workspace, and browse documentation.
-- Your job is to analyze, design, and produce implementation plans.
-
-Output structured plans with:
-1. Clear objective
-2. Files to create or modify (with paths)
-3. Step-by-step implementation tasks
-4. Acceptance criteria
-
-Be precise. Reference specific file paths from the workspace map. Do not implement — only plan.
-`;
-
-const BUILTIN_MODE_VIBE = `---
-tier: utility
-temperature: 0.2
-allowed_tools: [read_file, glob_files, write_file, edit_file, execute_command]
----
-You are in VIBE mode. Full autonomous execution — no permission gates.
-
-All tool calls execute immediately without operator approval. You have complete workspace control.
-
-Work efficiently:
-- Read the relevant code, implement changes, run tests, and verify.
-- If tests fail, diagnose and fix without waiting for input.
-- Keep going until the task is complete and verified.
-`;
-
-const BUILTIN_COMPACT = `---
-tier: flash
-temperature: 0.0
----
-You are the VoidRift Conversational History Compactor.
-
-Summarize the following conversation turns into a structured chronological recap.
-Preserve: file paths modified, key decisions made, tool results, and any unresolved issues.
-Discard: redundant back-and-forth, repeated tool calls, and verbose file contents.
-
-Output format:
-## Session Recap
-- **Files Modified**: list
-- **Key Decisions**: list
-- **Unresolved**: list
-- **Summary**: 2-3 sentence narrative
-`;

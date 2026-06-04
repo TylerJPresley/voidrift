@@ -4,17 +4,23 @@ import { HumanMessage, AIMessage, SystemMessage, ToolMessage } from "@langchain/
 import { readFileSync } from "fs";
 import { join } from "path";
 import type { EventBus } from "../events/bus.js";
+import type { AgentManifest } from "../agents/registry.js";
+import { PermissionGate } from "../security/permission-gate.js";
 import type { OnChunk } from "../adapters/stream.js";
 import type { ModelResponse } from "../adapters/types.js";
 import { streamModel } from "../adapters/stream.js";
 import { executeNode, getPersona, type GraphState, type RoutingFlag, type NodeResult } from "./nodes.js";
 import { bindTools } from "../tools/binding.js";
+import { TOOL_SCHEMAS } from "../tools/definitions.js";
 import { readFile, globFiles, writeFile, editFile, executeCommand } from "../tools/executors.js";
+import { webFetch, webSearch, type SearchConfig } from "../tools/web.js";
 import { summarizeFileWithFlash } from "../codemap/summarizer.js";
 import { IndexCache } from "../codemap/cache.js";
 import type { ContextManager } from "../session/context.js";
 import type { VoidRiftConfig } from "../config/loader.js";
 import type { NodeType, Mode } from "../router/index.js";
+import type { Tier } from "../adapters/factory.js";
+import { shouldEscalate, resolveEscalation, escalateTier, buildEscalationState, escalationNotice } from "../router/index.js";
 
 // Workspace root — set by the harness on bootstrap
 let _workspaceRoot = process.cwd();
@@ -50,7 +56,7 @@ async function streamWithRetry(client: BaseChatModel, messages: BaseMessage[], o
   return { text: "", toolCalls: [], usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 } };
 }
 
-async function executeToolCall(toolName: string, argsJson: string, mode: Mode, workspaceRoot: string): Promise<string> {
+async function executeToolCall(toolName: string, argsJson: string, mode: Mode, workspaceRoot: string, context?: ContextManager, config?: VoidRiftConfig): Promise<string> {
   let args: Record<string, any>;
   try {
     args = JSON.parse(argsJson);
@@ -74,6 +80,30 @@ async function executeToolCall(toolName: string, argsJson: string, mode: Mode, w
     case "execute_command":
       if (mode === "plan") return "Error: execute_command blocked in plan mode.";
       return executeCommand(workspaceRoot, args.command ?? "", args.timeout).output;
+    case "web_fetch": {
+      const result = await webFetch(args.url ?? "", workspaceRoot);
+      if (result.isPrivate) return "Error: This is a private/localhost URL. Permission required to access local services.";
+      return result.error ? `Error: ${result.error}` : result.output;
+    }
+    case "web_search": {
+      const searchConfig = config?.search;
+      const result = await webSearch(args.query ?? args.keywords ?? "", searchConfig);
+      return result.error ? `Error: ${result.error}` : result.output;
+    }
+    case "read_plan":
+      return context?.context.workspace.activePlan || "(no active plan)";
+    case "write_plan":
+      if (context) context.setPlan(args.content ?? "");
+      return "Plan updated.";
+    case "update_plan":
+      if (context) {
+        const current = context.context.workspace.activePlan || "";
+        const updated = current.replace(args.search ?? "", args.replace ?? "");
+        context.setPlan(updated);
+      }
+      return "Plan section updated.";
+    case "run_task_agent":
+      return `Error: run_task_agent must be handled by the orchestration layer.`;
     default:
       return `Error: Tool "${toolName}" not implemented.`;
   }
@@ -89,6 +119,8 @@ export interface OrchestrationInput {
   signal?: AbortSignal;
   context?: ContextManager;
   config?: VoidRiftConfig;
+  tier?: Tier;
+  agent?: AgentManifest;
 }
 
 export interface OrchestrationResult {
@@ -133,8 +165,10 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
     new HumanMessage(input.userMessage),
   ];
 
-  // Bind tools in OpenAI function-calling format
-  const tools = bindTools(null, input.state.activeMode);
+  // Bind tools in OpenAI function-calling format (either from manifest or Mode defaults)
+  const tools = input.agent
+    ? TOOL_SCHEMAS.filter((t) => input.agent!.tools.includes(t.name))
+    : bindTools(null, input.state.activeMode);
   const toolDefs = tools.map((t) => ({
     type: "function" as const,
     function: {
@@ -148,12 +182,15 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
     },
   }));
 
-  let client = input.client;
+  let client: BaseChatModel = input.client;
   try {
-    if (toolDefs.length > 0) client = input.client.bindTools(toolDefs);
+    if (toolDefs.length > 0 && input.client.bindTools) client = input.client.bindTools(toolDefs) as unknown as BaseChatModel;
   } catch {
     // Model doesn't support tool binding — fall back to raw client
   }
+
+  // Initialize the permission gate for this turn execution context
+  const gate = bus ? new PermissionGate(bus, _workspaceRoot) : null;
 
   // Tool execution loop: stream, execute any tool calls, feed results back
   let currentMessages = [...messages];
@@ -179,9 +216,21 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
 
     for (const tc of response.toolCalls) {
       const args = JSON.parse(tc.args || "{}");
-      bus?.publish("BEFORE_TOOL_EXECUTE", { toolName: tc.name, arguments: args });
 
       let result: string;
+
+      // Execute the permission gate check if an active agent manifest is provided
+      if (input.agent && gate) {
+        const checkResult = await gate.check(tc.name, args, input.agent);
+        if (!checkResult.approved) {
+          const errMsg = checkResult.reason || "Error: Operation rejected by permission gate.";
+          bus?.publish("AFTER_TOOL_EXECUTE", { toolName: tc.name, arguments: args, status: "error", output: errMsg });
+          currentMessages.push(new ToolMessage({ content: errMsg, tool_call_id: tc.id }));
+          continue; // Skip physical execution of this tool call
+        }
+      }
+
+      bus?.publish("BEFORE_TOOL_EXECUTE", { toolName: tc.name, arguments: args });
 
       // Progressive disclosure: read_file without explicit offset → summarize full file
       if (tc.name === "read_file" && args.offset === undefined && input.context && input.config) {
@@ -206,10 +255,34 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
             result = summary;
           }
         } catch {
-          result = await executeToolCall(tc.name, tc.args, input.state.activeMode, _workspaceRoot);
+          result = await executeToolCall(tc.name, tc.args, input.state.activeMode, _workspaceRoot, input.context, input.config);
         }
+      } else if (tc.name === "run_task_agent" && input.config) {
+        // Inline task agent execution (Flash model call with agent persona)
+        const taskArgs = JSON.parse(tc.args || "{}");
+        const agentId = taskArgs.agentId || taskArgs.agent_id || "";
+        const instruction = taskArgs.instruction || taskArgs.prompt || "";
+        const { AgentRegistry } = await import("../agents/registry.js");
+        // Access registry from global — find the task agent
+        const taskAgent = input.agent ? undefined : undefined; // placeholder
+        const { createTierAdapter } = await import("../adapters/factory.js");
+        const { streamModel } = await import("../adapters/stream.js");
+        
+        // Find the task agent manifest from registered agents
+        // For now, use a direct Flash call with the summarizer prompt
+        const flashAdapter = createTierAdapter("flash", input.config);
+        const taskPrompt = agentId === "summarizer" 
+          ? "You are a content summarizer. Extract and summarize the relevant information concisely. Preserve key details. Keep under 500 words."
+          : `You are task agent "${agentId}". Complete the following task.`;
+        
+        const taskMessages = [
+          new SystemMessage(taskPrompt),
+          new HumanMessage(instruction),
+        ];
+        const taskResponse = await streamModel(flashAdapter.client, taskMessages, () => {}, input.signal);
+        result = taskResponse.text || "Task agent returned no output.";
       } else {
-        result = await executeToolCall(tc.name, tc.args, input.state.activeMode, _workspaceRoot);
+        result = await executeToolCall(tc.name, tc.args, input.state.activeMode, _workspaceRoot, input.context, input.config);
 
         // Track focused files for write/edit and targeted reads
         if (input.context && input.config && (tc.name === "read_file" || tc.name === "write_file" || tc.name === "edit_file")) {
@@ -269,8 +342,26 @@ export async function orchestratedTask(input: OrchestrationInput): Promise<Orche
   let lastResponse: ModelResponse | null = null;
   let reworkCount = 0;
   const allUpdates: Partial<GraphState> = {};
+  let activeClient = input.client;
+  let currentTier = input.tier || "utility";
 
   while (currentNode !== null && reworkCount < MAX_REWORK_CYCLES) {
+    // Check for escalation before node execution
+    if (shouldEscalate(0, 100000, reworkCount) && input.config) {
+      const escalated = resolveEscalation(currentTier, input.config);
+      if (escalated) {
+        const nextTier = escalateTier(currentTier);
+        if (nextTier) {
+          currentTier = nextTier;
+          activeClient = escalated.client;
+          input.onChunk({ 
+            type: "status", 
+            message: `[Escalation] Repeated failures detected (${reworkCount}). Upgrading reasoning to ${currentTier} tier...` 
+          });
+        }
+      }
+    }
+
     const persona = getPersona(currentNode);
     const messages: BaseMessage[] = [
       new SystemMessage(persona),
@@ -282,11 +373,28 @@ export async function orchestratedTask(input: OrchestrationInput): Promise<Orche
       messages.push(new SystemMessage(`--- Rework Required ---\n${state.diagnostics}`));
     }
 
+    // If we just escalated, inject the escalation notice into system instructions
+    if (reworkCount > 0 && currentTier === "dense") {
+      const escState = buildEscalationState(
+        "utility",
+        "dense",
+        "REPEATED_AUDIT_FAILURE",
+        `Auditor failed engineering tests ${reworkCount} times. Upgrading client.`,
+        currentNode || "orchestration",
+        {
+          activePlan: state.activePlan,
+          focusedFiles: state.focusedFiles,
+          messagesSnapshot: [],
+        }
+      );
+      messages.push(new SystemMessage(escalationNotice(escState)));
+    }
+
     messages.push(new HumanMessage(input.userMessage));
 
     const result: NodeResult = await executeNode(
       currentNode,
-      input.client,
+      activeClient,
       messages,
       state,
       input.onChunk

@@ -57,14 +57,14 @@ describe("Integration: Tool Call Flow", () => {
       setTimeout(() => bus.publish("TOOL_CONFIRMATION_RESPONSE", { approved: true, requestId: (e.payload as any).requestId }), 10);
     });
 
-    const result = await gate.check("write_file", { path: "test.ts", content: "x" }, "chat");
+    const result = await gate.check("write_file", { path: "test.ts", content: "x" }, { approvalMode: "prompt", allowedTools: ["read_file"] });
     expect(result.approved).toBe(true);
   });
 
-  it("permission gate rejects in plan mode", async () => {
+  it("permission gate rejects in deny mode", async () => {
     const bus = new EventBus();
     const gate = new PermissionGate(bus);
-    const result = await gate.check("write_file", { path: "test.ts", content: "x" }, "plan");
+    const result = await gate.check("write_file", { path: "test.ts", content: "x" }, { approvalMode: "deny", allowedTools: ["read_file"] });
     expect(result.approved).toBe(false);
   });
 });

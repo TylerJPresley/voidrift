@@ -1,6 +1,12 @@
 ---
 name: DATA-ENG
 description: Data pipeline design, storage patterns, processing constraints, and data quality principles for data engineering work.
+triggers:
+  extensions: [".sql"]
+  files: []
+  keywords: ["pipeline","etl","data lake","schema","migration","sql"]
+agents: []
+active: true
 ---
 
 # Domain: Data Engineering (DATA-ENG)

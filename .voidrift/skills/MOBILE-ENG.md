@@ -1,6 +1,12 @@
 ---
 name: MOBILE-ENG
 description: Mobile application architecture, platform constraints, offline patterns, and UX principles for mobile development.
+triggers:
+  extensions: [".swift",".kt",".dart"]
+  files: []
+  keywords: ["mobile","ios","android","flutter","react native"]
+agents: []
+active: true
 ---
 
 # Domain: Mobile Engineering (MOBILE-ENG)

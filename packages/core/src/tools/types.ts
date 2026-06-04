@@ -1,5 +1,5 @@
 export type SafetyProfile = "auto-approved" | "gated";
-export type ActionLayer = "file-ops" | "system-exec" | "web" | "lsp" | "orchestration" | "external";
+export type ActionLayer = "file-ops" | "system-exec" | "web" | "lsp" | "orchestration" | "external" | "partition";
 
 export interface ToolParameter {
   name: string;

@@ -10,8 +10,7 @@ import {
   bootstrap,
   ContextManager,
   TokenBudgetWatcher,
-  ModeCycler,
-  TurnSerializer,
+  SessionBrain,
   MemoryRegistry,
   SkillManager,
   AuditLogger,
@@ -26,17 +25,22 @@ import {
   generateCodeMap,
   getGitBranch,
   shortenPath,
+  AgentRegistry,
+  PromptRegistry,
   type StreamChunk,
   TaskScheduler,
+  PluginInterface,
 } from "./index.js";
 import {
   StatsPanel, HelpPanel, ToolsPanel, ModelPanel, MemoryPanel, GenericPanel,
-  SkillsPanel, MCPPanel, TemplatesPanel, ContextPanel, TasksPanel,
+  SkillsPanel, MCPPanel, TemplatesPanel, PromptsPanel, ContextPanel, TasksPanel,
   ResumePanel, RewindPanel, IdeasPanel, ChangesPanel, AgentsPanel,
 } from "./panels.js";
 import type { EngineContext } from "./engine.js";
 import { executeTurn } from "./turn.js";
 import { validateEditor } from "./utils/editor.js";
+import { validateAssets } from "./bootstrap/validate.js";
+import { ResourceWatcher } from "./watcher/resources.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -280,7 +284,34 @@ function App({ engine }: { engine: EngineContext }) {
   const [busy, setBusy] = useState(false);
   const [panel, setPanel] = useState<string | null>(null);
   const [acIdx, setAcIdx] = useState(0);
+  const acIdxRef = React.useRef(0);
+  acIdxRef.current = acIdx;
+  const [inputKey, setInputKey] = useState(0);
   const [, forceRender] = useState(0);
+
+  // Helper: activate an agent — sets persona, mode, loads resources
+  const activateAgent = (agentId: string) => {
+    const agent = engine.agents.setActive(agentId);
+    const basePrompt = engine.prompts.resolve("chat")?.body || "";
+    const persona = agent.prompt ? `${agent.prompt}\n\n${basePrompt}` : basePrompt;
+    engine.context.setPersona(persona);
+    engine.context.setTools(agent.tools);
+    // Load resources into focused files
+    if (agent.resources) {
+      for (const uri of agent.resources) {
+        if (uri.startsWith("file://")) {
+          const relPath = uri.slice(7).replace(/^\.\//, "");
+          const absPath = join(engine.workspaceRoot, relPath);
+          if (existsSync(absPath)) {
+            const content = readFileSync(absPath, "utf-8");
+            const lines = content.split("\n").length;
+            engine.context.focusFile(relPath, content, lines);
+          }
+        }
+      }
+    }
+    setHistory(h => [...h, { id: id(), type: "system", text: agent.welcomeMessage || `Switched to ${agent.name}` }]);
+  };
 
   // Re-render on terminal resize
   useEffect(() => {
@@ -307,7 +338,6 @@ function App({ engine }: { engine: EngineContext }) {
 
   useInput((ch, key) => {
     if (key.escape) {
-      if (panel) { setPanel(null); return; }
       if (busy) {
         abortRef.current?.abort();
         setBusy(false); setThinking(null); setStreaming(null); setPendingTools(null);
@@ -316,14 +346,14 @@ function App({ engine }: { engine: EngineContext }) {
     }
     if (key.tab && !busy && !panel) {
       if (showAutocomplete && acCommands.length && !key.shift) {
-        setInput("/" + acCommands[acIdx] + " ");
+        setInput("/" + acCommands[acIdx]);
         setAcIdx(0);
+        setInputKey(k => k + 1);
         return;
       }
       if (key.shift) {
-        const newMode = engine.cycler.cycle();
-        engine.context.setMode(newMode);
-        setHistory(h => [...h, { id: id(), type: "system", text: `Mode: ${newMode}` }]);
+        const agent = engine.agents.cycle();
+        activateAgent(agent.id);
       }
     }
     if (ch === "c" && key.ctrl) {
@@ -343,12 +373,24 @@ function App({ engine }: { engine: EngineContext }) {
   const handleSubmit = useCallback(async (text: string) => {
     if (!text.trim() || busy) return;
 
-    // If autocomplete is showing and input is a partial command, complete it instead of submitting
-    if (text.startsWith("/") && !text.includes(" ") && acCommands.length > 0) {
-      const exact = engine.container.registry.getSlashCommand(text.slice(1));
-      if (!exact) {
-        setInput("/" + acCommands[acIdx] + " ");
+    // If autocomplete is showing and input is a partial command, execute the selected item
+    if (text.startsWith("/") && !text.includes(" ")) {
+      const partial = text.slice(1).toLowerCase();
+      const matches = engine.container.registry.listSlashCommands().filter(n => n.startsWith(partial));
+      if (matches.length > 0 && !engine.container.registry.getSlashCommand(partial)) {
+        const selected = matches[acIdxRef.current % matches.length];
+        setInput("");
         setAcIdx(0);
+        const handler = engine.container.registry.getSlashCommand(selected);
+        if (handler) {
+          let captured = "";
+          engine.setCmdOutput((t: string) => { captured += (captured ? "\n" : "") + t; });
+          engine.setOpenPanel((p: string) => setPanel(p));
+          await handler.execute([]);
+          engine.setCmdOutput(() => {});
+          engine.setOpenPanel(() => {});
+          if (captured) setHistory(h => [...h, { id: id(), type: "system", text: captured }]);
+        }
         return;
       }
     }
@@ -357,7 +399,7 @@ function App({ engine }: { engine: EngineContext }) {
     const trimmed = text.trim();
 
     // Slash commands
-    if (trimmed === "/quit") { engine.container.shutdown().then(() => exit()); return; }
+    if (trimmed === "/quit") { engine.container.shutdown().then(() => { process.stdout.write("\x1B[?25h"); exit(); }); return; }
     if (trimmed.startsWith("/")) {
       const [cmd, ...args] = trimmed.slice(1).split(/\s+/);
       const handler = engine.container.registry.getSlashCommand(cmd);
@@ -454,7 +496,7 @@ function App({ engine }: { engine: EngineContext }) {
       {streaming && <StreamingResponse {...streaming} />}
 
       <Box flexDirection="column" marginTop={1}>
-        <Footer mode={engine.cycler.mode} model={modelDisplay} contextPct={engine.budget.state.percentage} workspace={engine.shortPath} branch={engine.branch} />
+        <Footer mode={engine.agents.active.name} model={modelDisplay} contextPct={engine.budget.state.percentage} workspace={engine.shortPath} branch={engine.branch} />
         <Text> </Text>
         <Box>
           <Text color="#6a7ec8" bold>❯ </Text>
@@ -462,7 +504,7 @@ function App({ engine }: { engine: EngineContext }) {
             ? <Text dimColor italic>working... (esc to cancel)</Text>
             : panel
               ? <Text dimColor italic>esc to close</Text>
-              : <TextInput value={input} onChange={(v) => { setInput(v); setAcIdx(0); }} onSubmit={handleSubmit} placeholder="ask a question or describe a task" />
+              : <TextInput key={inputKey} value={input} onChange={(v) => { setInput(v); setAcIdx(0); }} onSubmit={handleSubmit} placeholder="ask a question or describe a task" />
           }
         </Box>
       </Box>
@@ -473,20 +515,21 @@ function App({ engine }: { engine: EngineContext }) {
 
       {panel === "stats" && <StatsPanel stats={engine.stats} budget={engine.budget} onClose={() => setPanel(null)} />}
       {panel === "help" && <HelpPanel registry={engine.container.registry} sessionId={engine.stats.current.sessionId} workspace={engine.shortPath} onClose={() => setPanel(null)} />}
-      {panel === "tools" && <ToolsPanel cycler={engine.cycler} onClose={() => setPanel(null)} />}
+      {panel === "tools" && <ToolsPanel agents={engine.agents} onClose={() => setPanel(null)} />}
       {panel === "model" && <ModelPanel config={engine.container.config} onAssign={() => {}} onClose={() => setPanel(null)} />}
       {panel === "memory" && <MemoryPanel memory={engine.memory} context={engine.context} onClose={() => setPanel(null)} />}
-      {panel === "skills" && <SkillsPanel skills={engine.skills} onClose={() => setPanel(null)} />}
+      {panel === "skills" && <SkillsPanel skills={engine.skills} config={engine.container.config} workspaceRoot={engine.workspaceRoot} agents={engine.agents} onClose={() => setPanel(null)} />}
       {panel === "mcp" && <MCPPanel mcp={engine.mcp} onClose={() => setPanel(null)} />}
-      {panel === "templates" && <TemplatesPanel templates={engine.templates} config={engine.container.config} onClose={() => setPanel(null)} />}
-      {panel === "context" && <ContextPanel budget={engine.budget} context={engine.context} stats={engine.stats} modelName={modelDisplay} skills={engine.skills} mcp={engine.mcp} worktree={engine.worktree} workspaceRoot={engine.workspaceRoot} onClose={() => setPanel(null)} />}
+      {panel === "templates" && <TemplatesPanel templates={engine.templates} config={engine.container.config} workspaceRoot={engine.workspaceRoot} onClose={() => setPanel(null)} />}
+      {panel === "prompts" && <PromptsPanel prompts={engine.prompts} config={engine.container.config} workspaceRoot={engine.workspaceRoot} onClose={() => setPanel(null)} />}
+      {panel === "context" && <ContextPanel budget={engine.budget} context={engine.context} stats={engine.stats} modelName={modelDisplay} skills={engine.skills} onClose={() => setPanel(null)} />}
       {panel === "tasks" && <TasksPanel scheduler={engine.scheduler} onClose={() => setPanel(null)} />}
       {panel === "resume" && <ResumePanel onClose={() => setPanel(null)} />}
       {panel === "rewind" && <RewindPanel turns={engine.stats.current.turns} onRewind={(t) => { engine.context.setMessages(engine.context.getMessages().slice(0, t * 2)); }} onClose={() => setPanel(null)} />}
       {panel === "ideas" && <IdeasPanel workspaceRoot={engine.workspaceRoot} onClose={() => setPanel(null)} />}
       {panel === "changes" && <ChangesPanel workspaceRoot={engine.workspaceRoot} onClose={() => setPanel(null)} />}
-      {panel === "agents" && <AgentsPanel onClose={() => setPanel(null)} />}
-      {panel && !["stats","help","tools","model","memory","skills","mcp","templates","context","tasks","resume","rewind","ideas","changes","agents"].includes(panel) && <GenericPanel name={panel} onClose={() => setPanel(null)} />}
+      {panel === "agents" && <AgentsPanel agents={engine.agents} config={engine.container.config} workspaceRoot={engine.workspaceRoot} onClose={() => setPanel(null)} />}
+      {panel && !["stats","help","tools","model","memory","skills","mcp","templates","prompts","context","tasks","resume","rewind","ideas","changes","agents"].includes(panel) && <GenericPanel name={panel} onClose={() => setPanel(null)} />}
     </Box>
   );
 }
@@ -518,24 +561,46 @@ const engine: EngineContext = await (async () => {
   }
   setWorkspaceRoot(workspaceRoot);
   const codeMap = generateCodeMap(workspaceRoot);
-  // Load persona from workspace or global prompts, falling back to a sensible default
-  const personaPaths = [
-    join(workspaceRoot, ".voidrift", "prompts", "chat.md"),
-    join(homedir(), ".config", "voidrift", "prompts", "chat.md"),
-  ];
-  let persona = "You are VoidRift, an AI coding assistant with direct access to the developer's workspace via tools (read_file, glob_files, write_file, edit_file, execute_command).";
-  for (const p of personaPaths) {
-    if (existsSync(p)) { persona = readFileSync(p, "utf-8"); break; }
-  }
-  const context = new ContextManager(persona, "chat", codeMap);
-  const budget = new TokenBudgetWatcher(container.config.models[container.config.tiers.utility]?.contextLimit ?? 128000);
-  const cycler = new ModeCycler();
-  const serializer = new TurnSerializer(workspaceRoot, sessionId, container.bus);
-  const memory = new MemoryRegistry();
-  const skills = new SkillManager();
+  const agents = new AgentRegistry();
   const templates = new TemplateService(workspaceRoot);
+  const prompts = new PromptRegistry(workspaceRoot);
   const mcp = new MCPEngine(workspaceRoot, container.bus);
   const worktree = new WorktreeEngine(workspaceRoot, container.bus);
+
+  // Config-driven plugin loading
+  const startupWarnings: string[] = [];
+  templates.setActivePlugins(container.config.plugins);
+  for (const pluginName of container.config.plugins) {
+    try {
+      const pluginInterface = new PluginInterface(
+        container.registry,
+        container.bus,
+        worktree,
+        workspaceRoot,
+        templates,
+        agents,
+        prompts,
+        pluginName,
+      );
+      const mod = await import(pluginName);
+      if (typeof mod.register === "function") {
+        mod.register(pluginInterface);
+      }
+    } catch (err: any) {
+      startupWarnings.push(`Plugin "${pluginName}" failed to load: ${err.message}`);
+    }
+  }
+
+  agents.discover(workspaceRoot);
+  const activeAgent = agents.active;
+  const basePrompt = prompts.resolve("chat")?.body || "";
+  const startupPersona = activeAgent.prompt ? `${activeAgent.prompt}\n\n${basePrompt}` : basePrompt;
+  const context = new ContextManager(startupPersona, codeMap);
+  context.setTools(activeAgent.tools);
+  const budget = new TokenBudgetWatcher(container.config.models[container.config.tiers.utility]?.contextLimit ?? 128000);
+  const brain = new SessionBrain(workspaceRoot, sessionId, container.bus);
+  const memory = new MemoryRegistry();
+  const skills = new SkillManager();
   const logger = new AuditLogger({ workspaceRoot, sessionId });
   const guard = new ExceptionGuard(container.bus, context);
   const stats = new StatsTracker(sessionId);
@@ -546,7 +611,7 @@ const engine: EngineContext = await (async () => {
   skills.index([join(workspaceRoot, ".voidrift", "skills"), join(homedir(), ".config", "voidrift", "resources", "skills")]);
   memory.index([join(workspaceRoot, ".voidrift", "memory"), join(homedir(), ".config", "voidrift", "memory")]);
   logger.attach(container.bus);
-  serializer.attach(() => context.context);
+  brain.attach(() => context.context, () => agents.active.id);
   container.bus.publish("SESSION_START", { workspaceRoot, globalConfig: container.config as any });
 
   // Watcher → re-index codemap and memory on file changes (debounced 2s)
@@ -564,11 +629,22 @@ const engine: EngineContext = await (async () => {
   container.bus.subscribe("FILE_CREATED", (e) => scheduleReindex(e.payload.path));
   container.bus.subscribe("FILE_DELETED", (e) => scheduleReindex(e.payload.path));
 
+  // Resource watcher: tracks voidrift config directories (local + global)
+  const resourceWatcher = new ResourceWatcher(workspaceRoot, join(homedir(), ".config", "voidrift"), container.bus);
+  resourceWatcher.start().catch(() => {});
+  container.bus.subscribe("RESOURCE_CHANGED", (e) => {
+    const { type } = e.payload;
+    if (type === "skill") skills.index([join(workspaceRoot, ".voidrift", "skills"), join(homedir(), ".config", "voidrift", "skills")]);
+    if (type === "agent") agents.discover(workspaceRoot);
+    if (type === "template") templates.discover();
+    // prompts resolve from disk on-demand, config requires restart
+  });
+
   let cmdOutputFn: (text: string) => void = () => {};
   let openPanelFn: (panel: string) => void = () => {};
 
   registerCommands(container.registry, {
-    config: container.config, context, budget, cycler, serializer, memory, stats,
+    config: container.config, context, budget, agents, brain, memory, stats,
     skills, templates, mcp, worktree, scheduler, bus: container.bus, workspaceRoot, sessionId,
     output: (text) => cmdOutputFn(text),
     openPanel: (panel) => openPanelFn(panel),
@@ -577,14 +653,14 @@ const engine: EngineContext = await (async () => {
       budget.setLimit(container.config.models[name].contextLimit);
       return true;
     },
-    exit: () => process.exit(0),
+    exit: () => { process.stdout.write("\x1B[?25h"); process.exit(0); },
   });
 
   return {
-    container, context, budget, cycler, guard, stats, memory, skills, mcp, templates, logger,
+    container, context, budget, agents, prompts, guard, stats, memory, skills, mcp, templates, logger,
     worktree, scheduler,
     branch, shortPath, workspaceRoot,
-    startupWarnings: validateStartup(container.config),
+    startupWarnings: [...startupWarnings, ...validateStartup(container.config), ...validateAssets(agents, skills).map(i => `[${i.type}] ${i.id}: ${i.message}`)],
     setCmdOutput: (fn: (text: string) => void) => { cmdOutputFn = fn; },
     setOpenPanel: (fn: (panel: string) => void) => { openPanelFn = fn; },
   };
@@ -595,6 +671,7 @@ const engine: EngineContext = await (async () => {
 async function gracefulShutdown(signal: string) {
   process.stderr.write(`\n[VoidRift] Received ${signal}, shutting down...\n`);
   await engine.container.shutdown();
+  process.stdout.write("\x1B[?25h");
   process.exit(0);
 }
 
@@ -605,4 +682,5 @@ process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
 process.stdout.write("\x1b[?25l"); // Hide native cursor
 process.on("exit", () => process.stdout.write("\x1b[?25h"));
 
-render(<App engine={engine} />, { patchConsole: false, alternateScreen: true });
+render(<App engine={engine} />, { patchConsole: false, exitOnCtrlC: false });
+process.stdout.write("\x1B[?25l"); // hide terminal cursor

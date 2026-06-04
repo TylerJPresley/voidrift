@@ -6,7 +6,7 @@ import { EventBus } from "../../src/events/bus.js";
 describe("ExceptionGuard", () => {
   it("returns result on success", async () => {
     const bus = new EventBus();
-    const ctx = new ContextManager("", "chat", "");
+    const ctx = new ContextManager("", "");
     const guard = new ExceptionGuard(bus, ctx);
 
     const result = await guard.run(async () => "ok");
@@ -15,7 +15,7 @@ describe("ExceptionGuard", () => {
 
   it("catches errors and returns null", async () => {
     const bus = new EventBus();
-    const ctx = new ContextManager("", "chat", "");
+    const ctx = new ContextManager("", "");
     const guard = new ExceptionGuard(bus, ctx);
 
     const result = await guard.run(async () => { throw new Error("boom"); });
@@ -24,7 +24,7 @@ describe("ExceptionGuard", () => {
 
   it("adds error message to context", async () => {
     const bus = new EventBus();
-    const ctx = new ContextManager("", "chat", "");
+    const ctx = new ContextManager("", "");
     const guard = new ExceptionGuard(bus, ctx);
 
     await guard.run(async () => { throw new Error("API timeout"); });
@@ -35,7 +35,7 @@ describe("ExceptionGuard", () => {
 
   it("publishes ERROR_OCCURRED event", async () => {
     const bus = new EventBus();
-    const ctx = new ContextManager("", "chat", "");
+    const ctx = new ContextManager("", "");
     const guard = new ExceptionGuard(bus, ctx);
     const listener = vi.fn();
 

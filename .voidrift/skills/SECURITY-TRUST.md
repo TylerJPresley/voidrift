@@ -1,6 +1,12 @@
 ---
 name: SECURITY-TRUST
 description: Authentication, authorization, threat modeling, least privilege, and secure-by-default security and trust principles.
+triggers:
+  extensions: []
+  files: []
+  keywords: ["auth","jwt","oauth","permission","encryption","vulnerability","security"]
+agents: []
+active: true
 ---
 
 # Domain: Security & Trust (SECURITY-TRUST)

@@ -1,6 +1,12 @@
 ---
 name: ML-ENG
 description: Machine learning pipeline design, model lifecycle management, evaluation patterns, and reproducibility for ML engineering.
+triggers:
+  extensions: [".ipynb"]
+  files: []
+  keywords: ["model","training","inference","dataset","neural","machine learning"]
+agents: []
+active: true
 ---
 
 # Domain: Machine Learning Engineering (ML-ENG)

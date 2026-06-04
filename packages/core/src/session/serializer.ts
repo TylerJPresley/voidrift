@@ -3,7 +3,6 @@ import { execSync } from "child_process";
 import { join } from "path";
 import type { SessionContext } from "./context.js";
 import type { EventBus } from "../events/bus.js";
-import type { Mode } from "../router/index.js";
 
 export interface TurnStateJSON {
   sessionId: string;
@@ -15,7 +14,7 @@ export interface TurnStateJSON {
     isDirty: boolean;
   };
   harnessState: {
-    activeMode: Mode;
+    approvalMode: string;
     activeLocks: string[];
   };
   graphState: {
@@ -48,7 +47,7 @@ export class TurnSerializer {
     this.filePath = join(dir, "session_state.json");
   }
 
-  attach(getContext: () => SessionContext, getMode?: () => Mode, getNode?: () => string): () => void {
+  attach(getContext: () => SessionContext, getMode?: () => string, getNode?: () => string): () => void {
     return this.bus.subscribe("TURN_COMPLETE", () => {
       this.turnIndex++;
       const ctx = getContext();
@@ -56,14 +55,14 @@ export class TurnSerializer {
     });
   }
 
-  save(ctx: SessionContext, activeMode: Mode = "chat", activeNode: string = "idle"): void {
+  save(ctx: SessionContext, approvalMode: string = "prompt", activeNode: string = "idle"): void {
     const state: TurnStateJSON = {
       sessionId: this.sessionId,
       turnIndex: this.turnIndex,
       timestamp: Date.now(),
       gitState: this.getGitState(),
       harnessState: {
-        activeMode,
+        approvalMode,
         activeLocks: this.getActiveLocks(),
       },
       graphState: {

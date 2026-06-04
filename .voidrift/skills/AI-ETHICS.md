@@ -1,6 +1,12 @@
 ---
 name: AI-ETHICS
 description: Responsible AI development principles: fairness, transparency, bias mitigation, and ethical constraints for AI systems.
+triggers:
+  extensions: []
+  files: []
+  keywords: ["ethics","bias","fairness","responsible ai","transparency"]
+agents: []
+active: true
 ---
 
 # Domain: AI Safety & Ethics (AI-ETHICS)

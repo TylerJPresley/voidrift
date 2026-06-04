@@ -4,7 +4,7 @@ import type { SessionContext } from "../../src/session/context.js";
 
 function makeCtx(overrides?: Partial<SessionContext>): SessionContext {
   return {
-    governance: { activePersona: "You are helpful.", activeMode: "chat", activeSkills: [] },
+    governance: { activePersona: "You are helpful.", activeSkills: [] },
     workspace: { activePlan: null, focusedFiles: [], workspaceCodeMap: "", activeMemory: [], gitStatus: null },
     work: { messages: [], diagnostics: null },
     ...overrides,
@@ -16,7 +16,6 @@ describe("Prompt Compiler", () => {
     const msgs = compilePrompt(makeCtx());
     expect(msgs[0].role).toBe("system");
     expect(msgs[0].content).toContain("You are helpful.");
-    expect(msgs[0].content).toContain("[Mode: chat]");
   });
 
   it("includes workspace partition after governance", () => {

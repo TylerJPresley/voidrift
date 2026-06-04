@@ -1,7 +1,9 @@
 import type { CoreRegistry } from "../registry/core.js";
 import type { EventBus } from "../events/bus.js";
 import type { WorktreeEngine } from "../worktree/engine.js";
-import type { TemplateService, TemplateType } from "../templates/service.js";
+import type { TemplateService } from "../templates/service.js";
+import type { AgentRegistry, AgentManifest } from "../agents/registry.js";
+import type { PromptRegistry } from "../prompts/registry.js";
 import { generateCodeMap } from "../codemap/index.js";
 import { executeCommand } from "../tools/executors.js";
 
@@ -42,6 +44,8 @@ export class PluginInterface {
     private worktree: WorktreeEngine,
     private workspaceRoot: string,
     private templateService?: TemplateService,
+    private agentRegistry?: AgentRegistry,
+    private promptRegistry?: PromptRegistry,
     private pluginName: string = "plugin"
   ) {}
 
@@ -71,17 +75,34 @@ export class PluginInterface {
     return this.bus.subscribe(eventType as any, handler);
   }
 
-  /** Register a namespaced prompt or template into the Template & Prompt Service. */
-  registerPrompt(key: string, type: TemplateType, content: string): void {
-    this.templateService?.register(key, type, content, this.pluginName);
+  /** Register a prompt owned by this plugin. */
+  registerPrompt(key: string, content: string, label?: string, description?: string): void {
+    this.promptRegistry?.register(key, content, this.pluginName, label, description);
   }
 
-  /** Declare that this plugin's version of a prompt takes priority over core's default. */
-  overridePrompt(key: string, content: string): void {
-    const resolved = this.templateService?.resolve(key);
-    const type = resolved?.type ?? "prompt";
-    this.templateService?.register(key, type, content, this.pluginName);
+  /** Register a document template owned by this plugin. */
+  registerTemplate(key: string, content: string, label?: string, description?: string): void {
+    this.templateService?.register(key, "template", content, this.pluginName, label, description);
   }
+
+  /** Override a core prompt — replaces the base entirely. */
+  overridePrompt(key: string, content: string): void {
+    this.promptRegistry?.register(key, content, this.pluginName);
+  }
+
+  /** Extend a core prompt — appends content to the resolved base. */
+  extendPrompt(key: string, content: string): void {
+    // Append to the existing prompt content
+    const existing = this.promptRegistry?.resolve(key);
+    if (existing) {
+      this.promptRegistry?.register(key, existing.body + "\n\n" + content, this.pluginName);
+    }
+  }
+
+  /** Register a custom agent owned by this plugin. */
+  registerAgent = (manifest: AgentManifest): void => {
+    this.agentRegistry?.register(manifest, this.pluginName);
+  };
 
   /** Check if a path is allowed by the active sandbox mode's guard. */
   isPathAllowed(modeName: string, targetPath: string): boolean {

@@ -1,9 +1,8 @@
-import type { Mode } from "../router/index.js";
 import type { MemoryMeta } from "./memory.js";
 
 export interface GovernancePartition {
   activePersona: string;
-  activeMode: Mode;
+  activeTools: string[];
   activeSkills: string[];
   activeMemoryIndex: MemoryMeta[];
 }
@@ -47,9 +46,9 @@ export interface SessionContext {
 export class ContextManager {
   private ctx: SessionContext;
 
-  constructor(persona: string, mode: Mode, codeMap: string) {
+  constructor(persona: string, codeMap: string) {
     this.ctx = {
-      governance: { activePersona: persona, activeMode: mode, activeSkills: [], activeMemoryIndex: [] },
+      governance: { activePersona: persona, activeTools: [], activeSkills: [], activeMemoryIndex: [] },
       workspace: { activePlan: null, focusedFiles: [], workspaceCodeMap: codeMap, activeMemory: [], gitStatus: null },
       work: { messages: [], diagnostics: null },
     };
@@ -61,7 +60,7 @@ export class ContextManager {
 
   // Governance
   setPersona(persona: string): void { this.ctx.governance.activePersona = persona; }
-  setMode(mode: Mode): void { this.ctx.governance.activeMode = mode; }
+  setTools(tools: string[]): void { this.ctx.governance.activeTools = tools; }
   setSkills(skills: string[]): void { this.ctx.governance.activeSkills = skills; }
   setMemoryIndex(index: MemoryMeta[]): void { this.ctx.governance.activeMemoryIndex = index; }
 

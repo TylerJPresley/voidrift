@@ -56,6 +56,7 @@ export function openInEditor(filePath: string, editor: EditorType): { success: b
   if (isTerminal) {
     // Terminal editors need stdio: inherit and block
     const result = spawnSync(cmd, [filePath], { stdio: "inherit" });
+    process.stdout.write("\x1B[?25l"); // re-hide cursor after editor restores it
     if (result.error) return { success: false, error: result.error.message };
     return { success: true };
   }

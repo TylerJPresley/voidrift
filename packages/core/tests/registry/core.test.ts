@@ -52,10 +52,12 @@ describe("CoreRegistry", () => {
     expect(reg.listModes()).toEqual(["plan"]);
   });
 
-  it("throws on duplicate slash command", () => {
+  it("overwrites duplicate slash commands", () => {
     const reg = new CoreRegistry();
-    const cmd = { name: "x", description: "", execute: async () => {} };
-    reg.registerSlashCommand(cmd);
-    expect(() => reg.registerSlashCommand(cmd)).toThrow();
+    const cmd1 = { name: "x", description: "first", execute: async () => {} };
+    const cmd2 = { name: "x", description: "second", execute: async () => {} };
+    reg.registerSlashCommand(cmd1);
+    reg.registerSlashCommand(cmd2);
+    expect(reg.getSlashCommand("x")?.description).toBe("second");
   });
 });

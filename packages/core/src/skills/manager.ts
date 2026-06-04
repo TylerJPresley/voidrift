@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, existsSync } from "fs";
+import { readdirSync, readFileSync, existsSync, writeFileSync } from "fs";
 import { join, extname, basename } from "path";
 
 export interface SkillTriggers {
@@ -11,6 +11,8 @@ export interface SkillEntry {
   name: string;
   description: string;
   triggers: SkillTriggers;
+  agents: string[];
+  active: boolean;
   content: string;
   filePath: string;
 }
@@ -60,13 +62,20 @@ export class SkillManager {
 
   /**
    * Hybrid Anchor Resolution: evaluates focused files, user input, and active plan
-   * against registered skill triggers. Returns matching skill content for injection
-   * into the Governance Partition's activeSkills slot.
+   * against registered skill triggers. Also loads skills bound to the active agent.
+   * Returns matching skill content for injection into the Governance Partition's activeSkills slot.
    */
-  resolve(ctx: AnchorContext): string[] {
+  resolve(ctx: AnchorContext, activeAgentId?: string): string[] {
     const matched = new Set<string>();
 
     for (const skill of this.skills) {
+      if (!skill.active) continue;
+      // Agent-bound: load if skill declares this agent
+      if (activeAgentId && skill.agents.length > 0 && skill.agents.includes(activeAgentId)) {
+        matched.add(skill.content);
+        continue;
+      }
+      // Trigger-based: load if context matches triggers
       if (this.matchesTriggers(skill.triggers, ctx)) {
         matched.add(skill.content);
       }
@@ -77,6 +86,45 @@ export class SkillManager {
 
   get indexed(): SkillEntry[] {
     return this.skills;
+  }
+
+  /** Validate skills against known agent ids. Returns skills with invalid agent references. */
+  validate(knownAgentIds: string[]): Array<{ skill: SkillEntry; invalidAgents: string[] }> {
+    const issues: Array<{ skill: SkillEntry; invalidAgents: string[] }> = [];
+    for (const skill of this.skills) {
+      const invalid = skill.agents.filter(id => !knownAgentIds.includes(id));
+      if (invalid.length > 0) issues.push({ skill, invalidAgents: invalid });
+    }
+    return issues;
+  }
+
+  /** Remove references to a deleted agent from all skills. */
+  removeAgentReferences(agentId: string): void {
+    for (const skill of this.skills) {
+      if (skill.agents.includes(agentId)) {
+        skill.agents = skill.agents.filter(id => id !== agentId);
+        // Write back to disk
+        this.updateFrontmatter(skill);
+      }
+    }
+  }
+
+  private updateFrontmatter(skill: SkillEntry): void {
+    try {
+      const raw = readFileSync(skill.filePath, "utf-8");
+      const match = raw.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+      if (!match) return;
+      let header = match[1];
+      const body = match[2];
+      // Update agents line
+      const agentsStr = skill.agents.length > 0 ? `[${skill.agents.map(a => `"${a}"`).join(", ")}]` : "[]";
+      if (header.includes("agents:")) {
+        header = header.replace(/agents:\s*\[[^\]]*\]/, `agents: ${agentsStr}`);
+      } else {
+        header += `\nagents: ${agentsStr}`;
+      }
+      writeFileSync(skill.filePath, `---\n${header}\n---\n${body}`);
+    } catch {}
   }
 
   private matchesTriggers(triggers: SkillTriggers, ctx: AnchorContext): boolean {
@@ -114,8 +162,11 @@ function parseSkillFile(filePath: string): SkillEntry | null {
     const name = extractField(header, "name") || basename(filePath, ".md");
     const description = extractField(header, "description") || "";
     const triggers = extractTriggers(header);
+    const agents = extractArray(header, "agents");
+    const activeField = extractField(header, "active");
+    const active = activeField === null ? true : activeField !== "false";
 
-    return { name, description, triggers, content, filePath };
+    return { name, description, triggers, agents, active, content, filePath };
   } catch {
     return null;
   }
@@ -143,4 +194,9 @@ function extractTriggers(yaml: string): SkillTriggers {
 
 function parseArray(raw: string): string[] {
   return raw.split(",").map((s) => s.trim().replace(/^["']|["']$/g, "")).filter(Boolean);
+}
+
+function extractArray(yaml: string, field: string): string[] {
+  const match = yaml.match(new RegExp(`${field}:\\s*\\[([^\\]]*)\\]`));
+  return match ? parseArray(match[1]) : [];
 }
