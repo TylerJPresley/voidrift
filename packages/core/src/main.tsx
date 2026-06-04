@@ -429,7 +429,7 @@ function App({ engine }: { engine: EngineContext }) {
     let tokenCount = 0;
     let fullText = "";
     const tools: ToolCall[] = [];
-    const modelDisplay = engine.container.config.models[engine.container.config.tiers.utility]?.model ?? "unknown";
+    let resolvedModel = engine.agents.active.modelTier === "auto" ? "auto" : (engine.container.config.models[engine.container.config.tiers[engine.agents.active.modelTier as keyof typeof engine.container.config.tiers]]?.model ?? engine.agents.active.modelTier);
 
     const result = await executeTurn(engine, trimmed, {
       signal: abortController.signal,
@@ -439,7 +439,7 @@ function App({ engine }: { engine: EngineContext }) {
           fullText += chunk.text;
           tokenCount++;
           const elapsed = +((Date.now() - startTime) / 1000).toFixed(1);
-          setStreaming({ model: modelDisplay, text: fullText, elapsed, tokens: tokenCount });
+          setStreaming({ model: resolvedModel, text: fullText, elapsed, tokens: tokenCount });
         }
         if (chunk.type === "tool_call") {
           setThinking(null);
@@ -451,7 +451,10 @@ function App({ engine }: { engine: EngineContext }) {
           setHistory(h => [...h, { id: id(), type: "system", text: `⚠️ ${chunk.message}` }]);
         }
         if (chunk.type === "status") {
-          setThinking(chunk.message);
+          if (chunk.message.startsWith("model:")) {
+            resolvedModel = chunk.message.slice(6);
+          }
+          setThinking(chunk.message.startsWith("model:") ? "Thinking..." : chunk.message);
         }
       },
     });
@@ -467,19 +470,19 @@ function App({ engine }: { engine: EngineContext }) {
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
       const tokPerSec = tokenCount > 0 ? (tokenCount / +elapsed).toFixed(1) : "0";
       setHistory(h => [...h, {
-        id: id(), type: "assistant", model: modelDisplay, text: result.response.text,
+        id: id(), type: "assistant", model: resolvedModel, text: result.response.text,
         stats: `↑ ${result.response.usage.promptTokens} · ↓ ${tokenCount} · ${tokPerSec} tok/s · ${elapsed}s`,
       }]);
     }
   }, [busy, engine]);
 
-  const modelDisplay = engine.container.config.models[engine.container.config.tiers.utility]?.model ?? "unknown";
+  const footerModel = engine.agents.active.modelTier === "auto" ? "auto" : (engine.container.config.models[engine.container.config.tiers[engine.agents.active.modelTier as keyof typeof engine.container.config.tiers]]?.model ?? engine.agents.active.modelTier);
 
   return (
     <Box flexDirection="column">
       <Static items={[{ id: "welcome" } as any, ...history]}>
         {(item: any) => {
-          if (item.id === "welcome") return <Welcome key="welcome" model={modelDisplay} workspace={engine.shortPath} branch={engine.branch} />;
+          if (item.id === "welcome") return <Welcome key="welcome" model={footerModel} workspace={engine.shortPath} branch={engine.branch} />;
           switch (item.type) {
             case "user": return <UserMessage key={item.id} text={item.text} />;
             case "tools": return <ToolGroup key={item.id} tools={item.tools} />;
@@ -496,7 +499,7 @@ function App({ engine }: { engine: EngineContext }) {
       {streaming && <StreamingResponse {...streaming} />}
 
       <Box flexDirection="column" marginTop={1}>
-        <Footer mode={engine.agents.active.name} model={modelDisplay} contextPct={engine.budget.state.percentage} workspace={engine.shortPath} branch={engine.branch} />
+        <Footer mode={engine.agents.active.name} model={footerModel} contextPct={engine.budget.state.percentage} workspace={engine.shortPath} branch={engine.branch} />
         <Text> </Text>
         <Box>
           <Text color="#6a7ec8" bold>❯ </Text>
@@ -522,7 +525,7 @@ function App({ engine }: { engine: EngineContext }) {
       {panel === "mcp" && <MCPPanel mcp={engine.mcp} onClose={() => setPanel(null)} />}
       {panel === "templates" && <TemplatesPanel templates={engine.templates} config={engine.container.config} workspaceRoot={engine.workspaceRoot} onClose={() => setPanel(null)} />}
       {panel === "prompts" && <PromptsPanel prompts={engine.prompts} config={engine.container.config} workspaceRoot={engine.workspaceRoot} onClose={() => setPanel(null)} />}
-      {panel === "context" && <ContextPanel budget={engine.budget} context={engine.context} stats={engine.stats} modelName={modelDisplay} skills={engine.skills} onClose={() => setPanel(null)} />}
+      {panel === "context" && <ContextPanel budget={engine.budget} context={engine.context} stats={engine.stats} modelName={footerModel} skills={engine.skills} onClose={() => setPanel(null)} />}
       {panel === "tasks" && <TasksPanel scheduler={engine.scheduler} onClose={() => setPanel(null)} />}
       {panel === "resume" && <ResumePanel onClose={() => setPanel(null)} />}
       {panel === "rewind" && <RewindPanel turns={engine.stats.current.turns} onRewind={(t) => { engine.context.setMessages(engine.context.getMessages().slice(0, t * 2)); }} onClose={() => setPanel(null)} />}

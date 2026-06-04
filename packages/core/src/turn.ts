@@ -36,6 +36,9 @@ export async function executeTurn(engine: EngineContext, userMessage: string, ca
   }
   const resolved = createTierAdapter(tier, engine.container.config);
 
+  // Emit resolved model name so the UI can display it
+  callbacks.onChunk({ type: "status", message: `model:${resolved.name}` });
+
   const state: GraphState = {
     activePlan: engine.context.context.workspace.activePlan,
     focusedFiles: engine.context.context.workspace.focusedFiles.map(f => f.path),
