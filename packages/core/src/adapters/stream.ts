@@ -25,12 +25,17 @@ export async function streamModel(
   const toolAccumulator = new Map<string, { id: string; name: string; args: string }>();
   let usage: TokenUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
 
+  if (signal?.aborted) {
+    return { text: "", toolCalls: [], usage };
+  }
+
   try {
-    const stream = await client.stream(messages);
+    const stream = await client.stream(messages, { signal });
 
     try {
       for await (const chunk of stream) {
         if (signal?.aborted) break;
+
         // Extract text content from chunk
         const content = extractContent(chunk.content);
         if (content) {
@@ -63,13 +68,19 @@ export async function streamModel(
         }
       }
     } catch (err: unknown) {
-      // Mid-stream error (network dropout, connection reset during iteration)
+      // Mid-stream error (network dropout, connection reset, or abort)
+      if (signal?.aborted) {
+        return { text, toolCalls: flushToolCalls(toolAccumulator, onChunk), usage };
+      }
       const message = err instanceof Error ? err.message : String(err);
       onChunk({ type: "error", message, retryable: isRetryable(message) });
       return { text, toolCalls: flushToolCalls(toolAccumulator, onChunk), usage };
     }
   } catch (err: unknown) {
-    // Pre-stream error (failed to initiate stream)
+    // Pre-stream error (failed to initiate stream, or aborted during prefill)
+    if (signal?.aborted) {
+      return { text, toolCalls: [], usage };
+    }
     const message = err instanceof Error ? err.message : String(err);
     onChunk({ type: "error", message, retryable: isRetryable(message) });
     return { text, toolCalls: [], usage };
