@@ -135,11 +135,14 @@ const MAX_REWORK_CYCLES = 3;
  * Entry Router.
  *
  * Determines whether to use the Direct Chat Path or the Active Task Path:
- * - Direct Chat: activePlan is null AND mode is not "plan" → simple conversational turn
- * - Active Task: activePlan exists OR mode is "plan" → orchestrated multi-node graph
+ * - Direct Chat: default path — single agent turn with tool loop
+ * - Active Task: activePlan exists AND mode is not "plan" → orchestrated multi-node graph
+ *
+ * Plan mode uses directChat because it's a single-agent turn (Architect)
+ * that needs tool binding (read_file, glob_files, etc.) to explore the codebase.
  */
 export function routeEntry(state: GraphState): "direct" | "orchestrated" {
-  if (state.activeMode === "plan") return "orchestrated";
+  if (state.activeMode === "plan") return "direct";
   if (state.activePlan !== null) return "orchestrated";
   return "direct";
 }

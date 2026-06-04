@@ -38,8 +38,8 @@ describe("Orchestration - Entry Router", () => {
     expect(routeEntry(makeState({ activeMode: "vibe" }))).toBe("direct");
   });
 
-  it("routes to orchestrated when mode is plan", () => {
-    expect(routeEntry(makeState({ activeMode: "plan" }))).toBe("orchestrated");
+  it("routes to direct when mode is plan (single-agent turn with tools)", () => {
+    expect(routeEntry(makeState({ activeMode: "plan" }))).toBe("direct");
   });
 
   it("routes to orchestrated when activePlan exists", () => {
