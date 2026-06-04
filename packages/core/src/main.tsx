@@ -452,7 +452,8 @@ function App({ engine }: { engine: EngineContext }) {
         }
         if (chunk.type === "status") {
           if (chunk.message.startsWith("model:")) {
-            resolvedModel = chunk.message.slice(6);
+            const name = chunk.message.slice(6);
+            resolvedModel = engine.agents.active.modelTier === "auto" ? `auto[${name}]` : name;
           }
           setThinking(chunk.message.startsWith("model:") ? "Thinking..." : chunk.message);
         }
