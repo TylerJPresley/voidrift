@@ -34,8 +34,15 @@ export interface TokenUsage {
   totalTokens: number;
 }
 
+export interface StreamTiming {
+  requestStart: number;
+  firstTokenAt: number | null;
+  endAt: number;
+}
+
 export interface ModelResponse {
   text: string;
   toolCalls: ToolCallChunk[];
   usage: TokenUsage;
+  timing?: StreamTiming;
 }

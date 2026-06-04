@@ -24,9 +24,11 @@ export async function streamModel(
   let text = "";
   const toolAccumulator = new Map<string, { id: string; name: string; args: string }>();
   let usage: TokenUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+  const requestStart = Date.now();
+  let firstTokenAt: number | null = null;
 
   if (signal?.aborted) {
-    return { text: "", toolCalls: [], usage };
+    return { text: "", toolCalls: [], usage, timing: { requestStart, firstTokenAt: null, endAt: Date.now() } };
   }
 
   try {
@@ -39,6 +41,7 @@ export async function streamModel(
         // Extract text content from chunk
         const content = extractContent(chunk.content);
         if (content) {
+          if (!firstTokenAt) firstTokenAt = Date.now();
           text += content;
           onChunk({ type: "content", text: content });
         }
@@ -70,26 +73,26 @@ export async function streamModel(
     } catch (err: unknown) {
       // Mid-stream error (network dropout, connection reset, or abort)
       if (signal?.aborted) {
-        return { text, toolCalls: flushToolCalls(toolAccumulator, onChunk), usage };
+        return { text, toolCalls: flushToolCalls(toolAccumulator, onChunk), usage, timing: { requestStart, firstTokenAt, endAt: Date.now() } };
       }
       const message = err instanceof Error ? err.message : String(err);
       onChunk({ type: "error", message, retryable: isRetryable(message) });
-      return { text, toolCalls: flushToolCalls(toolAccumulator, onChunk), usage };
+      return { text, toolCalls: flushToolCalls(toolAccumulator, onChunk), usage, timing: { requestStart, firstTokenAt, endAt: Date.now() } };
     }
   } catch (err: unknown) {
     // Pre-stream error (failed to initiate stream, or aborted during prefill)
     if (signal?.aborted) {
-      return { text, toolCalls: [], usage };
+      return { text, toolCalls: [], usage, timing: { requestStart, firstTokenAt, endAt: Date.now() } };
     }
     const message = err instanceof Error ? err.message : String(err);
     onChunk({ type: "error", message, retryable: isRetryable(message) });
-    return { text, toolCalls: [], usage };
+    return { text, toolCalls: [], usage, timing: { requestStart, firstTokenAt, endAt: Date.now() } };
   }
 
   // Yield accumulated tool calls
   const toolCalls = flushToolCalls(toolAccumulator, onChunk);
   onChunk({ type: "done", usage });
-  return { text, toolCalls, usage };
+  return { text, toolCalls, usage, timing: { requestStart, firstTokenAt, endAt: Date.now() } };
 }
 
 /**

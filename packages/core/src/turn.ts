@@ -89,7 +89,7 @@ export async function executeTurn(engine: EngineContext, userMessage: string, ca
   });
 
   if (result) {
-    engine.logger.logModelResponse(resolved.name, result.response.text, result.response.toolCalls, result.response.usage);
+    engine.logger.logModelResponse(resolved.name, result.response.text, result.response.toolCalls, result.response.usage, result.response.timing);
     engine.stats.recordTurn(resolved.name, result.response.usage.promptTokens, result.response.usage.completionTokens || 0, 0, 0);
     engine.context.addMessage({ role: "assistant", content: result.response.text });
     engine.budget.add(result.response.usage.totalTokens || 0);

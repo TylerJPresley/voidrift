@@ -9,7 +9,7 @@ export { bootstrap, type Container, type ContainerOptions } from "./bootstrap/co
 // Tier 2: Model Connectivity
 export { createAdapter, createTierAdapter, type Tier, type ResolvedModel } from "./adapters/factory.js";
 export { streamModel, type OnChunk } from "./adapters/stream.js";
-export type { StreamChunk, ContentChunk, ToolCallChunk, DoneChunk, ErrorChunk, TokenUsage, ModelResponse } from "./adapters/types.js";
+export type { StreamChunk, ContentChunk, ToolCallChunk, DoneChunk, ErrorChunk, TokenUsage, ModelResponse, StreamTiming } from "./adapters/types.js";
 export { routeTier, resolveRouter, escalateTier, delegateTier, shouldEscalate, resolveEscalation, resolveDelegation, buildEscalationState, escalationNotice, type NodeType, type Mode, type RoutingContext, type EscalationState, type EscalationCode } from "./router/index.js";
 
 // Tier 3: Capability Subsystem

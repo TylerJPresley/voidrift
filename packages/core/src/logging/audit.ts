@@ -122,8 +122,10 @@ export class AuditLogger {
   }
 
   /** Log model response (called directly from turn execution) */
-  logModelResponse(model: string, text: string, toolCalls: unknown[], usage: unknown): void {
-    this.local("info", "model", "response", { model, text: text.slice(0, 1000), toolCalls, usage });
+  logModelResponse(model: string, text: string, toolCalls: unknown[], usage: unknown, timing?: { requestStart: number; firstTokenAt: number | null; endAt: number }): void {
+    const prefillMs = timing?.firstTokenAt ? timing.firstTokenAt - timing.requestStart : null;
+    const totalMs = timing ? timing.endAt - timing.requestStart : null;
+    this.local("info", "model", "response", { model, text: text.slice(0, 1000), toolCalls, usage, prefillMs, totalMs });
   }
 
   /** Log the full prompt sent to the model */
