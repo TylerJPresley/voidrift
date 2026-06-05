@@ -5,6 +5,7 @@
  */
 import React, { useState } from "react";
 import { Box, Text, useInput } from "ink";
+import { Markdown } from "./ui/markdown.js";
 import type { StatsTracker } from "./session/stats.js";
 import type { TokenBudgetWatcher } from "./output/budget.js";
 import type { VoidRiftConfig } from "./config/loader.js";
@@ -215,7 +216,7 @@ export function PlanPanel({ context, onClose }: { context: ContextManager; onClo
       <Text color="#5a6aa8">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
       <Text> </Text>
       {plan
-        ? <Text>{plan}</Text>
+        ? <Markdown text={plan} />
         : <Text dimColor italic>No active plan. Use plan mode to create one.</Text>
       }
       <Text> </Text>
