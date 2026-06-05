@@ -252,7 +252,12 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
       // Progressive disclosure: read_file without explicit offset → summarize full file
       if (tc.name === "read_file" && args.offset === undefined && input.context && input.config) {
         const filePath = args.path;
-        try {
+        // If already focused, return the cached summary immediately
+        const existing = input.context.context.workspace.focusedFiles.find(f => f.path === filePath);
+        if (existing) {
+          result = existing.summary;
+        } else {
+          try {
           const cacheInstance = getCache(_workspaceRoot);
           const fullContent = readFileSync(join(_workspaceRoot, filePath), "utf-8");
           const currentHash = cacheInstance.computeHash(fullContent);
@@ -273,6 +278,7 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
           }
         } catch {
           result = await executeToolCall(tc.name, tc.args, input.state.activeMode, _workspaceRoot, input.context, input.config);
+        }
         }
       } else if (tc.name === "run_task_agent" && input.config) {
         // Inline task agent execution (Flash model call with agent persona)
