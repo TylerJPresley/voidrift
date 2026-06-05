@@ -45,7 +45,8 @@ export function registerCommands(registry: CoreRegistry, deps: CommandDeps): voi
   // --- Session & Navigation ---
   registry.registerSlashCommand({ name: "help", description: "Interactive help utility panel", execute: async () => deps.openPanel("help") });
   registry.registerSlashCommand({ name: "exit", description: "Save session and exit", execute: async () => { deps.brain.save(deps.context.context, deps.agents.active.id); deps.output("Session saved. Goodbye."); deps.exit(); } });
-  registry.registerSlashCommand({ name: "clear", description: "Reset conversation history", execute: async () => { deps.context.setMessages([]); deps.context.setPlan(null); deps.output("Session cleared."); } });
+  registry.registerSlashCommand({ name: "clear", description: "Reset conversation history", execute: async () => { deps.context.setMessages([]); deps.output("Session cleared."); } });
+  registry.registerSlashCommand({ name: "plan", description: "View, edit, or delete the active plan", execute: async () => deps.openPanel("plan") });
   registry.registerSlashCommand({ name: "compact", description: "Compact conversation history", execute: async () => {
     const msgs = deps.context.getMessages();
     const result = compactHistory(msgs, deps.budget.state.used, deps.budget.state.limit);

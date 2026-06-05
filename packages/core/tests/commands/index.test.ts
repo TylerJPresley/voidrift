@@ -54,11 +54,11 @@ function makeDeps(): { registry: CoreRegistry; deps: CommandDeps; output: string
 
 afterEach(() => { rmSync(TMP, { recursive: true, force: true }); });
 
-describe("Slash Commands (all 26)", () => {
-  it("registers all 26 commands", () => {
+describe("Slash Commands (all 28)", () => {
+  it("registers all 28 commands", () => {
     const { registry } = makeDeps();
     const cmds = registry.listSlashCommands();
-    expect(cmds.length).toBe(27);
+    expect(cmds.length).toBe(28);
     expect(cmds).toContain("help");
     expect(cmds).toContain("exit");
     expect(cmds).toContain("model");

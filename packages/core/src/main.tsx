@@ -34,7 +34,7 @@ import {
 import {
   StatsPanel, HelpPanel, ToolsPanel, ModelPanel, MemoryPanel, GenericPanel,
   SkillsPanel, MCPPanel, TemplatesPanel, PromptsPanel, ContextPanel, TasksPanel,
-  ResumePanel, RewindPanel, IdeasPanel, ChangesPanel, AgentsPanel,
+  ResumePanel, RewindPanel, IdeasPanel, ChangesPanel, AgentsPanel, PlanPanel,
 } from "./panels.js";
 import type { EngineContext } from "./engine.js";
 import { executeTurn } from "./turn.js";
@@ -522,6 +522,7 @@ function App({ engine }: { engine: EngineContext }) {
       {panel === "help" && <HelpPanel registry={engine.container.registry} sessionId={engine.stats.current.sessionId} workspace={engine.shortPath} onClose={() => setPanel(null)} />}
       {panel === "tools" && <ToolsPanel agents={engine.agents} onClose={() => setPanel(null)} />}
       {panel === "model" && <ModelPanel config={engine.container.config} agents={engine.agents} onClose={() => setPanel(null)} />}
+      {panel === "plan" && <PlanPanel context={engine.context} onClose={() => setPanel(null)} />}
       {panel === "memory" && <MemoryPanel memory={engine.memory} context={engine.context} onClose={() => setPanel(null)} />}
       {panel === "skills" && <SkillsPanel skills={engine.skills} config={engine.container.config} workspaceRoot={engine.workspaceRoot} agents={engine.agents} onClose={() => setPanel(null)} />}
       {panel === "mcp" && <MCPPanel mcp={engine.mcp} onClose={() => setPanel(null)} />}
@@ -534,7 +535,7 @@ function App({ engine }: { engine: EngineContext }) {
       {panel === "ideas" && <IdeasPanel workspaceRoot={engine.workspaceRoot} onClose={() => setPanel(null)} />}
       {panel === "changes" && <ChangesPanel workspaceRoot={engine.workspaceRoot} onClose={() => setPanel(null)} />}
       {panel === "agents" && <AgentsPanel agents={engine.agents} config={engine.container.config} workspaceRoot={engine.workspaceRoot} onClose={() => setPanel(null)} />}
-      {panel && !["stats","help","tools","model","memory","skills","mcp","templates","prompts","context","tasks","resume","rewind","ideas","changes","agents"].includes(panel) && <GenericPanel name={panel} onClose={() => setPanel(null)} />}
+      {panel && !["stats","help","tools","model","plan","memory","skills","mcp","templates","prompts","context","tasks","resume","rewind","ideas","changes","agents"].includes(panel) && <GenericPanel name={panel} onClose={() => setPanel(null)} />}
     </Box>
   );
 }

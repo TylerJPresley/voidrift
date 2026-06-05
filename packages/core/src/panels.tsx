@@ -195,6 +195,35 @@ export function ModelPanel({ config, agents, onClose }: { config: VoidRiftConfig
   );
 }
 
+// ─── /plan ───────────────────────────────────────────────────────────────────
+
+export function PlanPanel({ context, onClose }: { context: ContextManager; onClose: () => void }) {
+  const plan = context.context.workspace.activePlan;
+
+  useInput((ch, key) => {
+    if (key.escape) onClose();
+    if (key.delete || (ch === "d" && !plan)) onClose();
+    if (ch === "d" && plan) {
+      context.setPlan(null);
+      onClose();
+    }
+  });
+
+  return (
+    <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1} paddingY={1}>
+      <Text bold>Active Plan</Text>
+      <Text color="#5a6aa8">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
+      <Text> </Text>
+      {plan
+        ? <Text>{plan}</Text>
+        : <Text dimColor italic>No active plan. Use plan mode to create one.</Text>
+      }
+      <Text> </Text>
+      <Text dimColor>  {plan ? <><Text color="#61afef" bold>d</Text> Delete plan  </> : null}<Text color="#61afef" bold>esc</Text> Close</Text>
+    </Box>
+  );
+}
+
 // ─── /skills ─────────────────────────────────────────────────────────────────
 
 export function SkillsPanel({ skills, config, workspaceRoot, agents, onClose }: { skills: SkillManager; config: VoidRiftConfig; workspaceRoot: string; agents: AgentRegistry; onClose: () => void }) {
