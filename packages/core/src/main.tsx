@@ -443,6 +443,12 @@ function App({ engine }: { engine: EngineContext }) {
           setStreaming({ model: resolvedModel, text: fullText, elapsed, tokens: tokenCount });
         }
         if (chunk.type === "tool_call") {
+          // Flush any accumulated text to history before showing tools
+          if (fullText.trim()) {
+            setStreaming(null);
+            setHistory(h => [...h, { id: id(), type: "assistant", model: resolvedModel, text: fullText }]);
+            fullText = "";
+          }
           setThinking(null);
           tools.push({ name: chunk.name, args: chunk.args, status: "success", elapsed: `${((Date.now() - startTime) / 1000).toFixed(1)}s` });
           setPendingTools([...tools]);
@@ -455,6 +461,12 @@ function App({ engine }: { engine: EngineContext }) {
           if (chunk.message.startsWith("model:")) {
             const name = chunk.message.slice(6);
             resolvedModel = engine.agents.active.modelTier === "auto" ? `auto[${name}]` : name;
+          }
+          // Flush tools to history when a new round starts
+          if (chunk.message === "Thinking..." && tools.length) {
+            setPendingTools(null);
+            setHistory(h => [...h, { id: id(), type: "tools", tools: [...tools] }]);
+            tools.length = 0;
           }
           setThinking(chunk.message.startsWith("model:") ? "Thinking..." : chunk.message);
         }
