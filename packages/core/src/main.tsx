@@ -410,6 +410,7 @@ function App({ engine }: { engine: EngineContext }) {
         await handler.execute(args);
         engine.setCmdOutput(() => {});
         engine.setOpenPanel(() => {});
+        if (cmd === "clear") { setHistory([]); return; }
         if (captured) setHistory(h => [...h, { id: id(), type: "system", text: captured }]);
       } else {
         setHistory(h => [...h, { id: id(), type: "system", text: `Unknown command: /${cmd}` }]);
