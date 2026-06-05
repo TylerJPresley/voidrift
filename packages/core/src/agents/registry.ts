@@ -13,7 +13,7 @@ import { join, dirname } from "path";
 
 export type AgentType = "interactive" | "task";
 export type ApprovalMode = "prompt" | "deny" | "autonomous";
-export type ModelTier = "flash" | "utility" | "dense" | "auto";
+export type ModelTier = "flash" | "utility" | "dense" | "auto" | (string & {});
 
 export interface ToolSettings {
   allowedPaths?: string[];
