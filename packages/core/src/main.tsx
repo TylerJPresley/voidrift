@@ -389,6 +389,7 @@ function App({ engine }: { engine: EngineContext }) {
           await handler.execute([]);
           engine.setCmdOutput(() => {});
           engine.setOpenPanel(() => {});
+          if (selected === "clear") { setHistory([]); return; }
           if (captured) setHistory(h => [...h, { id: id(), type: "system", text: captured }]);
         }
         return;

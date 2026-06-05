@@ -107,4 +107,5 @@ export class ContextManager {
   setDiagnostics(diag: string | null): void { this.ctx.work.diagnostics = diag; }
   getMessages(): Message[] { return this.ctx.work.messages; }
   setMessages(msgs: Message[]): void { this.ctx.work.messages = msgs; }
+  clearFocusedFiles(): void { this.ctx.workspace.focusedFiles = []; }
 }
