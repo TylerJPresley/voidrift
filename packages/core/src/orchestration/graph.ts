@@ -203,6 +203,7 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
 
   for (let round = 0; round < maxToolRounds; round++) {
     if (input.signal?.aborted) break;
+    if (round > 0) input.onChunk({ type: "status", message: "Thinking..." });
     const response = await streamWithRetry(client, currentMessages, input.onChunk, input.signal);
     finalResponse = response;
 
@@ -213,6 +214,9 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
     const callKey = response.toolCalls.map((tc) => `${tc.name}:${tc.args}`).join("|");
     if (executedCalls.has(callKey)) break;
     executedCalls.add(callKey);
+
+    // Indicate tool execution is happening
+    input.onChunk({ type: "status", message: `Executing ${response.toolCalls.length} tool call${response.toolCalls.length > 1 ? "s" : ""}...` });
 
     // Add the AI message with tool calls
     currentMessages.push(new AIMessage({ content: response.text || "", tool_calls: response.toolCalls.map((tc) => ({ id: tc.id, name: tc.name, args: JSON.parse(tc.args || "{}") })) }));
