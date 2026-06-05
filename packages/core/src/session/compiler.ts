@@ -6,57 +6,67 @@ export interface CompiledMessage {
 }
 
 /**
- * Prompt Cache Optimizer.
- * Serializes context in ascending volatility order to maximize provider cache prefix hits:
- * 1. Governance (least volatile — persona, mode, skills)
- * 2. Workspace (semi-dynamic — plan, code map, focused files, memory)
- * 3. Work (most volatile — messages, diagnostics)
+ * Four-Layer Prompt Cache Optimizer (AMD-017).
+ *
+ * Compiles context into four system messages ordered by ascending volatility,
+ * giving providers independent cache boundaries per layer:
+ *
+ * 1. Governance      — agent identity (never changes)
+ * 2. Workspace Global — project landscape (rarely changes)
+ * 3. Workspace Context — active working set (changes on tool use)
+ * 4. Work            — conversation history (changes every turn)
  */
 export function compilePrompt(ctx: SessionContext): CompiledMessage[] {
   const messages: CompiledMessage[] = [];
 
-  // 1. Governance partition (static system prompt — cached prefix)
-  const systemParts: string[] = [ctx.governance.activePersona];
+  // Layer 1: Governance (session-locked, perfect cache anchor)
+  const govParts: string[] = [ctx.governance.activePersona];
   if (ctx.governance.boundSkills.length) {
-    systemParts.push("\n--- Agent Skills ---\n" + ctx.governance.boundSkills.join("\n\n"));
+    govParts.push("\n--- Agent Skills ---\n" + ctx.governance.boundSkills.join("\n\n"));
   }
   if (ctx.governance.skillDiscoveryIndex.length) {
-    systemParts.push("\n--- Available Skills ---\n" + ctx.governance.skillDiscoveryIndex.join("\n"));
+    govParts.push("\n--- Available Skills ---\n" + ctx.governance.skillDiscoveryIndex.join("\n"));
   }
-  messages.push({ role: "system", content: systemParts.join("\n") });
+  messages.push({ role: "system", content: govParts.join("\n") });
 
-  // 2. Workspace partition (semi-dynamic — ordered most-stable to least-stable for cache)
-  const workspaceParts: string[] = [];
+  // Layer 2: Workspace Global (project landscape, changes ~5% of turns)
+  const globalParts: string[] = [];
   if (ctx.workspace.activeSkills.length) {
-    workspaceParts.push("--- Active Skills ---\n" + ctx.workspace.activeSkills.join("\n\n"));
+    globalParts.push("--- Active Skills ---\n" + ctx.workspace.activeSkills.join("\n\n"));
   }
   if (ctx.workspace.workspaceCodeMap) {
-    workspaceParts.push("--- Workspace Map ---\n" + ctx.workspace.workspaceCodeMap);
+    globalParts.push("--- Workspace Map ---\n" + ctx.workspace.workspaceCodeMap);
   }
   if (ctx.workspace.activePlan) {
-    workspaceParts.push("--- Active Plan ---\n" + ctx.workspace.activePlan);
+    globalParts.push("--- Active Plan ---\n" + ctx.workspace.activePlan);
   }
   if (ctx.workspace.activeMemory.length) {
-    workspaceParts.push("--- Memory ---\n" + ctx.workspace.activeMemory.join("\n\n"));
+    globalParts.push("--- Memory ---\n" + ctx.workspace.activeMemory.join("\n\n"));
   }
+  if (globalParts.length) {
+    messages.push({ role: "system", content: globalParts.join("\n\n") });
+  }
+
+  // Layer 3: Workspace Context (active working set, changes ~30-40% of turns)
+  const ctxParts: string[] = [];
   if (ctx.workspace.focusedFiles.length) {
     for (const f of ctx.workspace.focusedFiles) {
-      workspaceParts.push(`--- Focused: ${f.path} ---\n${f.summary}`);
+      ctxParts.push(`--- Focused: ${f.path} ---\n${f.summary}`);
     }
   }
   if (ctx.workspace.gitStatus) {
-    workspaceParts.push("--- Git Status ---\n" + ctx.workspace.gitStatus);
+    ctxParts.push("--- Git Status ---\n" + ctx.workspace.gitStatus);
   }
-  if (workspaceParts.length) {
-    messages.push({ role: "system", content: workspaceParts.join("\n\n") });
+  if (ctxParts.length) {
+    messages.push({ role: "system", content: ctxParts.join("\n\n") });
   }
 
-  // 3. Work partition (most volatile — conversation history)
+  // Layer 4: Work (conversation history, changes every turn)
   for (const msg of ctx.work.messages) {
     messages.push({ role: msg.role === "tool" ? "tool" : msg.role, content: msg.content });
   }
 
-  // Diagnostics appended at the very end (most volatile)
+  // Diagnostics at the absolute tail (most volatile)
   if (ctx.work.diagnostics) {
     messages.push({ role: "system", content: "--- Diagnostics ---\n" + ctx.work.diagnostics });
   }

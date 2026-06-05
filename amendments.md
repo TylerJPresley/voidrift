@@ -318,3 +318,28 @@ The `"modelTier": "auto"` approach provides enterprise-grade capabilities with z
 - **Crash recovery**: Load the session directory on `/resume` to restore full state
 - **Rewind**: Read `system.turns.json` to get the target turn's snapshot, restore each partition file to that state, `git reset --hard` to the matching checkpoint SHA
 - **Agent switch**: Clear `work.messages.json`, update `governance.*` files, workspace stays intact
+
+## AMD-017: Four-Layer Context Partitioning (Cache-Optimized)
+- **Blueprint says**: Three-partition context (Governance, Workspace, Work)
+- **We decided**: Four layers ordered by volatility for maximum prompt cache reuse
+
+### The Four Layers (ascending volatility)
+
+| Layer | Label | Contains | Changes |
+|---|---|---|---|
+| **Governance** | Agent identity | Persona, bound skills, skill discovery index, tool schemas | Never (session-locked) |
+| **Workspace Global** | Project landscape | Code map, plan, memory, active skills | Rarely (~5% of turns) |
+| **Workspace Context** | Active working set | Focused files, git status | On tool use (~30-40%) |
+| **Work** | Conversation | Messages, diagnostics | Every turn |
+
+### Skill Three-Tier Split
+- **Governance**: `boundSkills` (agent-manifest-declared, static) + `skillDiscoveryIndex` (name+triggers of all available skills, static)
+- **Workspace Global**: `activeSkills` (dynamically loaded bodies, trigger-matched per turn based on focused files/keywords)
+
+### Cache Behavior
+- Pure chat (no tools): Only Work changes. Full governance + both workspace layers cached.
+- Coding session: Workspace Context changes on read/write. Governance + Workspace Global stay cached.
+- Each layer compiles to a separate system message, giving providers independent cache boundaries.
+
+### Reason
+Anthropic auto-caches prefix matches. By separating stable project data (code map, plan, memory) from volatile working-set data (focused files, git status), we maximize the cacheable prefix length. In conversational turns, 100% of non-Work content stays cached.
