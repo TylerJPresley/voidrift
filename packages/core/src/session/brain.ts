@@ -101,6 +101,47 @@ export class SessionBrain {
   /** Get current turn index. */
   get turn(): number { return this.turnIndex; }
 
+  /** Load a different session into the given context manager. */
+  loadSession(sessionId: string, context: { setMessages: (m: any[]) => void; setPlan: (p: string | null) => void; setDiagnostics: (d: string | null) => void }): boolean {
+    const dir = join(this.workspaceRoot, ".voidrift", "sessions", sessionId);
+    if (!existsSync(join(dir, "system.metadata.json"))) return false;
+    const messages = (() => { try { return JSON.parse(readFileSync(join(dir, "work.messages.json"), "utf-8")); } catch { return []; } })();
+    const plan = (() => { try { const p = readFileSync(join(dir, "workspace.plan.md"), "utf-8"); return p || null; } catch { return null; } })();
+    const diag = (() => { try { const d = readFileSync(join(dir, "work.diagnostics.md"), "utf-8"); return d || null; } catch { return null; } })();
+    context.setMessages(messages);
+    context.setPlan(plan);
+    context.setDiagnostics(diag);
+    // Update internal state to track the resumed session
+    this.sessionId = sessionId;
+    (this as any).dir = dir;
+    const turns = (() => { try { return JSON.parse(readFileSync(join(dir, "system.turns.json"), "utf-8")); } catch { return []; } })();
+    this.turnIndex = turns.length;
+    return true;
+  }
+
+  /** List all sessions on disk. */
+  listSessions(): Array<{ id: string; startTime: number; turnCount: number; lastActivity: number }> {
+    const sessionsDir = join(this.workspaceRoot, ".voidrift", "sessions");
+    if (!existsSync(sessionsDir)) return [];
+    const { readdirSync, statSync } = require("fs") as typeof import("fs");
+    const entries: Array<{ id: string; startTime: number; turnCount: number; lastActivity: number }> = [];
+    for (const name of readdirSync(sessionsDir)) {
+      const metaPath = join(sessionsDir, name, "system.metadata.json");
+      if (!existsSync(metaPath)) continue;
+      try {
+        const meta = JSON.parse(readFileSync(metaPath, "utf-8"));
+        const turnsPath = join(sessionsDir, name, "system.turns.json");
+        let lastActivity = meta.startTime || 0;
+        if (existsSync(turnsPath)) {
+          const turns = JSON.parse(readFileSync(turnsPath, "utf-8"));
+          if (turns.length) lastActivity = turns[turns.length - 1].timestamp;
+        }
+        entries.push({ id: name, startTime: meta.startTime || 0, turnCount: meta.turnCount || 0, lastActivity });
+      } catch { continue; }
+    }
+    return entries.sort((a, b) => b.lastActivity - a.lastActivity);
+  }
+
   private writeJson(filename: string, data: unknown): void {
     writeFileSync(join(this.dir, filename), JSON.stringify(data, null, 2), "utf-8");
   }

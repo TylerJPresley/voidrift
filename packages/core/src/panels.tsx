@@ -1058,16 +1058,63 @@ export function TasksPanel({
 
 // ─── /resume ─────────────────────────────────────────────────────────────────
 
-export function ResumePanel({ onClose }: { onClose: () => void }) {
-  useInput((_, key) => { if (key.escape) onClose(); });
+export function ResumePanel({ workspaceRoot, currentSessionId, onResume, onClose }: { workspaceRoot: string; currentSessionId: string; onResume: (id: string) => void; onClose: () => void }) {
+  const sessionsDir = join(workspaceRoot, ".voidrift", "sessions");
+  const sessions: Array<{ id: string; startTime: number; turnCount: number; lastActivity: number }> = [];
+  if (existsSync(sessionsDir)) {
+    for (const name of readdirSync(sessionsDir)) {
+      const metaPath = join(sessionsDir, name, "system.metadata.json");
+      if (!existsSync(metaPath)) continue;
+      try {
+        const meta = JSON.parse(readFileSync(metaPath, "utf-8"));
+        const turnsPath = join(sessionsDir, name, "system.turns.json");
+        let lastActivity = meta.startTime || 0;
+        if (existsSync(turnsPath)) {
+          const turns = JSON.parse(readFileSync(turnsPath, "utf-8"));
+          if (turns.length) lastActivity = turns[turns.length - 1].timestamp;
+        }
+        sessions.push({ id: name, startTime: meta.startTime || 0, turnCount: meta.turnCount || 0, lastActivity });
+      } catch { continue; }
+    }
+  }
+  sessions.sort((a, b) => b.lastActivity - a.lastActivity);
+
+  const [selected, setSelected] = useState(0);
+  useInput((_, key) => {
+    if (key.escape) onClose();
+    if (key.upArrow) setSelected(s => Math.max(0, s - 1));
+    if (key.downArrow) setSelected(s => Math.min(sessions.length - 1, s + 1));
+    if (key.return && sessions.length > 0) {
+      onResume(sessions[selected].id);
+    }
+  });
+
+  const relativeTime = (ts: number) => {
+    const diff = Date.now() - ts;
+    if (diff < 60_000) return "just now";
+    if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
+    if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
+    return `${Math.floor(diff / 86_400_000)}d ago`;
+  };
+
   return (
     <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1}>
       <Text bold>Conversations</Text>
       <Text color="#5a6aa8">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
       <Text> </Text>
-      <Text dimColor>No saved conversations found.</Text>
+      {sessions.length === 0
+        ? <Text dimColor>No saved conversations found.</Text>
+        : sessions.map((s, i) => (
+          <Text key={s.id}>
+            <Text color={i === selected ? "#4ec9b0" : undefined}>{i === selected ? "▸ " : "  "}</Text>
+            {s.id === currentSessionId && <Text color="green">[CURRENT] </Text>}
+            <Text color="#61afef">{s.id.slice(0, 8)}</Text>
+            <Text dimColor>  {s.turnCount} turns  {relativeTime(s.lastActivity)}</Text>
+          </Text>
+        ))
+      }
       <Text> </Text>
-      <Text dimColor>  <Text color="#61afef" bold>esc</Text> Close</Text>
+      <Text dimColor>  <Text color="#61afef" bold>↑↓</Text> Navigate  <Text color="#61afef" bold>enter</Text> Resume  <Text color="#61afef" bold>esc</Text> Close</Text>
     </Box>
   );
 }

@@ -530,7 +530,7 @@ function App({ engine }: { engine: EngineContext }) {
       {panel === "prompts" && <PromptsPanel prompts={engine.prompts} config={engine.container.config} workspaceRoot={engine.workspaceRoot} onClose={() => setPanel(null)} />}
       {panel === "context" && <ContextPanel budget={engine.budget} context={engine.context} stats={engine.stats} modelName={footerModel} skills={engine.skills} onClose={() => setPanel(null)} />}
       {panel === "tasks" && <TasksPanel scheduler={engine.scheduler} onClose={() => setPanel(null)} />}
-      {panel === "resume" && <ResumePanel onClose={() => setPanel(null)} />}
+      {panel === "resume" && <ResumePanel workspaceRoot={engine.workspaceRoot} currentSessionId={engine.sessionId} onResume={(id) => { engine.brain.loadSession(id, engine.context); setHistory([]); setPanel(null); }} onClose={() => setPanel(null)} />}
       {panel === "rewind" && <RewindPanel turns={engine.stats.current.turns} onRewind={(t) => { engine.context.setMessages(engine.context.getMessages().slice(0, t * 2)); }} onClose={() => setPanel(null)} />}
       {panel === "ideas" && <IdeasPanel workspaceRoot={engine.workspaceRoot} onClose={() => setPanel(null)} />}
       {panel === "changes" && <ChangesPanel workspaceRoot={engine.workspaceRoot} onClose={() => setPanel(null)} />}
@@ -664,7 +664,7 @@ const engine: EngineContext = await (async () => {
 
   return {
     container, context, budget, agents, prompts, guard, stats, memory, skills, mcp, templates, logger,
-    worktree, scheduler,
+    worktree, scheduler, brain, sessionId,
     branch, shortPath, workspaceRoot,
     startupWarnings: [...startupWarnings, ...validateStartup(container.config), ...validateAssets(agents, skills).map(i => `[${i.type}] ${i.id}: ${i.message}`)],
     setCmdOutput: (fn: (text: string) => void) => { cmdOutputFn = fn; },
