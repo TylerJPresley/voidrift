@@ -472,7 +472,7 @@ function App({ engine }: { engine: EngineContext }) {
       const tokPerSec = tokenCount > 0 ? (tokenCount / +elapsed).toFixed(1) : "0";
       setHistory(h => [...h, {
         id: id(), type: "assistant", model: resolvedModel, text: result.response.text,
-        stats: `${resolvedModel} · ↑ ${result.response.usage.promptTokens} · ↓ ${tokenCount} · ${tokPerSec} tok/s · ${elapsed}s`,
+        stats: `↑ ${result.response.usage.promptTokens} · ↓ ${tokenCount} · ${tokPerSec} tok/s · ${elapsed}s`,
       }]);
     }
   }, [busy, engine]);
