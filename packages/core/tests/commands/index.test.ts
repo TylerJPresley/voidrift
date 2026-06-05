@@ -114,7 +114,7 @@ describe("Slash Commands (all 26)", () => {
     deps.budget.add(500);
     await registry.getSlashCommand("clear")!.execute([]);
     expect(deps.context.getMessages()).toHaveLength(0);
-    expect(deps.budget.state.used).toBe(0);
+    expect(deps.budget.state.used).toBe(500); // budget is not conversation state
   });
 
   it("/compact compacts when over threshold", async () => {
