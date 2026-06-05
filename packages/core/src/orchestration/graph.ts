@@ -334,6 +334,7 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
       }
 
       bus?.publish("AFTER_TOOL_EXECUTE", { toolName: tc.name, arguments: args, status: result.startsWith("Error:") ? "error" : "success", output: result });
+      input.onChunk({ type: "tool_call", id: tc.id, name: tc.name, args: tc.args });
       currentMessages.push(new ToolMessage({ content: result, tool_call_id: tc.id }));
     }
   }

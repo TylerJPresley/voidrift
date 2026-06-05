@@ -121,7 +121,6 @@ function flushToolCalls(
   for (const [index, { id, name, args }] of accumulator) {
     const tc: ToolCallChunk = { type: "tool_call", id: id || `tool_${index}`, name, args };
     toolCalls.push(tc);
-    onChunk(tc);
   }
   return toolCalls;
 }
