@@ -239,6 +239,16 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
 
       bus?.publish("BEFORE_TOOL_EXECUTE", { toolName: tc.name, arguments: args });
 
+      // Show the user what's executing right now
+      const toolDesc = tc.name === "read_file" ? `${tc.name} ${args.path || ""}` :
+                       tc.name === "glob_files" ? `${tc.name} ${args.pattern || ""}` :
+                       tc.name === "execute_command" ? `${tc.name} ${(args.command || "").slice(0, 40)}` :
+                       tc.name === "web_search" ? `${tc.name} "${args.query || ""}"` :
+                       tc.name === "web_fetch" ? `${tc.name} ${args.url || ""}` :
+                       tc.name === "write_file" || tc.name === "edit_file" ? `${tc.name} ${args.path || ""}` :
+                       tc.name;
+      input.onChunk({ type: "status", message: `⚙ ${toolDesc}` });
+
       // Progressive disclosure: read_file without explicit offset → summarize full file
       if (tc.name === "read_file" && args.offset === undefined && input.context && input.config) {
         const filePath = args.path;
