@@ -912,7 +912,7 @@ export function ContextPanel({
 
   const messages = context.getMessages();
   const focusedFiles = context.context.workspace.focusedFiles;
-  const activeSkills = context.context.governance.activeSkills;
+  const activeSkills = context.context.workspace.activeSkills;
 
   // Token estimates
   const promptTokens = Math.ceil(context.context.governance.activePersona.length / 4);

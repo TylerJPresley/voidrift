@@ -4,8 +4,8 @@ import type { SessionContext } from "../../src/session/context.js";
 
 function makeCtx(overrides?: Partial<SessionContext>): SessionContext {
   return {
-    governance: { activePersona: "You are helpful.", activeSkills: [] },
-    workspace: { activePlan: null, focusedFiles: [], workspaceCodeMap: "", activeMemory: [], gitStatus: null },
+    governance: { activePersona: "You are helpful.", activeTools: [], boundSkills: [], skillDiscoveryIndex: [], activeMemoryIndex: [] },
+    workspace: { activePlan: null, focusedFiles: [], activeSkills: [], workspaceCodeMap: "", activeMemory: [], gitStatus: null },
     work: { messages: [], diagnostics: null },
     ...overrides,
   };
@@ -51,9 +51,9 @@ describe("Prompt Compiler", () => {
 
   it("includes skills in governance when present", () => {
     const ctx = makeCtx();
-    ctx.governance.activeSkills = ["Use React Server Components"];
+    ctx.governance.boundSkills = ["Use React Server Components"];
     const msgs = compilePrompt(ctx);
-    expect(msgs[0].content).toContain("Skills");
+    expect(msgs[0].content).toContain("Agent Skills");
     expect(msgs[0].content).toContain("React Server Components");
   });
 });

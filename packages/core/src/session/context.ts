@@ -3,7 +3,8 @@ import type { MemoryMeta } from "./memory.js";
 export interface GovernancePartition {
   activePersona: string;
   activeTools: string[];
-  activeSkills: string[];
+  boundSkills: string[];          // Agent-manifest-declared skill bodies (static)
+  skillDiscoveryIndex: string[];  // Lightweight name+trigger summaries of all available skills (static)
   activeMemoryIndex: MemoryMeta[];
 }
 
@@ -17,6 +18,7 @@ export interface FocusedFile {
 export interface WorkspacePartition {
   activePlan: string | null;
   focusedFiles: FocusedFile[];
+  activeSkills: string[];         // Dynamically loaded skill bodies (trigger-matched per turn)
   workspaceCodeMap: string;
   activeMemory: string[];
   gitStatus: string | null;
@@ -48,8 +50,8 @@ export class ContextManager {
 
   constructor(persona: string, codeMap: string) {
     this.ctx = {
-      governance: { activePersona: persona, activeTools: [], activeSkills: [], activeMemoryIndex: [] },
-      workspace: { activePlan: null, focusedFiles: [], workspaceCodeMap: codeMap, activeMemory: [], gitStatus: null },
+      governance: { activePersona: persona, activeTools: [], boundSkills: [], skillDiscoveryIndex: [], activeMemoryIndex: [] },
+      workspace: { activePlan: null, focusedFiles: [], activeSkills: [], workspaceCodeMap: codeMap, activeMemory: [], gitStatus: null },
       work: { messages: [], diagnostics: null },
     };
   }
@@ -61,10 +63,12 @@ export class ContextManager {
   // Governance
   setPersona(persona: string): void { this.ctx.governance.activePersona = persona; }
   setTools(tools: string[]): void { this.ctx.governance.activeTools = tools; }
-  setSkills(skills: string[]): void { this.ctx.governance.activeSkills = skills; }
+  setBoundSkills(skills: string[]): void { this.ctx.governance.boundSkills = skills; }
+  setSkillDiscoveryIndex(index: string[]): void { this.ctx.governance.skillDiscoveryIndex = index; }
   setMemoryIndex(index: MemoryMeta[]): void { this.ctx.governance.activeMemoryIndex = index; }
 
   // Workspace
+  setActiveSkills(skills: string[]): void { this.ctx.workspace.activeSkills = skills; }
   setPlan(plan: string | null): void { this.ctx.workspace.activePlan = plan; }
   setCodeMap(map: string): void { this.ctx.workspace.workspaceCodeMap = map; }
   setGitStatus(status: string | null): void { this.ctx.workspace.gitStatus = status; }

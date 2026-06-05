@@ -58,7 +58,7 @@ export class SessionBrain {
 
     // Governance
     this.writeFile("governance.persona.md", ctx.governance.activePersona);
-    this.writeJson("governance.skills.json", ctx.governance.activeSkills.map((_, i) => `skill-${i}`));
+    this.writeJson("governance.skills.json", { bound: ctx.governance.boundSkills.length, active: ctx.workspace.activeSkills.length });
     this.writeJson("governance.tools.json", ctx.governance.activeTools);
 
     // Workspace

@@ -17,13 +17,19 @@ export function compilePrompt(ctx: SessionContext): CompiledMessage[] {
 
   // 1. Governance partition (static system prompt — cached prefix)
   const systemParts: string[] = [ctx.governance.activePersona];
-  if (ctx.governance.activeSkills.length) {
-    systemParts.push("\n--- Skills ---\n" + ctx.governance.activeSkills.join("\n\n"));
+  if (ctx.governance.boundSkills.length) {
+    systemParts.push("\n--- Agent Skills ---\n" + ctx.governance.boundSkills.join("\n\n"));
+  }
+  if (ctx.governance.skillDiscoveryIndex.length) {
+    systemParts.push("\n--- Available Skills ---\n" + ctx.governance.skillDiscoveryIndex.join("\n"));
   }
   messages.push({ role: "system", content: systemParts.join("\n") });
 
   // 2. Workspace partition (semi-dynamic — changes less frequently)
   const workspaceParts: string[] = [];
+  if (ctx.workspace.activeSkills.length) {
+    workspaceParts.push("--- Active Skills ---\n" + ctx.workspace.activeSkills.join("\n\n"));
+  }
   if (ctx.workspace.workspaceCodeMap) {
     workspaceParts.push("--- Workspace Map ---\n" + ctx.workspace.workspaceCodeMap);
   }

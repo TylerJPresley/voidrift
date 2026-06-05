@@ -61,7 +61,7 @@ export async function executeTurn(engine: EngineContext, userMessage: string, ca
     },
     engine.agents.active.id,
   );
-  engine.context.setSkills(resolvedSkills);
+  engine.context.setActiveSkills(resolvedSkills);
 
   // Compile the full three-partition context via the Prompt Cache Optimizer
   const compiled = compilePrompt(engine.context.context);
