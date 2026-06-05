@@ -4,7 +4,7 @@
  */
 import { HumanMessage, AIMessage } from "@langchain/core/messages";
 import { runTurn } from "./orchestration/graph.js";
-import { createTierAdapter } from "./adapters/factory.js";
+import { createTierAdapter, createAdapter } from "./adapters/factory.js";
 import { routeTier } from "./router/index.js";
 import { compilePrompt } from "./session/compiler.js";
 import type { EngineContext } from "./engine.js";
@@ -34,7 +34,10 @@ export async function executeTurn(engine: EngineContext, userMessage: string, ca
       mentionedFiles: 0 
     });
   }
-  const resolved = createTierAdapter(tier, engine.container.config);
+  const isTierKey = tier === "flash" || tier === "utility" || tier === "dense";
+  const resolved = isTierKey
+    ? createTierAdapter(tier as any, engine.container.config)
+    : createAdapter(tier, engine.container.config);
 
   // Emit resolved model name so the UI can display it
   callbacks.onChunk({ type: "status", message: `model:${resolved.name}` });
