@@ -530,7 +530,19 @@ function App({ engine }: { engine: EngineContext }) {
       {panel === "prompts" && <PromptsPanel prompts={engine.prompts} config={engine.container.config} workspaceRoot={engine.workspaceRoot} onClose={() => setPanel(null)} />}
       {panel === "context" && <ContextPanel budget={engine.budget} context={engine.context} stats={engine.stats} modelName={footerModel} skills={engine.skills} onClose={() => setPanel(null)} />}
       {panel === "tasks" && <TasksPanel scheduler={engine.scheduler} onClose={() => setPanel(null)} />}
-      {panel === "resume" && <ResumePanel workspaceRoot={engine.workspaceRoot} currentSessionId={engine.sessionId} onResume={(id) => { engine.brain.loadSession(id, engine.context); setHistory([]); setPanel(null); }} onClose={() => setPanel(null)} />}
+      {panel === "resume" && <ResumePanel workspaceRoot={engine.workspaceRoot} currentSessionId={engine.sessionId} onResume={(id, msgs) => {
+        engine.brain.loadSession(id, engine.context);
+        // Rebuild UI history from persisted messages
+        let n = 0;
+        const restored = msgs.map((m: any) => {
+          n++;
+          if (m.role === "user") return { id: String(n), type: "user" as const, text: m.content };
+          if (m.role === "assistant") return { id: String(n), type: "assistant" as const, model: "", text: m.content };
+          return null;
+        }).filter(Boolean) as any[];
+        setHistory(restored);
+        setPanel(null);
+      }} onClose={() => setPanel(null)} />}
       {panel === "rewind" && <RewindPanel turns={engine.stats.current.turns} onRewind={(t) => { engine.context.setMessages(engine.context.getMessages().slice(0, t * 2)); }} onClose={() => setPanel(null)} />}
       {panel === "ideas" && <IdeasPanel workspaceRoot={engine.workspaceRoot} onClose={() => setPanel(null)} />}
       {panel === "changes" && <ChangesPanel workspaceRoot={engine.workspaceRoot} onClose={() => setPanel(null)} />}

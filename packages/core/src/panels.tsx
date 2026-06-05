@@ -1058,9 +1058,9 @@ export function TasksPanel({
 
 // ─── /resume ─────────────────────────────────────────────────────────────────
 
-export function ResumePanel({ workspaceRoot, currentSessionId, onResume, onClose }: { workspaceRoot: string; currentSessionId: string; onResume: (id: string) => void; onClose: () => void }) {
+export function ResumePanel({ workspaceRoot, currentSessionId, onResume, onClose }: { workspaceRoot: string; currentSessionId: string; onResume: (id: string, messages: Array<{ role: string; content: string }>) => void; onClose: () => void }) {
   const sessionsDir = join(workspaceRoot, ".voidrift", "sessions");
-  const sessions: Array<{ id: string; startTime: number; turnCount: number; lastActivity: number }> = [];
+  const sessions: Array<{ id: string; turnCount: number; lastActivity: number; lastMessage: string }> = [];
   if (existsSync(sessionsDir)) {
     for (const name of readdirSync(sessionsDir)) {
       const metaPath = join(sessionsDir, name, "system.metadata.json");
@@ -1073,7 +1073,14 @@ export function ResumePanel({ workspaceRoot, currentSessionId, onResume, onClose
           const turns = JSON.parse(readFileSync(turnsPath, "utf-8"));
           if (turns.length) lastActivity = turns[turns.length - 1].timestamp;
         }
-        sessions.push({ id: name, startTime: meta.startTime || 0, turnCount: meta.turnCount || 0, lastActivity });
+        let lastMessage = "";
+        const msgsPath = join(sessionsDir, name, "work.messages.json");
+        if (existsSync(msgsPath)) {
+          const msgs = JSON.parse(readFileSync(msgsPath, "utf-8"));
+          const lastUser = [...msgs].reverse().find((m: any) => m.role === "user");
+          if (lastUser) lastMessage = lastUser.content.slice(0, 60).replace(/\n/g, " ");
+        }
+        sessions.push({ id: name, turnCount: meta.turnCount || 0, lastActivity, lastMessage });
       } catch { continue; }
     }
   }
@@ -1085,7 +1092,10 @@ export function ResumePanel({ workspaceRoot, currentSessionId, onResume, onClose
     if (key.upArrow) setSelected(s => Math.max(0, s - 1));
     if (key.downArrow) setSelected(s => Math.min(sessions.length - 1, s + 1));
     if (key.return && sessions.length > 0) {
-      onResume(sessions[selected].id);
+      const s = sessions[selected];
+      const msgsPath = join(sessionsDir, s.id, "work.messages.json");
+      const msgs = existsSync(msgsPath) ? JSON.parse(readFileSync(msgsPath, "utf-8")) : [];
+      onResume(s.id, msgs);
     }
   });
 
@@ -1105,12 +1115,15 @@ export function ResumePanel({ workspaceRoot, currentSessionId, onResume, onClose
       {sessions.length === 0
         ? <Text dimColor>No saved conversations found.</Text>
         : sessions.map((s, i) => (
-          <Text key={s.id}>
-            <Text color={i === selected ? "#4ec9b0" : undefined}>{i === selected ? "▸ " : "  "}</Text>
-            {s.id === currentSessionId && <Text color="green">[CURRENT] </Text>}
-            <Text color="#61afef">{s.id.slice(0, 8)}</Text>
-            <Text dimColor>  {s.turnCount} turns  {relativeTime(s.lastActivity)}</Text>
-          </Text>
+          <Box key={s.id} flexDirection="column">
+            <Text>
+              <Text color={i === selected ? "#4ec9b0" : undefined}>{i === selected ? "▸ " : "  "}</Text>
+              {s.id === currentSessionId && <Text color="green">[CURRENT] </Text>}
+              <Text color="#61afef">{s.id.slice(0, 8)}</Text>
+              <Text dimColor>  {s.turnCount} turns · {relativeTime(s.lastActivity)}</Text>
+            </Text>
+            {s.lastMessage && <Text dimColor>    {s.lastMessage}{s.lastMessage.length >= 60 ? "…" : ""}</Text>}
+          </Box>
         ))
       }
       <Text> </Text>
