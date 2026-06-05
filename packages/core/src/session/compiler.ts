@@ -25,7 +25,7 @@ export function compilePrompt(ctx: SessionContext): CompiledMessage[] {
   }
   messages.push({ role: "system", content: systemParts.join("\n") });
 
-  // 2. Workspace partition (semi-dynamic — changes less frequently)
+  // 2. Workspace partition (semi-dynamic — ordered most-stable to least-stable for cache)
   const workspaceParts: string[] = [];
   if (ctx.workspace.activeSkills.length) {
     workspaceParts.push("--- Active Skills ---\n" + ctx.workspace.activeSkills.join("\n\n"));
@@ -36,13 +36,13 @@ export function compilePrompt(ctx: SessionContext): CompiledMessage[] {
   if (ctx.workspace.activePlan) {
     workspaceParts.push("--- Active Plan ---\n" + ctx.workspace.activePlan);
   }
+  if (ctx.workspace.activeMemory.length) {
+    workspaceParts.push("--- Memory ---\n" + ctx.workspace.activeMemory.join("\n\n"));
+  }
   if (ctx.workspace.focusedFiles.length) {
     for (const f of ctx.workspace.focusedFiles) {
       workspaceParts.push(`--- Focused: ${f.path} ---\n${f.summary}`);
     }
-  }
-  if (ctx.workspace.activeMemory.length) {
-    workspaceParts.push("--- Memory ---\n" + ctx.workspace.activeMemory.join("\n\n"));
   }
   if (ctx.workspace.gitStatus) {
     workspaceParts.push("--- Git Status ---\n" + ctx.workspace.gitStatus);
