@@ -16,6 +16,7 @@ import type { WorktreeEngine } from "./worktree/engine.js";
 import type { TaskScheduler } from "./orchestration/scheduler.js";
 import type { AgentRegistry } from "./agents/registry.js";
 import type { PromptRegistry } from "./prompts/registry.js";
+import type { PluginRegistry } from "./plugins/registry.js";
 import type { SessionBrain } from "./session/brain.js";
 
 export interface EngineContext {
@@ -34,6 +35,7 @@ export interface EngineContext {
   worktree: WorktreeEngine;
   scheduler: TaskScheduler;
   brain: SessionBrain;
+  pluginRegistry: PluginRegistry;
   sessionId: string;
   branch: string | null;
   shortPath: string;

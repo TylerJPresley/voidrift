@@ -56,19 +56,19 @@ export class SessionBrain {
     turns.push({ turn: this.turnIndex, timestamp: Date.now(), agentId, gitSha });
     this.writeJson("system.turns.json", turns);
 
-    // Governance
-    this.writeFile("governance.persona.md", ctx.governance.activePersona);
-    this.writeJson("governance.skills.json", { bound: ctx.governance.boundSkills.length, active: ctx.workspace.activeSkills.length });
-    this.writeJson("governance.tools.json", ctx.governance.activeTools);
+    // Agent
+    this.writeFile("governance.persona.md", ctx.agent.activePersona);
+    this.writeJson("governance.skills.json", { bound: ctx.agent.boundSkills.length, active: ctx.orbit.activeSkills.length });
+    this.writeJson("governance.tools.json", ctx.agent.activeTools);
 
-    // Workspace
-    this.writeFile("workspace.plan.md", ctx.workspace.activePlan || "");
-    this.writeJson("workspace.focused.json", ctx.workspace.focusedFiles.map(f => ({ path: f.path, totalLines: f.totalLines, readRanges: f.readRanges })));
-    this.writeJson("workspace.memory.json", ctx.workspace.activeMemory.length);
+    // Orbit
+    this.writeFile("workspace.plan.md", ctx.orbit.activePlan || "");
+    this.writeJson("workspace.focused.json", ctx.drift.focusedFiles.map(f => ({ path: f.path, totalLines: f.totalLines, readRanges: f.readRanges })));
+    this.writeJson("workspace.memory.json", ctx.orbit.activeMemory.length);
 
-    // Work
-    this.writeJson("work.messages.json", ctx.work.messages);
-    this.writeFile("work.diagnostics.md", ctx.work.diagnostics || "");
+    // Void
+    this.writeJson("work.messages.json", ctx.void.messages);
+    this.writeFile("work.diagnostics.md", ctx.void.diagnostics || "");
   }
 
   /** Load session state from disk for recovery. */
@@ -88,9 +88,10 @@ export class SessionBrain {
     return {
       turns,
       context: {
-        governance: { activePersona: persona, activeTools: tools, activeSkills: [], activeMemoryIndex: [] },
-        workspace: { activePlan: plan, focusedFiles: focused, workspaceCodeMap: "", activeMemory: [], gitStatus: null },
-        work: { messages, diagnostics: diagnostics || null },
+        agent: { activePersona: persona, activeTools: tools, boundSkills: [], skillDiscoveryIndex: [], activeMemoryIndex: [] },
+        orbit: { activePlan: plan, workspaceCodeMap: "", activeMemory: [], activeSkills: [] },
+        drift: { focusedFiles: focused, gitStatus: null },
+        void: { messages, diagnostics: diagnostics || null },
       },
     };
   }

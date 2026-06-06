@@ -61,13 +61,24 @@ type Listener<T extends EventType> = (event: VoidRiftEvent<T>) => void | Promise
 
 export class EventBus {
   private emitter = new EventEmitter();
+  private registeredEvents = new Set<string>();
 
   constructor() {
     this.emitter.setMaxListeners(100);
   }
 
-  subscribe<T extends EventType>(type: T, listener: Listener<T>): () => void {
-    const wrapped = async (event: VoidRiftEvent<T>) => {
+  registerEvent(name: string): void {
+    this.registeredEvents.add(name);
+  }
+
+  listRegisteredEvents(): string[] {
+    return [...this.registeredEvents];
+  }
+
+  subscribe<T extends EventType>(type: T, listener: Listener<T>): () => void;
+  subscribe(type: string, listener: (event: any) => void): () => void;
+  subscribe(type: string, listener: (event: any) => void): () => void {
+    const wrapped = async (event: any) => {
       try {
         await listener(event);
       } catch (err) {
@@ -78,7 +89,9 @@ export class EventBus {
     return () => this.emitter.off(type, wrapped);
   }
 
-  publish<T extends EventType>(type: T, payload: EventPayloadMap[T]): void {
-    this.emitter.emit(type, { type, payload, timestamp: Date.now() } satisfies VoidRiftEvent<T>);
+  publish<T extends EventType>(type: T, payload: EventPayloadMap[T]): void;
+  publish(type: string, payload: Record<string, unknown>): void;
+  publish(type: string, payload: any): void {
+    this.emitter.emit(type, { type, payload, timestamp: Date.now() });
   }
 }

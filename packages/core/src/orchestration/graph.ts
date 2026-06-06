@@ -91,13 +91,13 @@ async function executeToolCall(toolName: string, argsJson: string, mode: Mode, w
       return result.error ? `Error: ${result.error}` : result.output;
     }
     case "read_plan":
-      return context?.context.workspace.activePlan || "(no active plan)";
+      return context?.context.orbit.activePlan || "(no active plan)";
     case "write_plan":
       if (context) context.setPlan(args.content ?? "");
       return "Plan updated.";
     case "update_plan":
       if (context) {
-        const current = context.context.workspace.activePlan || "";
+        const current = context.context.orbit.activePlan || "";
         const updated = current.replace(args.search ?? "", args.replace ?? "");
         context.setPlan(updated);
       }
@@ -215,9 +215,6 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
     if (executedCalls.has(callKey)) break;
     executedCalls.add(callKey);
 
-    // Indicate tool execution is happening
-    input.onChunk({ type: "status", message: `Executing ${response.toolCalls.length} tool call${response.toolCalls.length > 1 ? "s" : ""}...` });
-
     // Add the AI message with tool calls
     currentMessages.push(new AIMessage({ content: response.text || "", tool_calls: response.toolCalls.map((tc) => ({ id: tc.id, name: tc.name, args: JSON.parse(tc.args || "{}") })) }));
 
@@ -226,12 +223,16 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
 
       let result: string;
 
+      // Emit executing state so TUI shows tool immediately with spinner
+      input.onChunk({ type: "tool_call", id: tc.id, name: tc.name, args: tc.args, status: "executing" });
+
       // Execute the permission gate check if an active agent manifest is provided
       if (input.agent && gate) {
         const checkResult = await gate.check(tc.name, args, input.agent);
         if (!checkResult.approved) {
           const errMsg = checkResult.reason || "Error: Operation rejected by permission gate.";
           bus?.publish("AFTER_TOOL_EXECUTE", { toolName: tc.name, arguments: args, status: "error", output: errMsg });
+          input.onChunk({ type: "tool_call", id: tc.id, name: tc.name, args: tc.args, status: "error" });
           currentMessages.push(new ToolMessage({ content: errMsg, tool_call_id: tc.id }));
           continue; // Skip physical execution of this tool call
         }
@@ -239,21 +240,11 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
 
       bus?.publish("BEFORE_TOOL_EXECUTE", { toolName: tc.name, arguments: args });
 
-      // Show the user what's executing right now
-      const toolDesc = tc.name === "read_file" ? `${tc.name} ${args.path || ""}` :
-                       tc.name === "glob_files" ? `${tc.name} ${args.pattern || ""}` :
-                       tc.name === "execute_command" ? `${tc.name} ${(args.command || "").slice(0, 40)}` :
-                       tc.name === "web_search" ? `${tc.name} "${args.query || ""}"` :
-                       tc.name === "web_fetch" ? `${tc.name} ${args.url || ""}` :
-                       tc.name === "write_file" || tc.name === "edit_file" ? `${tc.name} ${args.path || ""}` :
-                       tc.name;
-      input.onChunk({ type: "status", message: `⚙ ${toolDesc}` });
-
       // Progressive disclosure: read_file without explicit offset → summarize full file
       if (tc.name === "read_file" && args.offset === undefined && input.context && input.config) {
         const filePath = args.path;
         // If already focused, return the cached summary immediately
-        const existing = input.context.context.workspace.focusedFiles.find(f => f.path === filePath);
+        const existing = input.context.context.drift.focusedFiles.find(f => f.path === filePath);
         if (existing) {
           result = existing.summary;
         } else {
@@ -315,7 +306,7 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
               const cacheInstance = getCache(_workspaceRoot);
               const fullContent = readFileSync(join(_workspaceRoot, filePath), "utf-8");
               const totalLines = fullContent.split("\n").length;
-              const existing = input.context.context.workspace.focusedFiles.find(f => f.path === filePath);
+              const existing = input.context.context.drift.focusedFiles.find(f => f.path === filePath);
               if (existing) {
                 // Update read ranges for targeted reads
                 if (tc.name === "read_file" && args.offset !== undefined) {
@@ -340,7 +331,7 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
       }
 
       bus?.publish("AFTER_TOOL_EXECUTE", { toolName: tc.name, arguments: args, status: result.startsWith("Error:") ? "error" : "success", output: result });
-      input.onChunk({ type: "tool_call", id: tc.id, name: tc.name, args: tc.args });
+      input.onChunk({ type: "tool_call", id: tc.id, name: tc.name, args: tc.args, status: result.startsWith("Error:") ? "error" : "complete" });
       currentMessages.push(new ToolMessage({ content: result, tool_call_id: tc.id }));
     }
   }

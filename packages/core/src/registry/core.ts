@@ -7,6 +7,7 @@ export interface CapabilityHook {
 export interface SlashCommandHook {
   name: string;
   description: string;
+  source?: string;
   execute: (args: string[]) => Promise<void>;
 }
 
@@ -59,6 +60,10 @@ export class CoreRegistry {
 
   listSlashCommands(): string[] {
     return [...this.slashCommands.keys()].sort();
+  }
+
+  listSlashCommandHooks(): SlashCommandHook[] {
+    return [...this.slashCommands.values()].sort((a, b) => a.name.localeCompare(b.name));
   }
 
   listModes(): string[] {

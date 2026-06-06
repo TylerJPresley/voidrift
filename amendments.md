@@ -343,3 +343,161 @@ The `"modelTier": "auto"` approach provides enterprise-grade capabilities with z
 
 ### Reason
 Anthropic auto-caches prefix matches. By separating stable project data (code map, plan, memory) from volatile working-set data (focused files, git status), we maximize the cacheable prefix length. In conversational turns, 100% of non-Work content stays cached.
+
+## AMD-018: Four-Layer Context Naming (Agent · Orbit · Drift · Void)
+- **Blueprint says**: Three-partition context (Governance, Workspace, Work)
+- **AMD-017 said**: Four layers (Governance, Workspace Global, Workspace Context, Work)
+- **We decided**: Rename all layers to thematic, VoidRift-native terminology:
+
+### The Four Layers (ascending volatility)
+
+| Layer | Name | Contains | Changes |
+|---|---|---|---|
+| 1 | **Agent** | Persona, tools, bound skills, skill discovery index | Never (session-locked) |
+| 2 | **Orbit** | Plan, memory, active skills | Rarely (~5% of turns) |
+| 3 | **Drift** | File map, active files, git status | On tool use (~30-40%) |
+| 4 | **Void** | Messages, tool results, diagnostics | Every turn |
+
+### Key Decisions
+- **File Map** (formerly "Code Map"): Moved from Orbit to Drift. It changes when files are added/removed during active work. Renamed because the core is a harness, not code-specific.
+- **Active Files** (formerly "Focused Files" / "Files"): Renamed for clarity. These are the file summaries the model is currently attending to.
+- **AST indexing stays in core**: The file map generator uses AST for code, headings for markdown, keys for JSON/YAML. It's a universal structural indexer, not code-specific. The dev plugin does NOT own this.
+- **Code interfaces**: `AgentPartition`, `OrbitPartition`, `DriftPartition`, `VoidPartition`. Context accessed via `ctx.agent`, `ctx.orbit`, `ctx.drift`, `ctx.void`.
+
+### Naming Rationale (VoidRift thematic)
+- **Agent** — the star at the center. Identity, rules, capabilities.
+- **Orbit** — stable project landscape circling it. Rarely shifts.
+- **Drift** — active working set in motion. Changes as you move through the workspace.
+- **Void** — transient conversation passing through. Compacted or discarded.
+
+### Reason
+"Governance/Workspace/Work" was generic and confusing (Workspace was overloaded across two layers, Work implied "where work happens" rather than "volatile"). The new names are immediately distinct, thematically consistent with the product identity, and implicitly communicate cache behavior through their metaphor.
+
+## AMD-019: Plugin Lifecycle & Discovery
+- **Blueprint says**: Plugins register via `PluginInterface` on startup, config lists active plugins
+- **We decided**: Full user-facing plugin management from the TUI, no manual config editing required
+
+### Discovery
+- On startup, scan `node_modules/*/package.json` for packages with `"voidrift": { "plugin": true }`
+- Discovered plugins appear in `/plugins` panel regardless of active state
+- Plugin `package.json` declares metadata:
+  ```json
+  {
+    "name": "@voidrift/plugin-dev",
+    "voidrift": {
+      "plugin": true,
+      "description": "Development workflows — ideas, CRs, tasks"
+    }
+  }
+  ```
+
+### Config Schema
+```json
+{
+  "plugins": ["@voidrift/plugin-dev", "@voidrift/plugin-json"]
+}
+```
+- Keys are npm package names in a flat array
+- Both global and workspace configs have a `plugins` array
+- Effective loaded list = union of global + workspace arrays
+- If it's in global, it's everywhere. If it's in workspace, it's just here.
+- Config is the persistence layer, not the user interface
+
+### Lifecycle
+1. **Discovered** — package found in node_modules with voidrift marker
+2. **Inactive** — in config with `active: false` (or not in config yet)
+3. **Active** — `register(api)` called, contributions live in harness
+4. **Deactivated** — `unregister(api)` called if implemented, contributions removed
+
+### Plugin Contract
+```typescript
+interface VoidRiftPlugin {
+  register(api: PluginInterface): void;
+  unregister?(api: PluginInterface): void;  // enables hot deactivation without restart
+}
+```
+- Plugins that implement `unregister` support live toggle
+- Plugins without it show "restart required" on deactivate
+
+### `/plugins` Panel
+- Shows all discovered plugins with active/inactive status
+- `a` activates, `d` deactivates — writes config, loads/unloads if hot-capable
+- `enter` opens detail view (general, commands, agents tabs)
+- No config file editing required by the user
+
+### Session Plugin Dependencies
+- `system.metadata.json` records which plugins were active when the session was created
+- On `/resume`, check if all required plugins are still active
+- If a plugin is missing: warn the user but allow resume with degraded context
+- Conversation history remains useful even if plugin commands aren't available
+
+### Reason
+Config editing is developer UX, not operator UX. VoidRift is a premium TUI — plugin management should feel like VS Code extensions or Obsidian community plugins, not editing `.eslintrc`.
+
+## AMD-020: Core API (Public Interface)
+- **Blueprint says**: Separate Plugin Registration Interface (Section 9.1) and Core Service Interface (Section 9.2)
+- **We decided**: Single unified `CoreAPI` class. One surface for plugins, IDE integrations, and any external consumer.
+
+### Design Principles
+- Everything goes through `CoreAPI` — no backdoor access to internal services
+- The API delegates to the same internal functions the core uses (facade pattern)
+- `CoreAPI` is instantiated per-consumer with a `pluginName` for namespacing
+- TUI wires `setOutputHandler` and `setPanelHandler` at bootstrap so services work at runtime
+
+### Registration Methods
+
+| Method | Purpose |
+|---|---|
+| `registerCommand(name, description, handler)` | Add a slash command to the TUI |
+| `registerAgent(manifest)` | Register an interactive or task agent |
+| `registerPrompt(key, content, label?, description?)` | Register a prompt template |
+| `registerTemplate(key, content, label?, description?)` | Register a document template |
+| `overridePrompt(key, content)` | Replace a core prompt entirely |
+| `extendPrompt(key, content)` | Append to an existing prompt |
+| `registerPanel(name, definition)` | Register a TUI panel (columns, items, actions) |
+
+### Event Methods
+
+| Method | Purpose |
+|---|---|
+| `registerEvent(name)` | Declare a new event type (discoverable by others) |
+| `subscribeEvent(eventType, handler)` | Listen to any event (core or plugin-defined) |
+| `emitEvent(key, payload)` | Fire any event (core or plugin-defined) |
+
+### Service Methods
+
+| Method | Purpose |
+|---|---|
+| `output(text)` | Print text to the TUI output stream |
+| `openPanel(name)` | Trigger a panel to render in the TUI |
+| `spawnSubagent(fileBoundaries, execute)` | Provision a git worktree and run isolated work |
+| `executeCommand(cmd, cwd?, timeout?)` | Run a shell command sandboxed with timeout |
+| `getWorkspaceMap()` | Get the structural file map of the workspace |
+| `getWorkspaceRoot()` | Get the absolute workspace root path |
+
+### Panel Registration Schema
+
+```typescript
+interface PanelDefinition {
+  title: string;
+  columns: PanelColumn[];
+  getItems: () => any[];
+  actions?: Record<string, PanelAction>;
+}
+
+interface PanelColumn {
+  key: string;
+  label: string;
+  width?: number;
+}
+
+interface PanelAction {
+  label: string;
+  handler: (item: any) => void | Promise<void>;
+}
+```
+
+Core renders the panel shell (border, cursor, navigation, keybinding footer). Plugin provides data and actions. Plugin never touches React/Ink.
+
+### Reason
+A single public API eliminates the confusion of split interfaces, supports multiple consumer types (plugins, IDE extensions, future REST layer), and ensures all external access goes through one controlled surface.

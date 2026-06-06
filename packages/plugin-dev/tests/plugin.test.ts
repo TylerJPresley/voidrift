@@ -1,16 +1,16 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { register, WorkflowObjects } from "../src/index.js";
-import { CoreRegistry, EventBus, WorktreeEngine, PluginInterface } from "@voidrift/core";
+import { CoreRegistry, EventBus, WorktreeEngine, CoreAPI } from "@voidrift/core";
 import { mkdirSync, rmSync, existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 
 const TMP = join(tmpdir(), "voidrift-plugin-dev-test-" + Date.now());
 
-function makePluginInterface(registry: CoreRegistry): PluginInterface {
+function makePluginInterface(registry: CoreRegistry): CoreAPI {
   const bus = new EventBus();
   const worktree = new WorktreeEngine(TMP);
-  return new PluginInterface(registry, bus, worktree, TMP, undefined, undefined, undefined, "plugin-dev");
+  return new CoreAPI(registry, bus, worktree, TMP, undefined, undefined, undefined, "plugin-dev");
 }
 
 beforeEach(() => {
@@ -22,15 +22,6 @@ afterEach(() => {
 });
 
 describe("Plugin Registration", () => {
-  it("registers dev modes into registry", () => {
-    const registry = new CoreRegistry();
-    const api = makePluginInterface(registry);
-    register(api);
-    expect(registry.getMode("idea")).toBeDefined();
-    expect(registry.getMode("cr")).toBeDefined();
-    expect(registry.getMode("dev")).toBeDefined();
-  });
-
   it("registers dev commands into registry", () => {
     const registry = new CoreRegistry();
     const api = makePluginInterface(registry);
@@ -42,17 +33,18 @@ describe("Plugin Registration", () => {
     expect(registry.getSlashCommand("deploy")).toBeDefined();
   });
 
-  it("registers dev agents via pluginInterface", () => {
+  it("registers dev agents via CoreAPI", () => {
     const registry = new CoreRegistry();
     const registeredAgents: any[] = [];
     const api = makePluginInterface(registry);
     api.registerAgent = (manifest: any) => { registeredAgents.push(manifest); };
     register(api);
 
-    expect(registeredAgents).toHaveLength(5);
+    expect(registeredAgents).toHaveLength(6);
     const ids = registeredAgents.map(a => a.id);
     expect(ids).toContain("idea");
     expect(ids).toContain("cr");
+    expect(ids).toContain("dev");
     expect(ids).toContain("develop");
     expect(ids).toContain("verify");
     expect(ids).toContain("deploy");

@@ -175,4 +175,21 @@ export function registerDevAgents(registerAgent: (manifest: AgentManifest) => vo
     approvalMode: "autonomous",
     allowedTools: ALL_TOOLS
   });
+
+  registerAgent({
+    id: "dev",
+    name: "Developer",
+    description: "Interactive engineering agent for task implementation",
+    type: "interactive",
+    modelTier: "auto",
+    prompt: PROMPT_DEVELOP,
+    tools: ALL_TOOLS,
+    approvalMode: "prompt",
+    allowedTools: READ_TOOLS,
+    toolsSettings: {
+      write_file: { allowedPaths: ["./**"] },
+      edit_file: { allowedPaths: ["./**"] }
+    },
+    welcomeMessage: "Ready to implement. What are we building?"
+  });
 }

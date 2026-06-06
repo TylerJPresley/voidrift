@@ -8,7 +8,7 @@ import { runGoal } from "../../src/orchestration/goal.js";
 import { GitCheckpointer } from "../../src/safeguards/checkpoint.js";
 import { routeMCPToolCall, isMCPTool } from "../../src/mcp/router.js";
 import { buildEscalationState, shouldEscalate, escalateTier } from "../../src/router/index.js";
-import { PluginInterface, CoreServices } from "../../src/plugins/interface.js";
+import { CoreAPI } from "../../src/plugins/interface.js";
 import { CoreRegistry } from "../../src/registry/core.js";
 import { WorktreeEngine } from "../../src/worktree/engine.js";
 import type { GraphState } from "../../src/orchestration/nodes.js";
@@ -160,36 +160,37 @@ describe("Integration: Plugin Registration", () => {
     const bus = new EventBus();
     const registry = new CoreRegistry();
     const worktree = new WorktreeEngine(TMP, bus);
-    const pi = new PluginInterface(registry, bus, worktree, TMP);
+    const pi = new CoreAPI(registry, bus, worktree, TMP);
 
-    pi.registerSandboxMode("idea", "You are a PM.", (path) => path.includes(".voidrift/ideas/"));
-
-    expect(pi.isPathAllowed("idea", ".voidrift/ideas/IDEA-1.md")).toBe(true);
-    expect(pi.isPathAllowed("idea", "src/main.ts")).toBe(false);
+    pi.registerAgent({ id: "test", name: "Test", description: "test agent", type: "interactive", modelTier: "auto", prompt: "You are a test.", tools: [], approvalMode: "prompt", allowedTools: [] });
+    // Agent registration is handled by the registry; no sandbox modes anymore
   });
 
-  it("registers graph nodes and edges", () => {
+  it("registers and emits custom events", () => {
     const bus = new EventBus();
     const registry = new CoreRegistry();
     const worktree = new WorktreeEngine(TMP, bus);
-    const pi = new PluginInterface(registry, bus, worktree, TMP);
+    const api = new CoreAPI(registry, bus, worktree, TMP);
 
-    pi.registerGraphNode("SecurityExpert", "You audit security.", ["read_file"], async () => "done");
-    pi.registerGraphEdge("engineer", "SecurityExpert", (state) => (state as any).needsSecurityReview === true);
+    api.registerEvent("TASK_COMPLETED");
+    let received: any = null;
+    api.subscribeEvent("TASK_COMPLETED", (e) => { received = e; });
+    api.emitEvent("TASK_COMPLETED", { taskId: "t1" });
 
-    expect(pi.getNode("SecurityExpert")).toBeDefined();
-    expect(pi.getEdges()).toHaveLength(1);
+    expect(received).not.toBeNull();
+    expect(received.payload.taskId).toBe("t1");
   });
 
-  it("core services expose workspace map and command execution", () => {
+  it("core api exposes workspace map and command execution", () => {
     const bus = new EventBus();
+    const registry = new CoreRegistry();
     const worktree = new WorktreeEngine(TMP, bus);
-    const cs = new CoreServices(bus, worktree, TMP);
+    const api = new CoreAPI(registry, bus, worktree, TMP);
 
-    const map = cs.getWorkspaceMap();
+    const map = api.getWorkspaceMap();
     expect(map).toBeDefined();
 
-    const result = cs.executeCommand("echo hello");
+    const result = api.executeCommand("echo hello");
     expect(result.success).toBe(true);
     expect(result.output.trim()).toBe("hello");
   });

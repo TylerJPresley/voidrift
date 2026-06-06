@@ -4,6 +4,13 @@
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
+  "author": "TJ Presley",
+  "license": "MIT",
+  "homepage": "https://github.com/voidrift/voidrift",
+  "voidrift": {
+    "plugin": true,
+    "description": "Development workflows — ideas, CRs, tasks"
+  },
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest"

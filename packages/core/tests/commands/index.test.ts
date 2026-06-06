@@ -54,17 +54,17 @@ function makeDeps(): { registry: CoreRegistry; deps: CommandDeps; output: string
 
 afterEach(() => { rmSync(TMP, { recursive: true, force: true }); });
 
-describe("Slash Commands (all 28)", () => {
-  it("registers all 28 commands", () => {
+describe("Slash Commands (all 22)", () => {
+  it("registers all 22 commands", () => {
     const { registry } = makeDeps();
     const cmds = registry.listSlashCommands();
-    expect(cmds.length).toBe(28);
+    expect(cmds.length).toBe(22);
     expect(cmds).toContain("help");
     expect(cmds).toContain("exit");
     expect(cmds).toContain("model");
     expect(cmds).toContain("stats");
     expect(cmds).toContain("templates");
-    expect(cmds).toContain("ideas");
+    expect(cmds).toContain("plugins");
     expect(cmds).toContain("mcp");
     expect(cmds).toContain("goal");
     expect(cmds).toContain("schedule");
@@ -219,39 +219,7 @@ describe("Slash Commands (all 28)", () => {
   });
 
   it("/ideas opens ideas panel", async () => {
-    const { registry, panels } = makeDeps();
-    await registry.getSlashCommand("ideas")!.execute([]);
-    expect(panels).toContain("ideas");
-  });
-
-  it("/idea without args opens ideas panel", async () => {
-    const { registry, panels } = makeDeps();
-    await registry.getSlashCommand("idea")!.execute([]);
-    expect(panels).toContain("ideas");
-  });
-
-  it("/cr without args opens changes panel", async () => {
-    const { registry, panels } = makeDeps();
-    await registry.getSlashCommand("cr")!.execute([]);
-    expect(panels).toContain("changes");
-  });
-
-  it("/develop requires --cr flag", async () => {
-    const { registry, output } = makeDeps();
-    await registry.getSlashCommand("develop")!.execute([]);
-    expect(output[0]).toContain("Usage");
-  });
-
-  it("/import outputs scanning message", async () => {
-    const { registry, output } = makeDeps();
-    await registry.getSlashCommand("import")!.execute(["src/"]);
-    expect(output[0]).toContain("Scanning src/");
-  });
-
-  it("/done marks task complete", async () => {
-    const { registry, output } = makeDeps();
-    await registry.getSlashCommand("done")!.execute([]);
-    expect(output[0]).toContain("complete");
+    // Moved to plugin-dev tests
   });
 
   it("/schedule --delay registers a delayed task", async () => {

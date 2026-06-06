@@ -1,4 +1,4 @@
-import type { PluginInterface } from "@voidrift/core";
+import type { CoreAPI } from "@voidrift/core";
 
 /**
  * Section 9.3: Custom Mode Sandboxes.
@@ -8,7 +8,7 @@ import type { PluginInterface } from "@voidrift/core";
  * - cr: writes locked to .voidrift/changes/ only
  * - dev: writes locked to files declared in active CR's focusedFiles
  */
-export function registerDevModes(api: PluginInterface): void {
+export function registerDevModes(api: CoreAPI): void {
   api.registerSandboxMode("idea", "PM Idea refinement mode", (path) => path.includes(".voidrift/ideas"));
   api.registerSandboxMode("cr", "Architecture planning mode", (path) => path.includes(".voidrift/changes"));
   api.registerSandboxMode("dev", "Engineer execution mode", () => true);

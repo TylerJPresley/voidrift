@@ -70,14 +70,14 @@ export class TurnSerializer {
         currentNodeState: { retryCount: 0, lastExecutionStatus: "complete" },
       },
       contextSnapshot: {
-        governance: { loadedSkills: [...ctx.governance.boundSkills.map((_, i) => `bound-${i}`), ...ctx.workspace.activeSkills.map((_, i) => `active-${i}`)] },
+        governance: { loadedSkills: [...ctx.agent.boundSkills.map((_, i) => `bound-${i}`), ...ctx.orbit.activeSkills.map((_, i) => `active-${i}`)] },
         workspace: {
-          activePlan: ctx.workspace.activePlan,
-          focusedFiles: ctx.workspace.focusedFiles.map((f) => ({ path: f.path, totalLines: f.totalLines, readRanges: f.readRanges })),
+          activePlan: ctx.orbit.activePlan,
+          focusedFiles: ctx.drift.focusedFiles.map((f) => ({ path: f.path, totalLines: f.totalLines, readRanges: f.readRanges })),
         },
         work: {
-          messages: ctx.work.messages.map((m) => ({ role: m.role, content: m.content })),
-          diagnostics: ctx.work.diagnostics,
+          messages: ctx.void.messages.map((m) => ({ role: m.role, content: m.content })),
+          diagnostics: ctx.void.diagnostics,
         },
       },
     };

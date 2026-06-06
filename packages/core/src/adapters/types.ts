@@ -8,6 +8,7 @@ export interface ToolCallChunk {
   id: string;
   name: string;
   args: string; // JSON string of accumulated arguments
+  status?: "executing" | "complete" | "error"; // lifecycle state for live UI updates
 }
 
 export interface DoneChunk {
