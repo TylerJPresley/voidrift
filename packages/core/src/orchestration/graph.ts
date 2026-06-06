@@ -248,20 +248,35 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
         const taskPrompt = taskAgent?.prompt || `You are task agent "${agentId}". Complete the following task.`;
         const tier = taskAgent?.modelTier === "auto" || !taskAgent?.modelTier ? "flash" : taskAgent.modelTier;
         const adapter = createTierAdapter(tier as any, input.config);
-        
-        // Run full directChat loop so task agent can use tools
-        const taskResult = await directChat({
-          userMessage: instruction,
-          client: adapter.client,
-          systemPrompt: taskPrompt,
-          history: [],
-          onChunk: () => {},
-          signal: input.signal,
-          context: input.context,
-          config: input.config,
-          agent: taskAgent || input.agent,
-        }, bus);
-        result = taskResult.response.text || "Task agent returned no output.";
+        const runAsync = taskAgent?.async && (input.config.maxConcurrentAgents ?? 1) > 1;
+
+        const executeTask = async () => {
+          const taskResult = await directChat({
+            userMessage: instruction,
+            client: adapter.client,
+            systemPrompt: taskPrompt,
+            history: [],
+            onChunk: () => {},
+            signal: input.signal,
+            context: input.context,
+            config: input.config,
+            agent: taskAgent || input.agent,
+          }, bus);
+          return taskResult.response.text || "Task agent returned no output.";
+        };
+
+        if (runAsync) {
+          // Fire and forget — report back via event bus when done
+          executeTask().then(output => {
+            bus?.publish("SUBAGENT_COMPLETED", { subagentId: agentId, status: "success" });
+          }).catch(() => {
+            bus?.publish("SUBAGENT_COMPLETED", { subagentId: agentId, status: "failed" });
+          });
+          bus?.publish("SUBAGENT_SPAWNED", { subagentId: agentId, worktreePath: _workspaceRoot });
+          result = `Task agent "${agentId}" spawned in background.`;
+        } else {
+          result = await executeTask();
+        }
       } else {
         result = await executeToolCall(tc.name, tc.args, _workspaceRoot, input.context, input.config);
 

@@ -33,6 +33,7 @@ export interface AgentManifest {
   toolsSettings?: Record<string, ToolSettings>;
   resources?: string[];
   welcomeMessage?: string;
+  async?: boolean;
   active?: boolean;
   source?: string;
   overrideStatus?: "default" | "global" | "workspace";
@@ -187,6 +188,7 @@ const CORE_AGENTS: AgentManifest[] = [
     tools: READ_TOOLS,
     approvalMode: "autonomous",
     allowedTools: READ_TOOLS,
+    async: true,
     active: true,
   },
   {
@@ -199,6 +201,7 @@ const CORE_AGENTS: AgentManifest[] = [
     tools: READ_TOOLS,
     approvalMode: "autonomous",
     allowedTools: READ_TOOLS,
+    async: true,
     active: true,
   }
 ];
