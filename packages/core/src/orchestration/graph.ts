@@ -95,6 +95,22 @@ async function executeToolCall(toolName: string, argsJson: string, workspaceRoot
         context.setPlan(updated);
       }
       return "Plan section updated.";
+    case "save_memory": {
+      const title = args.title ?? "Untitled";
+      const content = args.content ?? "";
+      const keywords = (args.keywords ?? "").split(",").map((k: string) => k.trim()).filter(Boolean);
+      const scope = args.scope === "global" ? "global" : "local";
+      const id = `mem-${Date.now().toString(36)}`;
+      const dir = scope === "global"
+        ? join(process.env.HOME || "", ".config", "voidrift", "memory")
+        : join(workspaceRoot, ".voidrift", "memory");
+      const { mkdirSync, writeFileSync } = await import("fs");
+      mkdirSync(dir, { recursive: true });
+      const filePath = join(dir, `${id}.md`);
+      const file = `---\nid: ${id}\ntitle: ${title}\nsummary: ${content.slice(0, 100)}\ncontext:\n  keywords: [${keywords.map((k: string) => `"${k}"`).join(", ")}]\n---\n\n${content}\n`;
+      writeFileSync(filePath, file, "utf-8");
+      return `Memory saved: "${title}" (${scope})`;
+    }
     case "run_task_agent":
       return `Error: run_task_agent must be handled by the orchestration layer.`;
     default:

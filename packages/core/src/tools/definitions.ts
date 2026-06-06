@@ -159,6 +159,18 @@ export const TOOL_SCHEMAS: ToolSchema[] = [
       { name: "replace", type: "string", description: "Replacement text", required: true },
     ],
   },
+  {
+    name: "save_memory",
+    description: "Save a fact, directive, or preference to long-term memory for future sessions",
+    actionLayer: "partition",
+    safetyProfile: "auto-approved",
+    parameters: [
+      { name: "title", type: "string", description: "Short title for the memory", required: true },
+      { name: "content", type: "string", description: "The fact, directive, or preference to remember", required: true },
+      { name: "keywords", type: "string", description: "Comma-separated keywords for retrieval", required: true },
+      { name: "scope", type: "string", description: "Where to save: 'local' (this project) or 'global' (all projects)", required: false },
+    ],
+  },
 ];
 
 export function getToolSchema(name: string): ToolSchema | undefined {
