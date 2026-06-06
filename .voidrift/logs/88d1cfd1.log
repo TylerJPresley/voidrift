@@ -1,5 +1,0 @@
-{"timestamp":"2026-06-01T01:21:08.579Z","level":"info","source":"fs","message":"modified","data":{"path":"packages/core/src/plugins/interface.ts"}}
-{"timestamp":"2026-06-01T01:21:13.777Z","level":"info","source":"fs","message":"modified","data":{"path":"packages/core/src/plugins/interface.ts"}}
-{"timestamp":"2026-06-01T01:21:20.720Z","level":"info","source":"fs","message":"modified","data":{"path":"packages/core/src/plugins/interface.ts"}}
-{"timestamp":"2026-06-01T01:21:28.440Z","level":"info","source":"fs","message":"modified","data":{"path":"packages/plugin-dev/src/index.ts"}}
-{"timestamp":"2026-06-01T01:22:32.515Z","level":"info","source":"fs","message":"created","data":{"path":"packages/plugin-dev/src/prompts.ts"}}

@@ -2,3 +2,10 @@ node_modules/
 dist/
 *.DS_Store
 mockup/node_modules/
+.voidrift/logs/
+.voidrift/cache/
+.voidrift/sessions/
+.voidrift/session_state.json
+.voidrift/index_cache.json
+.voidrift/locks.json
+.voidrift/lock_queue.json

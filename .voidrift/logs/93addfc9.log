@@ -1,5 +1,0 @@
-{"timestamp":"2026-05-30T14:01:51.375Z","level":"info","source":"fs","message":"modified","data":{"path":"packages/core/src/templates/service.ts"}}
-{"timestamp":"2026-05-30T14:02:06.095Z","level":"info","source":"fs","message":"modified","data":{"path":"packages/core/src/templates/service.ts"}}
-{"timestamp":"2026-05-30T14:02:20.311Z","level":"info","source":"fs","message":"modified","data":{"path":"packages/core/tests/templates/service.test.ts"}}
-{"timestamp":"2026-05-30T14:04:28.657Z","level":"info","source":"fs","message":"modified","data":{"path":"packages/core/src/main.tsx"}}
-{"timestamp":"2026-05-30T14:05:38.278Z","level":"info","source":"fs","message":"modified","data":{"path":"packages/core/src/main.tsx"}}
