@@ -565,11 +565,21 @@ function App({ engine }: { engine: EngineContext }) {
     }
   }, [busy, engine]);
 
-  // Subscribe to scheduled task triggers
+  // Subscribe to scheduled task triggers (queue if busy)
+  const scheduledQueueRef = React.useRef<string[]>([]);
   useEffect(() => {
     return engine.container.bus.subscribe("USER_INPUT", (event: any) => {
-      if (event.payload.text && !busy) handleSubmit(event.payload.text);
+      if (event.payload.text) {
+        if (busy) { scheduledQueueRef.current.push(event.payload.text); }
+        else { handleSubmit(event.payload.text); }
+      }
     });
+  }, [busy]);
+  useEffect(() => {
+    if (!busy && scheduledQueueRef.current.length > 0) {
+      const next = scheduledQueueRef.current.shift()!;
+      handleSubmit(next);
+    }
   }, [busy]);
 
   const footerModel = engine.agents.active.modelTier === "auto" ? "auto" : (engine.container.config.models[engine.container.config.tiers[engine.agents.active.modelTier as keyof typeof engine.container.config.tiers]]?.model ?? engine.agents.active.modelTier);
