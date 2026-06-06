@@ -104,18 +104,21 @@ describe("Integration: Rewind", () => {
 });
 
 describe("Integration: Goal Loop", () => {
-  it("runs until model signals done", async () => {
+  it("runs until model outputs completion token", async () => {
+    let callCount = 0;
     const client = { stream: vi.fn().mockImplementation(async () => ({
       [Symbol.asyncIterator]: async function* () {
-        yield { content: "Task complete. Here is the report." };
+        callCount++;
+        if (callCount === 1) yield { content: "Working on it..." };
+        else yield { content: "All done. <!-- GOAL_COMPLETE -->" };
       },
     })) } as any;
 
     const bus = new EventBus();
     const result = await runGoal("process files", client, bus, () => {});
     expect(result.success).toBe(true);
-    expect(result.terminationReason).toBe("done");
-    expect(result.turns).toBe(1);
+    expect(result.terminationReason).toBe("complete");
+    expect(result.turns).toBe(2);
   });
 });
 

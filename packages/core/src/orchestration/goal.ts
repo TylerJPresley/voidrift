@@ -3,21 +3,35 @@ import type { EventBus } from "../events/bus.js";
 import type { OnChunk } from "../adapters/stream.js";
 import { directChat, type OrchestrationInput } from "./graph.js";
 
-const MAX_GOAL_TURNS = 15;
+const MAX_GOAL_TURNS = 25;
+const COMPLETION_TOKEN = "<!-- GOAL_COMPLETE -->";
+
+const GOAL_SYSTEM_PROMPT = `You are in autonomous goal execution mode. You will work continuously until the goal is complete.
+
+Rules:
+- Execute tools freely without waiting for user input.
+- If a command fails, read the error, fix the issue, and retry.
+- Do NOT stop to ask for clarification — make reasonable decisions and continue.
+- When you believe you are done, verify your work: confirm files exist, tests pass, and requirements are met.
+- Only when you have verified completion with evidence, output exactly: <!-- GOAL_COMPLETE -->
+- Do NOT output <!-- GOAL_COMPLETE --> until you have real evidence of success.
+- "Having spent effort" is not the same as "being done." Only verified results count.`;
+
+const CONTINUATION_MESSAGE = "The goal is not yet complete. You have not output <!-- GOAL_COMPLETE -->. Continue working toward the objective.";
 
 export interface GoalResult {
   success: boolean;
   turns: number;
-  terminationReason: "done" | "budget" | "interrupted";
+  terminationReason: "complete" | "budget" | "interrupted";
 }
 
 /**
  * Autonomous Execution Loop (/goal).
  *
- * Runs directChat in a loop with auto-approval until:
- * - The model stops calling tools (signals completion)
+ * Runs directChat in a forced loop until:
+ * - The model outputs <!-- GOAL_COMPLETE --> (verified completion)
  * - Turn budget exceeded
- * - User interrupts
+ * - User interrupts (ctrl+c)
  */
 export async function runGoal(
   instruction: string,
@@ -31,10 +45,14 @@ export async function runGoal(
   while (turns < MAX_GOAL_TURNS) {
     if (signal?.interrupted) return { success: false, turns, terminationReason: "interrupted" };
 
+    const userMessage = turns === 0
+      ? instruction
+      : CONTINUATION_MESSAGE;
+
     const input: OrchestrationInput = {
-      userMessage: turns === 0 ? instruction : "Continue. If the task is complete, say so without calling any tools.",
+      userMessage,
       client,
-      systemPrompt: "",
+      systemPrompt: GOAL_SYSTEM_PROMPT,
       history: [],
       onChunk,
     };
@@ -42,9 +60,9 @@ export async function runGoal(
     const result = await directChat(input, bus);
     turns++;
 
-    // If the model responded with text and no tool calls, it's done
-    if (result.response.toolCalls.length === 0 && result.response.text.trim()) {
-      return { success: true, turns, terminationReason: "done" };
+    // Check for explicit completion signal
+    if (result.response.text.includes(COMPLETION_TOKEN)) {
+      return { success: true, turns, terminationReason: "complete" };
     }
   }
 
