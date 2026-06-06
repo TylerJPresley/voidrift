@@ -171,6 +171,17 @@ export const TOOL_SCHEMAS: ToolSchema[] = [
       { name: "scope", type: "string", description: "Where to save: 'local' (this project) or 'global' (all projects)", required: false },
     ],
   },
+  {
+    name: "schedule",
+    description: "Schedule a delayed or recurring task. Use for async waits, periodic checks, or timed automation.",
+    actionLayer: "orchestration",
+    safetyProfile: "auto-approved",
+    parameters: [
+      { name: "instruction", type: "string", description: "The instruction to execute when the timer fires", required: true },
+      { name: "delay", type: "string", description: "One-shot delay (e.g. '30s', '5m', '1h'). Mutually exclusive with cron.", required: false },
+      { name: "cron", type: "string", description: "Recurring cron pattern (e.g. '*/5 * * * *'). Mutually exclusive with delay.", required: false },
+    ],
+  },
 ];
 
 export function getToolSchema(name: string): ToolSchema | undefined {

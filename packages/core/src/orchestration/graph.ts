@@ -21,6 +21,7 @@ import type { Tier } from "../adapters/factory.js";
 // Workspace root — set by the harness on bootstrap
 let _workspaceRoot = process.cwd();
 let _cache: IndexCache | null = null;
+let _scheduler: any = null;
 function getCache(root: string): IndexCache {
   if (!_cache) {
     _cache = new IndexCache(root);
@@ -30,6 +31,9 @@ function getCache(root: string): IndexCache {
 export function setWorkspaceRoot(root: string) {
   _workspaceRoot = root;
   _cache = null; // Reset cache reference if workspace root changes
+}
+export function setScheduler(scheduler: any) {
+  _scheduler = scheduler;
 }
 
 const MAX_RETRIES = 3;
@@ -110,6 +114,20 @@ async function executeToolCall(toolName: string, argsJson: string, workspaceRoot
       const file = `---\nid: ${id}\ntitle: ${title}\nsummary: ${content.slice(0, 100)}\ncontext:\n  keywords: [${keywords.map((k: string) => `"${k}"`).join(", ")}]\n---\n\n${content}\n`;
       writeFileSync(filePath, file, "utf-8");
       return `Memory saved: "${title}" (${scope})`;
+    }
+    case "schedule": {
+      const instruction = args.instruction ?? "";
+      const { TaskScheduler, parseDelay } = await import("../orchestration/scheduler.js");
+      if (!_scheduler) return "Error: Scheduler not available.";
+      if (args.delay) {
+        const ms = parseDelay(args.delay);
+        const task = _scheduler.scheduleDelay(ms, instruction);
+        return `Scheduled one-shot task [${task.id}] firing in ${args.delay}.`;
+      } else if (args.cron) {
+        const task = _scheduler.scheduleCron(args.cron, instruction);
+        return `Scheduled recurring task [${task.id}] with pattern "${args.cron}".`;
+      }
+      return "Error: Provide either 'delay' or 'cron' parameter.";
     }
     case "run_task_agent":
       return `Error: run_task_agent must be handled by the orchestration layer.`;

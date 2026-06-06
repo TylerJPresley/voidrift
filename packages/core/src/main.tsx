@@ -23,6 +23,7 @@ import {
   CoreRegistry,
   registerCommands,
   setWorkspaceRoot,
+  setScheduler,
   generateCodeMap,
   getGitBranch,
   shortenPath,
@@ -747,6 +748,7 @@ const engine: EngineContext = await (async () => {
   const scheduler = new TaskScheduler(container.bus, (instruction) => {
     cmdOutputFn(`[Scheduler Triggered] Executing: "${instruction}"`);
   });
+  setScheduler(scheduler);
 
   skills.index([join(workspaceRoot, ".voidrift", "skills"), join(homedir(), ".config", "voidrift", "resources", "skills")]);
   memory.index([join(workspaceRoot, ".voidrift", "memory"), join(homedir(), ".config", "voidrift", "memory")]);
