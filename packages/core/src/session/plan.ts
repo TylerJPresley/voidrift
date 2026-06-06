@@ -16,14 +16,16 @@ export interface PlanItem {
 }
 
 export class PlanManager {
-  private dir: string;
+  private _dir: string;
 
   constructor(private workspaceRoot: string) {
-    this.dir = join(workspaceRoot, ".voidrift", "plan");
+    this._dir = join(workspaceRoot, ".voidrift", "plan");
   }
 
+  get dir(): string { return this._dir; }
+
   private parse(filename: string): PlanItem | null {
-    const filePath = join(this.dir, filename);
+    const filePath = join(this._dir, filename);
     try {
       const raw = readFileSync(filePath, "utf-8");
       const match = raw.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
@@ -38,8 +40,8 @@ export class PlanManager {
   }
 
   all(): PlanItem[] {
-    if (!existsSync(this.dir)) return [];
-    return readdirSync(this.dir)
+    if (!existsSync(this._dir)) return [];
+    return readdirSync(this._dir)
       .filter(f => f.endsWith(".md"))
       .map(f => this.parse(f))
       .filter(Boolean) as PlanItem[];
@@ -71,17 +73,17 @@ export class PlanManager {
   }
 
   add(name: string, description: string, rationale: string, priority: PlanItem["priority"] = "now", body = ""): string {
-    mkdirSync(this.dir, { recursive: true });
+    mkdirSync(this._dir, { recursive: true });
     const filename = `${name}.md`;
     const content = `---\npriority: ${priority}\ndescription: ${description}\nrationale: ${rationale}\n---\n\n${body}\n`;
-    writeFileSync(join(this.dir, filename), content, "utf-8");
+    writeFileSync(join(this._dir, filename), content, "utf-8");
     return filename;
   }
 
   updatePriority(filename: string, priority: PlanItem["priority"]): boolean {
     const item = this.parse(filename);
     if (!item) return false;
-    const filePath = join(this.dir, filename);
+    const filePath = join(this._dir, filename);
     const raw = readFileSync(filePath, "utf-8");
     const updated = raw.replace(/priority:\s*.+/, `priority: ${priority}`);
     writeFileSync(filePath, updated, "utf-8");
@@ -89,7 +91,7 @@ export class PlanManager {
   }
 
   remove(filename: string): boolean {
-    const filePath = join(this.dir, filename);
+    const filePath = join(this._dir, filename);
     if (!existsSync(filePath)) return false;
     unlinkSync(filePath);
     return true;

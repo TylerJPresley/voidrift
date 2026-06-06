@@ -19,6 +19,7 @@ import type { CoreRegistry } from "./registry/core.js";
 import type { AgentRegistry } from "./agents/registry.js";
 import type { PromptRegistry } from "./prompts/registry.js";
 import type { ContextManager } from "./session/context.js";
+import type { PlanManager } from "./session/plan.js";
 import { openInEditor } from "./utils/editor.js";
 import { readdirSync, readFileSync, existsSync, mkdirSync, writeFileSync, unlinkSync, renameSync } from "fs";
 import { join, dirname } from "path";
@@ -292,28 +293,80 @@ export function ModelPanel({ config, agents, onClose }: { config: VoidRiftConfig
 
 // ─── /plan ───────────────────────────────────────────────────────────────────
 
-export function PlanPanel({ context, onClose }: { context: ContextManager; onClose: () => void }) {
-  const plan = context.context.orbit.activePlan;
-
+export function PlanPanel({ planManager, config, onClose }: { planManager: PlanManager; config: VoidRiftConfig; onClose: () => void }) {
+  const [page, setPage] = useState(0);
+  const [cursor, setCursor] = useState(0);
+  const [detail, setDetail] = useState<string | null>(null);
+  const [, refresh] = useState(0);
+  const pages = ["now", "next", "later"] as const;
   const termHeight = process.stdout.rows || 24;
-  const viewHeight = termHeight - 7;
+  const viewHeight = termHeight - 9;
+
+  const items = planManager.byPriority(pages[page]);
 
   useInput((ch, key) => {
+    if (detail) {
+      if (key.escape) { setDetail(null); return; }
+      if (ch === "e" && config.editor) {
+        openInEditor(join(planManager.dir, detail), config.editor);
+        refresh(n => n + 1);
+        return;
+      }
+      if (ch === "n") { planManager.updatePriority(detail, "now"); refresh(n => n + 1); return; }
+      if (ch === "x") { planManager.updatePriority(detail, "next"); refresh(n => n + 1); return; }
+      if (ch === "l") { planManager.updatePriority(detail, "later"); refresh(n => n + 1); return; }
+      return;
+    }
     if (key.escape) onClose();
-    if (ch === "d" && plan) { context.setPlan(null); onClose(); }
+    if (key.leftArrow) { setPage(p => (p - 1 + 3) % 3); setCursor(0); }
+    if (key.rightArrow) { setPage(p => (p + 1) % 3); setCursor(0); }
+    if (key.upArrow) setCursor(c => Math.max(0, c - 1));
+    if (key.downArrow) setCursor(c => Math.min(items.length - 1, c + 1));
+    if (key.return && items[cursor]) { setDetail(items[cursor].filename); }
+    if (ch === "n" && items[cursor]) { planManager.updatePriority(items[cursor].filename, "now"); refresh(n => n + 1); }
+    if (ch === "x" && items[cursor]) { planManager.updatePriority(items[cursor].filename, "next"); refresh(n => n + 1); }
+    if (ch === "l" && items[cursor]) { planManager.updatePriority(items[cursor].filename, "later"); refresh(n => n + 1); }
+    if (key.delete && items[cursor]) { planManager.remove(items[cursor].filename); refresh(n => n + 1); }
   });
 
-  const lines = plan
-    ? plan.split("\n").map((line, i) => <Text key={i}>{line || " "}</Text>)
-    : [<Text key="empty" dimColor italic>No active plan. Use plan mode to create one.</Text>];
+  if (detail) {
+    const item = planManager.get(detail);
+    if (!item) { setDetail(null); return null; }
+    const bodyLines = item.body ? item.body.split("\n").map((line, i) => <Text key={i}>{line || " "}</Text>) : [<Text key="empty" dimColor>No details.</Text>];
+    return (
+      <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1}>
+        <Text bold>Plan <Text dimColor>›</Text> {item.filename}</Text>
+        <Text color="#5a6aa8">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
+        <Text> </Text>
+        <Text><Text color="#61afef">{"Priority:".padEnd(14)}</Text>{item.priority}</Text>
+        <Text><Text color="#61afef">{"Description:".padEnd(14)}</Text>{item.description}</Text>
+        <Text><Text color="#61afef">{"Rationale:".padEnd(14)}</Text>{item.rationale || "—"}</Text>
+        <Text dimColor color="#333333">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
+        <Text> </Text>
+        <ScrollView height={viewHeight} lines={bodyLines} />
+        <Text dimColor><Text color="#61afef" bold>n</Text> now  <Text color="#61afef" bold>x</Text> next  <Text color="#61afef" bold>l</Text> later  <Text color="#61afef" bold>e</Text> edit  <Text color="#61afef" bold>esc</Text> back</Text>
+      </Box>
+    );
+  }
 
   return (
     <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1}>
-      <Text bold>Active Plan <Text dimColor>({plan ? plan.split("\n").length : 0} lines)</Text></Text>
+      <Text bold>Plan</Text>
       <Text color="#5a6aa8">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
+      <Box>{pages.map((name, i) => (<React.Fragment key={name}><Text bold color={page === i ? "#4ec9b0" : undefined}>{page === i ? `[ ${name} ]` : `  ${name}  `}</Text>{i < pages.length - 1 && <Text>  </Text>}</React.Fragment>))}</Box>
+      <Text dimColor color="#333333">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
       <Text> </Text>
-      <ScrollView height={viewHeight} lines={lines} active={!!plan} />
-      <Text dimColor><Text color="#61afef" bold>↑↓</Text> Scroll  <Text color="#61afef" bold>pgup/pgdn</Text> Page  <Text color="#61afef" bold>d</Text> Delete  <Text color="#61afef" bold>esc</Text> Close</Text>
+      {items.length === 0
+        ? <Text dimColor>No items.</Text>
+        : items.map((item, i) => (
+            <Text key={item.filename}>
+              <Text color={i === cursor ? "#4ec9b0" : undefined}>{i === cursor ? "▸ " : "  "}</Text>
+              <Text bold color={i === cursor ? "#4ec9b0" : "#61afef"}>{item.description || item.filename}</Text>
+            </Text>
+          ))
+      }
+      <Text> </Text>
+      <Text dimColor><Text color="#61afef" bold>←/→</Text> Tab  <Text color="#61afef" bold>↑↓</Text> Navigate  <Text color="#61afef" bold>enter</Text> Details  <Text color="#61afef" bold>n</Text> now  <Text color="#61afef" bold>x</Text> next  <Text color="#61afef" bold>l</Text> later  <Text color="#61afef" bold>del</Text> Remove  <Text color="#61afef" bold>esc</Text> Close</Text>
     </Box>
   );
 }

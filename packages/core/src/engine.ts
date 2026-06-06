@@ -15,6 +15,7 @@ import type { AuditLogger } from "./logging/audit.js";
 import type { WorktreeEngine } from "./worktree/engine.js";
 import type { TaskScheduler } from "./orchestration/scheduler.js";
 import type { GitCheckpointer } from "./safeguards/checkpoint.js";
+import type { PlanManager } from "./session/plan.js";
 import type { AgentRegistry } from "./agents/registry.js";
 import type { PromptRegistry } from "./prompts/registry.js";
 import type { PluginRegistry } from "./plugins/registry.js";
@@ -36,6 +37,7 @@ export interface EngineContext {
   worktree: WorktreeEngine;
   scheduler: TaskScheduler;
   checkpointer: GitCheckpointer;
+  planManager: PlanManager;
   brain: SessionBrain;
   pluginRegistry: PluginRegistry;
   sessionId: string;

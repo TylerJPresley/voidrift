@@ -589,7 +589,7 @@ function App({ engine }: { engine: EngineContext }) {
   return (
     <Box flexDirection="column" height={fullPanel ? process.stdout.rows || 24 : undefined}>
       {fullPanel === "diff" && <DiffPanel workspaceRoot={engine.workspaceRoot} onClose={() => { setFullPanel(null); process.stdout.write("\x1b[2J\x1b[H"); }} />}
-      {fullPanel === "plan" && <PlanPanel context={engine.context} onClose={() => { setFullPanel(null); process.stdout.write("\x1b[2J\x1b[H"); }} />}
+      {fullPanel === "plan" && <PlanPanel planManager={engine.planManager} config={engine.container.config} onClose={() => { setFullPanel(null); process.stdout.write("\x1b[2J\x1b[H"); }} />}
       {!fullPanel && <>
       <Static key={clearKey} items={[{ id: "welcome" } as any, ...history]}>
         {(item: any) => {
@@ -825,7 +825,7 @@ const engine: EngineContext = await (async () => {
 
   return {
     container, context, budget, agents, prompts, guard, stats, memory, skills, mcp, templates, logger,
-    worktree, scheduler, checkpointer, brain, sessionId, pluginRegistry,
+    worktree, scheduler, checkpointer, planManager, brain, sessionId, pluginRegistry,
     branch, shortPath, workspaceRoot,
     startupWarnings: [...startupWarnings, ...validateStartup(container.config), ...validateAssets(agents, skills).map(i => `[${i.type}] ${i.id}: ${i.message}`)],
     setCmdOutput: (fn: (text: string) => void) => { cmdOutputFn = fn; },
