@@ -60,7 +60,6 @@ export { registerCommands, type CommandDeps } from "./commands/index.js";
 
 // Section 8: Orchestration
 export { directChat, runTurn, setWorkspaceRoot, type OrchestrationInput, type OrchestrationResult } from "./orchestration/graph.js";
-// nodes.ts retained for plugin-dev use — not part of core public API
 export { runGoal, type GoalResult } from "./orchestration/goal.js";
 export { TaskScheduler, parseDelay, type ScheduledTask } from "./orchestration/scheduler.js";
 // developCR moved to @voidrift/plugin-dev
