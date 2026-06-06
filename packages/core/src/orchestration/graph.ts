@@ -240,7 +240,6 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
         const instruction = taskArgs.instruction || taskArgs.prompt || "";
         const { AgentRegistry } = await import("../agents/registry.js");
         const { createTierAdapter } = await import("../adapters/factory.js");
-        const { streamModel } = await import("../adapters/stream.js");
         
         // Look up task agent from registry
         const registry = new AgentRegistry();
@@ -250,12 +249,19 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
         const tier = taskAgent?.modelTier === "auto" || !taskAgent?.modelTier ? "flash" : taskAgent.modelTier;
         const adapter = createTierAdapter(tier as any, input.config);
         
-        const taskMessages = [
-          new SystemMessage(taskPrompt),
-          new HumanMessage(instruction),
-        ];
-        const taskResponse = await streamModel(adapter.client, taskMessages, () => {}, input.signal);
-        result = taskResponse.text || "Task agent returned no output.";
+        // Run full directChat loop so task agent can use tools
+        const taskResult = await directChat({
+          userMessage: instruction,
+          client: adapter.client,
+          systemPrompt: taskPrompt,
+          history: [],
+          onChunk: () => {},
+          signal: input.signal,
+          context: input.context,
+          config: input.config,
+          agent: taskAgent || input.agent,
+        }, bus);
+        result = taskResult.response.text || "Task agent returned no output.";
       } else {
         result = await executeToolCall(tc.name, tc.args, _workspaceRoot, input.context, input.config);
 
