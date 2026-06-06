@@ -25,8 +25,6 @@ export async function executeTurn(engine: EngineContext, userMessage: string, ca
   let tier: Tier | string = engine.agents.active.modelTier || "auto";
   if (tier === "auto") {
     tier = routeTier({ 
-      activeNode: null, 
-      activeMode: "chat", 
       inputLength: userMessage.length, 
       mentionedFiles: 0 
     });
