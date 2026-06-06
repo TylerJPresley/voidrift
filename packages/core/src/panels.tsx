@@ -1101,8 +1101,9 @@ export function ContextPanel({
   return (
     <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1}>
       <Text bold>Context</Text>
-      <Box>{pages.map((name, i) => (<React.Fragment key={name}><Text bold color={page === i ? "#4ec9b0" : undefined}>{page === i ? `[ ${name} ]` : `  ${name}  `}</Text>{i < pages.length - 1 && <Text>  </Text>}</React.Fragment>))}</Box>
       <Text color="#5a6aa8">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
+      <Box>{pages.map((name, i) => (<React.Fragment key={name}><Text bold color={page === i ? "#4ec9b0" : undefined}>{page === i ? `[ ${name} ]` : `  ${name}  `}</Text>{i < pages.length - 1 && <Text>  </Text>}</React.Fragment>))}</Box>
+      <Text dimColor color="#333333">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
       <Text> </Text>
       {page === 0 && <>
       <Text bold>Agent <Text dimColor>({fmt(agentTotal)} · {pct(agentTotal)}%) locked to active agent</Text></Text>
