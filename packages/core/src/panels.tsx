@@ -1021,7 +1021,14 @@ export function ContextPanel({
   skills: SkillManager;
   onClose: () => void;
 }) {
-  useInput((_, key) => { if (key.escape) onClose(); });
+  const [page, setPage] = useState(0);
+  const pages = ["overview", "agent", "orbit", "drift", "void"];
+
+  useInput((_, key) => {
+    if (key.escape) onClose();
+    if (key.leftArrow) setPage(p => (p - 1 + pages.length) % pages.length);
+    if (key.rightArrow) setPage(p => (p + 1) % pages.length);
+  });
 
   const b = budget.state;
   const totalLimit = b.limit;
@@ -1094,8 +1101,10 @@ export function ContextPanel({
   return (
     <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1}>
       <Text bold>Context</Text>
+      <Box gap={2}>{pages.map((name, i) => <Text key={name} bold={i === page} underline={i === page} color={i === page ? "#4ec9b0" : undefined}>{name}</Text>)}</Box>
       <Text color="#5a6aa8">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
       <Text> </Text>
+      {page === 0 && <>
       <Text bold>Agent <Text dimColor>({fmt(agentTotal)} · {pct(agentTotal)}%) locked to active agent</Text></Text>
       <Box flexDirection="row">
         <Box flexDirection="column" marginRight={4}>
@@ -1166,8 +1175,47 @@ export function ContextPanel({
       </Box>
       <Text> </Text>
       <Text bold>{modelName} · {fmt(totalUsed)}/{fmt(totalLimit)} ({pct(totalUsed)}%) <Text dimColor>Free: {fmt(freeTokens)}</Text></Text>
+      </>}
+      {page === 1 && <Box flexDirection="column">
+        <Text bold>Persona <Text dimColor>({fmt(personaTokens)} tok)</Text></Text>
+        <Text dimColor>{context.context.agent.activePersona.slice(0, 200)}{context.context.agent.activePersona.length > 200 ? "…" : ""}</Text>
+        <Text> </Text>
+        <Text bold>Tools <Text dimColor>({tools.length})</Text></Text>
+        <Text dimColor>{tools.join(", ")}</Text>
+        <Text> </Text>
+        <Text bold>Bound Skills <Text dimColor>({boundSkills.length})</Text></Text>
+        {boundSkills.length === 0 ? <Text dimColor>none</Text> : boundSkills.map((s, i) => <Text key={i} dimColor>{s.slice(0, 80)}…</Text>)}
+      </Box>}
+      {page === 2 && <Box flexDirection="column">
+        <Text bold>Active Skills <Text dimColor>({activeSkills.length} triggered)</Text></Text>
+        {activeSkills.length === 0 ? <Text dimColor>none</Text> : activeSkills.map((s, i) => <Text key={i} dimColor>{s.slice(0, 100)}…</Text>)}
+        <Text> </Text>
+        <Text bold>Memory <Text dimColor>({activeMemory.length} loaded)</Text></Text>
+        {activeMemory.length === 0 ? <Text dimColor>none</Text> : activeMemory.map((m, i) => <Text key={i} dimColor>{m.slice(0, 100)}…</Text>)}
+        <Text> </Text>
+        <Text bold>Plan</Text>
+        {context.context.orbit.activePlan ? <Text dimColor>{context.context.orbit.activePlan.slice(0, 200)}…</Text> : <Text dimColor>no active plan</Text>}
+      </Box>}
+      {page === 3 && <Box flexDirection="column">
+        <Text bold>File Map <Text dimColor>({fmt(codeMapTokens)} tok)</Text></Text>
+        <Text dimColor>{context.context.orbit.workspaceCodeMap ? "loaded" : "empty"}</Text>
+        <Text> </Text>
+        <Text bold>Active Files <Text dimColor>({focusedFiles.length}/3)</Text></Text>
+        {focusedFiles.length === 0 ? <Text dimColor>none</Text> : focusedFiles.map((f, i) => <Box key={i} flexDirection="column"><Text color="#61afef">{f.path} <Text dimColor>({f.totalLines}L · {f.readRanges.length} ranges)</Text></Text><Text dimColor>  {f.summary.slice(0, 120)}…</Text></Box>)}
+        <Text> </Text>
+        <Text bold>Git Status</Text>
+        <Text dimColor>{context.context.drift.gitStatus || "clean"}</Text>
+      </Box>}
+      {page === 4 && <Box flexDirection="column">
+        <Text bold>Messages <Text dimColor>({messages.length})</Text></Text>
+        {messages.slice(-10).map((m, i) => <Text key={i} dimColor wrap="truncate">[{m.role}] {m.content.slice(0, 100)}{m.content.length > 100 ? "…" : ""}</Text>)}
+        {messages.length > 10 && <Text dimColor>  … {messages.length - 10} older</Text>}
+        <Text> </Text>
+        <Text bold>Diagnostics</Text>
+        <Text dimColor>{context.context.void.diagnostics || "none"}</Text>
+      </Box>}
       <Text> </Text>
-      <Text dimColor><Text color="#61afef" bold>esc</Text> Close</Text>
+      <Text dimColor><Text color="#61afef" bold>←/→</Text> Tab  <Text color="#61afef" bold>esc</Text> Close</Text>
     </Box>
   );
 }
