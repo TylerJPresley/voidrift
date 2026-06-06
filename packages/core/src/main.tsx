@@ -565,6 +565,13 @@ function App({ engine }: { engine: EngineContext }) {
     }
   }, [busy, engine]);
 
+  // Subscribe to scheduled task triggers
+  useEffect(() => {
+    return engine.container.bus.subscribe("USER_INPUT", (event: any) => {
+      if (event.payload.text && !busy) handleSubmit(event.payload.text);
+    });
+  }, [busy]);
+
   const footerModel = engine.agents.active.modelTier === "auto" ? "auto" : (engine.container.config.models[engine.container.config.tiers[engine.agents.active.modelTier as keyof typeof engine.container.config.tiers]]?.model ?? engine.agents.active.modelTier);
 
   return (
@@ -746,7 +753,7 @@ const engine: EngineContext = await (async () => {
   const guard = new ExceptionGuard(container.bus, context);
   const stats = new StatsTracker(sessionId);
   const scheduler = new TaskScheduler(container.bus, (instruction) => {
-    cmdOutputFn(`[Scheduler Triggered] Executing: "${instruction}"`);
+    container.bus.publish("USER_INPUT", { text: `[Scheduled] ${instruction}` });
   });
   setScheduler(scheduler);
 
