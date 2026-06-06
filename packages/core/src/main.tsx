@@ -699,6 +699,7 @@ const engine: EngineContext = await (async () => {
         templates,
         agents,
         prompts,
+        undefined,
         dp.id,
       );
       const mod = await import(dp.id);

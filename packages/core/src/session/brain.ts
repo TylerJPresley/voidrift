@@ -91,7 +91,7 @@ export class SessionBrain {
         agent: { activePersona: persona, activeTools: tools, boundSkills: [], skillDiscoveryIndex: [], activeMemoryIndex: [] },
         orbit: { activePlan: plan, workspaceCodeMap: "", activeMemory: [], activeSkills: [] },
         drift: { focusedFiles: focused, gitStatus: null },
-        void: { messages, diagnostics: diagnostics || null },
+        void: { messages, diagnostics: diagnostics || null, turnContext: [] },
       },
     };
   }

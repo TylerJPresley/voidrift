@@ -45,7 +45,7 @@ export { getGitBranch, shortenPath } from "./output/workspace.js";
 export { AutocompleteEngine } from "./output/autocomplete.js";
 
 // Tier 6: Agent Session
-export { ContextManager, type SessionContext, type AgentPartition, type OrbitPartition, type DriftPartition, type VoidPartition, type GovernancePartition, type WorkspacePartition, type WorkPartition, type FocusedFile, type Message } from "./session/context.js";
+export { ContextManager, type SessionContext, type AgentPartition, type OrbitPartition, type DriftPartition, type VoidPartition, type GovernancePartition, type WorkspacePartition, type WorkPartition, type FocusedFile, type Message, type TurnContext } from "./session/context.js";
 export { PluginRegistry, discoverPlugins, type PluginMeta, type DiscoveredPlugin } from "./plugins/registry.js";
 export { compilePrompt, type CompiledMessage } from "./session/compiler.js";
 export { compactHistory, buildCompactionPrompt, type CompactionResult } from "./session/compactor.js";

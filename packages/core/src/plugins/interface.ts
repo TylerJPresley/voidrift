@@ -4,6 +4,7 @@ import type { WorktreeEngine } from "../worktree/engine.js";
 import type { TemplateService } from "../templates/service.js";
 import type { AgentRegistry, AgentManifest } from "../agents/registry.js";
 import type { PromptRegistry } from "../prompts/registry.js";
+import type { ContextManager } from "../session/context.js";
 import { generateCodeMap } from "../codemap/index.js";
 import { executeCommand } from "../tools/executors.js";
 
@@ -44,12 +45,14 @@ export class CoreAPI {
     private templateService?: TemplateService,
     private agentRegistry?: AgentRegistry,
     private promptRegistry?: PromptRegistry,
+    private contextManager?: ContextManager,
     private pluginName: string = "plugin"
   ) {}
 
   /** Called by the TUI to wire output/panel callbacks. */
   setOutputHandler(fn: (text: string) => void): void { this._output = fn; }
   setPanelHandler(fn: (name: string) => void): void { this._openPanel = fn; }
+  setContextManager(ctx: ContextManager): void { this.contextManager = ctx; }
 
   // ─── Registration ────────────────────────────────────────────────────────
 
@@ -130,5 +133,9 @@ export class CoreAPI {
 
   getWorkspaceRoot(): string {
     return this.workspaceRoot;
+  }
+
+  injectTurnContext(label: string, content: string): void {
+    this.contextManager?.injectTurnContext(label, content);
   }
 }

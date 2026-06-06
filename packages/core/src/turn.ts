@@ -19,6 +19,7 @@ export interface TurnCallbacks {
 }
 
 export async function executeTurn(engine: EngineContext, userMessage: string, callbacks: TurnCallbacks): Promise<OrchestrationResult | null> {
+  engine.context.clearTurnContext();
   engine.context.addMessage({ role: "user", content: userMessage });
 
   // Derive mode from active agent's approvalMode

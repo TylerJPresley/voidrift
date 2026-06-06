@@ -296,7 +296,7 @@ export function PlanPanel({ context, onClose }: { context: ContextManager; onClo
   const plan = context.context.orbit.activePlan;
 
   const termHeight = process.stdout.rows || 24;
-  const viewHeight = termHeight - 8;
+  const viewHeight = termHeight - 7;
 
   useInput((ch, key) => {
     if (key.escape) onClose();
@@ -313,8 +313,7 @@ export function PlanPanel({ context, onClose }: { context: ContextManager; onClo
       <Text color="#5a6aa8">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
       <Text> </Text>
       <ScrollView height={viewHeight} lines={lines} active={!!plan} />
-      <Text> </Text>
-      <Text dimColor>  {plan ? <><Text color="#61afef" bold>↑↓</Text> Scroll  <Text color="#61afef" bold>pgup/pgdn</Text> Page  <Text color="#61afef" bold>d</Text> Delete  </> : null}<Text color="#61afef" bold>esc</Text> Close</Text>
+      <Text dimColor><Text color="#61afef" bold>↑↓</Text> Scroll  <Text color="#61afef" bold>pgup/pgdn</Text> Page  <Text color="#61afef" bold>d</Text> Delete  <Text color="#61afef" bold>esc</Text> Close</Text>
     </Box>
   );
 }
@@ -330,7 +329,7 @@ export function DiffPanel({ workspaceRoot, onClose }: { workspaceRoot: string; o
   }, []);
 
   const termHeight = process.stdout.rows || 24;
-  const viewHeight = termHeight - 8;
+  const viewHeight = termHeight - 7;
 
   useInput((_, key) => { if (key.escape) onClose(); });
 
@@ -347,7 +346,6 @@ export function DiffPanel({ workspaceRoot, onClose }: { workspaceRoot: string; o
       <Text color="#5a6aa8">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
       <Text> </Text>
       <ScrollView height={viewHeight} lines={lines} />
-      <Text> </Text>
       <Text dimColor><Text color="#61afef" bold>↑↓</Text> Scroll  <Text color="#61afef" bold>pgup/pgdn</Text> Page  <Text color="#61afef" bold>esc</Text> Close</Text>
     </Box>
   );

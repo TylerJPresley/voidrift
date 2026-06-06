@@ -35,9 +35,15 @@ export interface DriftPartition {
 
 // ─── Layer 4: Void (transient, changes every turn, never cached) ─────────────
 
+export interface TurnContext {
+  label: string;
+  content: string;
+}
+
 export interface VoidPartition {
   messages: Message[];
   diagnostics: string | null;
+  turnContext: TurnContext[];
 }
 
 // ─── Shared Types ────────────────────────────────────────────────────────────
@@ -74,7 +80,7 @@ export class ContextManager {
       agent: { activePersona: persona, activeTools: [], boundSkills: [], skillDiscoveryIndex: [], activeMemoryIndex: [] },
       orbit: { workspaceCodeMap: codeMap, activePlan: null, activeMemory: [], activeSkills: [] },
       drift: { focusedFiles: [], gitStatus: null },
-      void: { messages: [], diagnostics: null },
+      void: { messages: [], diagnostics: null, turnContext: [] },
     };
   }
 
@@ -143,4 +149,6 @@ export class ContextManager {
   setDiagnostics(diag: string | null): void { this.ctx.void.diagnostics = diag; }
   getMessages(): Message[] { return this.ctx.void.messages; }
   setMessages(msgs: Message[]): void { this.ctx.void.messages = msgs; }
+  injectTurnContext(label: string, content: string): void { this.ctx.void.turnContext.push({ label, content }); }
+  clearTurnContext(): void { this.ctx.void.turnContext = []; }
 }

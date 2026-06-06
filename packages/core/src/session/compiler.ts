@@ -71,5 +71,12 @@ export function compilePrompt(ctx: SessionContext): CompiledMessage[] {
     messages.push({ role: "system", content: "--- Diagnostics ---\n" + ctx.void.diagnostics });
   }
 
+  // Turn context (plugin-injected, ephemeral per-turn)
+  if (ctx.void.turnContext.length) {
+    for (const tc of ctx.void.turnContext) {
+      messages.push({ role: "system", content: `--- ${tc.label} ---\n${tc.content}` });
+    }
+  }
+
   return messages;
 }
