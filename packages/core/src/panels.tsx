@@ -344,7 +344,7 @@ export function PlanPanel({ planManager, config, onClose }: { planManager: PlanM
         <Text dimColor color="#333333">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
         <Text> </Text>
         <ScrollView height={viewHeight} lines={bodyLines} />
-        <Text dimColor><Text color="#61afef" bold>n</Text> now  <Text color="#61afef" bold>x</Text> next  <Text color="#61afef" bold>l</Text> later  <Text color="#61afef" bold>e</Text> edit  <Text color="#61afef" bold>esc</Text> back</Text>
+        <Text dimColor><Text color="#61afef" bold>↑↓</Text> Scroll  <Text color="#61afef" bold>esc</Text> Back  │  <Text color="#61afef" bold>n</Text> now  <Text color="#61afef" bold>x</Text> next  <Text color="#61afef" bold>l</Text> later  <Text color="#61afef" bold>e</Text> Edit</Text>
       </Box>
     );
   }
@@ -366,7 +366,7 @@ export function PlanPanel({ planManager, config, onClose }: { planManager: PlanM
           ))
       }
       <Text> </Text>
-      <Text dimColor><Text color="#61afef" bold>←/→</Text> Tab  <Text color="#61afef" bold>↑↓</Text> Navigate  <Text color="#61afef" bold>enter</Text> Details  <Text color="#61afef" bold>n</Text> now  <Text color="#61afef" bold>x</Text> next  <Text color="#61afef" bold>l</Text> later  <Text color="#61afef" bold>del</Text> Remove  <Text color="#61afef" bold>esc</Text> Close</Text>
+      <Text dimColor><Text color="#61afef" bold>←/→</Text> Tab  <Text color="#61afef" bold>↑↓</Text> Navigate  <Text color="#61afef" bold>enter</Text> Details  <Text color="#61afef" bold>esc</Text> Close  │  <Text color="#61afef" bold>n</Text> now  <Text color="#61afef" bold>x</Text> next  <Text color="#61afef" bold>l</Text> later  <Text color="#61afef" bold>del</Text> Remove</Text>
     </Box>
   );
 }
