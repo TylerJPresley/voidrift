@@ -29,13 +29,15 @@ import {
   PromptRegistry,
   type StreamChunk,
   TaskScheduler,
-  PluginInterface,
+  CoreAPI,
 } from "./index.js";
 import {
   StatsPanel, HelpPanel, ToolsPanel, ModelPanel, MemoryPanel, GenericPanel,
   SkillsPanel, MCPPanel, TemplatesPanel, PromptsPanel, ContextPanel, TasksPanel,
-  ResumePanel, RewindPanel, IdeasPanel, ChangesPanel, AgentsPanel, PlanPanel,
+  ResumePanel, RewindPanel, AgentsPanel, PlanPanel, DiffPanel,
+  PluginsPanel,
 } from "./panels.js";
+import { PluginRegistry, discoverPlugins } from "./plugins/registry.js";
 import type { EngineContext } from "./engine.js";
 import { executeTurn } from "./turn.js";
 import { validateEditor } from "./utils/editor.js";
@@ -220,7 +222,7 @@ function ThinkingIndicator({ label }: { label: string }) {
 }
 
 function SlashAutocomplete({ input, registry, selected }: { input: string; registry: CoreRegistry; selected: number }) {
-  const query = input.slice(1).toLowerCase();
+  const query = input === "" ? "" : input.slice(1).toLowerCase();
   const all = registry.listSlashCommands()
     .map(name => ({ name, description: registry.getSlashCommand(name)!.description }))
     .filter(c => c.name.startsWith(query));
@@ -232,7 +234,7 @@ function SlashAutocomplete({ input, registry, selected }: { input: string; regis
   const maxName = Math.max(...visible.map(c => c.name.length + 1));
   return (
     <Box flexDirection="column" marginLeft={1}>
-      <Text dimColor>{'─'.repeat(process.stdout.columns || 80)}</Text>
+      <Text dimColor>{'─'.repeat((process.stdout.columns || 80) - 1)}</Text>
       {visible.map((cmd, i) => {
         const idx = start + i;
         return (
@@ -280,13 +282,20 @@ function App({ engine }: { engine: EngineContext }) {
   const [streaming, setStreaming] = useState<{ model: string; text: string; elapsed: number; tokens: number } | null>(null);
   const [thinking, setThinking] = useState<string | null>(null);
   const [pendingTools, setPendingTools] = useState<ToolCall[] | null>(null);
+  const [clearKey, setClearKey] = useState(0);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [panel, setPanel] = useState<string | null>(null);
+  const [fullPanel, setFullPanel] = useState<string | null>(null);
   const [acIdx, setAcIdx] = useState(0);
+  const [acOpen, setAcOpen] = useState(false);
   const acIdxRef = React.useRef(0);
   acIdxRef.current = acIdx;
   const [inputKey, setInputKey] = useState(0);
+  const inputHistoryRef = React.useRef<string[]>([]);
+  const [histIdx, setHistIdx] = useState(-1);
+  const [exitPending, setExitPending] = useState(false);
+  const exitTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const [, forceRender] = useState(0);
 
   // Helper: activate an agent — sets persona, mode, loads resources
@@ -331,9 +340,9 @@ function App({ engine }: { engine: EngineContext }) {
   const id = () => String(nextId++);
   const abortRef = React.useRef<AbortController | null>(null);
 
-  const showAutocomplete = !busy && !panel && input.startsWith("/") && !input.includes(" ");
+  const showAutocomplete = !busy && !panel && ((input === "" && acOpen) || (input.startsWith("/") && !input.includes(" ")));
   const acCommands = showAutocomplete
-    ? engine.container.registry.listSlashCommands().filter(n => n.startsWith(input.slice(1).toLowerCase()))
+    ? engine.container.registry.listSlashCommands().filter(n => input === "" || n.startsWith(input.slice(1).toLowerCase()))
     : [];
 
   useInput((ch, key) => {
@@ -362,16 +371,66 @@ function App({ engine }: { engine: EngineContext }) {
         abortRef.current?.abort();
         setBusy(false); setThinking(null); setStreaming(null); setPendingTools(null);
         setHistory(h => [...h, { id: id(), type: "system", text: "Generation cancelled." }]);
+        return;
+      }
+      if (input) { setInput(""); setInputKey(k => k + 1); return; }
+      // Empty input — exit confirmation
+      if (exitPending) {
+        if (exitTimerRef.current) clearTimeout(exitTimerRef.current);
+        process.stdout.write("\x1B[?25h");
+        engine.container.shutdown().finally(() => process.exit(0));
+        return;
+      }
+      setExitPending(true);
+      exitTimerRef.current = setTimeout(() => { setExitPending(false); }, 1000);
+      return;
+    }
+    // Any other key clears exit pending
+    if (exitPending && ch) { setExitPending(false); if (exitTimerRef.current) clearTimeout(exitTimerRef.current); }
+    if (showAutocomplete && acCommands.length) {
+      if (key.downArrow) { setAcIdx(i => Math.min(i + 1, acCommands.length - 1)); return; }
+      if (key.upArrow) {
+        if (acOpen && acIdx === 0) { setAcOpen(false); return; }
+        setAcIdx(i => Math.max(i - 1, 0)); return;
       }
     }
-    if (showAutocomplete && acCommands.length) {
-      if (key.downArrow) { setAcIdx(i => (i + 1) % acCommands.length); return; }
-      if (key.upArrow) { setAcIdx(i => (i - 1 + acCommands.length) % acCommands.length); return; }
+    if (key.downArrow && !busy && !panel && input === "" && !acOpen) {
+      setAcOpen(true); setAcIdx(0); return;
     }
+    if (key.upArrow && !busy && !panel && !showAutocomplete) {
+      const hist = inputHistoryRef.current;
+      if (hist.length) {
+        const next = histIdx === -1 ? hist.length - 1 : Math.max(histIdx - 1, 0);
+        setHistIdx(next);
+        setInput(hist[next]);
+        setInputKey(k => k + 1);
+      }
+      return;
+    }
+    if (key.downArrow && !busy && !panel && !showAutocomplete && histIdx >= 0) {
+      const hist = inputHistoryRef.current;
+      const next = histIdx + 1;
+      if (next >= hist.length) {
+        setHistIdx(-1); setInput(""); setInputKey(k => k + 1);
+      } else {
+        setHistIdx(next); setInput(hist[next]); setInputKey(k => k + 1);
+      }
+      return;
+    }
+    if (key.return && acOpen && input === "" && acCommands.length) {
+      const selected = acCommands[acIdx % acCommands.length];
+      setAcOpen(false); setAcIdx(0);
+      setInput(""); setInputKey(k => k + 1);
+      handleSubmit("/" + selected);
+      return;
+    }
+    if (key.escape && acOpen) { setAcOpen(false); return; }
   });
 
   const handleSubmit = useCallback(async (text: string) => {
     if (!text.trim() || busy) return;
+    inputHistoryRef.current.push(text);
+    setHistIdx(-1);
 
     // If autocomplete is showing and input is a partial command, execute the selected item
     if (text.startsWith("/") && !text.includes(" ")) {
@@ -385,11 +444,11 @@ function App({ engine }: { engine: EngineContext }) {
         if (handler) {
           let captured = "";
           engine.setCmdOutput((t: string) => { captured += (captured ? "\n" : "") + t; });
-          engine.setOpenPanel((p: string) => setPanel(p));
+          engine.setOpenPanel((p: string) => { if (p === "diff" || p === "plan") { process.stdout.write("\x1b[2J\x1b[H"); setFullPanel(p); } else setPanel(p); });
           await handler.execute([]);
           engine.setCmdOutput(() => {});
           engine.setOpenPanel(() => {});
-          if (selected === "clear") { setHistory([]); return; }
+          if (selected === "clear") { process.stdout.write("\x1b[2J\x1b[H"); setHistory([]); setClearKey(k => k + 1); return; }
           if (captured) setHistory(h => [...h, { id: id(), type: "system", text: captured }]);
         }
         return;
@@ -407,11 +466,11 @@ function App({ engine }: { engine: EngineContext }) {
       if (handler) {
         let captured = "";
         engine.setCmdOutput((t: string) => { captured += (captured ? "\n" : "") + t; });
-        engine.setOpenPanel((p: string) => setPanel(p));
+        engine.setOpenPanel((p: string) => { if (p === "diff" || p === "plan") { process.stdout.write("\x1b[2J\x1b[H"); setFullPanel(p); } else setPanel(p); });
         await handler.execute(args);
         engine.setCmdOutput(() => {});
         engine.setOpenPanel(() => {});
-        if (cmd === "clear") { setHistory([]); return; }
+        if (cmd === "clear") { process.stdout.write("\x1b[2J\x1b[H"); setHistory([]); setClearKey(k => k + 1); return; }
         if (captured) setHistory(h => [...h, { id: id(), type: "system", text: captured }]);
       } else {
         setHistory(h => [...h, { id: id(), type: "system", text: `Unknown command: /${cmd}` }]);
@@ -451,8 +510,21 @@ function App({ engine }: { engine: EngineContext }) {
             fullText = "";
           }
           setThinking(null);
-          tools.push({ name: chunk.name, args: chunk.args, status: "success", elapsed: `${((Date.now() - startTime) / 1000).toFixed(1)}s` });
-          setPendingTools([...tools]);
+          if (chunk.status === "executing") {
+            // Tool just started — add with executing status
+            tools.push({ name: chunk.name, args: chunk.args, status: "executing" });
+            setPendingTools([...tools]);
+          } else {
+            // Tool finished — update its status
+            const idx = tools.findIndex(t => t.name === chunk.name && t.status === "executing");
+            if (idx !== -1) {
+              tools[idx].status = chunk.status === "error" ? "error" : "success";
+              tools[idx].elapsed = `${((Date.now() - startTime) / 1000).toFixed(1)}s`;
+            } else {
+              tools.push({ name: chunk.name, args: chunk.args, status: chunk.status === "error" ? "error" : "success", elapsed: `${((Date.now() - startTime) / 1000).toFixed(1)}s` });
+            }
+            setPendingTools([...tools]);
+          }
         }
         if (chunk.type === "error") {
           setThinking(null); setStreaming(null);
@@ -495,7 +567,10 @@ function App({ engine }: { engine: EngineContext }) {
 
   return (
     <Box flexDirection="column">
-      <Static items={[{ id: "welcome" } as any, ...history]}>
+      {fullPanel === "diff" && <DiffPanel workspaceRoot={engine.workspaceRoot} onClose={() => { setFullPanel(null); process.stdout.write("\x1b[2J\x1b[H"); }} />}
+      {fullPanel === "plan" && <PlanPanel context={engine.context} onClose={() => { setFullPanel(null); process.stdout.write("\x1b[2J\x1b[H"); }} />}
+      {!fullPanel && <>
+      <Static key={clearKey} items={[{ id: "welcome" } as any, ...history]}>
         {(item: any) => {
           if (item.id === "welcome") return <Welcome key="welcome" model={footerModel} workspace={engine.shortPath} branch={engine.branch} />;
           switch (item.type) {
@@ -522,7 +597,7 @@ function App({ engine }: { engine: EngineContext }) {
             ? <Text dimColor italic>working... (esc to cancel)</Text>
             : panel
               ? <Text dimColor italic>esc to close</Text>
-              : <TextInput key={inputKey} value={input} onChange={(v) => { setInput(v); setAcIdx(0); }} onSubmit={handleSubmit} placeholder="ask a question or describe a task" />
+              : <TextInput key={inputKey} value={input} onChange={(v) => { setInput(v); setAcIdx(0); setAcOpen(false); setHistIdx(-1); }} onSubmit={handleSubmit} placeholder={exitPending ? "press ctrl+c again to exit" : "ask a question or describe a task"} />
           }
         </Box>
       </Box>
@@ -535,7 +610,6 @@ function App({ engine }: { engine: EngineContext }) {
       {panel === "help" && <HelpPanel registry={engine.container.registry} sessionId={engine.stats.current.sessionId} workspace={engine.shortPath} onClose={() => setPanel(null)} />}
       {panel === "tools" && <ToolsPanel agents={engine.agents} onClose={() => setPanel(null)} />}
       {panel === "model" && <ModelPanel config={engine.container.config} agents={engine.agents} onClose={() => setPanel(null)} />}
-      {panel === "plan" && <PlanPanel context={engine.context} onClose={() => setPanel(null)} />}
       {panel === "memory" && <MemoryPanel memory={engine.memory} context={engine.context} onClose={() => setPanel(null)} />}
       {panel === "skills" && <SkillsPanel skills={engine.skills} config={engine.container.config} workspaceRoot={engine.workspaceRoot} agents={engine.agents} onClose={() => setPanel(null)} />}
       {panel === "mcp" && <MCPPanel mcp={engine.mcp} onClose={() => setPanel(null)} />}
@@ -557,10 +631,10 @@ function App({ engine }: { engine: EngineContext }) {
         setPanel(null);
       }} onClose={() => setPanel(null)} />}
       {panel === "rewind" && <RewindPanel turns={engine.stats.current.turns} onRewind={(t) => { engine.context.setMessages(engine.context.getMessages().slice(0, t * 2)); }} onClose={() => setPanel(null)} />}
-      {panel === "ideas" && <IdeasPanel workspaceRoot={engine.workspaceRoot} onClose={() => setPanel(null)} />}
-      {panel === "changes" && <ChangesPanel workspaceRoot={engine.workspaceRoot} onClose={() => setPanel(null)} />}
-      {panel === "agents" && <AgentsPanel agents={engine.agents} config={engine.container.config} workspaceRoot={engine.workspaceRoot} onClose={() => setPanel(null)} />}
-      {panel && !["stats","help","tools","model","plan","memory","skills","mcp","templates","prompts","context","tasks","resume","rewind","ideas","changes","agents"].includes(panel) && <GenericPanel name={panel} onClose={() => setPanel(null)} />}
+      {panel === "agents" && <AgentsPanel agents={engine.agents} config={engine.container.config} workspaceRoot={engine.workspaceRoot} bus={engine.container.bus} onClose={() => setPanel(null)} />}
+      {panel === "plugins" && <PluginsPanel plugins={engine.pluginRegistry} registry={engine.container.registry} agents={engine.agents} workspaceRoot={engine.workspaceRoot} onClose={() => setPanel(null)} />}
+      {panel && !["stats","help","tools","model","plan","memory","skills","mcp","templates","prompts","context","tasks","resume","rewind","agents","plugins"].includes(panel) && <GenericPanel name={panel} onClose={() => setPanel(null)} />}
+      </>}
     </Box>
   );
 }
@@ -601,9 +675,23 @@ const engine: EngineContext = await (async () => {
   // Config-driven plugin loading
   const startupWarnings: string[] = [];
   templates.setActivePlugins(container.config.plugins);
-  for (const pluginName of container.config.plugins) {
+  const pluginRegistry = new PluginRegistry();
+
+  // Discover all plugins from node_modules (by voidrift marker in package.json)
+  const discovered = discoverPlugins(workspaceRoot);
+  // Effective plugin list = union of global + workspace config arrays
+  const activePluginIds = new Set(container.config.plugins);
+
+  for (const dp of discovered) {
+    const isActive = activePluginIds.has(dp.id);
+
+    if (!isActive) {
+      pluginRegistry.register({ id: dp.id, name: dp.id, version: dp.version, description: dp.description, author: dp.author, license: dp.license, homepage: dp.homepage, active: false, commands: [], agents: [], modes: [], templates: [], prompts: [], skills: [] });
+      continue;
+    }
+
     try {
-      const pluginInterface = new PluginInterface(
+      const pluginInterface = new CoreAPI(
         container.registry,
         container.bus,
         worktree,
@@ -611,14 +699,31 @@ const engine: EngineContext = await (async () => {
         templates,
         agents,
         prompts,
-        pluginName,
+        dp.id,
       );
-      const mod = await import(pluginName);
+      const mod = await import(dp.id);
       if (typeof mod.register === "function") {
         mod.register(pluginInterface);
       }
+      const cmds = container.registry.listSlashCommandHooks().filter(c => c.source === dp.id);
+      pluginRegistry.register({
+        id: dp.id,
+        name: mod.name || dp.id,
+        version: dp.version,
+        description: dp.description,
+        author: dp.author,
+        license: dp.license,
+        homepage: dp.homepage,
+        active: true,
+        commands: cmds.map(c => c.name),
+        agents: agents.listInteractive().filter(a => a.source === dp.id).map(a => a.id),
+        modes: [],
+        templates: [],
+        prompts: [],
+        skills: [],
+      });
     } catch (err: any) {
-      startupWarnings.push(`Plugin "${pluginName}" failed to load: ${err.message}`);
+      startupWarnings.push(`Plugin "${dp.id}" failed to load: ${err.message}`);
     }
   }
 
@@ -689,7 +794,7 @@ const engine: EngineContext = await (async () => {
 
   return {
     container, context, budget, agents, prompts, guard, stats, memory, skills, mcp, templates, logger,
-    worktree, scheduler, brain, sessionId,
+    worktree, scheduler, brain, sessionId, pluginRegistry,
     branch, shortPath, workspaceRoot,
     startupWarnings: [...startupWarnings, ...validateStartup(container.config), ...validateAssets(agents, skills).map(i => `[${i.type}] ${i.id}: ${i.message}`)],
     setCmdOutput: (fn: (text: string) => void) => { cmdOutputFn = fn; },
@@ -710,7 +815,7 @@ process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
 
 // ─── Render ──────────────────────────────────────────────────────────────────
 
-process.stdout.write("\x1b[?25l"); // Hide native cursor
+process.stdout.write("\x1b[2J\x1b[H\x1b[?25l"); // Clear screen, move to top, hide cursor
 process.on("exit", () => process.stdout.write("\x1b[?25h"));
 
 render(<App engine={engine} />, { patchConsole: false, exitOnCtrlC: false });

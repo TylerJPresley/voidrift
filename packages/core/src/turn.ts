@@ -5,6 +5,7 @@
 import { HumanMessage, AIMessage } from "@langchain/core/messages";
 import { runTurn } from "./orchestration/graph.js";
 import { createTierAdapter, createAdapter } from "./adapters/factory.js";
+import type { Tier } from "./adapters/factory.js";
 import { routeTier } from "./router/index.js";
 import { compilePrompt } from "./session/compiler.js";
 import type { EngineContext } from "./engine.js";
@@ -25,7 +26,7 @@ export async function executeTurn(engine: EngineContext, userMessage: string, ca
   const activeMode = modeMap[engine.agents.active.approvalMode] || "chat";
 
   // Resolve the model tier: use static override if declared, otherwise delegate to the Model Router
-  let tier = engine.agents.active.modelTier || "auto";
+  let tier: Tier | string = engine.agents.active.modelTier || "auto";
   if (tier === "auto") {
     tier = routeTier({ 
       activeNode: null, 
@@ -36,28 +37,28 @@ export async function executeTurn(engine: EngineContext, userMessage: string, ca
   }
   const isTierKey = tier === "flash" || tier === "utility" || tier === "dense";
   const resolved = isTierKey
-    ? createTierAdapter(tier as any, engine.container.config)
+    ? createTierAdapter(tier as Tier, engine.container.config)
     : createAdapter(tier, engine.container.config);
 
   // Emit resolved model name so the UI can display it
   callbacks.onChunk({ type: "status", message: `model:${resolved.name}` });
 
   const state: GraphState = {
-    activePlan: engine.context.context.workspace.activePlan,
-    focusedFiles: engine.context.context.workspace.focusedFiles.map(f => f.path),
-    diagnostics: engine.context.context.work.diagnostics,
+    activePlan: engine.context.context.orbit.activePlan,
+    focusedFiles: engine.context.context.drift.focusedFiles.map(f => f.path),
+    diagnostics: engine.context.context.void.diagnostics,
     routingFlag: null,
     messages: [],
     activeMode,
-    activePersona: engine.context.context.governance.activePersona,
+    activePersona: engine.context.context.agent.activePersona,
   };
 
   // Resolve skills for this turn (agent-bound + trigger-based)
   const resolvedSkills = engine.skills.resolve(
     {
-      focusedFiles: engine.context.context.workspace.focusedFiles.map(f => f.path),
+      focusedFiles: engine.context.context.drift.focusedFiles.map(f => f.path),
       userInput: userMessage,
-      activePlan: engine.context.context.workspace.activePlan,
+      activePlan: engine.context.context.orbit.activePlan,
     },
     engine.agents.active.id,
   );
@@ -68,7 +69,7 @@ export async function executeTurn(engine: EngineContext, userMessage: string, ca
 
   // Extract system prompt: merge all system messages (governance + workspace) into one block
   const systemParts = compiled.filter(m => m.role === "system").map(m => m.content);
-  const systemPrompt = systemParts.join("\n\n") || engine.context.context.governance.activePersona;
+  const systemPrompt = systemParts.join("\n\n") || engine.context.context.agent.activePersona;
 
   // Extract conversation history (only user/assistant messages, exclude current turn)
   const history = compiled
@@ -89,7 +90,7 @@ export async function executeTurn(engine: EngineContext, userMessage: string, ca
       signal: callbacks.signal,
       context: engine.context,
       config: engine.container.config,
-      tier,
+      tier: isTierKey ? tier as Tier : undefined,
       agent: engine.agents.active,
     }, engine.container.bus);
   });

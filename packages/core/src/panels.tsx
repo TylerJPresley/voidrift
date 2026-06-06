@@ -3,9 +3,10 @@
  * Each panel is rendered below the input line, dismissed with ESC.
  * Panels follow the mockup's bordered-box pattern from /mockup.
  */
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Box, Text, useInput } from "ink";
 import { Markdown } from "./ui/markdown.js";
+import { Table, type TableRow } from "./ui/table.js";
 import type { StatsTracker } from "./session/stats.js";
 import type { TokenBudgetWatcher } from "./output/budget.js";
 import type { VoidRiftConfig } from "./config/loader.js";
@@ -20,8 +21,24 @@ import type { ContextManager } from "./session/context.js";
 import { openInEditor } from "./utils/editor.js";
 import { readdirSync, readFileSync, existsSync, mkdirSync, writeFileSync, unlinkSync, renameSync } from "fs";
 import { join, dirname } from "path";
+import { execSync } from "child_process";
 import { TOOL_SCHEMAS } from "./tools/definitions.js";
 import type { TaskScheduler } from "./orchestration/scheduler.js";
+import type { PluginRegistry } from "./plugins/registry.js";
+import type { EventBus } from "./events/bus.js";
+
+/** Truncate a string to max length, adding … if cut. Pad to width. */
+function trunc(str: string, max: number, pad: number): string {
+  const t = str.length > max ? str.slice(0, max - 1) + "…" : str;
+  return t.padEnd(pad);
+}
+
+/** Format a table cell: truncate content to fit within width (includes 1 char right padding). */
+function cell(str: string, width: number): string {
+  const max = width - 1;
+  const t = str.length > max ? str.slice(0, max - 1) + "…" : str;
+  return t.padEnd(width);
+}
 
 // ─── /stats ──────────────────────────────────────────────────────────────────
 
@@ -56,7 +73,7 @@ export function StatsPanel({ stats, budget, onClose }: { stats: StatsTracker; bu
       <Text> </Text>
       <Text><Text color="#61afef">Context: </Text><Text color={ctxColor}>◎ {b.percentage}%</Text><Text dimColor> ({b.used} / {b.limit})</Text></Text>
       <Text> </Text>
-      <Text dimColor>  <Text color="#61afef" bold>esc</Text> Close</Text>
+      <Text dimColor><Text color="#61afef" bold>esc</Text> Close</Text>
     </Box>
   );
 }
@@ -65,20 +82,18 @@ export function StatsPanel({ stats, budget, onClose }: { stats: StatsTracker; bu
 
 export function HelpPanel({ registry, sessionId, workspace, onClose }: { registry: CoreRegistry; sessionId: string; workspace: string; onClose: () => void }) {
   const [page, setPage] = useState(0);
-  const pages = ["general", "commands", "shortcuts"];
+  const pages = ["general", "commands", "shortcuts", "context"];
   useInput((_, key) => {
     if (key.escape) onClose();
-    if (key.leftArrow) setPage((p) => (p - 1 + 3) % 3);
-    if (key.rightArrow) setPage((p) => (p + 1) % 3);
+    if (key.leftArrow) setPage((p) => (p - 1 + 4) % 4);
+    if (key.rightArrow) setPage((p) => (p + 1) % 4);
   });
-
-  const cmds = registry.listSlashCommands().map((name) => ({ name, desc: registry.getSlashCommand(name)?.description ?? "" }));
 
   return (
     <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1}>
       <Text bold>Help</Text>
       <Text color="#5a6aa8">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
-      <Box><Text bold color={page === 0 ? "#4ec9b0" : undefined}>{page === 0 ? "[ general ]" : "  general  "}</Text><Text>  </Text><Text bold color={page === 1 ? "#4ec9b0" : undefined}>{page === 1 ? "[ commands ]" : "  commands  "}</Text><Text>  </Text><Text bold color={page === 2 ? "#4ec9b0" : undefined}>{page === 2 ? "[ shortcuts ]" : "  shortcuts  "}</Text></Box>
+      <Box><Text bold color={page === 0 ? "#4ec9b0" : undefined}>{page === 0 ? "[ general ]" : "  general  "}</Text><Text>  </Text><Text bold color={page === 1 ? "#4ec9b0" : undefined}>{page === 1 ? "[ commands ]" : "  commands  "}</Text><Text>  </Text><Text bold color={page === 2 ? "#4ec9b0" : undefined}>{page === 2 ? "[ shortcuts ]" : "  shortcuts  "}</Text><Text>  </Text><Text bold color={page === 3 ? "#4ec9b0" : undefined}>{page === 3 ? "[ context ]" : "  context  "}</Text></Box>
       <Text dimColor color="#333333">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
       <Text> </Text>
       {page === 0 && <>
@@ -91,9 +106,24 @@ export function HelpPanel({ registry, sessionId, workspace, onClose }: { registr
         <Text> </Text>
         <Text dimColor>Type / to see available commands</Text>
       </>}
-      {page === 1 && <>
-        {cmds.map((c) => <Text key={c.name}><Text color="#61afef">{"/" + c.name.padEnd(14)}</Text><Text dimColor>{c.desc}</Text></Text>)}
-      </>}
+      {page === 1 && (() => {
+        const hooks = registry.listSlashCommandHooks();
+        const core = hooks.filter(c => !c.source || c.source === "core");
+        const plugins = new Map<string, typeof hooks>();
+        hooks.filter(c => c.source && c.source !== "core").forEach(c => {
+          const group = plugins.get(c.source!) || [];
+          group.push(c);
+          plugins.set(c.source!, group);
+        });
+        return <>
+          <Text bold>Core</Text>
+          {core.map((c) => <Text key={c.name}><Text color="#61afef">  {"/" + c.name.padEnd(14)}</Text><Text dimColor>{c.description}</Text></Text>)}
+          {[...plugins.entries()].map(([source, cmds]) => <Box key={source} flexDirection="column" marginTop={1}>
+            <Text bold>Plugin: {source}</Text>
+            {cmds.map((c) => <Text key={c.name}><Text color="#c678dd">  {"/" + c.name.padEnd(14)}</Text><Text dimColor>{c.description}</Text></Text>)}
+          </Box>)}
+        </>;
+      })()}
       {page === 2 && <>
         <Text bold>Input</Text>
         <Text><Text color="#61afef">{"TAB".padEnd(16)}</Text>Autocomplete command/path</Text>
@@ -104,8 +134,37 @@ export function HelpPanel({ registry, sessionId, workspace, onClose }: { registr
         <Text><Text color="#61afef">{"ESC".padEnd(16)}</Text>Cancel generation / close panel</Text>
         <Text><Text color="#61afef">{"Ctrl+C ×2".padEnd(16)}</Text>Exit VoidRift</Text>
       </>}
+      {page === 3 && <>
+        <Text>Context is assembled in four layers ordered by ascending volatility.</Text>
+        <Text>Stable layers are cached by the provider. Volatile layers are discarded.</Text>
+        <Text> </Text>
+        <Text bold color="#98c379">Agent</Text><Text dimColor> Locked to the active agent. Rebuilds when you switch agents.</Text>
+        <Text> </Text>
+        <Text>  • <Text color="#61afef">Persona</Text> the instructions that define the active agent's personality, expertise, and behavior</Text>
+        <Text>  • <Text color="#61afef">Tool Schemas</Text> descriptions of every action the agent can perform, so it knows what's available</Text>
+        <Text>  • <Text color="#61afef">Bound Skills</Text> technical guidelines permanently attached to this agent (e.g. framework standards)</Text>
+        <Text>  • <Text color="#61afef">Skill Discovery Index</Text> a lightweight directory of all skills that could be loaded on demand</Text>
+        <Text>  • <Text color="#61afef">Memory Index</Text> a lightweight directory of all saved lessons and learnings available to recall</Text>
+        <Text> </Text>
+        <Text bold color="#61afef">Orbit</Text><Text dimColor> Stable project landscape. Changes rarely (~5% of turns). Usually cached.</Text>
+        <Text> </Text>
+        <Text>  • <Text color="#61afef">Plan</Text> the step-by-step roadmap the agent is following to complete a task</Text>
+        <Text>  • <Text color="#61afef">Active Skills</Text> technical guidelines loaded because the current work triggered them</Text>
+        <Text>  • <Text color="#61afef">Active Memory</Text> full lessons and learnings the agent pulled into working memory</Text>
+        <Text> </Text>
+        <Text bold color="#e5c07b">Drift</Text><Text dimColor> Active working set in motion. Changes on tool use (~30-40% of turns).</Text>
+        <Text> </Text>
+        <Text>  • <Text color="#61afef">File Map</Text> a structural overview of every file in the workspace (names, exports, headings)</Text>
+        <Text>  • <Text color="#61afef">Active Files</Text> detailed summaries of the specific files the agent is currently working with</Text>
+        <Text>  • <Text color="#61afef">Workspace Changes</Text> which files have been modified, added, or deleted since the last save point</Text>
+        <Text> </Text>
+        <Text bold color="#e06c75">Void</Text><Text dimColor> Transient conversation. Changes every turn. Compacted or discarded.</Text>
+        <Text> </Text>
+        <Text>  • <Text color="#61afef">Messages</Text> the back-and-forth conversation between you and the agent</Text>
+        <Text>  • <Text color="#61afef">Diagnostics</Text> errors or warnings from the last build, test, or validation run</Text>
+      </>}
       <Text> </Text>
-      <Text dimColor>  <Text color="#61afef" bold>←/→</Text> cycle pages  <Text color="#61afef" bold>esc</Text> close</Text>
+      <Text dimColor><Text color="#61afef" bold>←/→</Text> cycle pages  <Text color="#61afef" bold>esc</Text> close</Text>
     </Box>
   );
 }
@@ -113,23 +172,66 @@ export function HelpPanel({ registry, sessionId, workspace, onClose }: { registr
 // ─── /tools ──────────────────────────────────────────────────────────────────
 
 export function ToolsPanel({ agents, onClose }: { agents: AgentRegistry; onClose: () => void }) {
-  useInput((_, key) => { if (key.escape) onClose(); });
+  const [cursor, setCursor] = useState(0);
+  const [detail, setDetail] = useState<string | null>(null);
   const agent = agents.active;
   const tools = TOOL_SCHEMAS.filter(t => agent.tools.includes(t.name));
+
+  useInput((_, key) => {
+    if (key.escape) { if (detail) setDetail(null); else onClose(); }
+    if (!detail) {
+      if (key.upArrow) setCursor(c => Math.max(0, c - 1));
+      if (key.downArrow) setCursor(c => Math.min(tools.length - 1, c + 1));
+      if (key.return && tools[cursor]) setDetail(tools[cursor].name);
+    }
+  });
+
+  if (detail) {
+    const t = tools.find(x => x.name === detail)!;
+    const approved = agent.allowedTools.includes(t.name);
+    return (
+      <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1}>
+        <Text bold>Tools <Text dimColor>›</Text> {t.name}</Text>
+        <Text color="#5a6aa8">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
+        <Text> </Text>
+        <Text><Text color="#61afef">{"Name:".padEnd(16)}</Text>{t.name}</Text>
+        <Text><Text color="#61afef">{"Description:".padEnd(16)}</Text>{t.description}</Text>
+        <Text><Text color="#61afef">{"Approval:".padEnd(16)}</Text>{approved ? <Text color="green">auto-approved</Text> : <Text color="yellow">requires confirmation</Text>}</Text>
+        <Text> </Text>
+        <Text bold>Parameters</Text>
+        <Text> </Text>
+        <Text dimColor>{"Name".padEnd(16)}{"Type".padEnd(10)}{"Required".padEnd(12)}{"Description"}</Text>
+        <Text dimColor color="#333333">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
+        {t.parameters.map(p => (
+          <Text key={p.name}><Text color="#61afef">{p.name.padEnd(16)}</Text><Text dimColor>{p.type.padEnd(10)}</Text>{p.required ? <Text color="yellow">{"required".padEnd(12)}</Text> : <Text dimColor>{"optional".padEnd(12)}</Text>}<Text dimColor>{p.description}</Text></Text>
+        ))}
+        <Text> </Text>
+        <Text dimColor><Text color="#61afef" bold>esc</Text> back</Text>
+      </Box>
+    );
+  }
+
   return (
     <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1}>
       <Text bold>Tools <Text dimColor>({agent.name})</Text></Text>
       <Text color="#5a6aa8">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
       <Text> </Text>
-      {tools.map((t) => (
-        <Text key={t.name}>
-          <Text color={agent.allowedTools.includes(t.name) ? "green" : "yellow"}>{agent.allowedTools.includes(t.name) ? "✓ " : "🔒"} </Text>
-          <Text color="#61afef">{t.name.padEnd(18)}</Text>
-          <Text dimColor>{t.description}</Text>
-        </Text>
-      ))}
+      <Table
+        columns={[
+          { key: "name", label: "Name", width: 20 },
+          { key: "approval", label: "Approval", width: 15 },
+          { key: "description", label: "Description" },
+        ]}
+        rows={tools.map(t => {
+          const approved = agent.allowedTools.includes(t.name);
+          return { name: t.name, approval: approved ? "auto" : "confirm", description: t.description, _prefix: approved ? "✓ " : "🔒", _prefixColor: approved ? "green" : "yellow" } as TableRow;
+        })}
+        cursor={cursor}
+      />
       <Text> </Text>
-      <Text dimColor>  <Text color="#61afef" bold>esc</Text> Close</Text>
+      <Text dimColor><Text color="green">✓</Text> auto-approved   <Text color="yellow">🔒</Text> requires confirmation</Text>
+      <Text> </Text>
+      <Text dimColor><Text color="#61afef" bold>↑↓</Text> Navigate  <Text color="#61afef" bold>enter</Text> Details  <Text color="#61afef" bold>esc</Text> Close</Text>
     </Box>
   );
 }
@@ -150,48 +252,39 @@ export function ModelPanel({ config, agents, onClose }: { config: VoidRiftConfig
     if (key.downArrow) setSelected((s) => Math.min(items.length - 1, s + 1));
     if (key.return) {
       const picked = items[selected];
-      if (picked === "auto") {
-        activeAgent.modelTier = "auto";
-      } else {
-        activeAgent.modelTier = picked as any;
-      }
+      activeAgent.modelTier = picked === "auto" ? "auto" : picked as any;
       onClose();
     }
+    if (ch === "d") { const picked = items[selected]; if (picked !== "auto") { config.tiers.dense = picked; } }
+    if (ch === "u") { const picked = items[selected]; if (picked !== "auto") { config.tiers.utility = picked; } }
+    if (ch === "f") { const picked = items[selected]; if (picked !== "auto") { config.tiers.flash = picked; } }
+  });
+
+  const columns = [
+    { key: "name", label: "Model", width: 22 },
+    { key: "tiers", label: "Tiers", width: 10 },
+    { key: "detail", label: "Provider / Model" },
+  ];
+
+  const rows = items.map(name => {
+    if (name === "auto") {
+      const label = currentTier === "auto" ? "✓ auto" : "auto";
+      return { name: label, tiers: "", detail: "model router decides per turn" };
+    }
+    const cfg = config.models[name];
+    const tierTags = Object.entries(config.tiers).filter(([, v]) => v === name).map(([k]) => k[0]).join(",");
+    const label = name === currentTier ? `✓ ${name}` : name;
+    return { name: label, tiers: tierTags ? `[${tierTags}]` : "", detail: `${cfg.protocol}/${cfg.model}` };
   });
 
   return (
     <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1}>
-      <Text bold>Models</Text>
-      <Text dimColor>Active agent: {activeAgent.name} (current: {currentTier})</Text>
+      <Text bold>Models <Text dimColor>({activeAgent.name} · {currentTier})</Text></Text>
       <Text color="#5a6aa8">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
       <Text> </Text>
-      {items.map((name, i) => {
-        const isActive = name === currentTier || (name === "auto" && currentTier === "auto");
-        if (name === "auto") {
-          return (
-            <Text key="auto">
-              <Text color={i === selected ? "#4ec9b0" : undefined}>{i === selected ? "▸ " : "  "}</Text>
-              <Text color="#c678dd">auto</Text>
-              <Text dimColor>  (model router decides per turn)</Text>
-              {isActive && <Text color="green"> ✓</Text>}
-            </Text>
-          );
-        }
-        const cfg = config.models[name];
-        const tiers = Object.entries(config.tiers).filter(([, v]) => v === name).map(([k]) => k[0]);
-        const tierTag = tiers.length ? ` [${tiers.join(",")}]` : "";
-        return (
-          <Text key={name}>
-            <Text color={i === selected ? "#4ec9b0" : undefined}>{i === selected ? "▸ " : "  "}</Text>
-            <Text color="#61afef">{name.padEnd(20)}</Text>
-            <Text dimColor>{cfg.protocol}/{cfg.model}</Text>
-            <Text color="green">{tierTag}</Text>
-            {isActive && <Text color="green"> ✓</Text>}
-          </Text>
-        );
-      })}
+      <Table columns={columns} rows={rows} cursor={selected} />
       <Text> </Text>
-      <Text dimColor>  <Text color="#61afef" bold>↑↓</Text> Navigate  <Text color="#61afef" bold>enter</Text> Select  <Text color="#61afef" bold>esc</Text> Close</Text>
+      <Text dimColor><Text color="#61afef" bold>↑↓</Text> Navigate  <Text color="#61afef" bold>enter</Text> Select  <Text color="#61afef" bold>d/u/f</Text> Assign tier  <Text color="#61afef" bold>esc</Text> Close</Text>
     </Box>
   );
 }
@@ -199,7 +292,7 @@ export function ModelPanel({ config, agents, onClose }: { config: VoidRiftConfig
 // ─── /plan ───────────────────────────────────────────────────────────────────
 
 export function PlanPanel({ context, onClose }: { context: ContextManager; onClose: () => void }) {
-  const plan = context.context.workspace.activePlan;
+  const plan = context.context.orbit.activePlan;
 
   useInput((ch, key) => {
     if (key.escape) onClose();
@@ -211,7 +304,7 @@ export function PlanPanel({ context, onClose }: { context: ContextManager; onClo
   });
 
   return (
-    <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1} paddingY={1}>
+    <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1}>
       <Text bold>Active Plan</Text>
       <Text color="#5a6aa8">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
       <Text> </Text>
@@ -221,6 +314,49 @@ export function PlanPanel({ context, onClose }: { context: ContextManager; onClo
       }
       <Text> </Text>
       <Text dimColor>  {plan ? <><Text color="#61afef" bold>d</Text> Delete plan  </> : null}<Text color="#61afef" bold>esc</Text> Close</Text>
+    </Box>
+  );
+}
+
+// ─── /diff (full panel) ──────────────────────────────────────────────────────
+
+export function DiffPanel({ workspaceRoot, onClose }: { workspaceRoot: string; onClose: () => void }) {
+  const [scroll, setScroll] = useState(0);
+  const lines = React.useMemo(() => {
+    try {
+      const raw = execSync("git diff --no-color", { cwd: workspaceRoot, encoding: "utf-8" });
+      return raw ? raw.split("\n") : [];
+    } catch { return []; }
+  }, []);
+
+  const termHeight = process.stdout.rows || 24;
+  const viewHeight = termHeight - 6; // border + title + divider + footer
+  const maxScroll = Math.max(0, lines.length - viewHeight);
+
+  useInput((_, key) => {
+    if (key.escape) onClose();
+    if (key.upArrow) setScroll(s => Math.max(0, s - 1));
+    if (key.downArrow) setScroll(s => Math.min(maxScroll, s + 1));
+    if (key.pageDown) setScroll(s => Math.min(maxScroll, s + viewHeight));
+    if (key.pageUp) setScroll(s => Math.max(0, s - viewHeight));
+  });
+
+  const visible = lines.slice(scroll, scroll + viewHeight);
+
+  return (
+    <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1}>
+      <Text bold>Diff <Text dimColor>({lines.length} lines)</Text></Text>
+      <Text color="#5a6aa8">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
+      <Text> </Text>
+      {lines.length === 0
+        ? <Text dimColor>No uncommitted changes.</Text>
+        : visible.map((line, i) => {
+            const color = line.startsWith("+") ? "green" : line.startsWith("-") ? "red" : line.startsWith("@@") ? "cyan" : undefined;
+            return <Text key={scroll + i} color={color}>{line}</Text>;
+          })
+      }
+      <Text> </Text>
+      <Text dimColor><Text color="#61afef" bold>↑↓</Text> Scroll  <Text color="#61afef" bold>pgup/pgdn</Text> Page  <Text color="#61afef" bold>esc</Text> Close</Text>
     </Box>
   );
 }
@@ -339,13 +475,13 @@ export function SkillsPanel({ skills, config, workspaceRoot, agents, onClose }: 
       {skillList.length === 0 ? (
         <Text dimColor>No skills found.</Text>
       ) : (<>
-        <Text dimColor>{"  "}{"Name".padEnd(25)}{"Location".padEnd(15)}</Text>
+        <Text dimColor>{"  "}{"Name".padEnd(20)}{"Location".padEnd(15)}</Text>
         <Text dimColor color="#333333">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
         {skillList.map((s, i) => (
           <Box key={`${s.location}-${s.name}`} flexDirection="column">
             <Text>
               <Text color={i === cursor ? "#4ec9b0" : undefined}>{i === cursor ? "▸ " : "  "}</Text>
-              <Text bold color={s.invalid ? "red" : "#61afef"}>{s.invalid ? "[X] " : ""}{s.name.slice(0, 20).padEnd(25)}</Text>
+              <Text bold color={s.invalid ? "red" : "#61afef"}>{s.invalid ? "[X] " : ""}{trunc(s.name, 18, 20)}</Text>
               <Text>{s.location.padEnd(15)}</Text>
             </Text>
             {i < skillList.length - 1 && <Text dimColor color="#333333">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>}
@@ -358,7 +494,7 @@ export function SkillsPanel({ skills, config, workspaceRoot, agents, onClose }: 
       <Text dimColor>  Workspace:  .voidrift/skills/</Text>
       <Text dimColor>  Global:     ~/.config/voidrift/skills/</Text>
       <Text> </Text>
-      <Text dimColor>  <Text color="#61afef" bold>↑↓</Text> Navigate  <Text color="#61afef" bold>enter</Text> Open  <Text color="#61afef" bold>esc</Text> Close  │  <Text color="#61afef" bold>c</Text> create  <Text color="#61afef" bold>r</Text> rename  <Text color="#61afef" bold>del</Text> delete</Text>
+      <Text dimColor><Text color="#61afef" bold>↑↓</Text> Navigate  <Text color="#61afef" bold>enter</Text> Open  <Text color="#61afef" bold>esc</Text> Close  │  <Text color="#61afef" bold>c</Text> create  <Text color="#61afef" bold>r</Text> rename  <Text color="#61afef" bold>del</Text> delete</Text>
       {message && <Text color="#4ec9b0">{message}</Text>}
       {createState?.step === "name" && <Text color="#61afef">  &gt; {createName}<Text color="#4ec9b0">█</Text></Text>}
       {renaming && <Text color="#61afef">  &gt; {renameName}<Text color="#4ec9b0">█</Text></Text>}
@@ -374,7 +510,7 @@ export function MemoryPanel({ memory, context, onClose }: { memory: MemoryRegist
   const [selected, setSelected] = useState(0);
   const [, forceUpdate] = useState(0);
 
-  const activeMemory = context.context.workspace.activeMemory;
+  const activeMemory = context.context.orbit.activeMemory;
   const isLoaded = (id: string) => {
     const body = memory.loadBody(id);
     return body ? activeMemory.includes(body) : false;
@@ -417,7 +553,7 @@ export function MemoryPanel({ memory, context, onClose }: { memory: MemoryRegist
         </Text>
       ))}
       <Text> </Text>
-      <Text dimColor>  <Text color="#61afef" bold>↑↓</Text> Navigate  <Text color="#61afef" bold>l</Text> Load  <Text color="#61afef" bold>u</Text> Unload  <Text color="#61afef" bold>esc</Text> Close</Text>
+      <Text dimColor><Text color="#61afef" bold>↑↓</Text> Navigate  <Text color="#61afef" bold>l</Text> Load  <Text color="#61afef" bold>u</Text> Unload  <Text color="#61afef" bold>esc</Text> Close</Text>
     </Box>
   );
 }
@@ -447,7 +583,7 @@ export function MCPPanel({ mcp, onClose }: { mcp: MCPEngine; onClose: () => void
         </Text>
       ))}
       <Text> </Text>
-      <Text dimColor>  <Text color="#61afef" bold>↑↓</Text> Navigate  <Text color="#61afef" bold>enter</Text> Actions  <Text color="#61afef" bold>esc</Text> Close</Text>
+      <Text dimColor><Text color="#61afef" bold>↑↓</Text> Navigate  <Text color="#61afef" bold>enter</Text> Actions  <Text color="#61afef" bold>esc</Text> Close</Text>
     </Box>
   );
 }
@@ -648,7 +784,7 @@ export function TemplatesPanel({ templates, config, workspaceRoot, onClose }: { 
             <Text dimColor>{item?.path.replace(process.env.HOME || "", "~").replace(workspaceRoot, ".") || ""}</Text>
           </Text>
           <Text> </Text>
-          <Text dimColor>  <Text color="#61afef" bold>enter</Text> Open  <Text color="#61afef" bold>esc</Text> Back</Text>
+          <Text dimColor><Text color="#61afef" bold>enter</Text> Open  <Text color="#61afef" bold>esc</Text> Back</Text>
           {message && <Text color="#4ec9b0">{message}</Text>}
         </Box>
       );
@@ -684,7 +820,7 @@ export function TemplatesPanel({ templates, config, workspaceRoot, onClose }: { 
           </Text>
         ))}
         <Text> </Text>
-        <Text dimColor>  <Text color="#61afef" bold>↑↓</Text> Navigate  <Text color="#61afef" bold>enter</Text> {detailCursor === 0 ? "View" : "Open/Create"}  <Text color="#61afef" bold>esc</Text> Back</Text>
+        <Text dimColor><Text color="#61afef" bold>↑↓</Text> Navigate  <Text color="#61afef" bold>enter</Text> {detailCursor === 0 ? "View" : "Open/Create"}  <Text color="#61afef" bold>esc</Text> Back</Text>
         {message && <Text color="#4ec9b0">{message}</Text>}
       </Box>
     );
@@ -710,34 +846,29 @@ export function TemplatesPanel({ templates, config, workspaceRoot, onClose }: { 
       ) : (<>
         {!isCustomPage ? (
           <>
-            <Text dimColor>{"  "}{"Label".padEnd(25)}{"Source".padEnd(25)}{"Override"}</Text>
-            <Text dimColor color="#333333">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
-            {systemSlots.map((slot, i) => {
-              const resolved = templates.resolveSlot(slot);
-              const override = resolved.source;
-              return (
-                <Box key={`${slot.sourcePlugin}-${slot.key}`} flexDirection="column">
-                  <Text>
-                    <Text color={i === cursor ? "#4ec9b0" : undefined}>{i === cursor ? "▸ " : "  "}</Text>
-                    <Text bold color="#61afef">{slot.label.slice(0, 20).padEnd(25)}</Text>
-                    <Text>{slot.sourcePlugin.slice(0, 20).padEnd(25)}</Text>
-                    <Text>{override}</Text>
-                  </Text>
-                  {i < systemSlots.length - 1 && <Text dimColor color="#333333">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>}
-                  {i === systemSlots.length - 1 && <Text dimColor color="#333333">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>}
-                </Box>
-              );
-            })}
+            <Table
+              columns={[
+                { key: "label", label: "Label", width: 20 },
+                { key: "source", label: "Source", width: 15 },
+                { key: "override", label: "Override", width: 15 },
+                { key: "description", label: "Description" },
+              ]}
+              rows={systemSlots.map(slot => {
+                const resolved = templates.resolveSlot(slot);
+                return { label: slot.label, source: slot.sourcePlugin, override: resolved.source, description: slot.description };
+              })}
+              cursor={cursor}
+            />
           </>
         ) : (
           <>
-            <Text dimColor>{"  "}{"Name".padEnd(25)}{"Location".padEnd(15)}</Text>
+            <Text dimColor>{"  "}{"Name".padEnd(20)}{"Location".padEnd(15)}</Text>
             <Text dimColor color="#333333">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
             {customTemplates.map((t, i) => (
               <Box key={t.key} flexDirection="column">
                 <Text>
                   <Text color={i === cursor ? "#4ec9b0" : undefined}>{i === cursor ? "▸ " : "  "}</Text>
-                  <Text bold color="#61afef">{t.key.slice(0, 20).padEnd(25)}</Text>
+                  <Text bold color="#61afef">{trunc(t.key, 18, 20)}</Text>
                   <Text>{t.location.padEnd(15)}</Text>
                 </Text>
                 {i < customTemplates.length - 1 && <Text dimColor color="#333333">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>}
@@ -752,7 +883,7 @@ export function TemplatesPanel({ templates, config, workspaceRoot, onClose }: { 
       <Text dimColor>  Workspace:  .voidrift/templates/</Text>
       <Text dimColor>  Global:     ~/.config/voidrift/templates/</Text>
       <Text> </Text>
-      <Text dimColor>  <Text color="#61afef" bold>←/→</Text> pages  <Text color="#61afef" bold>↑↓</Text> Navigate  <Text color="#61afef" bold>enter</Text> {isCustomPage ? "Open" : "Details"}  <Text color="#61afef" bold>esc</Text> Close{isCustomPage && <>  │  <Text color="#61afef" bold>c</Text> create  <Text color="#61afef" bold>r</Text> rename  <Text color="#61afef" bold>del</Text> delete</>}</Text>
+      <Text dimColor><Text color="#61afef" bold>←/→</Text> pages  <Text color="#61afef" bold>↑↓</Text> Navigate  <Text color="#61afef" bold>enter</Text> {isCustomPage ? "Open" : "Details"}  <Text color="#61afef" bold>esc</Text> Close{isCustomPage && <>  │  <Text color="#61afef" bold>c</Text> create  <Text color="#61afef" bold>r</Text> rename  <Text color="#61afef" bold>del</Text> delete</>}</Text>
       {message && <Text color="#4ec9b0">{message}</Text>}
       {createState?.step === "name" && <Text color="#61afef">  &gt; {createName}<Text color="#4ec9b0">█</Text></Text>}
       {renaming && <Text color="#61afef">  &gt; {renameName}<Text color="#4ec9b0">█</Text></Text>}
@@ -843,7 +974,7 @@ export function PromptsPanel({ prompts, config, workspaceRoot, onClose }: { prom
           </Text>
         ))}
         <Text> </Text>
-        <Text dimColor>  <Text color="#61afef" bold>↑↓</Text> Navigate  <Text color="#61afef" bold>enter</Text> {detailCursor === 0 ? "View" : "Open/Create"}  <Text color="#61afef" bold>del</Text> Delete  <Text color="#61afef" bold>esc</Text> Back</Text>
+        <Text dimColor><Text color="#61afef" bold>↑↓</Text> Navigate  <Text color="#61afef" bold>enter</Text> {detailCursor === 0 ? "View" : "Open/Create"}  <Text color="#61afef" bold>del</Text> Delete  <Text color="#61afef" bold>esc</Text> Back</Text>
         {message && <Text color="#4ec9b0">{message}</Text>}
       </Box>
     );
@@ -858,31 +989,26 @@ export function PromptsPanel({ prompts, config, workspaceRoot, onClose }: { prom
       {entries.length === 0 ? (
         <Text dimColor>No prompts registered.</Text>
       ) : (<>
-        <Text dimColor>{"  "}{"Label".padEnd(25)}{"Source".padEnd(25)}{"Override"}</Text>
-        <Text dimColor color="#333333">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
-        {entries.map((entry, i) => {
-          const resolved = prompts.resolve(entry.key);
-          const override = resolved?.source || "default";
-          return (
-            <Box key={entry.key} flexDirection="column">
-              <Text>
-                <Text color={i === cursor ? "#4ec9b0" : undefined}>{i === cursor ? "▸ " : "  "}</Text>
-                <Text bold color="#61afef">{entry.label.slice(0, 20).padEnd(25)}</Text>
-                <Text>{entry.sourcePlugin.slice(0, 20).padEnd(25)}</Text>
-                <Text>{override}</Text>
-              </Text>
-              {i < entries.length - 1 && <Text dimColor color="#333333">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>}
-              {i === entries.length - 1 && <Text dimColor color="#333333">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>}
-            </Box>
-          );
-        })}
+        <Table
+          columns={[
+            { key: "label", label: "Label", width: 20 },
+            { key: "source", label: "Source", width: 15 },
+            { key: "override", label: "Override", width: 15 },
+            { key: "description", label: "Description" },
+          ]}
+          rows={entries.map(entry => {
+            const resolved = prompts.resolve(entry.key);
+            return { label: entry.label, source: entry.sourcePlugin, override: resolved?.source || "default", description: entry.description || "" };
+          })}
+          cursor={cursor}
+        />
       </>)}
       <Text> </Text>
       <Text bold>Locations</Text>
       <Text dimColor>  Workspace:  .voidrift/prompts/</Text>
       <Text dimColor>  Global:     ~/.config/voidrift/prompts/</Text>
       <Text> </Text>
-      <Text dimColor>  <Text color="#61afef" bold>↑↓</Text> Navigate  <Text color="#61afef" bold>enter</Text> Details  <Text color="#61afef" bold>esc</Text> Close</Text>
+      <Text dimColor><Text color="#61afef" bold>↑↓</Text> Navigate  <Text color="#61afef" bold>enter</Text> Details  <Text color="#61afef" bold>esc</Text> Close</Text>
       {message && <Text color="#4ec9b0">{message}</Text>}
     </Box>
   );
@@ -911,32 +1037,46 @@ export function ContextPanel({
   const totalLimit = b.limit;
 
   const messages = context.getMessages();
-  const focusedFiles = context.context.workspace.focusedFiles;
-  const activeSkills = context.context.workspace.activeSkills;
+  const focusedFiles = context.context.drift.focusedFiles;
+  const activeSkills = context.context.orbit.activeSkills;
+  const boundSkills = context.context.agent.boundSkills;
+  const skillIndex = context.context.agent.skillDiscoveryIndex;
+  const memoryIndex = context.context.agent.activeMemoryIndex;
+  const activeMemory = context.context.orbit.activeMemory;
+  const tools = context.context.agent.activeTools;
 
   // Token estimates
-  const promptTokens = Math.ceil(context.context.governance.activePersona.length / 4);
+  const personaTokens = Math.ceil(context.context.agent.activePersona.length / 4);
   const toolsTokens = Math.ceil(JSON.stringify(TOOL_SCHEMAS).length / 4);
-  const skillsTokens = activeSkills.reduce((acc, s) => acc + Math.ceil(s.length / 4), 0);
+  const boundSkillsTokens = boundSkills.reduce((acc, s) => acc + Math.ceil(s.length / 4), 0);
+  const skillIndexTokens = skillIndex.reduce((acc, s) => acc + Math.ceil(s.length / 4), 0);
+  const memoryIndexTokens = memoryIndex.reduce((acc, m) => acc + Math.ceil((m.title + m.summary).length / 4), 0);
+
+  const activeSkillsTokens = activeSkills.reduce((acc, s) => acc + Math.ceil(s.length / 4), 0);
+  const memoryTokens = activeMemory.reduce((acc, m) => acc + Math.ceil(m.length / 4), 0);
+  const planTokens = context.context.orbit.activePlan ? Math.ceil(context.context.orbit.activePlan.length / 4) : 0;
+
+  const codeMapTokens = Math.ceil(context.context.orbit.workspaceCodeMap.length / 4);
   const filesTokens = focusedFiles.reduce((acc, f) => acc + Math.ceil(f.summary.length / 4), 0);
-  const codeMapTokens = Math.ceil(context.context.workspace.workspaceCodeMap.length / 4);
-  const memoryTokens = context.context.workspace.activeMemory.reduce((acc, m) => acc + Math.ceil(m.length / 4), 0);
-  const planTokens = context.context.workspace.activePlan ? Math.ceil(context.context.workspace.activePlan.length / 4) : 0;
+  const gitTokens = context.context.drift.gitStatus ? Math.ceil(context.context.drift.gitStatus.length / 4) : 0;
+
   const msgTokens = messages.filter(m => m.role === "user" || m.role === "assistant").reduce((acc, m) => acc + Math.ceil(m.content.length / 4), 0);
   const toolResultTokens = messages.filter(m => m.role === "tool").reduce((acc, m) => acc + Math.ceil(m.content.length / 4), 0);
-  const diagTokens = context.context.work.diagnostics ? Math.ceil(context.context.work.diagnostics.length / 4) : 0;
+  const diagTokens = context.context.void.diagnostics ? Math.ceil(context.context.void.diagnostics.length / 4) : 0;
 
-  const govTotal = promptTokens + toolsTokens + skillsTokens;
-  const wsTotal = filesTokens + codeMapTokens + memoryTokens + planTokens;
-  const workTotal = msgTokens + toolResultTokens + diagTokens;
-  const totalUsed = govTotal + wsTotal + workTotal;
+  const agentTotal = personaTokens + toolsTokens + boundSkillsTokens + skillIndexTokens + memoryIndexTokens;
+  const orbitTotal = activeSkillsTokens + memoryTokens + planTokens;
+  const driftTotal = codeMapTokens + filesTokens + gitTokens;
+  const voidTotal = msgTokens + toolResultTokens + diagTokens;
+  const totalUsed = agentTotal + orbitTotal + driftTotal + voidTotal;
   const freeTokens = Math.max(0, totalLimit - totalUsed);
 
   const fmt = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`;
-  const pct = (n: number) => ((n / totalLimit) * 100).toFixed(1);
+  const pct = (n: number) => totalLimit > 0 ? ((n / totalLimit) * 100).toFixed(1) : "0";
 
-  // Grid: each partition's grid shows fill relative to totalLimit
-  // blocks filled = (partitionTokens / totalLimit) * totalBlocks
+  const turnCount = messages.filter(m => m.role === "user").length;
+
+  // Grid
   const renderGrid = (rows: number, items: Array<{ tokens: number; char: string; color: string }>) => {
     const totalBlocks = rows * 30;
     const blocks: Array<{ char: string; color: string }> = [];
@@ -966,63 +1106,81 @@ export function ContextPanel({
       <Text bold>Context</Text>
       <Text color="#5a6aa8">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
       <Text> </Text>
-      <Text bold>Governance <Text dimColor>({fmt(govTotal)} · {pct(govTotal)}%)</Text></Text>
+      <Text bold>Agent <Text dimColor>({fmt(agentTotal)} · {pct(agentTotal)}%) locked to active agent</Text></Text>
       <Box flexDirection="row">
         <Box flexDirection="column" marginRight={4}>
           {renderGrid(4, [
-            { tokens: promptTokens, char: "⚙", color: "#61afef" },
+            { tokens: personaTokens, char: "⚙", color: "#61afef" },
             { tokens: toolsTokens, char: "●", color: "#e5c07b" },
-            { tokens: skillsTokens, char: "◎", color: "#c678dd" },
+            { tokens: boundSkillsTokens, char: "◎", color: "#c678dd" },
+            { tokens: skillIndexTokens, char: "▪", color: "#56b6c2" },
+            { tokens: memoryIndexTokens, char: "◆", color: "#d19a66" },
           ])}
         </Box>
         <Box flexDirection="column">
-          <Text><Text color="#61afef">⚙</Text> Prompt: {fmt(promptTokens)}</Text>
-          <Text><Text color="#e5c07b">●</Text> Tools: {fmt(toolsTokens)}</Text>
-          <Text><Text color="#c678dd">◎</Text> Skills: {fmt(skillsTokens)}</Text>
+          <Text><Text color="#61afef">⚙</Text> Persona: {fmt(personaTokens)}</Text>
+          <Text><Text color="#e5c07b">●</Text> Tool Schemas: {fmt(toolsTokens)} <Text dimColor>({tools.length} tools)</Text></Text>
+          <Text><Text color="#c678dd">◎</Text> Bound Skills: {fmt(boundSkillsTokens)} <Text dimColor>({boundSkills.length} loaded)</Text></Text>
+          <Text><Text color="#56b6c2">▪</Text> Skill Index: {fmt(skillIndexTokens)} <Text dimColor>({skillIndex.length} available)</Text></Text>
+          <Text><Text color="#d19a66">◆</Text> Memory Index: {fmt(memoryIndexTokens)} <Text dimColor>({memoryIndex.length} discovered)</Text></Text>
         </Box>
       </Box>
       <Text> </Text>
-      <Text bold>Workspace <Text dimColor>({fmt(wsTotal)} · {pct(wsTotal)}%)</Text></Text>
+      <Text bold>Orbit <Text dimColor>({fmt(orbitTotal)} · {pct(orbitTotal)}%) stable project landscape</Text></Text>
       <Box flexDirection="row">
         <Box flexDirection="column" marginRight={4}>
           {renderGrid(4, [
-            { tokens: filesTokens, char: "◎", color: "cyan" },
-            { tokens: codeMapTokens, char: "●", color: "#98c379" },
+            { tokens: activeSkillsTokens, char: "◎", color: "#c678dd" },
             { tokens: memoryTokens, char: "▪", color: "#e5c07b" },
             { tokens: planTokens, char: "◆", color: "#61afef" },
           ])}
         </Box>
         <Box flexDirection="column">
-          <Text><Text color="cyan">◎</Text> Files: {fmt(filesTokens)}</Text>
-          <Text><Text color="#98c379">●</Text> Code Map: {fmt(codeMapTokens)}</Text>
-          <Text><Text color="#e5c07b">▪</Text> Memory: {fmt(memoryTokens)}</Text>
-          <Text><Text color="#61afef">◆</Text> Plan: {fmt(planTokens)}</Text>
+          <Text><Text color="#c678dd">◎</Text> Active Skills: {fmt(activeSkillsTokens)} <Text dimColor>({activeSkills.length} triggered)</Text></Text>
+          <Text><Text color="#e5c07b">▪</Text> Memory: {fmt(memoryTokens)} <Text dimColor>({activeMemory.length} loaded)</Text></Text>
+          <Text><Text color="#61afef">◆</Text> Plan: {fmt(planTokens)} <Text dimColor>{context.context.orbit.activePlan ? "active" : "none"}</Text></Text>
         </Box>
       </Box>
       <Text> </Text>
-      <Text bold>Work <Text dimColor>({fmt(workTotal)} · {pct(workTotal)}%)</Text></Text>
+      <Text bold>Drift <Text dimColor>({fmt(driftTotal)} · {pct(driftTotal)}%) active working set</Text></Text>
       <Box flexDirection="row">
         <Box flexDirection="column" marginRight={4}>
-          {renderGrid(12, [
+          {renderGrid(4, [
+            { tokens: codeMapTokens, char: "●", color: "#98c379" },
+            { tokens: filesTokens, char: "◎", color: "cyan" },
+            { tokens: gitTokens, char: "▪", color: "#56b6c2" },
+          ])}
+        </Box>
+        <Box flexDirection="column">
+          <Text><Text color="#98c379">●</Text> File Map: {fmt(codeMapTokens)}</Text>
+          <Text><Text color="cyan">◎</Text> Active Files: {fmt(filesTokens)} <Text dimColor>({focusedFiles.length}/3 slots)</Text></Text>
+          {focusedFiles.map((f, i) => <Text key={i} dimColor>     {f.path} <Text color="gray">({f.totalLines}L{f.readRanges.length ? `, ${f.readRanges.length} range${f.readRanges.length > 1 ? "s" : ""} read` : ""})</Text></Text>)}
+          <Text><Text color="#56b6c2">▪</Text> Workspace Changes: {fmt(gitTokens)} <Text dimColor>{context.context.drift.gitStatus ? "modified" : "clean"}</Text></Text>
+        </Box>
+      </Box>
+      <Text> </Text>
+      <Text bold>Void <Text dimColor>({fmt(voidTotal)} · {pct(voidTotal)}%) transient conversation</Text></Text>
+      <Box flexDirection="row">
+        <Box flexDirection="column" marginRight={4}>
+          {renderGrid(8, [
             { tokens: msgTokens, char: "◎", color: "#61afef" },
             { tokens: toolResultTokens, char: "●", color: "#e5c07b" },
             { tokens: diagTokens, char: "✗", color: "red" },
           ])}
         </Box>
         <Box flexDirection="column">
-          <Text><Text color="#61afef">◎</Text> Messages: {fmt(msgTokens)}</Text>
+          <Text><Text color="#61afef">◎</Text> Messages: {fmt(msgTokens)} <Text dimColor>({turnCount} turn{turnCount !== 1 ? "s" : ""})</Text></Text>
           <Text><Text color="#e5c07b">●</Text> Tool Results: {fmt(toolResultTokens)}</Text>
-          <Text><Text color="red">✗</Text> Diagnostics: {fmt(diagTokens)}</Text>
+          <Text><Text color="red">✗</Text> Diagnostics: {fmt(diagTokens)} <Text dimColor>{context.context.void.diagnostics ? "active" : "none"}</Text></Text>
         </Box>
       </Box>
       <Text> </Text>
       <Text bold>{modelName} · {fmt(totalUsed)}/{fmt(totalLimit)} ({pct(totalUsed)}%) <Text dimColor>Free: {fmt(freeTokens)}</Text></Text>
       <Text> </Text>
-      <Text dimColor>  <Text color="#61afef" bold>esc</Text> Close</Text>
+      <Text dimColor><Text color="#61afef" bold>esc</Text> Close</Text>
     </Box>
   );
 }
-
 // ─── /tasks ──────────────────────────────────────────────────────────────────
 
 export function TasksPanel({
@@ -1051,7 +1209,7 @@ export function TasksPanel({
         ))
       )}
       <Text> </Text>
-      <Text dimColor>  <Text color="#61afef" bold>esc</Text> Close</Text>
+      <Text dimColor><Text color="#61afef" bold>esc</Text> Close</Text>
     </Box>
   );
 }
@@ -1114,20 +1272,25 @@ export function ResumePanel({ workspaceRoot, currentSessionId, onResume, onClose
       <Text> </Text>
       {sessions.length === 0
         ? <Text dimColor>No saved conversations found.</Text>
-        : sessions.map((s, i) => (
-          <Box key={s.id} flexDirection="column">
-            <Text>
-              <Text color={i === selected ? "#4ec9b0" : undefined}>{i === selected ? "▸ " : "  "}</Text>
-              {s.id === currentSessionId && <Text color="green">[CURRENT] </Text>}
-              <Text color="#61afef">{s.id.slice(0, 8)}</Text>
-              <Text dimColor>  {s.turnCount} turns · {relativeTime(s.lastActivity)}</Text>
-            </Text>
-            {s.lastMessage && <Text dimColor>    {s.lastMessage}{s.lastMessage.length >= 60 ? "…" : ""}</Text>}
-          </Box>
-        ))
+        : <Table
+            columns={[
+              { key: "id", label: "Session", width: 12 },
+              { key: "turns", label: "Turns", width: 8 },
+              { key: "activity", label: "Activity", width: 12 },
+              { key: "message", label: "Last Message" },
+            ]}
+            rows={sessions.map(s => ({
+              id: (s.id === currentSessionId ? "● " : "") + s.id.slice(0, 8),
+              turns: String(s.turnCount),
+              activity: relativeTime(s.lastActivity),
+              message: s.lastMessage,
+            }))}
+            cursor={selected}
+            dividers={false}
+          />
       }
       <Text> </Text>
-      <Text dimColor>  <Text color="#61afef" bold>↑↓</Text> Navigate  <Text color="#61afef" bold>enter</Text> Resume  <Text color="#61afef" bold>esc</Text> Close</Text>
+      <Text dimColor><Text color="#61afef" bold>↑↓</Text> Navigate  <Text color="#61afef" bold>enter</Text> Resume  <Text color="#61afef" bold>esc</Text> Close</Text>
     </Box>
   );
 }
@@ -1147,117 +1310,20 @@ export function RewindPanel({ turns, onRewind, onClose }: { turns: number; onRew
       <Text bold>Rewind to Turn</Text>
       <Text color="#5a6aa8">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
       <Text> </Text>
-      {Array.from({ length: turns }, (_, i) => i + 1).reverse().map((t) => (
-        <Text key={t}><Text color={t === selected ? "#4ec9b0" : undefined}>{t === selected ? "▸ " : "  "}Turn {t}</Text></Text>
-      ))}
+      <Table
+        columns={[
+          { key: "turn", label: "Turn", width: 10 },
+          { key: "description", label: "Description" },
+        ]}
+        rows={Array.from({ length: turns }, (_, i) => i + 1).reverse().map(t => ({
+          turn: `Turn ${t}`,
+          description: t === turns ? "current" : "",
+        }))}
+        cursor={turns - selected}
+        dividers={false}
+      />
       <Text> </Text>
-      <Text dimColor>  <Text color="#61afef" bold>↑↓</Text> Navigate  <Text color="#61afef" bold>enter</Text> Rollback  <Text color="#61afef" bold>esc</Text> Close</Text>
-    </Box>
-  );
-}
-
-// ─── /ideas ──────────────────────────────────────────────────────────────────
-
-export function IdeasPanel({ workspaceRoot, onClose }: { workspaceRoot: string; onClose: () => void }) {
-  const [selected, setSelected] = useState(0);
-  const [ideas, setIdeas] = useState<Array<{ id: string; title: string; status: string }>>([]);
-
-  React.useEffect(() => {
-    const ideasDir = join(workspaceRoot, ".voidrift", "ideas");
-    if (!existsSync(ideasDir)) return;
-    try {
-      const files = readdirSync(ideasDir).filter((f) => f.startsWith("IDEA-") && f.endsWith(".md"));
-      const parsed = files.map((f) => {
-        const content = readFileSync(join(ideasDir, f), "utf-8");
-        const titleMatch = content.match(/^#\s+(.+)$/m);
-        const statusMatch = content.match(/status:\s*(\S+)/);
-        const idMatch = f.match(/^(IDEA-\d+)/);
-        return {
-          id: idMatch ? idMatch[1] : f.replace(".md", ""),
-          title: titleMatch ? titleMatch[1] : "Untitled Idea",
-          status: statusMatch ? statusMatch[1] : "draft",
-        };
-      });
-      setIdeas(parsed);
-    } catch {}
-  }, [workspaceRoot]);
-
-  useInput((_, key) => {
-    if (key.escape) onClose();
-    if (key.upArrow) setSelected((s) => Math.max(0, s - 1));
-    if (key.downArrow) setSelected((s) => Math.min(ideas.length - 1, s + 1));
-  });
-
-  return (
-    <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1}>
-      <Text bold>Ideas</Text>
-      <Text color="#5a6aa8">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
-      <Text> </Text>
-      {ideas.length === 0 ? (
-        <Text dimColor>No ideas found. Use <Text color="#61afef">n</Text> to create one.</Text>
-      ) : (
-        ideas.map((idea, i) => (
-          <Text key={idea.id}>
-            <Text color={i === selected ? "#4ec9b0" : undefined}>{i === selected ? "▸ " : "  "}</Text>
-            <Text color="#61afef" bold>[{idea.id}]</Text> <Text color="green">({idea.status})</Text> {idea.title}
-          </Text>
-        ))
-      )}
-      <Text> </Text>
-      <Text dimColor>  <Text color="#61afef" bold>↑↓</Text> Navigate  <Text color="#61afef" bold>n</Text> New  <Text color="#61afef" bold>d</Text> Delete  <Text color="#61afef" bold>esc</Text> Close</Text>
-    </Box>
-  );
-}
-
-// ─── /changes ────────────────────────────────────────────────────────────────
-
-export function ChangesPanel({ workspaceRoot, onClose }: { workspaceRoot: string; onClose: () => void }) {
-  const [selected, setSelected] = useState(0);
-  const [changes, setChanges] = useState<Array<{ id: string; title: string; status: string }>>([]);
-
-  React.useEffect(() => {
-    const changesDir = join(workspaceRoot, ".voidrift", "changes");
-    if (!existsSync(changesDir)) return;
-    try {
-      const files = readdirSync(changesDir).filter((f) => f.startsWith("CR-") && f.endsWith(".md"));
-      const parsed = files.map((f) => {
-        const content = readFileSync(join(changesDir, f), "utf-8");
-        const titleMatch = content.match(/^#\s+(.+)$/m);
-        const statusMatch = content.match(/status:\s*(\S+)/);
-        const idMatch = f.match(/^(CR-\d+)/);
-        return {
-          id: idMatch ? idMatch[1] : f.replace(".md", ""),
-          title: titleMatch ? titleMatch[1] : "Untitled Change Request",
-          status: statusMatch ? statusMatch[1] : "draft",
-        };
-      });
-      setChanges(parsed);
-    } catch {}
-  }, [workspaceRoot]);
-
-  useInput((_, key) => {
-    if (key.escape) onClose();
-    if (key.upArrow) setSelected((s) => Math.max(0, s - 1));
-    if (key.downArrow) setSelected((s) => Math.min(changes.length - 1, s + 1));
-  });
-
-  return (
-    <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1}>
-      <Text bold>Change Requests</Text>
-      <Text color="#5a6aa8">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
-      <Text> </Text>
-      {changes.length === 0 ? (
-        <Text dimColor>No change requests found.</Text>
-      ) : (
-        changes.map((cr, i) => (
-          <Text key={cr.id}>
-            <Text color={i === selected ? "#4ec9b0" : undefined}>{i === selected ? "▸ " : "  "}</Text>
-            <Text color="#61afef" bold>[{cr.id}]</Text> <Text color="green">({cr.status})</Text> {cr.title}
-          </Text>
-        ))
-      )}
-      <Text> </Text>
-      <Text dimColor>  <Text color="#61afef" bold>↑↓</Text> Navigate  <Text color="#61afef" bold>esc</Text> Close</Text>
+      <Text dimColor><Text color="#61afef" bold>↑↓</Text> Navigate  <Text color="#61afef" bold>enter</Text> Rollback  <Text color="#61afef" bold>esc</Text> Close</Text>
     </Box>
   );
 }
@@ -1268,11 +1334,13 @@ export function AgentsPanel({
   agents,
   config,
   workspaceRoot,
+  bus,
   onClose,
 }: {
   agents: AgentRegistry;
   config: VoidRiftConfig;
   workspaceRoot: string;
+  bus: EventBus;
   onClose: () => void;
 }) {
   const [page, setPage] = useState(0);
@@ -1286,7 +1354,14 @@ export function AgentsPanel({
   const [createName, setCreateName] = useState("");
   const [renaming, setRenaming] = useState(false);
   const [renameName, setRenameName] = useState("");
-  const pages = ["system interactive", "system task", "custom interactive", "custom task"];
+  const [, refresh] = useState(0);
+  const pages = ["core interactive", "core task", "custom interactive", "custom task"];
+
+  useEffect(() => {
+    return bus.subscribe("RESOURCE_CHANGED" as any, (e: any) => {
+      if (e.payload.type === "agent") refresh(n => n + 1);
+    });
+  }, [bus]);
 
   const activeId = agents.active.id;
 
@@ -1369,7 +1444,8 @@ export function AgentsPanel({
           setCreateState(null);
           setCreateName("");
           if (config.editor) {
-            openInEditor(path, config.editor);
+            const result = openInEditor(path, config.editor);
+            agents.discover(workspaceRoot);
             setMessage(`Created ${createName} — editing config`);
           } else {
             setMessage(`Created: ${createName} (set "editor" in config)`);
@@ -1573,7 +1649,7 @@ export function AgentsPanel({
 
     return (
       <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1}>
-        <Text bold>Agent Details: {detail}</Text>
+        <Text bold>Agents <Text dimColor>[{pages[page]}]</Text> <Text dimColor>›</Text> {detail}</Text>
         <Text dimColor>{agent?.description}</Text>
         <Text color="#5a6aa8">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
       <Text> </Text>
@@ -1595,7 +1671,7 @@ export function AgentsPanel({
           {allRows.filter(r => r.section === "prompt").map(renderRow)}
         </>)}
         <Text> </Text>
-        <Text dimColor>  <Text color="#61afef" bold>↑↓</Text> Navigate  <Text color="#61afef" bold>enter</Text> {editableRows[detailCursor]?.level === "Default" ? "View" : "Open/Create"}  <Text color="#61afef" bold>esc</Text> Back{isCustomAgent && <>  │  <Text color="#61afef" bold>r</Text> Reset  <Text color="#61afef" bold>del</Text> Delete</>}{!isCustomAgent && <>  │  <Text color="#61afef" bold>del</Text> Delete</>}</Text>
+        <Text dimColor><Text color="#61afef" bold>↑↓</Text> Navigate  <Text color="#61afef" bold>enter</Text> {editableRows[detailCursor]?.level === "Default" ? "View" : "Open/Create"}  <Text color="#61afef" bold>esc</Text> Back{isCustomAgent && <>  │  <Text color="#61afef" bold>r</Text> Reset  <Text color="#61afef" bold>del</Text> Delete</>}{!isCustomAgent && <>  │  <Text color="#61afef" bold>del</Text> Delete</>}</Text>
         {message && <Text color="#4ec9b0">{message}</Text>}
       </Box>
     );
@@ -1619,40 +1695,37 @@ export function AgentsPanel({
       {list.length === 0 ? (
         <Text dimColor>No {pages[page]} agents registered.</Text>
       ) : (<>
-        <Text dimColor>{"  "}{"Name".padEnd(25)}{!isCustomPage ? "Source".padEnd(15) : "Location".padEnd(15)}{isCustomPage ? "Active".padEnd(10) : ""}{!isCustomPage ? "Override (config/prompt)" : ""}</Text>
-        <Text dimColor color="#333333">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
-        {list.map((a, i) => {
-          const globalDir = join(process.env.HOME || "", ".config", "voidrift", "agents", a.id);
-          const wsDir = join(workspaceRoot, ".voidrift", "agents", a.id);
-          const configOverride = existsSync(join(wsDir, "agent.json")) ? "workspace" : existsSync(join(globalDir, "agent.json")) ? "global" : "default";
-          const promptOverride = existsSync(join(wsDir, "prompt.md")) ? "workspace" : existsSync(join(globalDir, "prompt.md")) ? "global" : "default";
-          return (
-            <Box key={a.id} flexDirection="column">
-              <Text>
-                <Text color={i === selected ? "#4ec9b0" : undefined}>{i === selected ? "▸ " : "  "}</Text>
-                <Text bold color="#61afef">{a.name.slice(0, 20).padEnd(25)}</Text>
-                <Text>{(isCustomPage
-                  ? (existsSync(join(workspaceRoot, ".voidrift", "agents", a.id)) ? "workspace" : "global")
-                  : (a.source || "core")).slice(0, 12).padEnd(15)}</Text>
-                {isCustomPage && <Text color={a.active !== false ? "green" : "red"}>{(a.active !== false ? "yes" : "no").padEnd(10)}</Text>}
-                {!isCustomPage && <Text>{configOverride} / {promptOverride}</Text>}
-              </Text>
-              {i < list.length - 1 && <Text dimColor color="#333333">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>}
-              {i === list.length - 1 && <Text dimColor color="#333333">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>}
-            </Box>
-          );
-        })}
+        <Table
+          columns={[
+            { key: "name", label: "Name", width: 20 },
+            { key: "source", label: isCustomPage ? "Location" : "Source", width: 15 },
+            { key: "status", label: isCustomPage ? "Active" : "Override", width: 15 },
+            { key: "description", label: "Description" },
+          ]}
+          rows={list.map(a => {
+            const globalDir = join(process.env.HOME || "", ".config", "voidrift", "agents", a.id);
+            const wsDir = join(workspaceRoot, ".voidrift", "agents", a.id);
+            const configOverride = existsSync(join(wsDir, "agent.json")) ? "workspace" : existsSync(join(globalDir, "agent.json")) ? "global" : "default";
+            const promptOverride = existsSync(join(wsDir, "prompt.md")) ? "workspace" : existsSync(join(globalDir, "prompt.md")) ? "global" : "default";
+            return {
+              name: a.name,
+              source: isCustomPage ? (existsSync(join(workspaceRoot, ".voidrift", "agents", a.id)) ? "workspace" : "global") : (a.source || "core"),
+              status: isCustomPage ? (a.active !== false ? "yes" : "no") : configOverride + "/" + promptOverride,
+              description: a.description || "",
+            };
+          })}
+          cursor={selected}
+        />
       </>)}
       <Text> </Text>
       <Text bold>Locations</Text>
       <Text dimColor>  Workspace:  .voidrift/agents/</Text>
       <Text dimColor>  Global:     ~/.config/voidrift/agents/</Text>
       <Text> </Text>
-      <Text dimColor>  <Text color="#61afef" bold>←/→</Text> pages  <Text color="#61afef" bold>↑↓</Text> Navigate  <Text color="#61afef" bold>enter</Text> Details  <Text color="#61afef" bold>esc</Text> Close{isCustomPage && <>  │  <Text color="#61afef" bold>a</Text> toggle active  <Text color="#61afef" bold>c</Text> create  <Text color="#61afef" bold>r</Text> rename  <Text color="#61afef" bold>del</Text> delete</>}</Text>
+      <Text dimColor><Text color="#61afef" bold>←/→</Text> pages  <Text color="#61afef" bold>↑↓</Text> Navigate  <Text color="#61afef" bold>enter</Text> Details  <Text color="#61afef" bold>esc</Text> Close{isCustomPage && <>  │  <Text color="#61afef" bold>a</Text> toggle active  <Text color="#61afef" bold>c</Text> create  <Text color="#61afef" bold>r</Text> rename  <Text color="#61afef" bold>del</Text> delete</>}</Text>
       {message && <Text color="#4ec9b0">{message}</Text>}
       {createState?.step === "name" && <Text color="#61afef">  &gt; {createName}<Text color="#4ec9b0">█</Text></Text>}
       {renaming && <Text color="#61afef">  &gt; {renameName}<Text color="#4ec9b0">█</Text></Text>}
-      <Text> </Text>
     </Box>
   );
 }
@@ -1668,7 +1741,7 @@ export function GenericPanel({ name, onClose }: { name: string; onClose: () => v
       <Text> </Text>
       <Text dimColor>/{name}</Text>
       <Text> </Text>
-      <Text dimColor>  <Text color="#61afef" bold>esc</Text> Close</Text>
+      <Text dimColor><Text color="#61afef" bold>esc</Text> Close</Text>
     </Box>
   );
 }
@@ -1678,4 +1751,189 @@ function fmtMs(ms: number): string {
   const m = Math.floor(s / 60);
   if (m > 0) return `${m}m ${s % 60}s`;
   return `${s}s`;
+}
+
+// ─── /plugins ────────────────────────────────────────────────────────────────
+
+export function PluginsPanel({
+  plugins,
+  registry,
+  agents,
+  workspaceRoot,
+  onClose,
+}: {
+  plugins: PluginRegistry;
+  registry: CoreRegistry;
+  agents: AgentRegistry;
+  workspaceRoot: string;
+  onClose: () => void;
+}) {
+  const [cursor, setCursor] = useState(0);
+  const [detail, setDetail] = useState<string | null>(null);
+  const [page, setPage] = useState(0);
+  const [message, setMessage] = useState<string | null>(null);
+  const [, forceRender] = useState(0);
+
+  const allPlugins = plugins.list();
+  const globalConfigPath = join(process.env.HOME || "", ".config", "voidrift", "config.json");
+  const wsConfigPath = join(workspaceRoot, ".voidrift", "config.json");
+
+  // Determine scope for each plugin
+  const getScope = (id: string): "global" | "workspace" | "available" => {
+    let inGlobal = false, inWorkspace = false;
+    try { const g = JSON.parse(readFileSync(globalConfigPath, "utf-8")); inGlobal = (g.plugins || []).includes(id); } catch {}
+    try { const w = JSON.parse(readFileSync(wsConfigPath, "utf-8")); inWorkspace = (w.plugins || []).includes(id); } catch {}
+    if (inWorkspace) return "workspace";
+    if (inGlobal) return "global";
+    return "available";
+  };
+
+  const addToConfig = (id: string, scope: "global" | "workspace") => {
+    const targetPath = scope === "global" ? globalConfigPath : wsConfigPath;
+    const otherPath = scope === "global" ? wsConfigPath : globalConfigPath;
+    // Add to target
+    let config: any = {};
+    if (existsSync(targetPath)) { try { config = JSON.parse(readFileSync(targetPath, "utf-8")); } catch {} }
+    if (!Array.isArray(config.plugins)) config.plugins = [];
+    if (!config.plugins.includes(id)) config.plugins.push(id);
+    mkdirSync(dirname(targetPath), { recursive: true });
+    writeFileSync(targetPath, JSON.stringify(config, null, 2));
+    // Remove from the other
+    if (existsSync(otherPath)) {
+      try {
+        const other = JSON.parse(readFileSync(otherPath, "utf-8"));
+        if (Array.isArray(other.plugins) && other.plugins.includes(id)) {
+          other.plugins = other.plugins.filter((p: string) => p !== id);
+          writeFileSync(otherPath, JSON.stringify(other, null, 2));
+        }
+      } catch {}
+    }
+    setMessage(`Enabled ${id} (${scope}) — restart to apply`);
+    forceRender(n => n + 1);
+  };
+
+  const removeFromConfig = (id: string) => {
+    for (const path of [globalConfigPath, wsConfigPath]) {
+      if (!existsSync(path)) continue;
+      try {
+        const config = JSON.parse(readFileSync(path, "utf-8"));
+        if (Array.isArray(config.plugins)) {
+          config.plugins = config.plugins.filter((p: string) => p !== id);
+          writeFileSync(path, JSON.stringify(config, null, 2));
+        }
+      } catch {}
+    }
+    setMessage(`Disabled ${id} — restart to apply`);
+    forceRender(n => n + 1);
+  };
+
+  useInput((ch, key) => {
+    if (key.escape) {
+      if (detail) { setDetail(null); setPage(0); setMessage(null); }
+      else onClose();
+      return;
+    }
+    if (detail) {
+      const pageCount = 3;
+      if (key.leftArrow) setPage(pg => (pg - 1 + pageCount) % pageCount);
+      if (key.rightArrow) setPage(pg => (pg + 1) % pageCount);
+      return;
+    }
+    if (key.upArrow) setCursor(c => Math.max(0, c - 1));
+    if (key.downArrow) setCursor(c => Math.min(allPlugins.length - 1, c + 1));
+    if (key.return && allPlugins[cursor]) { setDetail(allPlugins[cursor].id); setPage(0); setMessage(null); }
+    if (ch === "g" && allPlugins[cursor]) addToConfig(allPlugins[cursor].id, "global");
+    if (ch === "w" && allPlugins[cursor]) addToConfig(allPlugins[cursor].id, "workspace");
+    if (ch === "d" && allPlugins[cursor]) removeFromConfig(allPlugins[cursor].id);
+  });
+
+  // ─── Detail View ───
+  if (detail) {
+    const p = allPlugins.find(pl => pl.id === detail)!;
+    const pages = ["general", "commands", "agents"];
+    const cmds = registry.listSlashCommandHooks().filter(c => c.source === p.id);
+    const scope = getScope(p.id);
+
+    return (
+      <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1}>
+        <Text bold>Plugins <Text dimColor>›</Text> {p.id}</Text>
+        <Text dimColor>{p.description}</Text>
+        <Text color="#5a6aa8">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
+        <Box>
+          {pages.map((pg, i) => <Text key={pg} bold color={page === i ? "#4ec9b0" : undefined}>{page === i ? `[ ${pg} ]` : `  ${pg}  `}  </Text>)}
+        </Box>
+        <Text dimColor color="#333333">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
+        <Text> </Text>
+        {page === 0 && <>
+          <Text><Text color="#61afef">{"Name:".padEnd(16)}</Text>{p.name}</Text>
+          <Text><Text color="#61afef">{"Version:".padEnd(16)}</Text>{p.version}</Text>
+          <Text><Text color="#61afef">{"Author:".padEnd(16)}</Text>{p.author || <Text dimColor>—</Text>}</Text>
+          <Text><Text color="#61afef">{"License:".padEnd(16)}</Text>{p.license || <Text dimColor>—</Text>}</Text>
+          <Text><Text color="#61afef">{"Homepage:".padEnd(16)}</Text>{p.homepage || <Text dimColor>—</Text>}</Text>
+          <Text><Text color="#61afef">{"Scope:".padEnd(16)}</Text>{scope}</Text>
+          <Text><Text color="#61afef">{"Status:".padEnd(16)}</Text>{p.active ? <Text color="green">active</Text> : <Text color="red">inactive</Text>}</Text>
+          <Text> </Text>
+          <Text bold>Contributions</Text>
+          <Text>  <Text color="#61afef">{String(p.commands.length).padEnd(3)}</Text>commands</Text>
+          <Text>  <Text color="#61afef">{String(p.agents.length).padEnd(3)}</Text>agents</Text>
+          <Text>  <Text color="#61afef">{String(p.modes.length).padEnd(3)}</Text>modes</Text>
+          <Text>  <Text color="#61afef">{String(p.templates.length).padEnd(3)}</Text>templates</Text>
+          <Text>  <Text color="#61afef">{String(p.skills.length).padEnd(3)}</Text>skills</Text>
+        </>}
+        {page === 1 && <>
+          {cmds.length === 0 ? <Text dimColor>No commands registered.</Text> : (<>
+            <Text dimColor>{"  "}{"Command".padEnd(20)}{"Description"}</Text>
+            <Text dimColor color="#333333">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
+            {cmds.map(c => (
+              <Text key={c.name}>  <Text color="#c678dd">{("/" + c.name).padEnd(20)}</Text><Text dimColor>{c.description}</Text></Text>
+            ))}
+          </>)}
+        </>}
+        {page === 2 && <>
+          {p.agents.length === 0 ? <Text dimColor>No agents registered.</Text> : (<>
+            <Text dimColor>{"  "}{"Agent".padEnd(20)}{"Description"}</Text>
+            <Text dimColor color="#333333">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
+            {p.agents.map(a => {
+              const manifest = agents.get(a);
+              return <Text key={a}>  <Text color="#61afef">{a.padEnd(20)}</Text><Text dimColor>{manifest?.description || ""}</Text></Text>;
+            })}
+          </>)}
+        </>}
+        <Text> </Text>
+        <Text dimColor><Text color="#61afef" bold>←/→</Text> pages  <Text color="#61afef" bold>esc</Text> back</Text>
+      </Box>
+    );
+  }
+
+  // ─── List View ───
+  return (
+    <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1}>
+      <Text bold>Plugins</Text>
+      <Text color="#5a6aa8">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
+      <Text> </Text>
+      {allPlugins.length === 0 ? (
+        <Text dimColor>No plugins discovered.</Text>
+      ) : (<>
+        <Table
+          columns={[
+            { key: "name", label: "Name", width: 20 },
+            { key: "scope", label: "Scope", width: 15 },
+            { key: "description", label: "Description" },
+          ]}
+          rows={allPlugins.map(p => {
+            const scope = getScope(p.id);
+            return { name: p.id, scope, description: p.description, _prefix: p.active ? "● " : "○ ", _prefixColor: p.active ? "green" : scope !== "available" ? "yellow" : "red" } as TableRow;
+          })}
+          cursor={cursor}
+        />
+      </>)}
+      <Text> </Text>
+      <Text bold>Locations</Text>
+      <Text dimColor>  Global:     ~/.config/voidrift/config.json → plugins[]</Text>
+      <Text dimColor>  Workspace:  .voidrift/config.json → plugins[]</Text>
+      <Text> </Text>
+      <Text dimColor><Text color="#61afef" bold>↑↓</Text> Navigate  <Text color="#61afef" bold>enter</Text> Details  <Text color="#61afef" bold>g</Text> enable global  <Text color="#61afef" bold>w</Text> enable workspace  <Text color="#61afef" bold>d</Text> disable  <Text color="#61afef" bold>esc</Text> Close</Text>
+      {message && <Text color="#4ec9b0">{message}</Text>}
+    </Box>
+  );
 }

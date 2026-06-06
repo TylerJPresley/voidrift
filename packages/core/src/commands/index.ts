@@ -69,9 +69,7 @@ export function registerCommands(registry: CoreRegistry, deps: CommandDeps): voi
   registry.registerSlashCommand({ name: "context", description: "Context visualizer", execute: async () => deps.openPanel("context") });
   registry.registerSlashCommand({ name: "tools", description: "List available tools", execute: async () => deps.openPanel("tools") });
   registry.registerSlashCommand({ name: "diff", description: "Code diff viewer", execute: async (args) => {
-    const flag = args.includes("--turn") || args.includes("-t") ? "--cached" : "";
-    try { const diff = execSync(`git diff ${flag} --stat`, { cwd: deps.workspaceRoot, encoding: "utf-8" }); deps.output(diff || "No changes."); }
-    catch { deps.output("Not a git repository or no changes."); }
+    deps.openPanel("diff");
   }});
 
   // --- Skills, Agents, MCP ---
@@ -130,38 +128,6 @@ export function registerCommands(registry: CoreRegistry, deps: CommandDeps): voi
     }
   }});
 
-  // --- Dev Workflow (Plugins) ---
-  registry.registerSlashCommand({ name: "ideas", description: "Ideas manager", execute: async () => deps.openPanel("ideas") });
-  registry.registerSlashCommand({ name: "idea", description: "Open/create an idea", execute: async (args) => {
-    if (!args.length) deps.openPanel("ideas");
-    else deps.output(`Opening IDEA-${args[0]}...`);
-  }});
-  registry.registerSlashCommand({ name: "cr", description: "Change request manager", execute: async (args) => {
-    if (!args.length) deps.openPanel("changes");
-    else deps.output(`Opening CR-${args[0]}...`);
-  }});
-  registry.registerSlashCommand({ name: "changes", description: "List change requests", execute: async () => deps.openPanel("changes") });
-  registry.registerSlashCommand({ name: "import", description: "Scan codebase structure", execute: async (args) => {
-    const path = args[0] || ".";
-    deps.output(`Scanning ${path}`);
-    const { importScan } = await import("../orchestration/import.js");
-    const report = importScan(deps.workspaceRoot, path);
-    deps.output(report);
-  }});
-  registry.registerSlashCommand({ name: "develop", description: "Spawn engineer subagents for a CR", execute: async (args) => {
-    const crFlag = args.indexOf("--cr");
-    const crId = crFlag >= 0 ? args[crFlag + 1] : null;
-    if (!crId) { deps.output("Usage: /develop --cr <id>"); return; }
-    const { developCR } = await import("../orchestration/develop.js");
-    deps.output(`Developing CR-${crId}...`);
-    developCR(crId, deps.workspaceRoot, deps.worktree, async (wtPath, taskContent) => {
-      deps.output(`[Worktree Subagent] Running in ${wtPath}...`);
-      return "success";
-    }).then(res => {
-      deps.output(`CR-${crId} development spawned! Tasks Scheduled: ${res.tasksSpawned}, Queued: ${res.tasksQueued}`);
-    }).catch(err => {
-      deps.output(`Development failed: ${err.message}`);
-    });
-  }});
-  registry.registerSlashCommand({ name: "done", description: "Mark current task complete", execute: async () => { deps.output("Task marked complete."); } });
+  // --- Plugins ---
+  registry.registerSlashCommand({ name: "plugins", description: "Plugin manager", execute: async () => deps.openPanel("plugins") });
 }

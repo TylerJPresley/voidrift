@@ -1,0 +1,11 @@
+{
+  "id": "this-is-going-to-be-a-long-name-to-test-the-interface",
+  "name": "this-is-going-to-be-a-long-name-to-test-the-interface",
+  "description": "This is the song that never ends. it goes on and on my friend. some people started singing it blah blah blah blah blah blah blah blah",
+  "type": "interactive",
+  "modelTier": "auto",
+  "tools": [],
+  "approvalMode": "prompt",
+  "allowedTools": [],
+  "active": false
+}
