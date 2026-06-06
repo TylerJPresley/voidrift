@@ -1021,17 +1021,11 @@ export function ContextPanel({
   skills: SkillManager;
   onClose: () => void;
 }) {
-  const [page, setPage] = useState(0);
-  const pages = ["overview", "agent", "orbit", "drift", "void"];
-
-  useInput((_, key) => {
-    if (key.escape) onClose();
-    if (key.leftArrow) setPage(p => (p - 1 + pages.length) % pages.length);
-    if (key.rightArrow) setPage(p => (p + 1) % pages.length);
-  });
+  useInput((_, key) => { if (key.escape) onClose(); });
 
   const b = budget.state;
   const totalLimit = b.limit;
+
   const messages = context.getMessages();
   const focusedFiles = context.context.drift.focusedFiles;
   const activeSkills = context.context.orbit.activeSkills;
@@ -1041,106 +1035,139 @@ export function ContextPanel({
   const activeMemory = context.context.orbit.activeMemory;
   const tools = context.context.agent.activeTools;
 
-  const fmt = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`;
-  const est = (s: string) => Math.ceil(s.length / 4);
+  // Token estimates
+  const personaTokens = Math.ceil(context.context.agent.activePersona.length / 4);
+  const toolsTokens = Math.ceil(JSON.stringify(TOOL_SCHEMAS).length / 4);
+  const boundSkillsTokens = boundSkills.reduce((acc, s) => acc + Math.ceil(s.length / 4), 0);
+  const skillIndexTokens = skillIndex.reduce((acc, s) => acc + Math.ceil(s.length / 4), 0);
+  const memoryIndexTokens = memoryIndex.reduce((acc, m) => acc + Math.ceil((m.title + m.summary).length / 4), 0);
 
-  const agentTotal = est(context.context.agent.activePersona) + est(JSON.stringify(TOOL_SCHEMAS)) + boundSkills.reduce((a, s) => a + est(s), 0) + skillIndex.reduce((a, s) => a + est(s), 0);
-  const orbitTotal = activeSkills.reduce((a, s) => a + est(s), 0) + activeMemory.reduce((a, m) => a + est(m), 0) + (context.context.orbit.activePlan ? est(context.context.orbit.activePlan) : 0);
-  const driftTotal = est(context.context.orbit.workspaceCodeMap) + focusedFiles.reduce((a, f) => a + est(f.summary), 0) + (context.context.drift.gitStatus ? est(context.context.drift.gitStatus) : 0);
-  const voidTotal = messages.reduce((a, m) => a + est(m.content), 0) + (context.context.void.diagnostics ? est(context.context.void.diagnostics) : 0);
+  const activeSkillsTokens = activeSkills.reduce((acc, s) => acc + Math.ceil(s.length / 4), 0);
+  const memoryTokens = activeMemory.reduce((acc, m) => acc + Math.ceil(m.length / 4), 0);
+  const planTokens = context.context.orbit.activePlan ? Math.ceil(context.context.orbit.activePlan.length / 4) : 0;
+
+  const codeMapTokens = Math.ceil(context.context.orbit.workspaceCodeMap.length / 4);
+  const filesTokens = focusedFiles.reduce((acc, f) => acc + Math.ceil(f.summary.length / 4), 0);
+  const gitTokens = context.context.drift.gitStatus ? Math.ceil(context.context.drift.gitStatus.length / 4) : 0;
+
+  const msgTokens = messages.filter(m => m.role === "user" || m.role === "assistant").reduce((acc, m) => acc + Math.ceil(m.content.length / 4), 0);
+  const toolResultTokens = messages.filter(m => m.role === "tool").reduce((acc, m) => acc + Math.ceil(m.content.length / 4), 0);
+  const diagTokens = context.context.void.diagnostics ? Math.ceil(context.context.void.diagnostics.length / 4) : 0;
+
+  const agentTotal = personaTokens + toolsTokens + boundSkillsTokens + skillIndexTokens + memoryIndexTokens;
+  const orbitTotal = activeSkillsTokens + memoryTokens + planTokens;
+  const driftTotal = codeMapTokens + filesTokens + gitTokens;
+  const voidTotal = msgTokens + toolResultTokens + diagTokens;
   const totalUsed = agentTotal + orbitTotal + driftTotal + voidTotal;
+  const freeTokens = Math.max(0, totalLimit - totalUsed);
 
-  const tabBar = pages.map((name, i) => (
-    <Text key={name} bold={i === page} underline={i === page} color={i === page ? "#4ec9b0" : undefined}>{name}</Text>
-  ));
+  const fmt = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`;
+  const pct = (n: number) => totalLimit > 0 ? ((n / totalLimit) * 100).toFixed(1) : "0";
 
-  const renderOverview = () => (
-    <Box flexDirection="column">
-      <Text><Text color="#61afef" bold>Agent</Text>   {fmt(agentTotal)} tokens</Text>
-      <Text><Text color="#c678dd" bold>Orbit</Text>   {fmt(orbitTotal)} tokens</Text>
-      <Text><Text color="#98c379" bold>Drift</Text>   {fmt(driftTotal)} tokens</Text>
-      <Text><Text color="#e5c07b" bold>Void</Text>    {fmt(voidTotal)} tokens</Text>
-      <Text> </Text>
-      <Text bold>{modelName} · {fmt(totalUsed)}/{fmt(totalLimit)} · Free: {fmt(Math.max(0, totalLimit - totalUsed))}</Text>
-    </Box>
-  );
+  const turnCount = messages.filter(m => m.role === "user").length;
 
-  const renderAgent = () => (
-    <Box flexDirection="column">
-      <Text bold>Persona <Text dimColor>({est(context.context.agent.activePersona)} tok)</Text></Text>
-      <Text dimColor>{context.context.agent.activePersona.slice(0, 200)}{context.context.agent.activePersona.length > 200 ? "…" : ""}</Text>
-      <Text> </Text>
-      <Text bold>Tools <Text dimColor>({tools.length})</Text></Text>
-      <Text dimColor>{tools.join(", ")}</Text>
-      <Text> </Text>
-      <Text bold>Bound Skills <Text dimColor>({boundSkills.length})</Text></Text>
-      {boundSkills.length === 0 ? <Text dimColor>none</Text> : boundSkills.map((s, i) => <Text key={i} dimColor>{s.slice(0, 80)}…</Text>)}
-      <Text> </Text>
-      <Text bold>Skill Index <Text dimColor>({skillIndex.length} available)</Text></Text>
-      {skillIndex.map((s, i) => <Text key={i} dimColor>{s}</Text>)}
-    </Box>
-  );
+  // Grid
+  const renderGrid = (rows: number, items: Array<{ tokens: number; char: string; color: string }>) => {
+    const totalBlocks = rows * 30;
+    const blocks: Array<{ char: string; color: string }> = [];
 
-  const renderOrbit = () => (
-    <Box flexDirection="column">
-      <Text bold>Active Skills <Text dimColor>({activeSkills.length})</Text></Text>
-      {activeSkills.length === 0 ? <Text dimColor>none triggered</Text> : activeSkills.map((s, i) => <Text key={i} dimColor>{s.slice(0, 100)}…</Text>)}
-      <Text> </Text>
-      <Text bold>Memory <Text dimColor>({activeMemory.length} loaded)</Text></Text>
-      {activeMemory.length === 0 ? <Text dimColor>none loaded</Text> : activeMemory.map((m, i) => <Text key={i} dimColor>{m.slice(0, 100)}…</Text>)}
-      <Text> </Text>
-      <Text bold>Plan</Text>
-      {context.context.orbit.activePlan ? <Text dimColor>{context.context.orbit.activePlan.slice(0, 200)}…</Text> : <Text dimColor>no active plan</Text>}
-    </Box>
-  );
+    for (const item of items) {
+      const count = Math.round((item.tokens / totalLimit) * totalBlocks);
+      for (let i = 0; i < count && blocks.length < totalBlocks; i++) {
+        blocks.push({ char: item.char, color: item.color });
+      }
+    }
+    while (blocks.length < totalBlocks) blocks.push({ char: "□", color: "grey" });
 
-  const renderDrift = () => (
-    <Box flexDirection="column">
-      <Text bold>File Map <Text dimColor>({est(context.context.orbit.workspaceCodeMap)} tok)</Text></Text>
-      <Text dimColor>{context.context.orbit.workspaceCodeMap ? "loaded" : "empty"}</Text>
-      <Text> </Text>
-      <Text bold>Active Files <Text dimColor>({focusedFiles.length}/3)</Text></Text>
-      {focusedFiles.length === 0 ? <Text dimColor>none</Text> : focusedFiles.map((f, i) => (
-        <Box key={i} flexDirection="column">
-          <Text color="#61afef">{f.path} <Text dimColor>({f.totalLines}L · {f.readRanges.length} ranges)</Text></Text>
-          <Text dimColor>  {f.summary.slice(0, 120)}…</Text>
-        </Box>
-      ))}
-      <Text> </Text>
-      <Text bold>Git Status</Text>
-      <Text dimColor>{context.context.drift.gitStatus || "clean"}</Text>
-    </Box>
-  );
-
-  const renderVoid = () => (
-    <Box flexDirection="column">
-      <Text bold>Messages <Text dimColor>({messages.length})</Text></Text>
-      {messages.slice(-10).map((m, i) => (
-        <Text key={i} dimColor wrap="truncate">[{m.role}] {m.content.slice(0, 100)}{m.content.length > 100 ? "…" : ""}</Text>
-      ))}
-      {messages.length > 10 && <Text dimColor>  … {messages.length - 10} older messages</Text>}
-      <Text> </Text>
-      <Text bold>Diagnostics</Text>
-      <Text dimColor>{context.context.void.diagnostics || "none"}</Text>
-      <Text> </Text>
-      <Text bold>Turn Context <Text dimColor>({context.context.void.turnContext.length})</Text></Text>
-      {context.context.void.turnContext.length === 0 ? <Text dimColor>none</Text> : context.context.void.turnContext.map((tc, i) => <Text key={i} dimColor>[{tc.label}] {tc.content.slice(0, 80)}…</Text>)}
-    </Box>
-  );
+    const gridRows = [];
+    for (let r = 0; r < rows; r++) {
+      const cols = [];
+      for (let c = 0; c < 30; c++) {
+        const bl = blocks[r * 30 + c];
+        cols.push(<Text key={c} color={bl.color}>{bl.char} </Text>);
+      }
+      gridRows.push(<Box key={r}>{cols}</Box>);
+    }
+    return gridRows;
+  };
 
   return (
     <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1}>
       <Text bold>Context</Text>
-      <Box gap={2}>{tabBar}</Box>
       <Text color="#5a6aa8">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
       <Text> </Text>
-      {page === 0 && renderOverview()}
-      {page === 1 && renderAgent()}
-      {page === 2 && renderOrbit()}
-      {page === 3 && renderDrift()}
-      {page === 4 && renderVoid()}
+      <Text bold>Agent <Text dimColor>({fmt(agentTotal)} · {pct(agentTotal)}%) locked to active agent</Text></Text>
+      <Box flexDirection="row">
+        <Box flexDirection="column" marginRight={4}>
+          {renderGrid(4, [
+            { tokens: personaTokens, char: "⚙", color: "#61afef" },
+            { tokens: toolsTokens, char: "●", color: "#e5c07b" },
+            { tokens: boundSkillsTokens, char: "◎", color: "#c678dd" },
+            { tokens: skillIndexTokens, char: "▪", color: "#56b6c2" },
+            { tokens: memoryIndexTokens, char: "◆", color: "#d19a66" },
+          ])}
+        </Box>
+        <Box flexDirection="column">
+          <Text><Text color="#61afef">⚙</Text> Persona: {fmt(personaTokens)}</Text>
+          <Text><Text color="#e5c07b">●</Text> Tool Schemas: {fmt(toolsTokens)} <Text dimColor>({tools.length} tools)</Text></Text>
+          <Text><Text color="#c678dd">◎</Text> Bound Skills: {fmt(boundSkillsTokens)} <Text dimColor>({boundSkills.length} loaded)</Text></Text>
+          <Text><Text color="#56b6c2">▪</Text> Skill Index: {fmt(skillIndexTokens)} <Text dimColor>({skillIndex.length} available)</Text></Text>
+          <Text><Text color="#d19a66">◆</Text> Memory Index: {fmt(memoryIndexTokens)} <Text dimColor>({memoryIndex.length} discovered)</Text></Text>
+        </Box>
+      </Box>
       <Text> </Text>
-      <Text dimColor><Text color="#61afef" bold>←/→</Text> Switch tab  <Text color="#61afef" bold>esc</Text> Close</Text>
+      <Text bold>Orbit <Text dimColor>({fmt(orbitTotal)} · {pct(orbitTotal)}%) stable project landscape</Text></Text>
+      <Box flexDirection="row">
+        <Box flexDirection="column" marginRight={4}>
+          {renderGrid(4, [
+            { tokens: activeSkillsTokens, char: "◎", color: "#c678dd" },
+            { tokens: memoryTokens, char: "▪", color: "#e5c07b" },
+            { tokens: planTokens, char: "◆", color: "#61afef" },
+          ])}
+        </Box>
+        <Box flexDirection="column">
+          <Text><Text color="#c678dd">◎</Text> Active Skills: {fmt(activeSkillsTokens)} <Text dimColor>({activeSkills.length} triggered)</Text></Text>
+          <Text><Text color="#e5c07b">▪</Text> Memory: {fmt(memoryTokens)} <Text dimColor>({activeMemory.length} loaded)</Text></Text>
+          <Text><Text color="#61afef">◆</Text> Plan: {fmt(planTokens)} <Text dimColor>{context.context.orbit.activePlan ? "active" : "none"}</Text></Text>
+        </Box>
+      </Box>
+      <Text> </Text>
+      <Text bold>Drift <Text dimColor>({fmt(driftTotal)} · {pct(driftTotal)}%) active working set</Text></Text>
+      <Box flexDirection="row">
+        <Box flexDirection="column" marginRight={4}>
+          {renderGrid(4, [
+            { tokens: codeMapTokens, char: "●", color: "#98c379" },
+            { tokens: filesTokens, char: "◎", color: "cyan" },
+            { tokens: gitTokens, char: "▪", color: "#56b6c2" },
+          ])}
+        </Box>
+        <Box flexDirection="column">
+          <Text><Text color="#98c379">●</Text> File Map: {fmt(codeMapTokens)}</Text>
+          <Text><Text color="cyan">◎</Text> Active Files: {fmt(filesTokens)} <Text dimColor>({focusedFiles.length}/3 slots)</Text></Text>
+          {focusedFiles.map((f, i) => <Text key={i} dimColor>     {f.path} <Text color="gray">({f.totalLines}L{f.readRanges.length ? `, ${f.readRanges.length} range${f.readRanges.length > 1 ? "s" : ""} read` : ""})</Text></Text>)}
+          <Text><Text color="#56b6c2">▪</Text> Workspace Changes: {fmt(gitTokens)} <Text dimColor>{context.context.drift.gitStatus ? "modified" : "clean"}</Text></Text>
+        </Box>
+      </Box>
+      <Text> </Text>
+      <Text bold>Void <Text dimColor>({fmt(voidTotal)} · {pct(voidTotal)}%) transient conversation</Text></Text>
+      <Box flexDirection="row">
+        <Box flexDirection="column" marginRight={4}>
+          {renderGrid(8, [
+            { tokens: msgTokens, char: "◎", color: "#61afef" },
+            { tokens: toolResultTokens, char: "●", color: "#e5c07b" },
+            { tokens: diagTokens, char: "✗", color: "red" },
+          ])}
+        </Box>
+        <Box flexDirection="column">
+          <Text><Text color="#61afef">◎</Text> Messages: {fmt(msgTokens)} <Text dimColor>({turnCount} turn{turnCount !== 1 ? "s" : ""})</Text></Text>
+          <Text><Text color="#e5c07b">●</Text> Tool Results: {fmt(toolResultTokens)}</Text>
+          <Text><Text color="red">✗</Text> Diagnostics: {fmt(diagTokens)} <Text dimColor>{context.context.void.diagnostics ? "active" : "none"}</Text></Text>
+        </Box>
+      </Box>
+      <Text> </Text>
+      <Text bold>{modelName} · {fmt(totalUsed)}/{fmt(totalLimit)} ({pct(totalUsed)}%) <Text dimColor>Free: {fmt(freeTokens)}</Text></Text>
+      <Text> </Text>
+      <Text dimColor><Text color="#61afef" bold>esc</Text> Close</Text>
     </Box>
   );
 }
