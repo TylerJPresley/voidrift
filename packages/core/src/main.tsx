@@ -566,7 +566,7 @@ function App({ engine }: { engine: EngineContext }) {
   const footerModel = engine.agents.active.modelTier === "auto" ? "auto" : (engine.container.config.models[engine.container.config.tiers[engine.agents.active.modelTier as keyof typeof engine.container.config.tiers]]?.model ?? engine.agents.active.modelTier);
 
   return (
-    <Box flexDirection="column">
+    <Box flexDirection="column" height={fullPanel ? process.stdout.rows || 24 : undefined}>
       {fullPanel === "diff" && <DiffPanel workspaceRoot={engine.workspaceRoot} onClose={() => { setFullPanel(null); process.stdout.write("\x1b[2J\x1b[H"); }} />}
       {fullPanel === "plan" && <PlanPanel context={engine.context} onClose={() => { setFullPanel(null); process.stdout.write("\x1b[2J\x1b[H"); }} />}
       {!fullPanel && <>

@@ -7,6 +7,7 @@ import React, { useState, useEffect } from "react";
 import { Box, Text, useInput } from "ink";
 import { Markdown } from "./ui/markdown.js";
 import { Table, type TableRow } from "./ui/table.js";
+import { ScrollView } from "./ui/scroll-view.js";
 import type { StatsTracker } from "./session/stats.js";
 import type { TokenBudgetWatcher } from "./output/budget.js";
 import type { VoidRiftConfig } from "./config/loader.js";
@@ -294,26 +295,26 @@ export function ModelPanel({ config, agents, onClose }: { config: VoidRiftConfig
 export function PlanPanel({ context, onClose }: { context: ContextManager; onClose: () => void }) {
   const plan = context.context.orbit.activePlan;
 
+  const termHeight = process.stdout.rows || 24;
+  const viewHeight = termHeight - 8;
+
   useInput((ch, key) => {
     if (key.escape) onClose();
-    if (key.delete || (ch === "d" && !plan)) onClose();
-    if (ch === "d" && plan) {
-      context.setPlan(null);
-      onClose();
-    }
+    if (ch === "d" && plan) { context.setPlan(null); onClose(); }
   });
+
+  const lines = plan
+    ? plan.split("\n").map((line, i) => <Text key={i}>{line || " "}</Text>)
+    : [<Text key="empty" dimColor italic>No active plan. Use plan mode to create one.</Text>];
 
   return (
     <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1}>
-      <Text bold>Active Plan</Text>
+      <Text bold>Active Plan <Text dimColor>({plan ? plan.split("\n").length : 0} lines)</Text></Text>
       <Text color="#5a6aa8">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
       <Text> </Text>
-      {plan
-        ? <Markdown text={plan} />
-        : <Text dimColor italic>No active plan. Use plan mode to create one.</Text>
-      }
+      <ScrollView height={viewHeight} lines={lines} active={!!plan} />
       <Text> </Text>
-      <Text dimColor>  {plan ? <><Text color="#61afef" bold>d</Text> Delete plan  </> : null}<Text color="#61afef" bold>esc</Text> Close</Text>
+      <Text dimColor>  {plan ? <><Text color="#61afef" bold>↑↓</Text> Scroll  <Text color="#61afef" bold>pgup/pgdn</Text> Page  <Text color="#61afef" bold>d</Text> Delete  </> : null}<Text color="#61afef" bold>esc</Text> Close</Text>
     </Box>
   );
 }
@@ -321,8 +322,7 @@ export function PlanPanel({ context, onClose }: { context: ContextManager; onClo
 // ─── /diff (full panel) ──────────────────────────────────────────────────────
 
 export function DiffPanel({ workspaceRoot, onClose }: { workspaceRoot: string; onClose: () => void }) {
-  const [scroll, setScroll] = useState(0);
-  const lines = React.useMemo(() => {
+  const rawLines = React.useMemo(() => {
     try {
       const raw = execSync("git diff --no-color", { cwd: workspaceRoot, encoding: "utf-8" });
       return raw ? raw.split("\n") : [];
@@ -330,31 +330,23 @@ export function DiffPanel({ workspaceRoot, onClose }: { workspaceRoot: string; o
   }, []);
 
   const termHeight = process.stdout.rows || 24;
-  const viewHeight = termHeight - 6; // border + title + divider + footer
-  const maxScroll = Math.max(0, lines.length - viewHeight);
+  const viewHeight = termHeight - 8;
 
-  useInput((_, key) => {
-    if (key.escape) onClose();
-    if (key.upArrow) setScroll(s => Math.max(0, s - 1));
-    if (key.downArrow) setScroll(s => Math.min(maxScroll, s + 1));
-    if (key.pageDown) setScroll(s => Math.min(maxScroll, s + viewHeight));
-    if (key.pageUp) setScroll(s => Math.max(0, s - viewHeight));
-  });
+  useInput((_, key) => { if (key.escape) onClose(); });
 
-  const visible = lines.slice(scroll, scroll + viewHeight);
+  const lines = rawLines.length === 0
+    ? [<Text key="empty" dimColor>No uncommitted changes.</Text>]
+    : rawLines.map((line, i) => {
+        const color = line.startsWith("+") ? "green" : line.startsWith("-") ? "red" : line.startsWith("@@") ? "cyan" : undefined;
+        return <Text key={i} color={color}>{line || " "}</Text>;
+      });
 
   return (
     <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1}>
-      <Text bold>Diff <Text dimColor>({lines.length} lines)</Text></Text>
+      <Text bold>Diff <Text dimColor>({rawLines.length} lines)</Text></Text>
       <Text color="#5a6aa8">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
       <Text> </Text>
-      {lines.length === 0
-        ? <Text dimColor>No uncommitted changes.</Text>
-        : visible.map((line, i) => {
-            const color = line.startsWith("+") ? "green" : line.startsWith("-") ? "red" : line.startsWith("@@") ? "cyan" : undefined;
-            return <Text key={scroll + i} color={color}>{line}</Text>;
-          })
-      }
+      <ScrollView height={viewHeight} lines={lines} />
       <Text> </Text>
       <Text dimColor><Text color="#61afef" bold>↑↓</Text> Scroll  <Text color="#61afef" bold>pgup/pgdn</Text> Page  <Text color="#61afef" bold>esc</Text> Close</Text>
     </Box>
