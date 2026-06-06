@@ -1,125 +1,97 @@
 /**
- * Plan Manager — persistent structured plan with phases and items.
- * Stored at .voidrift/plan.json, always loaded into Orbit partition.
+ * Plan Manager — persistent flat plan items as markdown files.
+ * Stored in .voidrift/plan/, each item is its own file.
+ * Filename is the ID. Frontmatter: priority, description, rationale.
+ * Body: full markdown detail (loaded on demand).
  */
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
-import { join, dirname } from "path";
+import { existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from "fs";
+import { join } from "path";
 
 export interface PlanItem {
-  id: string;
-  title: string;
+  filename: string;
+  priority: "now" | "next" | "later";
   description: string;
   rationale: string;
-  status: "backlog" | "active" | "done";
-  priority: "now" | "next" | "later";
-}
-
-export interface PlanPhase {
-  id: string;
-  title: string;
-  status: "backlog" | "active" | "done";
-  items: PlanItem[];
-}
-
-export interface PlanData {
-  phases: PlanPhase[];
+  body: string;
 }
 
 export class PlanManager {
-  private data: PlanData = { phases: [] };
-  private filePath: string;
+  private dir: string;
 
   constructor(private workspaceRoot: string) {
-    this.filePath = join(workspaceRoot, ".voidrift", "plan.json");
-    this.load();
+    this.dir = join(workspaceRoot, ".voidrift", "plan");
   }
 
-  get plan(): PlanData { return this.data; }
-  get activeItems(): PlanItem[] {
-    return this.data.phases
-      .filter(p => p.status === "active")
-      .flatMap(p => p.items.filter(i => i.status === "active"));
+  private parse(filename: string): PlanItem | null {
+    const filePath = join(this.dir, filename);
+    try {
+      const raw = readFileSync(filePath, "utf-8");
+      const match = raw.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+      if (!match) return null;
+      const header = match[1];
+      const body = match[2].trim();
+      const priority = (header.match(/priority:\s*(.+)/)?.[1]?.trim() || "later") as PlanItem["priority"];
+      const description = header.match(/description:\s*(.+)/)?.[1]?.trim() || "";
+      const rationale = header.match(/rationale:\s*(.+)/)?.[1]?.trim() || "";
+      return { filename, priority, description, rationale, body };
+    } catch { return null; }
   }
 
-  /** Compile a context-friendly summary for injection into Orbit */
+  all(): PlanItem[] {
+    if (!existsSync(this.dir)) return [];
+    return readdirSync(this.dir)
+      .filter(f => f.endsWith(".md"))
+      .map(f => this.parse(f))
+      .filter(Boolean) as PlanItem[];
+  }
+
+  byPriority(priority: PlanItem["priority"]): PlanItem[] {
+    return this.all().filter(i => i.priority === priority);
+  }
+
+  get(filename: string): PlanItem | null {
+    return this.parse(filename);
+  }
+
+  /** Compile now items into a context-friendly string for Orbit injection */
   compile(): string | null {
-    const active = this.data.phases.filter(p => p.status === "active");
-    if (active.length === 0) return null;
-    const lines: string[] = ["--- Active Plan ---"];
-    for (const phase of active) {
-      lines.push(`## ${phase.title}`);
-      for (const item of phase.items) {
-        const check = item.status === "done" ? "x" : " ";
-        lines.push(`- [${check}] ${item.title}${item.status === "active" ? " ← current" : ""}`);
-      }
+    const now = this.byPriority("now");
+    if (now.length === 0) return null;
+    const lines = ["--- Active Plan ---"];
+    for (const item of now) {
+      lines.push(`• ${item.description}${item.rationale ? ` — ${item.rationale}` : ""}`);
     }
     return lines.join("\n");
   }
 
-  addPhase(title: string, status: PlanPhase["status"] = "active"): PlanPhase {
-    const phase: PlanPhase = { id: `phase-${Date.now().toString(36)}`, title, status, items: [] };
-    this.data.phases.push(phase);
-    this.save();
-    return phase;
+  /** Load full body of a plan item (Stage 2 disclosure) */
+  loadBody(filename: string): string | null {
+    const item = this.parse(filename);
+    return item ? item.body : null;
   }
 
-  addItem(phaseId: string, title: string, description = "", rationale = "", priority: PlanItem["priority"] = "now"): PlanItem | null {
-    const phase = this.data.phases.find(p => p.id === phaseId);
-    if (!phase) return null;
-    const item: PlanItem = { id: `item-${Date.now().toString(36)}`, title, description, rationale, status: "active", priority };
-    phase.items.push(item);
-    this.save();
-    return item;
+  add(name: string, description: string, rationale: string, priority: PlanItem["priority"] = "now", body = ""): string {
+    mkdirSync(this.dir, { recursive: true });
+    const filename = `${name}.md`;
+    const content = `---\npriority: ${priority}\ndescription: ${description}\nrationale: ${rationale}\n---\n\n${body}\n`;
+    writeFileSync(join(this.dir, filename), content, "utf-8");
+    return filename;
   }
 
-  addItemToActive(title: string, description = "", rationale = "", priority: PlanItem["priority"] = "now"): PlanItem | null {
-    let phase = this.data.phases.find(p => p.status === "active");
-    if (!phase) phase = this.addPhase("Active");
-    return this.addItem(phase.id, title, description, rationale, priority);
+  updatePriority(filename: string, priority: PlanItem["priority"]): boolean {
+    const item = this.parse(filename);
+    if (!item) return false;
+    const filePath = join(this.dir, filename);
+    const raw = readFileSync(filePath, "utf-8");
+    const updated = raw.replace(/priority:\s*.+/, `priority: ${priority}`);
+    writeFileSync(filePath, updated, "utf-8");
+    return true;
   }
 
-  backlog(title: string, description = "", rationale = ""): PlanItem | null {
-    let phase = this.data.phases.find(p => p.title === "Backlog" && p.status === "backlog");
-    if (!phase) {
-      phase = { id: `phase-backlog`, title: "Backlog", status: "backlog", items: [] };
-      this.data.phases.push(phase);
-    }
-    const item: PlanItem = { id: `item-${Date.now().toString(36)}`, title, description, rationale, status: "backlog", priority: "later" };
-    phase.items.push(item);
-    this.save();
-    return item;
-  }
-
-  complete(itemId: string): boolean {
-    for (const phase of this.data.phases) {
-      const item = phase.items.find(i => i.id === itemId);
-      if (item) { item.status = "done"; this.save(); return true; }
-    }
-    return false;
-  }
-
-  remove(itemId: string): boolean {
-    for (const phase of this.data.phases) {
-      const idx = phase.items.findIndex(i => i.id === itemId);
-      if (idx !== -1) { phase.items.splice(idx, 1); this.save(); return true; }
-    }
-    return false;
-  }
-
-  removePhase(phaseId: string): boolean {
-    const idx = this.data.phases.findIndex(p => p.id === phaseId);
-    if (idx !== -1) { this.data.phases.splice(idx, 1); this.save(); return true; }
-    return false;
-  }
-
-  private load(): void {
-    if (existsSync(this.filePath)) {
-      try { this.data = JSON.parse(readFileSync(this.filePath, "utf-8")); } catch { this.data = { phases: [] }; }
-    }
-  }
-
-  private save(): void {
-    mkdirSync(dirname(this.filePath), { recursive: true });
-    writeFileSync(this.filePath, JSON.stringify(this.data, null, 2), "utf-8");
+  remove(filename: string): boolean {
+    const filePath = join(this.dir, filename);
+    if (!existsSync(filePath)) return false;
+    unlinkSync(filePath);
+    return true;
   }
 }

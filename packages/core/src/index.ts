@@ -54,7 +54,7 @@ export { ExceptionGuard } from "./session/guard.js";
 export { MemoryRegistry, type MemoryMeta, type MemoryDiscoveryContext } from "./session/memory.js";
 export { StatsTracker, type SessionStats, type ModelUsage, type ToolStats } from "./session/stats.js";
 
-export { PlanManager, type PlanData, type PlanPhase, type PlanItem } from "./session/plan.js";
+export { PlanManager, type PlanItem } from "./session/plan.js";
 // Section 6: Slash Commands
 export { registerCommands, type CommandDeps } from "./commands/index.js";
 

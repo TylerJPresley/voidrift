@@ -137,25 +137,28 @@ async function executeToolCall(toolName: string, argsJson: string, workspaceRoot
       if (!_planManager) return "Error: Plan manager not available.";
       const action = args.action ?? "";
       switch (action) {
-        case "add_phase":
-          const phase = _planManager.addPhase(args.title ?? "Untitled Phase");
-          return `Phase added: "${phase.title}" [${phase.id}]`;
-        case "add_item": {
-          const item = args.phase_id
-            ? _planManager.addItem(args.phase_id, args.title ?? "", args.description ?? "", args.rationale ?? "", args.priority ?? "now")
-            : _planManager.addItemToActive(args.title ?? "", args.description ?? "", args.rationale ?? "", args.priority ?? "now");
-          return item ? `Item added: "${item.title}" [${item.id}]` : "Error: Phase not found.";
+        case "add": {
+          const name = args.name ?? `item-${Date.now().toString(36)}`;
+          const filename = _planManager.add(name, args.description ?? "", args.rationale ?? "", args.priority ?? "now", args.body ?? "");
+          return `Plan item added: ${filename}`;
         }
         case "backlog": {
-          const bl = _planManager.backlog(args.title ?? "", args.description ?? "", args.rationale ?? "");
-          return bl ? `Backlogged: "${bl.title}" [${bl.id}]` : "Error: Failed to backlog.";
+          const name = args.name ?? `item-${Date.now().toString(36)}`;
+          const filename = _planManager.add(name, args.description ?? "", args.rationale ?? "", "later", args.body ?? "");
+          return `Backlogged: ${filename}`;
         }
-        case "complete":
-          return _planManager.complete(args.item_id ?? "") ? `Item completed.` : "Error: Item not found.";
+        case "load": {
+          const body = _planManager.loadBody(args.name ? `${args.name}.md` : "");
+          return body ?? "Error: Item not found.";
+        }
+        case "prioritize":
+          return _planManager.updatePriority(args.name ? `${args.name}.md` : "", args.priority ?? "now")
+            ? `Priority updated.` : "Error: Item not found.";
         case "remove":
-          return _planManager.remove(args.item_id ?? "") ? `Item removed.` : "Error: Item not found.";
+          return _planManager.remove(args.name ? `${args.name}.md` : "")
+            ? `Item removed.` : "Error: Item not found.";
         default:
-          return `Error: Unknown plan action "${action}". Use: add_phase, add_item, backlog, complete, remove.`;
+          return `Error: Unknown plan action "${action}". Use: add, backlog, load, prioritize, remove.`;
       }
     }
     case "run_task_agent":

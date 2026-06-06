@@ -184,17 +184,16 @@ export const TOOL_SCHEMAS: ToolSchema[] = [
   },
   {
     name: "plan",
-    description: "Manage the structured plan — add/complete/backlog items and phases",
+    description: "Manage the plan — add items, backlog ideas, change priority, remove completed items, or load full details",
     actionLayer: "partition",
     safetyProfile: "auto-approved",
     parameters: [
-      { name: "action", type: "string", description: "One of: add_phase, add_item, backlog, complete, remove", required: true },
-      { name: "title", type: "string", description: "Title for the phase or item", required: false },
-      { name: "description", type: "string", description: "Longer description (markdown)", required: false },
+      { name: "action", type: "string", description: "One of: add, backlog, load, prioritize, remove", required: true },
+      { name: "name", type: "string", description: "Filename slug for the item (no .md extension)", required: false },
+      { name: "description", type: "string", description: "1-2 sentence summary of what this is", required: false },
       { name: "rationale", type: "string", description: "Why this matters", required: false },
-      { name: "phase_id", type: "string", description: "Target phase ID (for add_item)", required: false },
-      { name: "item_id", type: "string", description: "Target item ID (for complete/remove)", required: false },
       { name: "priority", type: "string", description: "now, next, or later", required: false },
+      { name: "body", type: "string", description: "Full detail (markdown) for the item", required: false },
     ],
   },
 ];
