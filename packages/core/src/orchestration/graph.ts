@@ -22,6 +22,7 @@ import type { Tier } from "../adapters/factory.js";
 let _workspaceRoot = process.cwd();
 let _cache: IndexCache | null = null;
 let _scheduler: any = null;
+let _planManager: any = null;
 function getCache(root: string): IndexCache {
   if (!_cache) {
     _cache = new IndexCache(root);
@@ -34,6 +35,9 @@ export function setWorkspaceRoot(root: string) {
 }
 export function setScheduler(scheduler: any) {
   _scheduler = scheduler;
+}
+export function setPlanManager(pm: any) {
+  _planManager = pm;
 }
 
 const MAX_RETRIES = 3;
@@ -128,6 +132,31 @@ async function executeToolCall(toolName: string, argsJson: string, workspaceRoot
         return `Scheduled recurring task [${task.id}] with pattern "${args.cron}".`;
       }
       return "Error: Provide either 'delay' or 'cron' parameter.";
+    }
+    case "plan": {
+      if (!_planManager) return "Error: Plan manager not available.";
+      const action = args.action ?? "";
+      switch (action) {
+        case "add_phase":
+          const phase = _planManager.addPhase(args.title ?? "Untitled Phase");
+          return `Phase added: "${phase.title}" [${phase.id}]`;
+        case "add_item": {
+          const item = args.phase_id
+            ? _planManager.addItem(args.phase_id, args.title ?? "", args.description ?? "", args.rationale ?? "", args.priority ?? "now")
+            : _planManager.addItemToActive(args.title ?? "", args.description ?? "", args.rationale ?? "", args.priority ?? "now");
+          return item ? `Item added: "${item.title}" [${item.id}]` : "Error: Phase not found.";
+        }
+        case "backlog": {
+          const bl = _planManager.backlog(args.title ?? "", args.description ?? "", args.rationale ?? "");
+          return bl ? `Backlogged: "${bl.title}" [${bl.id}]` : "Error: Failed to backlog.";
+        }
+        case "complete":
+          return _planManager.complete(args.item_id ?? "") ? `Item completed.` : "Error: Item not found.";
+        case "remove":
+          return _planManager.remove(args.item_id ?? "") ? `Item removed.` : "Error: Item not found.";
+        default:
+          return `Error: Unknown plan action "${action}". Use: add_phase, add_item, backlog, complete, remove.`;
+      }
     }
     case "run_task_agent":
       return `Error: run_task_agent must be handled by the orchestration layer.`;

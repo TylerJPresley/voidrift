@@ -12,6 +12,7 @@ import {
   TokenBudgetWatcher,
   SessionBrain,
   MemoryRegistry,
+  PlanManager,
   SkillManager,
   AuditLogger,
   ExceptionGuard,
@@ -24,6 +25,7 @@ import {
   registerCommands,
   setWorkspaceRoot,
   setScheduler,
+  setPlanManager,
   generateCodeMap,
   getGitBranch,
   shortenPath,
@@ -758,6 +760,7 @@ const engine: EngineContext = await (async () => {
   const budget = new TokenBudgetWatcher(container.config.models[container.config.tiers.utility]?.contextLimit ?? 128000);
   const brain = new SessionBrain(workspaceRoot, sessionId, container.bus);
   const memory = new MemoryRegistry();
+  const planManager = new PlanManager(workspaceRoot);
   const skills = new SkillManager();
   const logger = new AuditLogger({ workspaceRoot, sessionId });
   const guard = new ExceptionGuard(container.bus, context);
@@ -766,6 +769,11 @@ const engine: EngineContext = await (async () => {
     container.bus.publish("USER_INPUT", { text: `[Scheduled] ${instruction}` });
   });
   setScheduler(scheduler);
+  setPlanManager(planManager);
+
+  // Inject persisted plan into orbit
+  const compiledPlan = planManager.compile();
+  if (compiledPlan) context.setPlan(compiledPlan);
 
   skills.index([join(workspaceRoot, ".voidrift", "skills"), join(homedir(), ".config", "voidrift", "resources", "skills")]);
   memory.index([join(workspaceRoot, ".voidrift", "memory"), join(homedir(), ".config", "voidrift", "memory")]);
