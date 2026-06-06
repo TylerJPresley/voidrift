@@ -104,22 +104,18 @@ describe("Integration: Rewind", () => {
 });
 
 describe("Integration: Goal Loop", () => {
-  it("runs until auditor passes", async () => {
-    let callCount = 0;
+  it("runs until model signals done", async () => {
     const client = { stream: vi.fn().mockImplementation(async () => ({
       [Symbol.asyncIterator]: async function* () {
-        callCount++;
-        if (callCount === 1) yield { content: "Plan: implement auth" };
-        else if (callCount === 2) yield { content: "Wrote auth.ts" };
-        else yield { content: "All tests pass. Verified." };
+        yield { content: "Task complete. Here is the report." };
       },
     })) } as any;
 
     const bus = new EventBus();
-    const result = await runGoal("build auth", client, bus, () => {});
+    const result = await runGoal("process files", client, bus, () => {});
     expect(result.success).toBe(true);
-    expect(result.terminationReason).toBe("pass");
-    expect(result.turns).toBeGreaterThan(0);
+    expect(result.terminationReason).toBe("done");
+    expect(result.turns).toBe(1);
   });
 });
 

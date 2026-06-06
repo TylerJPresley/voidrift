@@ -60,10 +60,10 @@ export { registerCommands, type CommandDeps } from "./commands/index.js";
 
 // Section 8: Orchestration
 export { directChat, runTurn, setWorkspaceRoot, type OrchestrationInput, type OrchestrationResult } from "./orchestration/graph.js";
-export { executeNode, getPersona, getToolSchemas, type GraphState, type RoutingFlag, type NodeResult } from "./orchestration/nodes.js";
+export { type GraphState, type RoutingFlag } from "./orchestration/nodes.js";
 export { runGoal, type GoalResult } from "./orchestration/goal.js";
 export { TaskScheduler, parseDelay, type ScheduledTask } from "./orchestration/scheduler.js";
-export { developCR, type DevelopResult } from "./orchestration/develop.js";
+// developCR moved to @voidrift/plugin-dev
 export { importScan } from "./orchestration/import.js";
 
 // Section 9: Plugin Interface
