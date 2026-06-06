@@ -11,7 +11,6 @@ import { compilePrompt } from "./session/compiler.js";
 import type { EngineContext } from "./engine.js";
 import type { StreamChunk } from "./adapters/types.js";
 import type { OrchestrationResult } from "./orchestration/graph.js";
-import type { GraphState } from "./orchestration/nodes.js";
 
 export interface TurnCallbacks {
   onChunk: (chunk: StreamChunk) => void;
@@ -22,16 +21,12 @@ export async function executeTurn(engine: EngineContext, userMessage: string, ca
   engine.context.clearTurnContext();
   engine.context.addMessage({ role: "user", content: userMessage });
 
-  // Derive mode from active agent's approvalMode
-  const modeMap = { deny: "plan", prompt: "chat", autonomous: "vibe" } as const;
-  const activeMode = modeMap[engine.agents.active.approvalMode] || "chat";
-
   // Resolve the model tier: use static override if declared, otherwise delegate to the Model Router
   let tier: Tier | string = engine.agents.active.modelTier || "auto";
   if (tier === "auto") {
     tier = routeTier({ 
       activeNode: null, 
-      activeMode, 
+      activeMode: "chat", 
       inputLength: userMessage.length, 
       mentionedFiles: 0 
     });
@@ -43,16 +38,6 @@ export async function executeTurn(engine: EngineContext, userMessage: string, ca
 
   // Emit resolved model name so the UI can display it
   callbacks.onChunk({ type: "status", message: `model:${resolved.name}` });
-
-  const state: GraphState = {
-    activePlan: engine.context.context.orbit.activePlan,
-    focusedFiles: engine.context.context.drift.focusedFiles.map(f => f.path),
-    diagnostics: engine.context.context.void.diagnostics,
-    routingFlag: null,
-    messages: [],
-    activeMode,
-    activePersona: engine.context.context.agent.activePersona,
-  };
 
   // Resolve skills for this turn (agent-bound + trigger-based)
   const resolvedSkills = engine.skills.resolve(
@@ -86,7 +71,6 @@ export async function executeTurn(engine: EngineContext, userMessage: string, ca
       client: resolved.client,
       systemPrompt,
       history,
-      state,
       onChunk: callbacks.onChunk,
       signal: callbacks.signal,
       context: engine.context,
@@ -101,7 +85,6 @@ export async function executeTurn(engine: EngineContext, userMessage: string, ca
     engine.stats.recordTurn(resolved.name, result.response.usage.promptTokens, result.response.usage.completionTokens || 0, 0, 0);
     engine.context.addMessage({ role: "assistant", content: result.response.text });
     engine.budget.add(result.response.usage.totalTokens || 0);
-    if (result.stateUpdates.activePlan !== undefined) engine.context.setPlan(result.stateUpdates.activePlan);
   }
 
   return result;

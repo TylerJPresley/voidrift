@@ -2,7 +2,6 @@ import type { BaseChatModel } from "@langchain/core/language_models/chat_models"
 import type { EventBus } from "../events/bus.js";
 import type { OnChunk } from "../adapters/stream.js";
 import { directChat, type OrchestrationInput } from "./graph.js";
-import type { GraphState } from "./nodes.js";
 
 const MAX_GOAL_TURNS = 15;
 
@@ -29,16 +28,6 @@ export async function runGoal(
 ): Promise<GoalResult> {
   let turns = 0;
 
-  const state: GraphState = {
-    activePlan: null,
-    focusedFiles: [],
-    diagnostics: null,
-    routingFlag: null,
-    messages: [],
-    activeMode: "vibe",
-    activePersona: "",
-  };
-
   while (turns < MAX_GOAL_TURNS) {
     if (signal?.interrupted) return { success: false, turns, terminationReason: "interrupted" };
 
@@ -47,7 +36,6 @@ export async function runGoal(
       client,
       systemPrompt: "",
       history: [],
-      state,
       onChunk,
     };
 

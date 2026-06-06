@@ -9,8 +9,6 @@ import { PermissionGate } from "../security/permission-gate.js";
 import type { OnChunk } from "../adapters/stream.js";
 import type { ModelResponse } from "../adapters/types.js";
 import { streamModel } from "../adapters/stream.js";
-import { type GraphState } from "./nodes.js";
-import { bindTools } from "../tools/binding.js";
 import { TOOL_SCHEMAS } from "../tools/definitions.js";
 import { readFile, globFiles, writeFile, editFile, executeCommand } from "../tools/executors.js";
 import { webFetch, webSearch, type SearchConfig } from "../tools/web.js";
@@ -18,7 +16,6 @@ import { summarizeFileWithFlash } from "../codemap/summarizer.js";
 import { IndexCache } from "../codemap/cache.js";
 import type { ContextManager } from "../session/context.js";
 import type { VoidRiftConfig } from "../config/loader.js";
-import type { NodeType, Mode } from "../router/index.js";
 import type { Tier } from "../adapters/factory.js";
 
 // Workspace root — set by the harness on bootstrap
@@ -55,7 +52,7 @@ async function streamWithRetry(client: BaseChatModel, messages: BaseMessage[], o
   return { text: "", toolCalls: [], usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 } };
 }
 
-async function executeToolCall(toolName: string, argsJson: string, mode: Mode, workspaceRoot: string, context?: ContextManager, config?: VoidRiftConfig): Promise<string> {
+async function executeToolCall(toolName: string, argsJson: string, workspaceRoot: string, context?: ContextManager, config?: VoidRiftConfig): Promise<string> {
   let args: Record<string, any>;
   try {
     args = JSON.parse(argsJson);
@@ -71,13 +68,10 @@ async function executeToolCall(toolName: string, argsJson: string, mode: Mode, w
     case "glob_files":
       return globFiles(workspaceRoot, args.pattern ?? "").output;
     case "write_file":
-      if (mode === "plan") return "Error: write_file blocked in plan mode.";
       return writeFile(workspaceRoot, args.path ?? "", args.content ?? "").output;
     case "edit_file":
-      if (mode === "plan") return "Error: edit_file blocked in plan mode.";
       return editFile(workspaceRoot, args.path ?? "", args.search ?? "", args.replace ?? "").output;
     case "execute_command":
-      if (mode === "plan") return "Error: execute_command blocked in plan mode.";
       return executeCommand(workspaceRoot, args.command ?? "", args.timeout).output;
     case "web_fetch": {
       const result = await webFetch(args.url ?? "", workspaceRoot);
@@ -113,7 +107,6 @@ export interface OrchestrationInput {
   client: BaseChatModel;
   systemPrompt: string;
   history: BaseMessage[];
-  state: GraphState;
   onChunk: OnChunk;
   signal?: AbortSignal;
   context?: ContextManager;
@@ -124,8 +117,7 @@ export interface OrchestrationInput {
 
 export interface OrchestrationResult {
   response: ModelResponse;
-  stateUpdates: Partial<GraphState>;
-  path: "direct" | "orchestrated";
+  path: "direct";
 }
 
 /**
@@ -139,10 +131,10 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
     new HumanMessage(input.userMessage),
   ];
 
-  // Bind tools in OpenAI function-calling format (either from manifest or Mode defaults)
+  // Bind tools from agent manifest
   const tools = input.agent
     ? TOOL_SCHEMAS.filter((t) => input.agent!.tools.includes(t.name))
-    : bindTools(null, input.state.activeMode);
+    : TOOL_SCHEMAS;
   const toolDefs = tools.map((t) => ({
     type: "function" as const,
     function: {
@@ -239,7 +231,7 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
             result = summary;
           }
         } catch {
-          result = await executeToolCall(tc.name, tc.args, input.state.activeMode, _workspaceRoot, input.context, input.config);
+          result = await executeToolCall(tc.name, tc.args, _workspaceRoot, input.context, input.config);
         }
         }
       } else if (tc.name === "run_task_agent" && input.config) {
@@ -267,7 +259,7 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
         const taskResponse = await streamModel(flashAdapter.client, taskMessages, () => {}, input.signal);
         result = taskResponse.text || "Task agent returned no output.";
       } else {
-        result = await executeToolCall(tc.name, tc.args, input.state.activeMode, _workspaceRoot, input.context, input.config);
+        result = await executeToolCall(tc.name, tc.args, _workspaceRoot, input.context, input.config);
 
         // Track focused files for write/edit and targeted reads
         if (input.context && input.config && (tc.name === "read_file" || tc.name === "write_file" || tc.name === "edit_file")) {
@@ -315,7 +307,7 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
     finalResponse = textResponse;
   }
 
-  return { response: finalResponse!, stateUpdates: {}, path: "direct" };
+  return { response: finalResponse!, path: "direct" };
 }
 
 /**
