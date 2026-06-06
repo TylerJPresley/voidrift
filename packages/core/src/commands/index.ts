@@ -11,6 +11,7 @@ import type { TemplateService } from "../templates/service.js";
 import type { MCPEngine } from "../mcp/engine.js";
 import type { WorktreeEngine } from "../worktree/engine.js";
 import type { TaskScheduler } from "../orchestration/scheduler.js";
+import type { GitCheckpointer } from "../safeguards/checkpoint.js";
 import { compactHistory } from "../session/compactor.js";
 import { createTierAdapter } from "../adapters/factory.js";
 import { EventBus } from "../events/bus.js";
@@ -29,6 +30,7 @@ export interface CommandDeps {
   mcp: MCPEngine;
   worktree: WorktreeEngine;
   scheduler?: TaskScheduler;
+  checkpointer: GitCheckpointer;
   bus: EventBus;
   workspaceRoot: string;
   sessionId: string;
@@ -56,7 +58,7 @@ export function registerCommands(registry: CoreRegistry, deps: CommandDeps): voi
   registry.registerSlashCommand({ name: "resume", description: "Conversation browser", execute: async () => deps.openPanel("resume") });
   registry.registerSlashCommand({ name: "rewind", description: "Rollback to previous turn", execute: async (args) => {
     const turn = args[0] ? parseInt(args[0]) : null;
-    if (turn !== null) { const msgs = deps.context.getMessages().slice(0, turn * 2); deps.context.setMessages(msgs); deps.output(`Rewound to turn ${turn}.`); }
+    if (turn !== null) { const msgs = deps.context.getMessages().slice(0, turn * 2); deps.context.setMessages(msgs); deps.checkpointer.rollbackTo(turn); deps.output(`Rewound to turn ${turn}.`); }
     else deps.openPanel("rewind");
   }});
 

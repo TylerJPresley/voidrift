@@ -19,6 +19,7 @@ import {
   TemplateService,
   MCPEngine,
   WorktreeEngine,
+  GitCheckpointer,
   CoreRegistry,
   registerCommands,
   setWorkspaceRoot,
@@ -671,6 +672,8 @@ const engine: EngineContext = await (async () => {
   const prompts = new PromptRegistry(workspaceRoot);
   const mcp = new MCPEngine(workspaceRoot, container.bus);
   const worktree = new WorktreeEngine(workspaceRoot, container.bus);
+  const checkpointer = new GitCheckpointer(workspaceRoot, container.bus);
+  checkpointer.attach();
 
   // Config-driven plugin loading
   const startupWarnings: string[] = [];
@@ -782,7 +785,7 @@ const engine: EngineContext = await (async () => {
 
   registerCommands(container.registry, {
     config: container.config, context, budget, agents, brain, memory, stats,
-    skills, templates, mcp, worktree, scheduler, bus: container.bus, workspaceRoot, sessionId,
+    skills, templates, mcp, worktree, scheduler, checkpointer, bus: container.bus, workspaceRoot, sessionId,
     output: (text) => cmdOutputFn(text),
     openPanel: (panel) => openPanelFn(panel),
     switchModel: (name) => {
@@ -795,7 +798,7 @@ const engine: EngineContext = await (async () => {
 
   return {
     container, context, budget, agents, prompts, guard, stats, memory, skills, mcp, templates, logger,
-    worktree, scheduler, brain, sessionId, pluginRegistry,
+    worktree, scheduler, checkpointer, brain, sessionId, pluginRegistry,
     branch, shortPath, workspaceRoot,
     startupWarnings: [...startupWarnings, ...validateStartup(container.config), ...validateAssets(agents, skills).map(i => `[${i.type}] ${i.id}: ${i.message}`)],
     setCmdOutput: (fn: (text: string) => void) => { cmdOutputFn = fn; },

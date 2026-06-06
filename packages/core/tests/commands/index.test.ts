@@ -11,6 +11,7 @@ import { SkillManager } from "../../src/skills/manager.js";
 import { TemplateService } from "../../src/templates/service.js";
 import { MCPEngine } from "../../src/mcp/engine.js";
 import { WorktreeEngine } from "../../src/worktree/engine.js";
+import { GitCheckpointer } from "../../src/safeguards/checkpoint.js";
 import { EventBus } from "../../src/events/bus.js";
 import { mkdirSync, rmSync } from "fs";
 import { join } from "path";
@@ -38,6 +39,7 @@ function makeDeps(): { registry: CoreRegistry; deps: CommandDeps; output: string
     templates: new TemplateService(TMP),
     mcp: new MCPEngine(TMP, bus),
     worktree: new WorktreeEngine(TMP, bus),
+    checkpointer: new GitCheckpointer(TMP, bus),
     bus,
     workspaceRoot: TMP,
     sessionId: "test-session",

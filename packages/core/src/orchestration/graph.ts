@@ -234,29 +234,27 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
           result = await executeToolCall(tc.name, tc.args, _workspaceRoot, input.context, input.config);
         }
         }
-      } else if (tc.name === "run_task_agent" && input.config) {
-        // Inline task agent execution (Flash model call with agent persona)
+      } else if (tc.name === "run_task_agent" && input.config && input.agent) {
         const taskArgs = JSON.parse(tc.args || "{}");
         const agentId = taskArgs.agentId || taskArgs.agent_id || "";
         const instruction = taskArgs.instruction || taskArgs.prompt || "";
         const { AgentRegistry } = await import("../agents/registry.js");
-        // Access registry from global — find the task agent
-        const taskAgent = input.agent ? undefined : undefined; // placeholder
         const { createTierAdapter } = await import("../adapters/factory.js");
         const { streamModel } = await import("../adapters/stream.js");
         
-        // Find the task agent manifest from registered agents
-        // For now, use a direct Flash call with the summarizer prompt
-        const flashAdapter = createTierAdapter("flash", input.config);
-        const taskPrompt = agentId === "summarizer" 
-          ? "You are a content summarizer. Extract and summarize the relevant information concisely. Preserve key details. Keep under 500 words."
-          : `You are task agent "${agentId}". Complete the following task.`;
+        // Look up task agent from registry
+        const registry = new AgentRegistry();
+        registry.discover(_workspaceRoot);
+        const taskAgent = registry.get(agentId);
+        const taskPrompt = taskAgent?.prompt || `You are task agent "${agentId}". Complete the following task.`;
+        const tier = taskAgent?.modelTier === "auto" || !taskAgent?.modelTier ? "flash" : taskAgent.modelTier;
+        const adapter = createTierAdapter(tier as any, input.config);
         
         const taskMessages = [
           new SystemMessage(taskPrompt),
           new HumanMessage(instruction),
         ];
-        const taskResponse = await streamModel(flashAdapter.client, taskMessages, () => {}, input.signal);
+        const taskResponse = await streamModel(adapter.client, taskMessages, () => {}, input.signal);
         result = taskResponse.text || "Task agent returned no output.";
       } else {
         result = await executeToolCall(tc.name, tc.args, _workspaceRoot, input.context, input.config);
