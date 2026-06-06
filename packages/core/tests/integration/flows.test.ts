@@ -3,7 +3,7 @@ import { EventBus } from "../../src/events/bus.js";
 import { ContextManager } from "../../src/session/context.js";
 import { PermissionGate } from "../../src/security/permission-gate.js";
 import { ExceptionGuard } from "../../src/session/guard.js";
-import { routeEntry, resolveEntryNode, directChat, orchestratedTask } from "../../src/orchestration/graph.js";
+import { directChat } from "../../src/orchestration/graph.js";
 import { runGoal } from "../../src/orchestration/goal.js";
 import { GitCheckpointer } from "../../src/safeguards/checkpoint.js";
 import { routeMCPToolCall, isMCPTool } from "../../src/mcp/router.js";
@@ -66,27 +66,6 @@ describe("Integration: Tool Call Flow", () => {
     const gate = new PermissionGate(bus);
     const result = await gate.check("write_file", { path: "test.ts", content: "x" }, { approvalMode: "deny", allowedTools: ["read_file"] });
     expect(result.approved).toBe(false);
-  });
-});
-
-describe("Integration: Orchestrated Task", () => {
-  it("architect → engineer → auditor → pass", async () => {
-    let callCount = 0;
-    const client = { stream: vi.fn().mockImplementation(async () => ({
-      [Symbol.asyncIterator]: async function* () {
-        callCount++;
-        if (callCount === 1) yield { content: "Plan: Step 1 - create file" };
-        else if (callCount === 2) yield { content: "Created file.ts" };
-        else yield { content: "All tests pass. Verified successfully." };
-      },
-    })) } as any;
-
-    const state: GraphState = { activePlan: null, focusedFiles: [], diagnostics: null, routingFlag: null, messages: [], activeMode: "chat", activePersona: "" };
-    const result = await orchestratedTask({ userMessage: "build a feature", client, systemPrompt: "", history: [], state, onChunk: () => {} });
-
-    expect(result.path).toBe("orchestrated");
-    expect(result.stateUpdates.activePlan).toContain("Plan");
-    expect(result.stateUpdates.routingFlag).toBe("pass");
   });
 });
 

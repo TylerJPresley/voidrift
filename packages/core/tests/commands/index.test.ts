@@ -194,10 +194,10 @@ describe("Slash Commands (all 22)", () => {
     expect(panels).toContain("rewind");
   });
 
-  it("/diff shows git diff", async () => {
-    const { registry, output } = makeDeps();
+  it("/diff opens diff panel", async () => {
+    const { registry, panels } = makeDeps();
     await registry.getSlashCommand("diff")!.execute([]);
-    expect(output[0]).toBeDefined();
+    expect(panels).toContain("diff");
   });
 
   it("/goal requires instruction", async () => {

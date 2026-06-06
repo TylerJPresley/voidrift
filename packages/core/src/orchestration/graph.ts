@@ -9,7 +9,7 @@ import { PermissionGate } from "../security/permission-gate.js";
 import type { OnChunk } from "../adapters/stream.js";
 import type { ModelResponse } from "../adapters/types.js";
 import { streamModel } from "../adapters/stream.js";
-import { executeNode, getPersona, type GraphState, type RoutingFlag, type NodeResult } from "./nodes.js";
+import { type GraphState } from "./nodes.js";
 import { bindTools } from "../tools/binding.js";
 import { TOOL_SCHEMAS } from "../tools/definitions.js";
 import { readFile, globFiles, writeFile, editFile, executeCommand } from "../tools/executors.js";
@@ -20,7 +20,6 @@ import type { ContextManager } from "../session/context.js";
 import type { VoidRiftConfig } from "../config/loader.js";
 import type { NodeType, Mode } from "../router/index.js";
 import type { Tier } from "../adapters/factory.js";
-import { shouldEscalate, resolveEscalation, escalateTier, buildEscalationState, escalationNotice } from "../router/index.js";
 
 // Workspace root — set by the harness on bootstrap
 let _workspaceRoot = process.cwd();
@@ -127,34 +126,6 @@ export interface OrchestrationResult {
   response: ModelResponse;
   stateUpdates: Partial<GraphState>;
   path: "direct" | "orchestrated";
-}
-
-const MAX_REWORK_CYCLES = 3;
-
-/**
- * Entry Router.
- *
- * Determines whether to use the Direct Chat Path or the Active Task Path:
- * - Direct Chat: default path — single agent turn with tool loop
- * - Active Task: activePlan exists AND mode is not "plan" → orchestrated multi-node graph
- *
- * Plan mode uses directChat because it's a single-agent turn (Architect)
- * that needs tool binding (read_file, glob_files, etc.) to explore the codebase.
- */
-export function routeEntry(state: GraphState): "direct" | "orchestrated" {
-  if (state.activeMode === "plan") return "direct";
-  if (state.activePlan !== null) return "orchestrated";
-  return "direct";
-}
-
-/**
- * Determines which node to start with based on intent and state.
- */
-export function resolveEntryNode(userMessage: string, state: GraphState): NodeType {
-  if (state.activeMode === "plan") return "architect";
-  if (state.activePlan === null) return "architect";
-  if (isVerificationIntent(userMessage)) return "auditor";
-  return "engineer";
 }
 
 /**
@@ -348,106 +319,11 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
 }
 
 /**
- * Active Task Path.
- * Orchestrated execution: Architect → Engineer → Auditor with conditional routing.
- */
-export async function orchestratedTask(input: OrchestrationInput): Promise<OrchestrationResult> {
-  let currentNode = resolveEntryNode(input.userMessage, input.state);
-  let state = { ...input.state };
-  let lastResponse: ModelResponse | null = null;
-  let reworkCount = 0;
-  const allUpdates: Partial<GraphState> = {};
-  let activeClient = input.client;
-  let currentTier = input.tier || "utility";
-
-  while (currentNode !== null && reworkCount < MAX_REWORK_CYCLES) {
-    // Check for escalation before node execution
-    if (shouldEscalate(0, 100000, reworkCount) && input.config) {
-      const escalated = resolveEscalation(currentTier, input.config);
-      if (escalated) {
-        const nextTier = escalateTier(currentTier);
-        if (nextTier) {
-          currentTier = nextTier;
-          activeClient = escalated.client;
-          input.onChunk({ 
-            type: "status", 
-            message: `[Escalation] Repeated failures detected (${reworkCount}). Upgrading reasoning to ${currentTier} tier...` 
-          });
-        }
-      }
-    }
-
-    const persona = getPersona(currentNode);
-    const messages: BaseMessage[] = [
-      new SystemMessage(persona),
-      ...input.history,
-    ];
-
-    // Inject diagnostics for rework cycles
-    if (currentNode === "engineer" && state.diagnostics) {
-      messages.push(new SystemMessage(`--- Rework Required ---\n${state.diagnostics}`));
-    }
-
-    // If we just escalated, inject the escalation notice into system instructions
-    if (reworkCount > 0 && currentTier === "dense") {
-      const escState = buildEscalationState(
-        "utility",
-        "dense",
-        "REPEATED_AUDIT_FAILURE",
-        `Auditor failed engineering tests ${reworkCount} times. Upgrading client.`,
-        currentNode || "orchestration",
-        {
-          activePlan: state.activePlan,
-          focusedFiles: state.focusedFiles,
-          messagesSnapshot: [],
-        }
-      );
-      messages.push(new SystemMessage(escalationNotice(escState)));
-    }
-
-    messages.push(new HumanMessage(input.userMessage));
-
-    const result: NodeResult = await executeNode(
-      currentNode,
-      activeClient,
-      messages,
-      state,
-      input.onChunk
-    );
-
-    // Apply state updates
-    Object.assign(state, result.stateUpdates);
-    Object.assign(allUpdates, result.stateUpdates);
-    lastResponse = result.response;
-
-    if (result.nextNode === "end") break;
-    if (result.nextNode === "engineer" && currentNode === "auditor") reworkCount++;
-    currentNode = result.nextNode;
-  }
-
-  return {
-    response: lastResponse!,
-    stateUpdates: allUpdates,
-    path: "orchestrated",
-  };
-}
-
-/**
  * Main orchestration entry point.
- * Routes to direct chat or orchestrated task based on state.
+ * Always runs direct chat — model delegates to task agents as needed.
  */
 export async function runTurn(input: OrchestrationInput, bus: EventBus): Promise<OrchestrationResult> {
-  const route = routeEntry(input.state);
-
-  const result = route === "direct"
-    ? await directChat(input, bus)
-    : await orchestratedTask(input);
-
+  const result = await directChat(input, bus);
   bus.publish("TURN_COMPLETE", { turnId: `turn-${Date.now()}` });
   return result;
-}
-
-function isVerificationIntent(message: string): boolean {
-  const patterns = [/\btests?\b/i, /\bverify\b/i, /\blint\b/i, /\bcheck\b/i, /\baudit\b/i];
-  return patterns.some((p) => p.test(message));
 }

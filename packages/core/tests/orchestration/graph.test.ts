@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { routeEntry, resolveEntryNode, directChat, orchestratedTask } from "../../src/orchestration/graph.js";
+import { directChat } from "../../src/orchestration/graph.js";
 import { getPersona, executeNode, type GraphState } from "../../src/orchestration/nodes.js";
 import type { StreamChunk } from "../../src/adapters/types.js";
 
@@ -28,43 +28,6 @@ function makeMockClient(text: string) {
   client.bindTools.mockReturnValue(client);
   return client;
 }
-
-describe("Orchestration - Entry Router", () => {
-  it("routes to direct when no plan and mode is chat", () => {
-    expect(routeEntry(makeState())).toBe("direct");
-  });
-
-  it("routes to direct when no plan and mode is vibe", () => {
-    expect(routeEntry(makeState({ activeMode: "vibe" }))).toBe("direct");
-  });
-
-  it("routes to direct when mode is plan (single-agent turn with tools)", () => {
-    expect(routeEntry(makeState({ activeMode: "plan" }))).toBe("direct");
-  });
-
-  it("routes to orchestrated when activePlan exists", () => {
-    expect(routeEntry(makeState({ activePlan: "Step 1: do thing" }))).toBe("orchestrated");
-  });
-});
-
-describe("Orchestration - Entry Node Resolution", () => {
-  it("resolves to architect when no plan exists", () => {
-    expect(resolveEntryNode("build a feature", makeState())).toBe("architect");
-  });
-
-  it("resolves to architect in plan mode", () => {
-    expect(resolveEntryNode("anything", makeState({ activeMode: "plan" }))).toBe("architect");
-  });
-
-  it("resolves to engineer when plan exists", () => {
-    expect(resolveEntryNode("continue", makeState({ activePlan: "Step 1" }))).toBe("engineer");
-  });
-
-  it("resolves to auditor on verification intent", () => {
-    expect(resolveEntryNode("run the tests", makeState({ activePlan: "Step 1" }))).toBe("auditor");
-    expect(resolveEntryNode("verify the changes", makeState({ activePlan: "Step 1" }))).toBe("auditor");
-  });
-});
 
 describe("Orchestration - Node Personas", () => {
   it("architect persona prohibits writes", () => {
@@ -140,34 +103,5 @@ describe("Orchestration - Node Execution", () => {
 
     expect(result.stateUpdates.routingFlag).toBe("rework");
     expect(result.nextNode).toBe("engineer");
-  });
-});
-
-describe("Orchestration - Orchestrated Task", () => {
-  it("runs architect → engineer → auditor → end", async () => {
-    let callCount = 0;
-    const client = {
-      stream: vi.fn().mockImplementation(async () => ({
-        [Symbol.asyncIterator]: async function* () {
-          callCount++;
-          if (callCount === 1) yield { content: "Plan: Step 1" }; // architect
-          else if (callCount === 2) yield { content: "Wrote file 'x.ts'" }; // engineer
-          else yield { content: "All tests pass. Verified." }; // auditor
-        },
-      })),
-    } as any;
-
-    const result = await orchestratedTask({
-      userMessage: "build a feature",
-      client,
-      systemPrompt: "",
-      history: [],
-      state: makeState({ activeMode: "chat" }),
-      onChunk: () => {},
-    });
-
-    expect(result.path).toBe("orchestrated");
-    expect(result.stateUpdates.activePlan).toContain("Plan");
-    expect(result.stateUpdates.routingFlag).toBe("pass");
   });
 });

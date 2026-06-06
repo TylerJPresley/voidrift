@@ -7,7 +7,7 @@ function makeCtx(overrides?: Partial<SessionContext>): SessionContext {
     agent: { activePersona: "You are helpful.", activeTools: [], boundSkills: [], skillDiscoveryIndex: [], activeMemoryIndex: [] },
     orbit: { activePlan: null, activeSkills: [], workspaceCodeMap: "", activeMemory: [] },
     drift: { focusedFiles: [], gitStatus: null },
-    void: { messages: [], diagnostics: null },
+    void: { messages: [], diagnostics: null, turnContext: [] },
     ...overrides,
   };
 }

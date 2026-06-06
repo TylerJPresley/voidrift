@@ -59,7 +59,7 @@ export { StatsTracker, type SessionStats, type ModelUsage, type ToolStats } from
 export { registerCommands, type CommandDeps } from "./commands/index.js";
 
 // Section 8: Orchestration
-export { routeEntry, resolveEntryNode, directChat, orchestratedTask, runTurn, setWorkspaceRoot, type OrchestrationInput, type OrchestrationResult } from "./orchestration/graph.js";
+export { directChat, runTurn, setWorkspaceRoot, type OrchestrationInput, type OrchestrationResult } from "./orchestration/graph.js";
 export { executeNode, getPersona, getToolSchemas, type GraphState, type RoutingFlag, type NodeResult } from "./orchestration/nodes.js";
 export { runGoal, type GoalResult } from "./orchestration/goal.js";
 export { TaskScheduler, parseDelay, type ScheduledTask } from "./orchestration/scheduler.js";

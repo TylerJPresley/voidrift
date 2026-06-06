@@ -501,3 +501,8 @@ Core renders the panel shell (border, cursor, navigation, keybinding footer). Pl
 
 ### Reason
 A single public API eliminates the confusion of split interfaces, supports multiple consumer types (plugins, IDE extensions, future REST layer), and ensures all external access goes through one controlled surface.
+
+## AMD-021: Remove Hardcoded Orchestration Pipeline from Core
+- **Blueprint says**: Multi-agent state graph with Architect→Engineer→Auditor nodes, conditional routing (Rework/Pass), and entry router logic lives in core orchestration layer.
+- **We decided**: Remove `orchestratedTask`, `routeEntry`, `resolveEntryNode`, and the fixed three-node pipeline from `@voidrift/core`. Core provides only `directChat` (single agent + tool loop) and `run_task_agent` (model-delegated background work). The Architect→Engineer→Auditor development workflow moves to `@voidrift/plugin-dev` when needed.
+- **Reason**: Task agents already provide the same capability compositionally. The model can dynamically orchestrate by calling `run_task_agent("architect", ...)`, `run_task_agent("engineer", ...)`, etc. A hardcoded pipeline duplicates this, adds rigidity, and couples core to a specific development methodology. Core should be workflow-agnostic — plugins define domain-specific pipelines. Escalation (tier upgrades on failure) remains in core as a harness-level concern. `/goal` becomes "direct chat in a loop with auto-approval until the model signals done."
