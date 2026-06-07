@@ -527,8 +527,9 @@ function App({ engine }: { engine: EngineContext }) {
           setThinking(null);
           fullText += chunk.text;
           tokenCount++;
-          // Update the live streaming display (stays in pendingTurn on tool_call)
-          setStreaming({ model: resolvedModel, text: fullText, elapsed: +((Date.now() - startTime) / 1000).toFixed(1), tokens: tokenCount });
+          if (fullText.trim()) {
+            setStreaming({ model: resolvedModel, text: fullText, elapsed: +((Date.now() - startTime) / 1000).toFixed(1), tokens: tokenCount });
+          }
         }
         if (chunk.type === "tool_call") {
           // Commit streaming text to pendingTurn (keeps it permanent)
