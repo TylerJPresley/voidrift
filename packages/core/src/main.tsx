@@ -530,8 +530,8 @@ function App({ engine }: { engine: EngineContext }) {
         }
         if (chunk.type === "tool_call") {
           // Flush any accumulated text to history before showing tools
+          setStreaming(null);
           if (fullText.trim()) {
-            setStreaming(null);
             setHistory(h => [...h, { id: id(), type: "assistant", model: resolvedModel, text: fullText }]);
             fullText = "";
           }
@@ -562,7 +562,7 @@ function App({ engine }: { engine: EngineContext }) {
             resolvedModel = engine.agents.active.modelTier === "auto" ? `auto[${name}]` : name;
           }
           setStreaming(null);
-          setThinking(chunk.message.startsWith("model:") ? "Thinking..." : chunk.message);
+          setThinking(chunk.message.startsWith("model:") ? null : chunk.message);
         }
       },
     });
