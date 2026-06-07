@@ -522,19 +522,19 @@ function App({ engine }: { engine: EngineContext }) {
           }
           setThinking(null);
           if (chunk.status === "executing") {
-            // Tool just started — add with executing status
-            tools.push({ name: chunk.name, args: chunk.args, status: "executing" });
-            setPendingTools([...tools]);
+            // Tool just started — commit to history immediately
+            const toolId = id();
+            tools.push({ name: chunk.name, args: chunk.args, status: "executing", _histId: toolId } as any);
+            setHistory(h => [...h, { id: toolId, type: "tools", tools: [{ name: chunk.name, args: chunk.args, status: "executing" }] }]);
           } else {
-            // Tool finished — update its status and flush to history
-            const idx = tools.findIndex(t => t.name === chunk.name && t.status === "executing");
-            if (idx !== -1) {
-              tools[idx].status = chunk.status === "error" ? "error" : "success";
-              tools[idx].elapsed = `${((Date.now() - startTime) / 1000).toFixed(1)}s`;
-            } else {
-              tools.push({ name: chunk.name, args: chunk.args, status: chunk.status === "error" ? "error" : "success", elapsed: `${((Date.now() - startTime) / 1000).toFixed(1)}s` });
+            // Tool finished — update the existing history entry in-place
+            const tool = tools.find(t => t.name === chunk.name && t.status === "executing");
+            if (tool) {
+              tool.status = chunk.status === "error" ? "error" : "success";
+              tool.elapsed = `${((Date.now() - startTime) / 1000).toFixed(1)}s`;
+              const histId = (tool as any)._histId;
+              setHistory(h => h.map(item => item.id === histId ? { ...item, tools: [{ ...tool }] } : item));
             }
-            setPendingTools([...tools]);
           }
         }
         if (chunk.type === "error") {
@@ -546,11 +546,11 @@ function App({ engine }: { engine: EngineContext }) {
             const name = chunk.message.slice(6);
             resolvedModel = engine.agents.active.modelTier === "auto" ? `auto[${name}]` : name;
           }
-          // Flush tools to history when a new round starts
-          if (chunk.message === "Thinking..." && tools.length) {
-            setPendingTools(null);
-            setHistory(h => [...h, { id: id(), type: "tools", tools: [...tools] }]);
-            tools.length = 0;
+          // Flush any accumulated text to history when a new round starts
+          if (chunk.message === "Thinking..." && fullText.trim()) {
+            setStreaming(null);
+            setHistory(h => [...h, { id: id(), type: "assistant", model: resolvedModel, text: fullText }]);
+            fullText = "";
           }
           setThinking(chunk.message.startsWith("model:") ? "Thinking..." : chunk.message);
         }
@@ -558,11 +558,7 @@ function App({ engine }: { engine: EngineContext }) {
     });
 
     setStreaming(null); setThinking(null); setBusy(false);
-
-    if (tools.length) {
-      setPendingTools(null);
-      setHistory(h => [...h, { id: id(), type: "tools", tools: [...tools] }]);
-    }
+    setPendingTools(null);
 
     if (result) {
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
