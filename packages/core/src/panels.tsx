@@ -1254,8 +1254,17 @@ export function ContextPanel({
         const driftLines: React.ReactNode[] = [];
         driftLines.push(<Text key="h1" bold>File Map <Text dimColor>({fmt(codeMapTokens)} tok)</Text></Text>);
         if (context.context.orbit.workspaceCodeMap) {
-          for (const [i, line] of context.context.orbit.workspaceCodeMap.split("\n").entries()) {
-            driftLines.push(<Text key={`fm-${i}`} dimColor>{line}</Text>);
+          // Simplified tree: extract just paths, show indented tree structure
+          const raw = context.context.orbit.workspaceCodeMap;
+          const paths = raw.split("\n")
+            .map(line => line.replace(/^[\s📁📝⚙️🔧]*/, "").replace(/\s*[\[(].*$/, "").trim())
+            .filter(p => p && !p.startsWith("["));
+          for (const [i, p] of paths.entries()) {
+            const depth = p.split("/").length - 1;
+            const indent = "  ".repeat(depth);
+            const name = p.split("/").pop() || p;
+            const isDir = p.endsWith("/");
+            driftLines.push(<Text key={`fm-${i}`} dimColor>{indent}{isDir ? "📁 " : "  "}{name}</Text>);
           }
         } else { driftLines.push(<Text key="fm-empty" dimColor>empty</Text>); }
         driftLines.push(<Text key="sp1">{" "}</Text>);
