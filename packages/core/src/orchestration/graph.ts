@@ -373,7 +373,7 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
   // If the last response was a tool call (no text), make one final call to get text response
   if (finalResponse && finalResponse.toolCalls.length > 0 && !finalResponse.text.trim()) {
     // Add a nudge to get the model to respond with text instead of more tool calls
-    currentMessages.push(new SystemMessage("Based on the tool results above, provide your response to the user. Do not call any more tools."));
+    currentMessages.push(new HumanMessage("Based on the tool results above, provide your response to the user. Do not call any more tools."));
     const textResponse = await streamModel(input.client, mergeMessageRuns(currentMessages) as BaseMessage[], input.onChunk, input.signal);
     finalResponse = textResponse;
   }
