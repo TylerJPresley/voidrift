@@ -1252,22 +1252,24 @@ export function ContextPanel({
       </Box>}
       {page === 3 && (() => {
         const driftLines: React.ReactNode[] = [];
-        // Active files at the top
+        // Git status
+        driftLines.push(<Text key="gs"><Text bold>Git: </Text><Text dimColor>{context.context.drift.gitStatus || "clean"}</Text></Text>);
+        driftLines.push(<Text key="sp1">{" "}</Text>);
+        // Stats
+        const allPaths = context.context.orbit.workspaceCodeMap
+          ? context.context.orbit.workspaceCodeMap.split("\n").map(line => line.replace(/^[\s📁📝⚙️🔧]*/, "").replace(/\s*[\[(].*$/, "").trim()).filter(p => p && !p.endsWith("/") && !p.startsWith("["))
+          : [];
+        driftLines.push(<Text key="stats" dimColor>Files mapped: {allPaths.length}  ·  {fmt(codeMapTokens)} tok  ·  {focusedFiles.length} active</Text>);
+        driftLines.push(<Text key="sp2">{" "}</Text>);
+        // Active files at top
         for (const [i, f] of focusedFiles.entries()) {
           driftLines.push(<Text key={`af-${i}`} bold color="#4ec9b0">● {f.path}</Text>);
         }
-        // All files from the map
-        if (context.context.orbit.workspaceCodeMap) {
-          const activePaths = new Set(focusedFiles.map(f => f.path));
-          const paths = context.context.orbit.workspaceCodeMap.split("\n")
-            .map(line => line.replace(/^[\s📁📝⚙️🔧]*/, "").replace(/\s*[\[(].*$/, "").trim())
-            .filter(p => p && !p.endsWith("/") && !p.startsWith("[") && !activePaths.has(p));
-          for (const [i, p] of paths.entries()) {
-            driftLines.push(<Text key={`f-${i}`} dimColor>  {p}</Text>);
-          }
+        // Rest of files
+        const activePaths = new Set(focusedFiles.map(f => f.path));
+        for (const [i, p] of allPaths.filter(p => !activePaths.has(p)).entries()) {
+          driftLines.push(<Text key={`f-${i}`} dimColor>  {p}</Text>);
         }
-        driftLines.push(<Text key="sp">{" "}</Text>);
-        driftLines.push(<Text key="gs"><Text bold>Git: </Text><Text dimColor>{context.context.drift.gitStatus || "clean"}</Text></Text>);
         return <ScrollView height={20} lines={driftLines} />;
       })()}
       {page === 4 && <Box flexDirection="column">
