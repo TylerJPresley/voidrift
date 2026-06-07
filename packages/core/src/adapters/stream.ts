@@ -27,6 +27,7 @@ export async function streamModel(
   let text = "";
   let accumulated: AIMessageChunk | null = null;
   let usage: TokenUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+  const emittedToolNames = new Set<string>();
   const requestStart = Date.now();
   let firstTokenAt: number | null = null;
 
@@ -50,6 +51,26 @@ export async function streamModel(
           if (!firstTokenAt) firstTokenAt = Date.now();
           text += content;
           onChunk({ type: "content", text: content });
+        }
+
+        // Emit tool calls as they start streaming (block-level granularity)
+        // This lets the UI show spinners immediately, not after the full response
+        if (chunk.tool_call_chunks?.length) {
+          for (const tc of chunk.tool_call_chunks) {
+            if (tc.name) {
+              // New tool starting — emit immediately so UI can show it
+              onChunk({ type: "tool_call", id: tc.id || `tool_${tc.index ?? 0}`, name: tc.name, args: "", status: "executing" });
+            }
+          }
+        }
+        // Same for fully-formed tool_calls (some providers send complete)
+        if (chunk.tool_calls?.length) {
+          for (const tc of chunk.tool_calls) {
+            if (tc.name && !emittedToolNames.has(tc.name + tc.id)) {
+              emittedToolNames.add(tc.name + tc.id);
+              onChunk({ type: "tool_call", id: tc.id || `tool_${emittedToolNames.size}`, name: tc.name, args: JSON.stringify(tc.args), status: "executing" });
+            }
+          }
         }
 
         // Accumulate chunks via LangChain's .concat() for tool call assembly

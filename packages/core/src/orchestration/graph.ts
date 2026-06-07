@@ -252,9 +252,6 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
       // Yield event loop so TUI can render the tool spinner before sync execution
       await new Promise(r => setTimeout(r, 0));
 
-      // Emit executing state so TUI shows tool immediately with spinner
-      input.onChunk({ type: "tool_call", id: tc.id, name: tc.name, args: tc.args, status: "executing" });
-
       // Execute the permission gate check if an active agent manifest is provided
       if (input.agent && gate) {
         const checkResult = await gate.check(tc.name, args, input.agent);
