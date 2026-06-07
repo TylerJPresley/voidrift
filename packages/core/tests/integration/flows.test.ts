@@ -28,9 +28,9 @@ afterEach(() => { rmSync(TMP, { recursive: true, force: true }); });
 
 function makeMockClient(text: string) {
   const client: any = {
-    streamEvents: vi.fn().mockReturnValue({
+    stream: vi.fn().mockResolvedValue({
       [Symbol.asyncIterator]: async function* () {
-        yield { event: "on_llm_stream", data: { chunk: { content: text } } };
+        yield { content: text };
       },
     }),
     bindTools: vi.fn(),
@@ -113,11 +113,11 @@ describe("Integration: Rewind", () => {
 describe("Integration: Goal Loop", () => {
   it("runs until model outputs completion token", async () => {
     let callCount = 0;
-    const client = { streamEvents: vi.fn().mockImplementation(() => ({
+    const client = { stream: vi.fn().mockImplementation(async () => ({
       [Symbol.asyncIterator]: async function* () {
         callCount++;
-        if (callCount === 1) yield { event: "on_llm_stream", data: { chunk: { content: "Working on it..." } } };
-        else yield { event: "on_llm_stream", data: { chunk: { content: "All done. <!-- GOAL_COMPLETE -->" } } };
+        if (callCount === 1) yield { content: "Working on it..." };
+        else yield { content: "All done. <!-- GOAL_COMPLETE -->" };
       },
     })) } as any;
 

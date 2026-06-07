@@ -1,11 +1,11 @@
 /**
- * LangChain streamEvents-based model streaming.
+ * Model Streaming.
  *
- * Uses streamEvents() v2 for full lifecycle visibility:
- * - on_llm_stream: token-by-token content
- * - on_llm_end: usage metadata, complete response
- * - on_retry: fallback/retry visibility
- * - Automatic LangSmith tracing integration
+ * Uses .stream() as the primary streaming method (works universally on all
+ * BaseChatModel, RunnableBinding, and bound-tool models).
+ *
+ * AIMessageChunk.concat() handles fragment accumulation for tool calls.
+ * Usage metadata extracted from final chunk.
  */
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import type { BaseMessage } from "@langchain/core/messages";
@@ -15,7 +15,8 @@ import type { StreamChunk, ToolCallChunk, ModelResponse, TokenUsage } from "./ty
 export type OnChunk = (chunk: StreamChunk) => void;
 
 /**
- * Streams a model invocation using streamEvents() for full lifecycle visibility.
+ * Streams a model invocation using .stream() for universal compatibility.
+ * Accumulates AIMessageChunks via .concat() for tool call assembly.
  */
 export async function streamModel(
   client: BaseChatModel,
@@ -34,69 +35,68 @@ export async function streamModel(
   }
 
   try {
-    const stream = client.streamEvents(messages, { version: "v2", signal });
+    const stream = await client.stream(messages, { signal });
 
-    for await (const event of stream) {
-      if (signal?.aborted) break;
+    try {
+      for await (const chunk of stream) {
+        if (signal?.aborted) break;
 
-      switch (event.event) {
-        case "on_llm_stream": {
-          const chunk = event.data.chunk;
-
-          // Extract text content from this chunk
-          const content = extractContent(chunk?.content);
-          if (content) {
-            if (!firstTokenAt) firstTokenAt = Date.now();
-            text += content;
-            onChunk({ type: "content", text: content });
-          }
-
-          // Accumulate for tool calls — use .concat() if available (real AIMessageChunk)
-          if (chunk) {
-            if (accumulated && typeof accumulated.concat === "function") {
-              accumulated = accumulated.concat(chunk);
-            } else if (!accumulated) {
-              accumulated = chunk;
-            } else {
-              // Fallback: merge tool_calls arrays manually for plain objects
-              const existing = (accumulated as any).tool_calls || [];
-              const incoming = chunk.tool_calls || [];
-              accumulated = { ...accumulated, tool_calls: [...existing, ...incoming] } as any;
-            }
-          }
-          break;
+        // Extract text content
+        const content = extractContent(chunk.content);
+        if (content) {
+          if (!firstTokenAt) firstTokenAt = Date.now();
+          text += content;
+          onChunk({ type: "content", text: content });
         }
 
-        case "on_llm_end": {
-          // Extract usage from the final output
-          const output = event.data.output as AIMessageChunk;
-          if (output?.usage_metadata) {
-            usage = {
-              promptTokens: output.usage_metadata.input_tokens ?? 0,
-              completionTokens: output.usage_metadata.output_tokens ?? 0,
-              totalTokens: output.usage_metadata.total_tokens ?? 0,
-            };
-          }
-          break;
+        // Accumulate chunks via LangChain's .concat() for tool call assembly
+        if (accumulated && typeof accumulated.concat === "function") {
+          accumulated = accumulated.concat(chunk);
+        } else if (!accumulated) {
+          accumulated = chunk;
+        } else {
+          // Fallback: manually merge tool_call_chunks for non-AIMessageChunk objects
+          const prevChunks = (accumulated as any).tool_call_chunks || [];
+          const newChunks = chunk.tool_call_chunks || [];
+          const prevCalls = (accumulated as any).tool_calls || [];
+          const newCalls = chunk.tool_calls || [];
+          accumulated = {
+            ...accumulated,
+            content: (accumulated.content || "") + (extractContent(chunk.content) || ""),
+            tool_call_chunks: [...prevChunks, ...newChunks],
+            tool_calls: [...prevCalls, ...newCalls],
+          } as any;
         }
 
-        case "on_retry": {
-          const errMsg = typeof event.data === "string" ? event.data : (event.data as any)?.error?.message ?? "unknown error";
-          onChunk({ type: "status", message: `Retrying (${errMsg})...` });
-          break;
+        // Usage metadata (usually on final chunk)
+        if (chunk.usage_metadata) {
+          usage = {
+            promptTokens: chunk.usage_metadata.input_tokens ?? 0,
+            completionTokens: chunk.usage_metadata.output_tokens ?? 0,
+            totalTokens: chunk.usage_metadata.total_tokens ?? 0,
+          };
         }
       }
+    } catch (err: unknown) {
+      // Mid-stream error
+      if (signal?.aborted) {
+        return { text, toolCalls: extractToolCalls(accumulated), usage, timing: { requestStart, firstTokenAt, endAt: Date.now() } };
+      }
+      const message = err instanceof Error ? err.message : String(err);
+      onChunk({ type: "error", message, retryable: isRetryable(message) });
+      return { text, toolCalls: extractToolCalls(accumulated), usage, timing: { requestStart, firstTokenAt, endAt: Date.now() } };
     }
   } catch (err: unknown) {
+    // Pre-stream error (failed to initiate)
     if (signal?.aborted) {
-      return { text, toolCalls: extractToolCalls(accumulated), usage, timing: { requestStart, firstTokenAt, endAt: Date.now() } };
+      return { text, toolCalls: [], usage, timing: { requestStart, firstTokenAt, endAt: Date.now() } };
     }
     const message = err instanceof Error ? err.message : String(err);
     onChunk({ type: "error", message, retryable: isRetryable(message) });
-    return { text, toolCalls: extractToolCalls(accumulated), usage, timing: { requestStart, firstTokenAt, endAt: Date.now() } };
+    return { text, toolCalls: [], usage, timing: { requestStart, firstTokenAt, endAt: Date.now() } };
   }
 
-  // Extract tool calls from the accumulated message
+  // Extract tool calls from the accumulated AIMessageChunk
   const toolCalls = extractToolCalls(accumulated);
   onChunk({ type: "done", usage });
   return { text, toolCalls, usage, timing: { requestStart, firstTokenAt, endAt: Date.now() } };
@@ -104,16 +104,44 @@ export async function streamModel(
 
 /**
  * Extracts tool calls from the fully accumulated AIMessageChunk.
- * LangChain handles fragment accumulation via concat() — no manual assembly needed.
+ * LangChain's .concat() assembles partial tool_call_chunks into complete tool_calls.
  */
 function extractToolCalls(accumulated: AIMessageChunk | null): ToolCallChunk[] {
-  if (!accumulated?.tool_calls?.length) return [];
-  return accumulated.tool_calls.map((tc) => ({
-    type: "tool_call" as const,
-    id: tc.id || `tool_${Math.random().toString(36).slice(2, 8)}`,
-    name: tc.name,
-    args: JSON.stringify(tc.args),
-  }));
+  if (!accumulated) return [];
+
+  // Prefer fully-assembled tool_calls (from .concat() accumulation)
+  if (accumulated.tool_calls?.length) {
+    return accumulated.tool_calls.map((tc) => ({
+      type: "tool_call" as const,
+      id: tc.id || `tool_${Math.random().toString(36).slice(2, 8)}`,
+      name: tc.name,
+      args: JSON.stringify(tc.args),
+    }));
+  }
+
+  // Fallback: assemble from tool_call_chunks if tool_calls is empty
+  if (accumulated.tool_call_chunks?.length) {
+    const map = new Map<number, { id: string; name: string; args: string }>();
+    for (const chunk of accumulated.tool_call_chunks) {
+      const idx = chunk.index ?? map.size;
+      const existing = map.get(idx);
+      if (existing) {
+        if (chunk.id) existing.id = chunk.id;
+        if (chunk.name) existing.name = chunk.name;
+        existing.args += chunk.args || "";
+      } else {
+        map.set(idx, { id: chunk.id || "", name: chunk.name || "", args: chunk.args || "" });
+      }
+    }
+    return [...map.values()].map((tc) => ({
+      type: "tool_call" as const,
+      id: tc.id || `tool_${Math.random().toString(36).slice(2, 8)}`,
+      name: tc.name,
+      args: tc.args,
+    }));
+  }
+
+  return [];
 }
 
 /**
