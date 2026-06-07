@@ -1234,6 +1234,8 @@ export function ContextPanel({
         const agentLines: React.ReactNode[] = [];
         const agent = context.context.agent;
         const allTools = TOOL_SCHEMAS.filter(t => agent.activeTools.includes(t.name));
+        agentLines.push(<Text key="total" dimColor>{fmt(agentTotal)} tok</Text>);
+        agentLines.push(<Text key="sp0">{" "}</Text>);
         // Tools
         agentLines.push(<Text key="h-tools" bold>Tools <Text dimColor>({allTools.length})</Text></Text>);
         for (const [i, t] of allTools.entries()) {
@@ -1252,7 +1254,6 @@ export function ContextPanel({
           agentLines.push(<Text key={`p-${i}`} dimColor>{line}</Text>);
         }
         agentLines.push(<Text key="sp3">{" "}</Text>);
-        agentLines.push(<Text key="total" dimColor>Total: {fmt(agentTotal)} tok</Text>);
         return <ScrollView height={20} lines={agentLines} />;
       })()}
       {page === 2 && <Box flexDirection="column">
