@@ -53,21 +53,20 @@ export async function streamModel(
           onChunk({ type: "content", text: content });
         }
 
-        // Emit tool calls as they start streaming (block-level granularity)
-        // This lets the UI show spinners immediately, not after the full response
+        // Emit tool calls once when name+id are first seen (no duplicates)
         if (chunk.tool_call_chunks?.length) {
           for (const tc of chunk.tool_call_chunks) {
-            if (tc.name) {
-              // New tool starting — emit immediately so UI can show it
-              onChunk({ type: "tool_call", id: tc.id || `tool_${tc.index ?? 0}`, name: tc.name, args: "", status: "executing" });
+            if (tc.name && tc.id && !emittedToolNames.has(tc.id)) {
+              emittedToolNames.add(tc.id);
+              onChunk({ type: "tool_call", id: tc.id, name: tc.name, args: "", status: "executing" });
             }
           }
         }
-        // Same for fully-formed tool_calls (some providers send complete)
         if (chunk.tool_calls?.length) {
           for (const tc of chunk.tool_calls) {
-            if (tc.name && !emittedToolNames.has(tc.name + tc.id)) {
-              emittedToolNames.add(tc.name + tc.id);
+            const key = tc.id || tc.name;
+            if (tc.name && !emittedToolNames.has(key)) {
+              emittedToolNames.add(key);
               onChunk({ type: "tool_call", id: tc.id || `tool_${emittedToolNames.size}`, name: tc.name, args: JSON.stringify(tc.args), status: "executing" });
             }
           }
