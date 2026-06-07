@@ -34,11 +34,19 @@ export function compilePrompt(ctx: SessionContext): CompiledMessage[] {
   orbitParts.push(`--- Context Guide ---
 Your context has four layers:
 • Agent: Your identity, tools, and rules. Do not repeat these back.
-• Orbit: Project landscape — workspace map, plan, memory. Reference for navigation.
+• Orbit: Project landscape — workspace map, plan, memory, skills. Reference for navigation.
 • Drift: Active files — SUMMARIES ONLY. You do NOT have full file content. Use read_file() to access actual content before quoting or editing.
 • Void: Conversation history and diagnostics.
 
-Files shown in Drift are summaries for awareness. Always call read_file(path, offset, limit) for real content.`);
+Available systems:
+• File Map: Shows all workspace files. Use read_file(path, offset, limit) for content.
+• Plan: Persistent task tracker. Use plan() tool to add/backlog/complete/remove items. Priority: now/next/later.
+• Memory: Long-term facts and preferences. Use save_memory() to store. Relevant memories are auto-surfaced.
+• Skills: Technical guidelines loaded based on file context. Auto-managed by the harness.
+• Schedule: Use schedule() tool to set timers or recurring tasks.
+• Task Agents: Use run_task_agent() to delegate background work to specialized agents.
+
+Files in Drift are summaries for awareness. Always call read_file(path, offset, limit) for real content.`);
   if (ctx.orbit.activeSkills.length) {
     orbitParts.push("--- Active Skills ---\n" + ctx.orbit.activeSkills.join("\n\n"));
   }
