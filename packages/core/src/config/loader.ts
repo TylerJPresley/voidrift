@@ -37,6 +37,12 @@ export const ConfigSchema = z.object({
     provider: z.enum(["duckduckgo", "tavily", "google"]).default("duckduckgo"),
     apiKey: z.string().optional(),
   }).default({ provider: "duckduckgo" }),
+  tracing: z.object({
+    enabled: z.boolean().default(false),
+    apiKeyEnv: z.string().default("LANGCHAIN_API_KEY"),
+    project: z.string().default("voidrift"),
+    endpoint: z.string().optional(),
+  }).default({ enabled: false, apiKeyEnv: "LANGCHAIN_API_KEY", project: "voidrift" }),
 }).refine(
   (cfg) => {
     const modelNames = Object.keys(cfg.models);
@@ -73,6 +79,7 @@ const DEFAULT_CONFIG: VoidRiftConfig = {
   maxConcurrentAgents: 1,
   plugins: [],
   search: { provider: "duckduckgo" as const },
+  tracing: { enabled: false, apiKeyEnv: "LANGCHAIN_API_KEY", project: "voidrift" },
 };
 
 /**
@@ -137,6 +144,19 @@ function resolveApiKeys(config: VoidRiftConfig): VoidRiftConfig {
   for (const [name, model] of Object.entries(models)) {
     if (model.apiKeyEnv && !process.env[model.apiKeyEnv]) {
       warnings.push(`env var "${model.apiKeyEnv}" not set for model "${name}"`);
+    }
+  }
+
+  // Apply tracing config — LangChain reads these env vars internally
+  if (config.tracing.enabled) {
+    process.env.LANGCHAIN_TRACING_V2 = "true";
+    process.env.LANGCHAIN_PROJECT = config.tracing.project;
+    if (config.tracing.endpoint) {
+      process.env.LANGCHAIN_ENDPOINT = config.tracing.endpoint;
+    }
+    const tracingKey = process.env[config.tracing.apiKeyEnv];
+    if (tracingKey) {
+      process.env.LANGCHAIN_API_KEY = tracingKey;
     }
   }
 

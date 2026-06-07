@@ -20,7 +20,7 @@ function resolveApiKey(config: ModelConfig): string | undefined {
   return process.env[config.apiKeyEnv];
 }
 
-function createClient(config: ModelConfig): BaseChatModel {
+function createClient(config: ModelConfig, maxConcurrency?: number): BaseChatModel {
   const apiKey = resolveApiKey(config);
 
   switch (config.protocol) {
@@ -35,6 +35,7 @@ function createClient(config: ModelConfig): BaseChatModel {
         streaming: true,
         maxRetries: DEFAULT_MAX_RETRIES,
         timeout: DEFAULT_TIMEOUT_MS,
+        maxConcurrency,
       });
 
     case "anthropic":
@@ -48,6 +49,7 @@ function createClient(config: ModelConfig): BaseChatModel {
         clientOptions: config.baseUrl && !config.baseUrl.includes("api.anthropic.com") ? { baseURL: config.baseUrl, timeout: DEFAULT_TIMEOUT_MS } : { timeout: DEFAULT_TIMEOUT_MS },
         streaming: true,
         maxRetries: DEFAULT_MAX_RETRIES,
+        maxConcurrency,
         ...(config.additionalHeaders && { headers: config.additionalHeaders }),
       });
 
@@ -61,6 +63,7 @@ function createClient(config: ModelConfig): BaseChatModel {
         topK: config.topK,
         streaming: true,
         maxRetries: DEFAULT_MAX_RETRIES,
+        maxConcurrency,
       });
 
     default:
@@ -71,7 +74,7 @@ function createClient(config: ModelConfig): BaseChatModel {
 export function createAdapter(modelName: string, appConfig: VoidRiftConfig): ResolvedModel {
   const config = appConfig.models[modelName];
   if (!config) throw new Error(`Model "${modelName}" not found in config`);
-  return { name: modelName, config, client: createClient(config) };
+  return { name: modelName, config, client: createClient(config, appConfig.maxConcurrentAgents) };
 }
 
 export function createTierAdapter(tier: Tier, appConfig: VoidRiftConfig): ResolvedModel {
