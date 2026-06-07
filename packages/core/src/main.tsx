@@ -531,8 +531,11 @@ function App({ engine }: { engine: EngineContext }) {
         if (chunk.type === "tool_call") {
           // Clear streaming display — tools are taking over
           setStreaming(null);
-          // Discard any accumulated text — it's just narration before tool use, not a final response
-          fullText = "";
+          // Commit any accumulated text to history — view is append-only
+          if (fullText.trim()) {
+            setHistory(h => [...h, { id: id(), type: "assistant", model: resolvedModel, text: fullText }]);
+            fullText = "";
+          }
           setThinking(null);
           if (chunk.status === "executing") {
             // Tool just started — commit to history immediately
