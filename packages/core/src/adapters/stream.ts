@@ -166,3 +166,22 @@ function isRetryable(message: string): boolean {
   const retryPatterns = [/rate.?limit/i, /429/, /503/, /timeout/i, /ECONNRESET/, /ECONNREFUSED/];
   return retryPatterns.some((p) => p.test(message));
 }
+
+/**
+ * Validates message ordering before sending to the model.
+ * Throws if system messages appear after non-system messages (violates OpenAI-compatible spec).
+ */
+function validateMessageOrder(messages: BaseMessage[]): void {
+  let seenNonSystem = false;
+  for (const msg of messages) {
+    const type = msg._getType();
+    if (type !== "system") {
+      seenNonSystem = true;
+    } else if (seenNonSystem) {
+      throw new Error(
+        `Invalid message order: SystemMessage found after conversation start. ` +
+        `System messages must be at the beginning. Got: ${messages.map(m => m._getType()).join(", ")}`
+      );
+    }
+  }
+}
