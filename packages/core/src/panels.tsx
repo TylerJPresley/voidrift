@@ -1280,7 +1280,7 @@ export function ContextPanel({
         <Text dimColor>{context.context.void.diagnostics || "none"}</Text>
       </Box>}
       <Text> </Text>
-      <Text dimColor><Text color="#61afef" bold>←/→</Text> Tab  <Text color="#61afef" bold>esc</Text> Close</Text>
+      <Text dimColor><Text color="#61afef" bold>←/→</Text> Tab  <Text color="#61afef" bold>↑↓</Text> Scroll  <Text color="#61afef" bold>esc</Text> Close</Text>
     </Box>
   );
 }
