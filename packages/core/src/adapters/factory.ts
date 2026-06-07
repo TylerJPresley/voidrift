@@ -45,7 +45,7 @@ function createClient(config: ModelConfig): BaseChatModel {
         maxTokens: config.maxOutputTokens ?? 4096,
         topP: config.topP,
         topK: config.topK,
-        clientOptions: { baseURL: config.baseUrl, timeout: DEFAULT_TIMEOUT_MS },
+        clientOptions: config.baseUrl && !config.baseUrl.includes("api.anthropic.com") ? { baseURL: config.baseUrl, timeout: DEFAULT_TIMEOUT_MS } : { timeout: DEFAULT_TIMEOUT_MS },
         streaming: true,
         maxRetries: DEFAULT_MAX_RETRIES,
         ...(config.additionalHeaders && { headers: config.additionalHeaders }),
