@@ -1234,7 +1234,7 @@ export function ContextPanel({
         const agentLines: React.ReactNode[] = [];
         const agent = context.context.agent;
         const allTools = TOOL_SCHEMAS.filter(t => agent.activeTools.includes(t.name));
-        agentLines.push(<Text key="total" dimColor>{fmt(agentTotal)} tok</Text>);
+        agentLines.push(<Text key="total"><Text bold>Tokens </Text><Text dimColor>{fmt(agentTotal)}</Text></Text>);
         agentLines.push(<Text key="sp0">{" "}</Text>);
         // Tools
         agentLines.push(<Text key="h-tools" bold>Tools <Text dimColor>({allTools.length})</Text></Text>);
@@ -1257,7 +1257,7 @@ export function ContextPanel({
         return <ScrollView height={20} lines={agentLines} />;
       })()}
       {page === 2 && <Box flexDirection="column">
-        <Text dimColor>{fmt(orbitTotal)} tok</Text>
+        <Text><Text bold>Tokens </Text><Text dimColor>{fmt(orbitTotal)}</Text></Text>
         <Text> </Text>
         <Text bold>Active Skills <Text dimColor>({activeSkills.length} triggered)</Text></Text>
         {activeSkills.length === 0 ? <Text dimColor>none</Text> : activeSkills.map((s, i) => <Text key={i} dimColor>{s.slice(0, 100)}…</Text>)}
@@ -1270,7 +1270,7 @@ export function ContextPanel({
       </Box>}
       {page === 3 && (() => {
         const driftLines: React.ReactNode[] = [];
-        driftLines.push(<Text key="tok" dimColor>{fmt(driftTotal)} tok</Text>);
+        driftLines.push(<Text key="tok"><Text bold>Tokens </Text><Text dimColor>{fmt(driftTotal)}</Text></Text>);
         driftLines.push(<Text key="sp-tok">{" "}</Text>);
         const allPaths = context.context.orbit.workspaceCodeMap
           ? context.context.orbit.workspaceCodeMap.split("\n").map(line => line.replace(/^[\s📁📝⚙️🔧]*/, "").replace(/\s*[\[(].*$/, "").trim()).filter(p => p && !p.endsWith("/") && !p.startsWith("["))
@@ -1292,7 +1292,7 @@ export function ContextPanel({
         return <ScrollView height={20} lines={driftLines} />;
       })()}
       {page === 4 && <Box flexDirection="column">
-        <Text dimColor>{fmt(voidTotal)} tok</Text>
+        <Text><Text bold>Tokens </Text><Text dimColor>{fmt(voidTotal)}</Text></Text>
         <Text> </Text>
         <Text bold>Messages <Text dimColor>({messages.length})</Text></Text>
         {messages.slice(-10).map((m, i) => <Text key={i} dimColor wrap="truncate">[{m.role}] {m.content.slice(0, 100)}{m.content.length > 100 ? "…" : ""}</Text>)}
