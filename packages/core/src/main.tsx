@@ -535,8 +535,8 @@ function App({ engine }: { engine: EngineContext }) {
           if (fullText.trim()) {
             turnItems.push({ id: id(), type: "assistant", model: resolvedModel, text: fullText } as any);
             fullText = "";
-            setStreaming(null);
           }
+          setStreaming(null);
           setThinking(null);
           // Commit tool and update live display in the same setState call
           if (chunk.status === "executing") {
