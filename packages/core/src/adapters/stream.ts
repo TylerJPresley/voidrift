@@ -155,8 +155,8 @@ function extractContent(content: unknown): string {
   if (typeof content === "string") return content;
   if (Array.isArray(content)) {
     return content
-      .filter((block: any) => block.type === "text" || block.text)
-      .map((block: any) => block.text || "")
+      .filter((block: any) => block.type === "text" || block.type === "thinking" || block.text || block.thinking)
+      .map((block: any) => block.text || block.thinking || "")
       .join("");
   }
   return "";
