@@ -531,7 +531,7 @@ function App({ engine }: { engine: EngineContext }) {
         if (chunk.type === "tool_call") {
           // Clear streaming display — tools are taking over
           setStreaming(null);
-          // Commit any accumulated text to history — view is append-only
+          // Commit any accumulated text — view is append-only
           if (fullText.trim()) {
             setHistory(h => [...h, { id: id(), type: "assistant", model: resolvedModel, text: fullText }]);
             fullText = "";
