@@ -1,0 +1,158 @@
+/**
+ * LangChain Tool Bindings.
+ *
+ * Converts VoidRift tool definitions into proper LangChain tool objects
+ * with Zod schemas. LangChain handles provider-specific translation
+ * (OpenAI, Anthropic, Google) automatically.
+ */
+import { tool } from "@langchain/core/tools";
+import { z } from "zod";
+
+// We define dummy implementations — execution is handled by our own tool loop,
+// not by LangChain's agent executor. These are only used for schema binding.
+const noop = async () => "";
+
+export const langchainTools = [
+  tool(noop, {
+    name: "read_file",
+    description: "Read file content from the workspace. Returns 200 lines by default. Use offset/limit for specific ranges.",
+    schema: z.object({
+      path: z.string().describe("Relative file path"),
+      offset: z.number().optional().describe("Line offset to start reading from"),
+      limit: z.number().optional().describe("Maximum number of lines to read"),
+    }),
+  }),
+  tool(noop, {
+    name: "glob_files",
+    description: "Search for files by glob pattern",
+    schema: z.object({
+      pattern: z.string().describe("Glob pattern (e.g. '**/*.ts')"),
+    }),
+  }),
+  tool(noop, {
+    name: "write_file",
+    description: "Create a new file or overwrite an existing one entirely",
+    schema: z.object({
+      path: z.string().describe("Relative file path"),
+      content: z.string().describe("Full file content to write"),
+    }),
+  }),
+  tool(noop, {
+    name: "edit_file",
+    description: "Perform a surgical search-and-replace edit on an existing file",
+    schema: z.object({
+      path: z.string().describe("Relative file path"),
+      search: z.string().describe("Exact text block to find"),
+      replace: z.string().describe("Replacement text"),
+    }),
+  }),
+  tool(noop, {
+    name: "execute_command",
+    description: "Run a shell command (build, test, lint, git). Timeout: 30s default.",
+    schema: z.object({
+      command: z.string().describe("Shell command to execute"),
+      timeout: z.number().optional().describe("Timeout in milliseconds"),
+    }),
+  }),
+  tool(noop, {
+    name: "web_search",
+    description: "Search the web for documentation or library information",
+    schema: z.object({
+      query: z.string().describe("Search query"),
+    }),
+  }),
+  tool(noop, {
+    name: "web_fetch",
+    description: "Fetch a URL and convert HTML to markdown",
+    schema: z.object({
+      url: z.string().describe("URL to fetch"),
+    }),
+  }),
+  tool(noop, {
+    name: "lsp_definition",
+    description: "Resolve definition location using Language Server",
+    schema: z.object({
+      path: z.string().describe("File path"),
+      line: z.number().describe("Line number"),
+      character: z.number().describe("Character position"),
+    }),
+  }),
+  tool(noop, {
+    name: "lsp_references",
+    description: "Find all references to a symbol",
+    schema: z.object({
+      path: z.string().describe("File path"),
+      line: z.number().describe("Line number"),
+      character: z.number().describe("Character position"),
+    }),
+  }),
+  tool(noop, {
+    name: "lsp_hover",
+    description: "Get type information and hover tips for a symbol",
+    schema: z.object({
+      path: z.string().describe("File path"),
+      line: z.number().describe("Line number"),
+      character: z.number().describe("Character position"),
+    }),
+  }),
+  tool(noop, {
+    name: "spawn_subagent",
+    description: "Spawn a background subagent in an isolated Git worktree",
+    schema: z.object({
+      task: z.string().describe("Task description"),
+      files: z.array(z.string()).describe("Target file paths"),
+    }),
+  }),
+  tool(noop, {
+    name: "connect_mcp_server",
+    description: "Connect to a Model Context Protocol server",
+    schema: z.object({
+      name: z.string().describe("Server name"),
+      command: z.string().describe("Command to spawn the server"),
+    }),
+  }),
+  tool(noop, {
+    name: "run_task_agent",
+    description: "Delegate a task to a specialized background agent",
+    schema: z.object({
+      agentId: z.string().describe("ID of the task agent to run"),
+      instruction: z.string().describe("Task instruction for the agent"),
+    }),
+  }),
+  tool(noop, {
+    name: "save_memory",
+    description: "Save a fact, directive, or preference to long-term memory",
+    schema: z.object({
+      title: z.string().describe("Short title for the memory"),
+      content: z.string().describe("The fact or preference to remember"),
+      keywords: z.string().describe("Comma-separated keywords for retrieval"),
+      scope: z.enum(["local", "global"]).optional().describe("Where to save: local (this project) or global (all projects)"),
+    }),
+  }),
+  tool(noop, {
+    name: "schedule",
+    description: "Schedule a delayed or recurring task",
+    schema: z.object({
+      instruction: z.string().describe("Instruction to execute when the timer fires"),
+      delay: z.string().optional().describe("One-shot delay (e.g. '30s', '5m', '1h')"),
+      cron: z.string().optional().describe("Recurring cron pattern (e.g. '*/5 * * * *')"),
+    }),
+  }),
+  tool(noop, {
+    name: "plan",
+    description: "Manage the plan — add items, backlog ideas, change priority, remove completed items, or load details",
+    schema: z.object({
+      action: z.enum(["add", "backlog", "load", "prioritize", "remove"]).describe("Action to perform"),
+      name: z.string().optional().describe("Filename slug for the item"),
+      description: z.string().optional().describe("1-2 sentence summary"),
+      rationale: z.string().optional().describe("Why this matters"),
+      priority: z.enum(["now", "next", "later"]).optional().describe("Priority level"),
+      body: z.string().optional().describe("Full detail markdown"),
+    }),
+  }),
+];
+
+/** Get LangChain tool objects filtered by tool names from an agent manifest */
+export function getLangchainTools(toolNames: string[]) {
+  return langchainTools.filter(t => toolNames.includes(t.name));
+}

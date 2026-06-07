@@ -197,31 +197,16 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
     new HumanMessage(input.userMessage),
   ];
 
-  // Bind tools from agent manifest
-  const tools = input.agent
-    ? TOOL_SCHEMAS.filter((t) => input.agent!.tools.includes(t.name))
-    : TOOL_SCHEMAS;
-  const toolDefs = tools.map((t) => ({
-    type: "function" as const,
-    function: {
-      name: t.name,
-      description: t.description,
-      parameters: {
-        type: "object",
-        properties: Object.fromEntries(t.parameters.map((p) => {
-          if (p.type.endsWith("[]")) {
-            return [p.name, { type: "array", items: { type: p.type.slice(0, -2) }, description: p.description }];
-          }
-          return [p.name, { type: p.type, description: p.description }];
-        })),
-        required: t.parameters.filter((p) => p.required).map((p) => p.name),
-      },
-    },
-  }));
+  // Bind tools using LangChain's native tool system (handles provider-specific translation)
+  const { getLangchainTools } = await import("../tools/langchain-tools.js");
+  const toolNames = input.agent
+    ? input.agent.tools
+    : TOOL_SCHEMAS.map(t => t.name);
+  const lcTools = getLangchainTools(toolNames);
 
   let client: BaseChatModel = input.client;
   try {
-    if (toolDefs.length > 0 && input.client.bindTools) client = input.client.bindTools(toolDefs) as unknown as BaseChatModel;
+    if (lcTools.length > 0 && input.client.bindTools) client = input.client.bindTools(lcTools) as unknown as BaseChatModel;
   } catch {
     // Model doesn't support tool binding — fall back to raw client
   }
