@@ -98,9 +98,9 @@ function Welcome({ model, workspace, branch }: { model: string; workspace: strin
   );
 }
 
-function UserMessage({ text }: { text: string }) {
+function UserMessage({ text, isFirst }: { text: string; isFirst?: boolean }) {
   return (
-    <Box marginTop={1}>
+    <Box marginTop={isFirst ? 0 : 1} marginBottom={1}>
       <Text color="#6a7ec8">┃ </Text>
       <Text bold>{text}</Text>
     </Box>
@@ -143,9 +143,9 @@ function describeToolCall(name: string, argsStr: string): { label: string; descr
   }
 }
 
-function ToolGroup({ tools, prevType }: { tools: ToolCall[]; prevType?: string }) {
+function ToolGroup({ tools }: { tools: ToolCall[] }) {
   return (
-    <Box flexDirection="column" marginLeft={1} marginTop={prevType === "user" ? 1 : 0}>
+    <Box flexDirection="column" marginLeft={1}>
       {tools.map((tool, i) => {
         const { label, description, color } = describeToolCall(tool.name, tool.args);
         return (
@@ -607,11 +607,12 @@ function App({ engine }: { engine: EngineContext }) {
       <Static key={clearKey} items={[{ id: "welcome", type: "welcome" } as any, ...history]}>
         {(item: any, idx: number) => {
           if (item.type === "welcome") return <Welcome key="welcome" model={footerModel} workspace={engine.shortPath} branch={engine.branch} />;
+          const isFirst = idx === 1; // idx 0 is welcome
           const allItems = [{ type: "welcome" }, ...history];
           const prev = allItems[idx - 1]?.type ?? "welcome";
           switch (item.type) {
-            case "user": return <UserMessage key={item.id} text={item.text} />;
-            case "tools": return <ToolGroup key={item.id} tools={item.tools} prevType={prev} />;
+            case "user": return <UserMessage key={item.id} text={item.text} isFirst={isFirst} />;
+            case "tools": return <ToolGroup key={item.id} tools={item.tools} />;
             case "diff": return <DiffDisplay key={item.id} summary={item.summary} lines={item.lines} />;
             case "assistant": return <AssistantMessage key={item.id} model={item.model} text={item.text} stats={item.stats} prevType={prev} />;
             case "system": return <Text key={item.id} dimColor italic>  {item.text}</Text>;
