@@ -108,23 +108,38 @@ function UserMessage({ text }: { text: string }) {
 }
 
 /** Get a human-readable description and color for a tool call */
-function describeToolCall(name: string, argsStr: string): { description: string; color: string } {
+function describeToolCall(name: string, argsStr: string): { label: string; description: string; color: string } {
   let args: Record<string, any> = {};
   try { args = JSON.parse(argsStr); } catch {}
 
+  const friendly: Record<string, string> = {
+    read_file: "Read", glob_files: "Glob", write_file: "Write", edit_file: "Edit",
+    execute_command: "Run", web_search: "Search", web_fetch: "Fetch",
+    save_memory: "Remember", schedule: "Schedule", plan: "Plan",
+    run_task_agent: "Task Agent",
+  };
+  const label = friendly[name] || name;
+
   switch (name) {
-    case "read_file":
-      return { description: args.path || "file", color: "green" };
+    case "read_file": {
+      const path = args.path || "file";
+      const range = args.offset !== undefined ? `:${args.offset + 1}-${(args.offset || 0) + (args.limit || 200)}` : "";
+      return { label, description: `${path}${range}`, color: "green" };
+    }
     case "glob_files":
-      return { description: args.pattern || "pattern", color: "green" };
+      return { label, description: args.pattern || "pattern", color: "green" };
     case "write_file":
-      return { description: args.path || "file", color: "blue" };
+      return { label, description: args.path || "file", color: "blue" };
     case "edit_file":
-      return { description: args.path || "file", color: "blue" };
+      return { label, description: args.path || "file", color: "blue" };
     case "execute_command":
-      return { description: args.command?.slice(0, 60) || "command", color: "yellow" };
+      return { label, description: args.command?.slice(0, 60) || "command", color: "yellow" };
+    case "web_search":
+      return { label, description: args.query?.slice(0, 60) || "query", color: "cyan" };
+    case "web_fetch":
+      return { label, description: args.url?.slice(0, 60) || "url", color: "cyan" };
     default:
-      return { description: argsStr.slice(0, 60), color: "gray" };
+      return { label, description: argsStr.slice(0, 60), color: "gray" };
   }
 }
 
@@ -132,11 +147,11 @@ function ToolGroup({ tools }: { tools: ToolCall[] }) {
   return (
     <Box flexDirection="column" marginLeft={1} marginTop={1}>
       {tools.map((tool, i) => {
-        const { description, color } = describeToolCall(tool.name, tool.args);
+        const { label, description, color } = describeToolCall(tool.name, tool.args);
         return (
           <Box key={i} flexDirection="row">
             <ToolStatusIcon status={tool.status} color={color} />
-            <Text bold>{tool.name}</Text>
+            <Text bold>{label}</Text>
             <Text color={color}>  {description}</Text>
             {tool.elapsed && tool.status !== "executing" && <Text dimColor>  {tool.elapsed}</Text>}
           </Box>
