@@ -27,7 +27,6 @@ export async function streamModel(
   let text = "";
   let accumulated: AIMessageChunk | null = null;
   let usage: TokenUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
-  const emittedToolNames = new Set<string>();
   const requestStart = Date.now();
   let firstTokenAt: number | null = null;
 
@@ -51,25 +50,6 @@ export async function streamModel(
           if (!firstTokenAt) firstTokenAt = Date.now();
           text += content;
           onChunk({ type: "content", text: content });
-        }
-
-        // Emit tool calls once when name+id are first seen (no duplicates)
-        if (chunk.tool_call_chunks?.length) {
-          for (const tc of chunk.tool_call_chunks) {
-            if (tc.name && tc.id && !emittedToolNames.has(tc.id)) {
-              emittedToolNames.add(tc.id);
-              onChunk({ type: "tool_call", id: tc.id, name: tc.name, args: "", status: "executing" });
-            }
-          }
-        }
-        if (chunk.tool_calls?.length) {
-          for (const tc of chunk.tool_calls) {
-            const key = tc.id || tc.name;
-            if (tc.name && !emittedToolNames.has(key)) {
-              emittedToolNames.add(key);
-              onChunk({ type: "tool_call", id: tc.id || `tool_${emittedToolNames.size}`, name: tc.name, args: JSON.stringify(tc.args), status: "executing" });
-            }
-          }
         }
 
         // Accumulate chunks via LangChain's .concat() for tool call assembly
