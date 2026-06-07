@@ -318,7 +318,12 @@ function App({ engine }: { engine: EngineContext }) {
           if (existsSync(absPath)) {
             const content = readFileSync(absPath, "utf-8");
             const lines = content.split("\n").length;
-            engine.context.focusFile(relPath, content, lines);
+            if (lines <= (engine.container.config.summarizeThreshold ?? 500)) {
+              engine.context.focusFile(relPath, content, lines);
+            } else {
+              // Large files: just register awareness with a brief note
+              engine.context.focusFile(relPath, `[Resource: ${relPath}] ${lines} lines. Use read_file("${relPath}", offset, limit) to access content.`, lines);
+            }
           }
         }
       }
