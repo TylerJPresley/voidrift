@@ -358,8 +358,9 @@ function App({ engine }: { engine: EngineContext }) {
     if (key.escape) {
       if (busy) {
         abortRef.current?.abort();
-        setBusy(false); setThinking(null); setStreaming(null); setPendingTools(null);
-        setHistory(h => [...h, { id: id(), type: "system", text: "Generation cancelled." }]);
+        setBusy(false); setThinking(null); setStreaming(null);
+        setHistory(h => [...h, ...(pendingTools ? [{ id: String(h.length+1), type: "tools" as const, tools: pendingTools }] : []), { id: String(h.length+2), type: "system" as const, text: "Generation cancelled." }]);
+        setPendingTools(null);
       }
     }
     if (key.tab && !busy && !panel) {
@@ -378,8 +379,9 @@ function App({ engine }: { engine: EngineContext }) {
       if (panel) { setPanel(null); return; }
       if (busy) {
         abortRef.current?.abort();
-        setBusy(false); setThinking(null); setStreaming(null); setPendingTools(null);
-        setHistory(h => [...h, { id: id(), type: "system", text: "Generation cancelled." }]);
+        setBusy(false); setThinking(null); setStreaming(null);
+        setHistory(h => [...h, ...(pendingTools ? [{ id: String(h.length+1), type: "tools" as const, tools: pendingTools }] : []), { id: String(h.length+2), type: "system" as const, text: "Generation cancelled." }]);
+        setPendingTools(null);
         return;
       }
       if (input) { setInput(""); setInputKey(k => k + 1); return; }
@@ -524,7 +526,7 @@ function App({ engine }: { engine: EngineContext }) {
             tools.push({ name: chunk.name, args: chunk.args, status: "executing" });
             setPendingTools([...tools]);
           } else {
-            // Tool finished — update its status
+            // Tool finished — update its status and flush to history
             const idx = tools.findIndex(t => t.name === chunk.name && t.status === "executing");
             if (idx !== -1) {
               tools[idx].status = chunk.status === "error" ? "error" : "success";
