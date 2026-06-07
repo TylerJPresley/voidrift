@@ -51,7 +51,7 @@ export function compilePrompt(ctx: SessionContext): CompiledMessage[] {
   const driftParts: string[] = [];
   if (ctx.drift.focusedFiles.length) {
     for (const f of ctx.drift.focusedFiles) {
-      driftParts.push(`--- Focused: ${f.path} ---\n${f.summary}`);
+      driftParts.push(`--- Focused: ${f.path} (SUMMARY — use read_file for actual content) ---\n${f.summary}`);
     }
   }
   if (ctx.drift.gitStatus) {
