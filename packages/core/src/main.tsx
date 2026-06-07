@@ -529,13 +529,12 @@ function App({ engine }: { engine: EngineContext }) {
           setStreaming({ model: resolvedModel, text: fullText, elapsed, tokens: tokenCount });
         }
         if (chunk.type === "tool_call") {
-          // Clear streaming display — tools are taking over
-          setStreaming(null);
-          // Commit any accumulated text — view is append-only
+          // Commit any accumulated text BEFORE clearing streaming (no empty frame)
           if (fullText.trim()) {
             setHistory(h => [...h, { id: id(), type: "assistant", model: resolvedModel, text: fullText }]);
             fullText = "";
           }
+          setStreaming(null);
           setThinking(null);
           if (chunk.status === "executing") {
             // Tool just started — commit to history immediately
