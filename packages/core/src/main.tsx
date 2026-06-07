@@ -301,6 +301,7 @@ function App({ engine }: { engine: EngineContext }) {
   const [streaming, setStreaming] = useState<{ model: string; text: string; elapsed: number; tokens: number } | null>(null);
   const [thinking, setThinking] = useState<string | null>(null);
   const [pendingTools, setPendingTools] = useState<ToolCall[] | null>(null);
+  const [pendingTurn, setPendingTurn] = useState<HistoryItem[]>([]);
   const [clearKey, setClearKey] = useState(0);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -516,6 +517,7 @@ function App({ engine }: { engine: EngineContext }) {
     let tokenCount = 0;
     let fullText = "";
     const tools: ToolCall[] = [];
+    const turnItems: HistoryItem[] = [];
     let resolvedModel = engine.agents.active.modelTier === "auto" ? "auto" : (engine.container.config.models[engine.container.config.tiers[engine.agents.active.modelTier as keyof typeof engine.container.config.tiers]]?.model ?? engine.agents.active.modelTier);
 
     const result = await executeTurn(engine, trimmed, {
@@ -529,32 +531,36 @@ function App({ engine }: { engine: EngineContext }) {
           setStreaming({ model: resolvedModel, text: fullText, elapsed, tokens: tokenCount });
         }
         if (chunk.type === "tool_call") {
-          // Commit any accumulated text BEFORE clearing streaming (no empty frame)
+          // Flush narration text to live turn items
           if (fullText.trim()) {
-            setHistory(h => [...h, { id: id(), type: "assistant", model: resolvedModel, text: fullText }]);
+            turnItems.push({ id: id(), type: "assistant", model: resolvedModel, text: fullText });
             fullText = "";
           }
           setStreaming(null);
           setThinking(null);
           if (chunk.status === "executing") {
-            // Tool just started — commit to history immediately
             const toolId = id();
-            tools.push({ name: chunk.name, args: chunk.args, status: "executing", _histId: toolId } as any);
-            setHistory(h => [...h, { id: toolId, type: "tools", tools: [{ name: chunk.name, args: chunk.args, status: "executing" }] }]);
+            const toolItem: any = { name: chunk.name, args: chunk.args, status: "executing" };
+            tools.push({ ...toolItem, _histId: toolId } as any);
+            turnItems.push({ id: toolId, type: "tools", tools: [toolItem] });
           } else {
-            // Tool finished — update the existing history entry in-place
+            // Tool finished — update in turnItems
             const tool = tools.find(t => t.name === chunk.name && t.status === "executing");
             if (tool) {
               tool.status = chunk.status === "error" ? "error" : "success";
               tool.elapsed = `${((Date.now() - startTime) / 1000).toFixed(1)}s`;
               const histId = (tool as any)._histId;
-              setHistory(h => h.map(item => item.id === histId ? { ...item, tools: [{ ...tool }] } : item));
+              const idx = turnItems.findIndex(item => item.id === histId);
+              if (idx >= 0) turnItems[idx] = { ...turnItems[idx], tools: [{ ...tool }] } as any;
             }
           }
+          // Update live display
+          setPendingTurn([...turnItems]);
         }
         if (chunk.type === "error") {
           setThinking(null); setStreaming(null);
-          setHistory(h => [...h, { id: id(), type: "system", text: `⚠️ ${chunk.message}` }]);
+          turnItems.push({ id: id(), type: "system", text: `⚠️ ${chunk.message}` } as any);
+          setPendingTurn([...turnItems]);
         }
         if (chunk.type === "status") {
           if (chunk.message.startsWith("model:")) {
@@ -570,14 +576,18 @@ function App({ engine }: { engine: EngineContext }) {
     if (result) {
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
       const tokPerSec = tokenCount > 0 ? (tokenCount / +elapsed).toFixed(1) : "0";
-      setHistory(h => [...h, {
+      // Commit all accumulated turn items + final response to Static in one batch
+      const finalItem: HistoryItem = {
         id: id(), type: "assistant", model: resolvedModel, text: result.response.text,
         stats: `↑ ${result.response.usage.promptTokens} · ↓ ${tokenCount} · ${tokPerSec} tok/s · ${elapsed}s`,
-      }]);
+      } as any;
+      setHistory(h => [...h, ...turnItems, finalItem]);
+    } else if (turnItems.length) {
+      setHistory(h => [...h, ...turnItems]);
     }
 
     setStreaming(null); setThinking(null); setBusy(false);
-    setPendingTools(null);
+    setPendingTools(null); setPendingTurn([]);
   }, [busy, engine]);
 
   // Subscribe to scheduled task triggers (queue if busy)
@@ -621,6 +631,14 @@ function App({ engine }: { engine: EngineContext }) {
         }}
       </Static>
 
+      {pendingTurn.length > 0 && pendingTurn.map((item: any) => {
+        switch (item.type) {
+          case "tools": return <ToolGroup key={item.id} tools={item.tools} />;
+          case "assistant": return <AssistantMessage key={item.id} model={item.model} text={item.text} stats={item.stats} prevType="tools" />;
+          case "system": return <Text key={item.id} dimColor italic>  {item.text}</Text>;
+          default: return null;
+        }
+      })}
       {pendingTools && <ToolGroup tools={pendingTools} />}
       {thinking && <ThinkingIndicator label={thinking} />}
       {streaming && <StreamingResponse {...streaming} />}
