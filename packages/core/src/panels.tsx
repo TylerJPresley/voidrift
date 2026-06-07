@@ -1279,7 +1279,7 @@ export function ContextPanel({
         driftLines.push(<Text key="gs"><Text bold>Git </Text><Text dimColor>{context.context.drift.gitStatus || "clean"}</Text></Text>);
         driftLines.push(<Text key="sp-gs">{" "}</Text>);
         // File Map stats
-        driftLines.push(<Text key="fm"><Text bold>File Map </Text><Text dimColor>{allPaths.length} files · {fmt(codeMapTokens)} tok · {focusedFiles.length} active</Text></Text>);
+        driftLines.push(<Text key="fm"><Text bold>File Map </Text><Text dimColor>{allPaths.length} files · {focusedFiles.length} active</Text></Text>);
         driftLines.push(<Text key="sp">{" "}</Text>);
         // Active files at top
         for (const [i, f] of focusedFiles.entries()) {
