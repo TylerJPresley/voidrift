@@ -145,27 +145,31 @@ function CodeBlock({ lines, lang }: { lines: string[]; lang: string }) {
 function TableBlock({ lines }: { lines: string[] }) {
   // Parse cells
   const parseRow = (line: string) => line.split("|").slice(1, -1).map(c => c.trim());
-  const rows = lines.filter(l => !/^[\s|:-]+$/.test(l)).map(parseRow);
+  const isSeparator = (line: string) => /^[\s|:-]+$/.test(line);
+  const rows = lines.filter(l => !isSeparator(l)).map(parseRow);
   if (rows.length === 0) return null;
 
-  // Calculate column widths, constrained to terminal
-  const termWidth = (process.stdout.columns || 80) - 4; // padding
+  // Strip markdown formatting for width calculation
+  const stripFormatting = (s: string) => s.replace(/\*\*(.+?)\*\*/g, "$1").replace(/`([^`]+)`/g, "$1").replace(/\[([^\]]+)\]\([^)]+\)/g, "$1").replace(/[*_]/g, "");
+
+  // Calculate column widths based on stripped content
   const colCount = rows[0].length;
   const widths = Array(colCount).fill(0);
   for (const row of rows) {
     for (let c = 0; c < colCount; c++) {
-      widths[c] = Math.max(widths[c], (row[c] || "").length);
+      widths[c] = Math.max(widths[c], stripFormatting(row[c] || "").length);
     }
   }
 
   // Shrink columns proportionally if total exceeds terminal width
-  const separatorCost = colCount * 3 + 2; // "│ " per col + outer
+  const termWidth = (process.stdout.columns || 80) - 4;
+  const separatorCost = (colCount + 1) * 2;
   const totalContent = widths.reduce((a, b) => a + b, 0);
   const available = termWidth - separatorCost;
   if (totalContent > available && available > colCount) {
     const ratio = available / totalContent;
     for (let c = 0; c < colCount; c++) {
-      widths[c] = Math.max(4, Math.floor(widths[c] * ratio));
+      widths[c] = Math.max(6, Math.floor(widths[c] * ratio));
     }
   }
 
@@ -173,15 +177,14 @@ function TableBlock({ lines }: { lines: string[] }) {
     <Box flexDirection="column" paddingLeft={1}>
       {rows.map((row, ri) => (
         <Box key={ri}>
-          <Text>│ </Text>
           {row.map((cell, ci) => {
             const w = widths[ci] || 10;
-            const display = cell.length > w ? cell.slice(0, w - 1) + "…" : cell.padEnd(w);
+            const stripped = stripFormatting(cell);
+            const display = stripped.length > w ? stripped.slice(0, w - 1) + "…" : stripped.padEnd(w);
             return (
               <React.Fragment key={ci}>
-                <Text bold={ri === 0}>{ri === 0 ? display : ""}</Text>
-                {ri !== 0 && <InlineText text={display} />}
-                <Text> │ </Text>
+                <Text bold={ri === 0}>{display}</Text>
+                {ci < row.length - 1 && <Text dimColor>  </Text>}
               </React.Fragment>
             );
           })}

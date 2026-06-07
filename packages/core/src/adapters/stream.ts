@@ -1,19 +1,21 @@
+/**
+ * LangChain streamEvents-based model streaming.
+ *
+ * Uses streamEvents() v2 for full lifecycle visibility:
+ * - on_llm_stream: token-by-token content
+ * - on_llm_end: usage metadata, complete response
+ * - on_retry: fallback/retry visibility
+ * - Automatic LangSmith tracing integration
+ */
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import type { BaseMessage } from "@langchain/core/messages";
+import { AIMessageChunk } from "@langchain/core/messages";
 import type { StreamChunk, ToolCallChunk, ModelResponse, TokenUsage } from "./types.js";
 
 export type OnChunk = (chunk: StreamChunk) => void;
 
 /**
- * Streams a model invocation, translating LangChain chunks into unified StreamChunks.
- *
- * Handles:
- * - String content (OpenAI style)
- * - Array content blocks (Anthropic style: [{type: "text", text: "..."}])
- * - Partial tool_call_chunks accumulation into complete tool calls
- * - Mid-stream errors (thrown during async iteration)
- * - Pre-stream errors (thrown on .stream() call)
- * - Usage metadata extraction
+ * Streams a model invocation using streamEvents() for full lifecycle visibility.
  */
 export async function streamModel(
   client: BaseChatModel,
@@ -22,7 +24,7 @@ export async function streamModel(
   signal?: AbortSignal
 ): Promise<ModelResponse> {
   let text = "";
-  const toolAccumulator = new Map<string, { id: string; name: string; args: string }>();
+  let accumulated: AIMessageChunk | null = null;
   let usage: TokenUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
   const requestStart = Date.now();
   let firstTokenAt: number | null = null;
@@ -32,74 +34,90 @@ export async function streamModel(
   }
 
   try {
-    const stream = await client.stream(messages, { signal });
+    const stream = client.streamEvents(messages, { version: "v2", signal });
 
-    try {
-      for await (const chunk of stream) {
-        if (signal?.aborted) break;
+    for await (const event of stream) {
+      if (signal?.aborted) break;
 
-        // Extract text content from chunk
-        const content = extractContent(chunk.content);
-        if (content) {
-          if (!firstTokenAt) firstTokenAt = Date.now();
-          text += content;
-          onChunk({ type: "content", text: content });
-        }
+      switch (event.event) {
+        case "on_llm_stream": {
+          const chunk = event.data.chunk;
 
-        // Accumulate tool call fragments
-        if (chunk.tool_call_chunks?.length) {
-          for (const tc of chunk.tool_call_chunks) {
-            const key = String(tc.index ?? toolAccumulator.size);
-            const existing = toolAccumulator.get(key);
-            if (existing) {
-              if (tc.id) existing.id = tc.id;
-              if (tc.name) existing.name = tc.name;
-              existing.args += tc.args || "";
+          // Extract text content from this chunk
+          const content = extractContent(chunk?.content);
+          if (content) {
+            if (!firstTokenAt) firstTokenAt = Date.now();
+            text += content;
+            onChunk({ type: "content", text: content });
+          }
+
+          // Accumulate for tool calls — use .concat() if available (real AIMessageChunk)
+          if (chunk) {
+            if (accumulated && typeof accumulated.concat === "function") {
+              accumulated = accumulated.concat(chunk);
+            } else if (!accumulated) {
+              accumulated = chunk;
             } else {
-              toolAccumulator.set(key, { id: tc.id || "", name: tc.name || "", args: tc.args || "" });
+              // Fallback: merge tool_calls arrays manually for plain objects
+              const existing = (accumulated as any).tool_calls || [];
+              const incoming = chunk.tool_calls || [];
+              accumulated = { ...accumulated, tool_calls: [...existing, ...incoming] } as any;
             }
           }
+          break;
         }
 
-        // Usage info (usually on final chunk)
-        if (chunk.usage_metadata) {
-          usage = {
-            promptTokens: chunk.usage_metadata.input_tokens ?? 0,
-            completionTokens: chunk.usage_metadata.output_tokens ?? 0,
-            totalTokens: chunk.usage_metadata.total_tokens ?? 0,
-          };
+        case "on_llm_end": {
+          // Extract usage from the final output
+          const output = event.data.output as AIMessageChunk;
+          if (output?.usage_metadata) {
+            usage = {
+              promptTokens: output.usage_metadata.input_tokens ?? 0,
+              completionTokens: output.usage_metadata.output_tokens ?? 0,
+              totalTokens: output.usage_metadata.total_tokens ?? 0,
+            };
+          }
+          break;
+        }
+
+        case "on_retry": {
+          const errMsg = typeof event.data === "string" ? event.data : (event.data as any)?.error?.message ?? "unknown error";
+          onChunk({ type: "status", message: `Retrying (${errMsg})...` });
+          break;
         }
       }
-    } catch (err: unknown) {
-      // Mid-stream error (network dropout, connection reset, or abort)
-      if (signal?.aborted) {
-        return { text, toolCalls: flushToolCalls(toolAccumulator, onChunk), usage, timing: { requestStart, firstTokenAt, endAt: Date.now() } };
-      }
-      const message = err instanceof Error ? err.message : String(err);
-      onChunk({ type: "error", message, retryable: isRetryable(message) });
-      return { text, toolCalls: flushToolCalls(toolAccumulator, onChunk), usage, timing: { requestStart, firstTokenAt, endAt: Date.now() } };
     }
   } catch (err: unknown) {
-    // Pre-stream error (failed to initiate stream, or aborted during prefill)
     if (signal?.aborted) {
-      return { text, toolCalls: [], usage, timing: { requestStart, firstTokenAt, endAt: Date.now() } };
+      return { text, toolCalls: extractToolCalls(accumulated), usage, timing: { requestStart, firstTokenAt, endAt: Date.now() } };
     }
     const message = err instanceof Error ? err.message : String(err);
     onChunk({ type: "error", message, retryable: isRetryable(message) });
-    return { text, toolCalls: [], usage, timing: { requestStart, firstTokenAt, endAt: Date.now() } };
+    return { text, toolCalls: extractToolCalls(accumulated), usage, timing: { requestStart, firstTokenAt, endAt: Date.now() } };
   }
 
-  // Yield accumulated tool calls
-  const toolCalls = flushToolCalls(toolAccumulator, onChunk);
+  // Extract tool calls from the accumulated message
+  const toolCalls = extractToolCalls(accumulated);
   onChunk({ type: "done", usage });
   return { text, toolCalls, usage, timing: { requestStart, firstTokenAt, endAt: Date.now() } };
 }
 
 /**
- * Extracts text from LangChain chunk content which can be:
- * - string (OpenAI)
- * - Array<{type: "text", text: string}> (Anthropic)
- * - empty/null
+ * Extracts tool calls from the fully accumulated AIMessageChunk.
+ * LangChain handles fragment accumulation via concat() — no manual assembly needed.
+ */
+function extractToolCalls(accumulated: AIMessageChunk | null): ToolCallChunk[] {
+  if (!accumulated?.tool_calls?.length) return [];
+  return accumulated.tool_calls.map((tc) => ({
+    type: "tool_call" as const,
+    id: tc.id || `tool_${Math.random().toString(36).slice(2, 8)}`,
+    name: tc.name,
+    args: JSON.stringify(tc.args),
+  }));
+}
+
+/**
+ * Extracts text from LangChain chunk content (string or content blocks).
  */
 function extractContent(content: unknown): string {
   if (!content) return "";
@@ -111,18 +129,6 @@ function extractContent(content: unknown): string {
       .join("");
   }
   return "";
-}
-
-function flushToolCalls(
-  accumulator: Map<string, { id: string; name: string; args: string }>,
-  onChunk: OnChunk
-): ToolCallChunk[] {
-  const toolCalls: ToolCallChunk[] = [];
-  for (const [index, { id, name, args }] of accumulator) {
-    const tc: ToolCallChunk = { type: "tool_call", id: id || `tool_${index}`, name, args };
-    toolCalls.push(tc);
-  }
-  return toolCalls;
 }
 
 function isRetryable(message: string): boolean {

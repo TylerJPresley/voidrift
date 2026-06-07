@@ -143,9 +143,9 @@ function describeToolCall(name: string, argsStr: string): { label: string; descr
   }
 }
 
-function ToolGroup({ tools }: { tools: ToolCall[] }) {
+function ToolGroup({ tools, prevType }: { tools: ToolCall[]; prevType?: string }) {
   return (
-    <Box flexDirection="column" marginLeft={1}>
+    <Box flexDirection="column" marginLeft={1} marginTop={prevType === "user" ? 1 : 0}>
       {tools.map((tool, i) => {
         const { label, description, color } = describeToolCall(tool.name, tool.args);
         return (
@@ -205,9 +205,9 @@ function DiffDisplay({ summary, lines }: { summary: string; lines: string[] }) {
 
 import { Markdown } from "./ui/markdown.js";
 
-function AssistantMessage({ model, text, stats }: { model: string; text: string; stats?: string }) {
+function AssistantMessage({ model, text, stats, prevType }: { model: string; text: string; stats?: string; prevType?: string }) {
   return (
-    <Box flexDirection="column" marginTop={1}>
+    <Box flexDirection="column" marginTop={prevType === "user" ? 0 : 1}>
       <Text dimColor italic>  {model}</Text>
       <Box borderLeft borderColor="#6a7ec8" borderRight={false} borderTop={false} borderBottom={false} paddingLeft={1} flexDirection="column">
         <Markdown text={text.trim()} />
@@ -609,14 +609,16 @@ function App({ engine }: { engine: EngineContext }) {
       {fullPanel === "diff" && <DiffPanel workspaceRoot={engine.workspaceRoot} onClose={() => { setFullPanel(null); process.stdout.write("\x1b[2J\x1b[H"); }} />}
       {fullPanel === "plan" && <PlanPanel planManager={engine.planManager} config={engine.container.config} onClose={() => { setFullPanel(null); process.stdout.write("\x1b[2J\x1b[H"); }} />}
       {!fullPanel && <>
-      <Static key={clearKey} items={[{ id: "welcome" } as any, ...history]}>
-        {(item: any) => {
-          if (item.id === "welcome") return <Welcome key="welcome" model={footerModel} workspace={engine.shortPath} branch={engine.branch} />;
+      <Static key={clearKey} items={[{ id: "welcome", type: "welcome" } as any, ...history]}>
+        {(item: any, idx: number) => {
+          if (item.type === "welcome") return <Welcome key="welcome" model={footerModel} workspace={engine.shortPath} branch={engine.branch} />;
+          const allItems = [{ type: "welcome" }, ...history];
+          const prev = allItems[idx - 1]?.type ?? "welcome";
           switch (item.type) {
             case "user": return <UserMessage key={item.id} text={item.text} />;
-            case "tools": return <ToolGroup key={item.id} tools={item.tools} />;
+            case "tools": return <ToolGroup key={item.id} tools={item.tools} prevType={prev} />;
             case "diff": return <DiffDisplay key={item.id} summary={item.summary} lines={item.lines} />;
-            case "assistant": return <AssistantMessage key={item.id} model={item.model} text={item.text} stats={item.stats} />;
+            case "assistant": return <AssistantMessage key={item.id} model={item.model} text={item.text} stats={item.stats} prevType={prev} />;
             case "system": return <Text key={item.id} dimColor italic>  {item.text}</Text>;
             default: return null;
           }
