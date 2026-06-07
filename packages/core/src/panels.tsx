@@ -1252,7 +1252,10 @@ export function ContextPanel({
       </Box>}
       {page === 3 && <Box flexDirection="column">
         <Text bold>File Map <Text dimColor>({fmt(codeMapTokens)} tok)</Text></Text>
-        <Text dimColor>{context.context.orbit.workspaceCodeMap ? "loaded" : "empty"}</Text>
+        {context.context.orbit.workspaceCodeMap
+          ? context.context.orbit.workspaceCodeMap.split("\n").map((line, i) => <Text key={i} dimColor>{line}</Text>)
+          : <Text dimColor>empty</Text>
+        }
         <Text> </Text>
         <Text bold>Active Files <Text dimColor>({focusedFiles.length}/3)</Text></Text>
         {focusedFiles.length === 0 ? <Text dimColor>none</Text> : focusedFiles.map((f, i) => <Box key={i} flexDirection="column"><Text color="#61afef">{f.path} <Text dimColor>({f.totalLines}L · {f.readRanges.length} ranges)</Text></Text><Text dimColor>  {f.summary.slice(0, 120)}…</Text></Box>)}
