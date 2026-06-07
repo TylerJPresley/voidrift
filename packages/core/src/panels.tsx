@@ -1250,19 +1250,26 @@ export function ContextPanel({
         <Text bold>Plan</Text>
         {context.context.orbit.activePlan ? <Text dimColor>{context.context.orbit.activePlan.slice(0, 200)}…</Text> : <Text dimColor>no active plan</Text>}
       </Box>}
-      {page === 3 && <Box flexDirection="column">
-        <Text bold>File Map <Text dimColor>({fmt(codeMapTokens)} tok)</Text></Text>
-        {context.context.orbit.workspaceCodeMap
-          ? context.context.orbit.workspaceCodeMap.split("\n").map((line, i) => <Text key={i} dimColor>{line}</Text>)
-          : <Text dimColor>empty</Text>
-        }
-        <Text> </Text>
-        <Text bold>Active Files <Text dimColor>({focusedFiles.length}/3)</Text></Text>
-        {focusedFiles.length === 0 ? <Text dimColor>none</Text> : focusedFiles.map((f, i) => <Box key={i} flexDirection="column"><Text color="#61afef">{f.path} <Text dimColor>({f.totalLines}L · {f.readRanges.length} ranges)</Text></Text><Text dimColor>  {f.summary.slice(0, 120)}…</Text></Box>)}
-        <Text> </Text>
-        <Text bold>Git Status</Text>
-        <Text dimColor>{context.context.drift.gitStatus || "clean"}</Text>
-      </Box>}
+      {page === 3 && (() => {
+        const driftLines: React.ReactNode[] = [];
+        driftLines.push(<Text key="h1" bold>File Map <Text dimColor>({fmt(codeMapTokens)} tok)</Text></Text>);
+        if (context.context.orbit.workspaceCodeMap) {
+          for (const [i, line] of context.context.orbit.workspaceCodeMap.split("\n").entries()) {
+            driftLines.push(<Text key={`fm-${i}`} dimColor>{line}</Text>);
+          }
+        } else { driftLines.push(<Text key="fm-empty" dimColor>empty</Text>); }
+        driftLines.push(<Text key="sp1">{" "}</Text>);
+        driftLines.push(<Text key="h2" bold>Active Files <Text dimColor>({focusedFiles.length}/3)</Text></Text>);
+        if (focusedFiles.length === 0) { driftLines.push(<Text key="af-empty" dimColor>none</Text>); }
+        else { for (const [i, f] of focusedFiles.entries()) {
+          driftLines.push(<Text key={`af-${i}`} color="#61afef">{f.path} <Text dimColor>({f.totalLines}L · {f.readRanges.length} ranges)</Text></Text>);
+          driftLines.push(<Text key={`afs-${i}`} dimColor>  {f.summary.slice(0, 120)}…</Text>);
+        }}
+        driftLines.push(<Text key="sp2">{" "}</Text>);
+        driftLines.push(<Text key="h3" bold>Git Status</Text>);
+        driftLines.push(<Text key="gs" dimColor>{context.context.drift.gitStatus || "clean"}</Text>);
+        return <ScrollView height={20} lines={driftLines} />;
+      })()}
       {page === 4 && <Box flexDirection="column">
         <Text bold>Messages <Text dimColor>({messages.length})</Text></Text>
         {messages.slice(-10).map((m, i) => <Text key={i} dimColor wrap="truncate">[{m.role}] {m.content.slice(0, 100)}{m.content.length > 100 ? "…" : ""}</Text>)}
