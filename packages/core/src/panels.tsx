@@ -247,6 +247,7 @@ export function ModelPanel({ config, agents, onClose }: { config: VoidRiftConfig
 
   const activeAgent = agents.active;
   const currentTier = activeAgent.modelTier;
+  const [, forceRender] = useState(0);
 
   useInput((ch, key) => {
     if (key.escape) onClose();
@@ -257,9 +258,22 @@ export function ModelPanel({ config, agents, onClose }: { config: VoidRiftConfig
       activeAgent.modelTier = picked === "auto" ? "auto" : picked as any;
       onClose();
     }
-    if (ch === "d") { const picked = items[selected]; if (picked !== "auto") { config.tiers.dense = picked; } }
-    if (ch === "u") { const picked = items[selected]; if (picked !== "auto") { config.tiers.utility = picked; } }
-    if (ch === "f") { const picked = items[selected]; if (picked !== "auto") { config.tiers.flash = picked; } }
+    if (ch === "d" || ch === "u" || ch === "f") {
+      const picked = items[selected];
+      if (picked !== "auto") {
+        if (ch === "d") config.tiers.dense = picked;
+        if (ch === "u") config.tiers.utility = picked;
+        if (ch === "f") config.tiers.flash = picked;
+        // Persist tier assignment to global config
+        try {
+          const globalPath = join(process.env.HOME || "", ".config", "voidrift", "config.json");
+          const raw = JSON.parse(readFileSync(globalPath, "utf-8"));
+          raw.tiers = { ...raw.tiers, ...config.tiers };
+          writeFileSync(globalPath, JSON.stringify(raw, null, 2));
+        } catch {}
+        forceRender((n) => n + 1);
+      }
+    }
   });
 
   const columns = [
