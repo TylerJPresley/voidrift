@@ -1257,6 +1257,8 @@ export function ContextPanel({
         return <ScrollView height={20} lines={agentLines} />;
       })()}
       {page === 2 && <Box flexDirection="column">
+        <Text dimColor>{fmt(orbitTotal)} tok</Text>
+        <Text> </Text>
         <Text bold>Active Skills <Text dimColor>({activeSkills.length} triggered)</Text></Text>
         {activeSkills.length === 0 ? <Text dimColor>none</Text> : activeSkills.map((s, i) => <Text key={i} dimColor>{s.slice(0, 100)}…</Text>)}
         <Text> </Text>
@@ -1268,6 +1270,8 @@ export function ContextPanel({
       </Box>}
       {page === 3 && (() => {
         const driftLines: React.ReactNode[] = [];
+        driftLines.push(<Text key="tok" dimColor>{fmt(driftTotal)} tok</Text>);
+        driftLines.push(<Text key="sp-tok">{" "}</Text>);
         const allPaths = context.context.orbit.workspaceCodeMap
           ? context.context.orbit.workspaceCodeMap.split("\n").map(line => line.replace(/^[\s📁📝⚙️🔧]*/, "").replace(/\s*[\[(].*$/, "").trim()).filter(p => p && !p.endsWith("/") && !p.startsWith("["))
           : [];
@@ -1288,6 +1292,8 @@ export function ContextPanel({
         return <ScrollView height={20} lines={driftLines} />;
       })()}
       {page === 4 && <Box flexDirection="column">
+        <Text dimColor>{fmt(voidTotal)} tok</Text>
+        <Text> </Text>
         <Text bold>Messages <Text dimColor>({messages.length})</Text></Text>
         {messages.slice(-10).map((m, i) => <Text key={i} dimColor wrap="truncate">[{m.role}] {m.content.slice(0, 100)}{m.content.length > 100 ? "…" : ""}</Text>)}
         {messages.length > 10 && <Text dimColor>  … {messages.length - 10} older</Text>}
