@@ -269,36 +269,25 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
 
       bus?.publish("BEFORE_TOOL_EXECUTE", { toolName: tc.name, arguments: args });
 
-      // Progressive disclosure: read_file without explicit offset → summarize full file
-      if (tc.name === "read_file" && args.offset === undefined && input.context && input.config) {
+      // Focus file in background (summary for drift awareness) but return actual content
+      if (tc.name === "read_file" && input.context && input.config) {
+        result = await executeToolCall(tc.name, tc.args, _workspaceRoot, input.context, input.config);
         const filePath = args.path;
-        // If already focused, return the cached summary immediately
-        const existing = input.context.context.drift.focusedFiles.find(f => f.path === filePath);
-        if (existing) {
-          result = existing.summary;
-        } else {
+        if (filePath) {
           try {
-          const cacheInstance = getCache(_workspaceRoot);
-          const fullContent = readFileSync(join(_workspaceRoot, filePath), "utf-8");
-          const currentHash = cacheInstance.computeHash(fullContent);
-          const cached = cacheInstance.get(filePath, currentHash);
-          const totalLines = fullContent.split("\n").length;
-
-          if (cached) {
-            input.context.focusFile(filePath, cached.summary, cached.totalLines);
-            result = cached.summary;
-          } else {
-            if (totalLines > (input.config.summarizeThreshold ?? 500)) {
-              input.onChunk({ type: "status", message: `Indexing ${filePath} (${totalLines} lines)...` });
+            const cacheInstance = getCache(_workspaceRoot);
+            const fullContent = readFileSync(join(_workspaceRoot, filePath), "utf-8");
+            const totalLines = fullContent.split("\n").length;
+            const currentHash = cacheInstance.computeHash(fullContent);
+            const cached = cacheInstance.get(filePath, currentHash);
+            if (cached) {
+              input.context.focusFile(filePath, cached.summary, cached.totalLines);
+            } else {
+              const { summary, totalLines: tl } = await summarizeFileWithFlash(filePath, fullContent, input.config);
+              cacheInstance.set(filePath, currentHash, summary, tl);
+              input.context.focusFile(filePath, summary, tl);
             }
-            const { summary, totalLines: tl } = await summarizeFileWithFlash(filePath, fullContent, input.config);
-            cacheInstance.set(filePath, currentHash, summary, tl);
-            input.context.focusFile(filePath, summary, tl);
-            result = summary;
-          }
-        } catch {
-          result = await executeToolCall(tc.name, tc.args, _workspaceRoot, input.context, input.config);
-        }
+          } catch {}
         }
       } else if (tc.name === "run_task_agent" && input.config && input.agent) {
         const taskArgs = JSON.parse(tc.args || "{}");
