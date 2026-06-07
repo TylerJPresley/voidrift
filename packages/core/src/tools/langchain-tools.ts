@@ -156,3 +156,50 @@ export const langchainTools = [
 export function getLangchainTools(toolNames: string[]) {
   return langchainTools.filter(t => toolNames.includes(t.name));
 }
+
+/**
+ * Get Anthropic-native tools that replace generic equivalents.
+ * When provider is Anthropic, these are higher-accuracy purpose-built tools.
+ * They replace: edit_file → textEditor, execute_command → bash.
+ */
+export async function getAnthropicNativeTools(toolNames: string[], workspaceRoot: string) {
+  const { tools } = await import("@langchain/anthropic");
+  const { readFile, editFile, writeFile, executeCommand } = await import("./executors.js");
+  const { readFileSync, readdirSync } = await import("fs");
+  const { join } = await import("path");
+
+  const native: any[] = [];
+
+  if (toolNames.includes("edit_file") || toolNames.includes("write_file") || toolNames.includes("read_file")) {
+    native.push(tools.textEditor_20250728({
+      execute: async (args) => {
+        switch (args.command) {
+          case "view": return readFile(workspaceRoot, args.path, 0, 200).output || "";
+          case "str_replace": return editFile(workspaceRoot, args.path, args.old_str!, args.new_str ?? "").output;
+          case "create": return writeFile(workspaceRoot, args.path, args.file_text ?? "").output;
+          case "insert": {
+            const content = readFileSync(join(workspaceRoot, args.path), "utf-8");
+            const lines = content.split("\n");
+            lines.splice(args.insert_line ?? lines.length, 0, args.new_str ?? "");
+            return writeFile(workspaceRoot, args.path, lines.join("\n")).output;
+          }
+          default: return `Unknown command: ${args.command}`;
+        }
+      },
+    }));
+  }
+
+  if (toolNames.includes("execute_command")) {
+    native.push(tools.bash_20250124({
+      execute: async (args) => {
+        if ("restart" in args) return "Bash session restarted.";
+        return executeCommand(workspaceRoot, args.command, 30000).output;
+      },
+    }));
+  }
+
+  // Return native tools + remaining generic tools (excluding the ones replaced)
+  const replaced = native.length > 0 ? ["edit_file", "write_file", "read_file", "execute_command"] : [];
+  const generic = langchainTools.filter(t => toolNames.includes(t.name) && !replaced.includes(t.name));
+  return [...native, ...generic];
+}

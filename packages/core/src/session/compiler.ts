@@ -1,63 +1,54 @@
-import type { SessionContext, Message } from "./context.js";
-import { ChatPromptTemplate, MessagesPlaceholder } from "@langchain/core/prompts";
-import { SystemMessage, HumanMessage, AIMessage } from "@langchain/core/messages";
-import type { BaseMessage } from "@langchain/core/messages";
+import type { SessionContext } from "./context.js";
 
 export interface CompiledMessage {
   role: "system" | "user" | "assistant" | "tool";
   content: string;
 }
 
-// Cache the template structure — shape is static, only slot values change
-let _cachedTemplate: ChatPromptTemplate | null = null;
-
-function getTemplate(): ChatPromptTemplate {
-  if (_cachedTemplate) return _cachedTemplate;
-  _cachedTemplate = ChatPromptTemplate.fromMessages([
-    ["system", "{agent_layer}"],
-    ["system", "{orbit_layer}"],
-    ["system", "{drift_layer}"],
-    new MessagesPlaceholder("history"),
-  ]);
-  return _cachedTemplate;
-}
-
 /**
- * Compiles context into LangChain BaseMessage[] using ChatPromptTemplate.
+ * Four-Layer Prompt Compiler.
  *
- * Four layers ordered by ascending volatility:
+ * Compiles context into messages ordered by ascending volatility:
  * 1. Agent  — identity, rules, Context Guide (never changes)
  * 2. Orbit  — project landscape (rarely changes)
  * 3. Drift  — active working set (changes on tool use)
- * 4. Void   — conversation history via MessagesPlaceholder (every turn)
+ * 4. Void   — conversation history (changes every turn)
+ *
+ * This ordering maximizes prompt cache reuse on providers that support it.
  */
-export async function compilePromptLC(ctx: SessionContext): Promise<BaseMessage[]> {
-  const template = getTemplate();
+export function compilePrompt(ctx: SessionContext): CompiledMessage[] {
+  const messages: CompiledMessage[] = [];
 
-  const formatted = await template.formatMessages({
-    agent_layer: buildAgentLayer(ctx),
-    orbit_layer: buildOrbitLayer(ctx),
-    drift_layer: buildDriftLayer(ctx),
-    history: buildHistory(ctx),
-  });
+  // Layer 1: Agent (session-locked cache anchor)
+  messages.push({ role: "system", content: buildAgentLayer(ctx) });
 
-  // Post-template volatile content (diagnostics, turn context)
+  // Layer 2: Orbit (project landscape, changes ~5% of turns)
+  const orbit = buildOrbitLayer(ctx);
+  if (orbit) messages.push({ role: "system", content: orbit });
+
+  // Layer 3: Drift (active working set, changes ~30-40% of turns)
+  const drift = buildDriftLayer(ctx);
+  if (drift) messages.push({ role: "system", content: drift });
+
+  // Layer 4: Void (conversation history, changes every turn)
+  for (const msg of ctx.void.messages) {
+    messages.push({ role: msg.role === "tool" ? "tool" : msg.role, content: msg.content });
+  }
+
   if (ctx.void.diagnostics) {
-    formatted.push(new SystemMessage(`--- Diagnostics ---\n${ctx.void.diagnostics}`));
+    messages.push({ role: "system", content: "--- Diagnostics ---\n" + ctx.void.diagnostics });
   }
   for (const tc of ctx.void.turnContext) {
-    formatted.push(new SystemMessage(`--- ${tc.label} ---\n${tc.content}`));
+    messages.push({ role: "system", content: `--- ${tc.label} ---\n${tc.content}` });
   }
 
-  return formatted;
+  return messages;
 }
-
-// ─── Layer Builders ──────────────────────────────────────────────────────────
 
 function buildAgentLayer(ctx: SessionContext): string {
   const parts: string[] = [ctx.agent.activePersona];
 
-  // Context Guide — part of agent identity, never changes
+  // Context Guide — part of agent identity
   parts.push(`
 --- Context Guide ---
 Your context has four layers:
@@ -85,7 +76,7 @@ Files in Drift are summaries for awareness. Always call read_file(path, offset, 
   return parts.join("\n");
 }
 
-function buildOrbitLayer(ctx: SessionContext): string {
+function buildOrbitLayer(ctx: SessionContext): string | null {
   const parts: string[] = [];
   if (ctx.orbit.activeSkills.length) {
     parts.push("--- Active Skills ---\n" + ctx.orbit.activeSkills.join("\n\n"));
@@ -99,10 +90,10 @@ function buildOrbitLayer(ctx: SessionContext): string {
   if (ctx.orbit.activeMemory.length) {
     parts.push("--- Memory ---\n" + ctx.orbit.activeMemory.join("\n\n"));
   }
-  return parts.join("\n\n") || "(no orbit context)";
+  return parts.length ? parts.join("\n\n") : null;
 }
 
-function buildDriftLayer(ctx: SessionContext): string {
+function buildDriftLayer(ctx: SessionContext): string | null {
   const parts: string[] = [];
   if (ctx.drift.focusedFiles.length) {
     for (const f of ctx.drift.focusedFiles) {
@@ -112,50 +103,5 @@ function buildDriftLayer(ctx: SessionContext): string {
   if (ctx.drift.gitStatus) {
     parts.push("--- Git Status ---\n" + ctx.drift.gitStatus);
   }
-  return parts.join("\n\n") || "(no drift context)";
-}
-
-function buildHistory(ctx: SessionContext): BaseMessage[] {
-  return ctx.void.messages.map((msg) => {
-    switch (msg.role) {
-      case "user": return new HumanMessage(msg.content);
-      case "assistant": return new AIMessage(msg.content);
-      default: return new HumanMessage(msg.content);
-    }
-  });
-}
-
-// ─── Legacy Path ─────────────────────────────────────────────────────────────
-
-/**
- * Legacy compile — produces raw CompiledMessage[] for backward compatibility.
- * graph.ts uses this until fully migrated to compilePromptLC.
- */
-export function compilePrompt(ctx: SessionContext): CompiledMessage[] {
-  const messages: CompiledMessage[] = [];
-
-  messages.push({ role: "system", content: buildAgentLayer(ctx) });
-
-  const orbit = buildOrbitLayer(ctx);
-  if (orbit !== "(no orbit context)") {
-    messages.push({ role: "system", content: orbit });
-  }
-
-  const drift = buildDriftLayer(ctx);
-  if (drift !== "(no drift context)") {
-    messages.push({ role: "system", content: drift });
-  }
-
-  for (const msg of ctx.void.messages) {
-    messages.push({ role: msg.role === "tool" ? "tool" : msg.role, content: msg.content });
-  }
-
-  if (ctx.void.diagnostics) {
-    messages.push({ role: "system", content: "--- Diagnostics ---\n" + ctx.void.diagnostics });
-  }
-  for (const tc of ctx.void.turnContext) {
-    messages.push({ role: "system", content: `--- ${tc.label} ---\n${tc.content}` });
-  }
-
-  return messages;
+  return parts.length ? parts.join("\n\n") : null;
 }

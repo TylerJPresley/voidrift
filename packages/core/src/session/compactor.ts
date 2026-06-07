@@ -1,5 +1,4 @@
 import type { Message } from "./context.js";
-import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 
 const RECENT_TURNS_KEPT = 10;
 
@@ -121,21 +120,4 @@ function extractParameters(messages: Message[]): string[] {
     }
   }
   return [...new Set(params)];
-}
-
-/**
- * Async compaction with model-accurate token counting.
- * Uses LangChain's getNumTokens() to determine exact token usage
- * before deciding whether compaction is needed.
- */
-export async function compactHistoryAccurate(
-  messages: Message[],
-  contextLimit: number,
-  model: BaseChatModel
-): Promise<CompactionResult> {
-  let total = 0;
-  for (const m of messages) {
-    total += await model.getNumTokens(m.content) + 4;
-  }
-  return compactHistory(messages, total, contextLimit);
 }

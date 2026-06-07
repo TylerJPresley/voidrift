@@ -40,25 +40,8 @@ export function setPlanManager(pm: any) {
   _planManager = pm;
 }
 
-const MAX_RETRIES = 3;
-const BACKOFF_BASE_MS = 1000;
-
-async function streamWithRetry(client: BaseChatModel, messages: BaseMessage[], onChunk: OnChunk, signal?: AbortSignal): Promise<ModelResponse> {
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    if (signal?.aborted) return { text: "", toolCalls: [], usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 } };
-    const response = await streamModel(client, messages, onChunk, signal);
-    // If no error or not retryable, return immediately
-    if (response.text || response.toolCalls.length > 0) return response;
-    // Check if the last chunk was a retryable error (indicated by empty response)
-    // The streamModel function already emitted the error chunk; we retry silently
-    if (attempt < MAX_RETRIES) {
-      await new Promise(r => setTimeout(r, BACKOFF_BASE_MS * 2 ** attempt));
-    } else {
-      return response;
-    }
-  }
-  return { text: "", toolCalls: [], usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 } };
-}
+import { mergeMessageRuns } from "@langchain/core/messages";
+import { createTierAdapter } from "../adapters/factory.js";
 
 async function executeToolCall(toolName: string, argsJson: string, workspaceRoot: string, context?: ContextManager, config?: VoidRiftConfig): Promise<string> {
   let args: Record<string, any>;
@@ -198,17 +181,41 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
   ];
 
   // Bind tools using LangChain's native tool system (handles provider-specific translation)
-  const { getLangchainTools } = await import("../tools/langchain-tools.js");
+  const { getLangchainTools, getAnthropicNativeTools } = await import("../tools/langchain-tools.js");
   const toolNames = input.agent
     ? input.agent.tools
     : TOOL_SCHEMAS.map(t => t.name);
-  const lcTools = getLangchainTools(toolNames);
+
+  // Use Anthropic native tools (textEditor, bash) when provider is Anthropic — higher accuracy
+  const isAnthropic = input.config?.models[input.config.tiers[input.tier as keyof typeof input.config.tiers] ?? ""]?.protocol === "anthropic";
+  const lcTools = isAnthropic
+    ? await getAnthropicNativeTools(toolNames, _workspaceRoot)
+    : getLangchainTools(toolNames);
 
   let client: BaseChatModel = input.client;
   try {
     if (lcTools.length > 0 && input.client.bindTools) client = input.client.bindTools(lcTools) as unknown as BaseChatModel;
   } catch {
     // Model doesn't support tool binding — fall back to raw client
+  }
+
+  // Add fallback chain: if the primary model fails, escalate to next tier
+  // Only if tiers resolve to different models (avoid wasteful duplication)
+  if (input.config && input.tier) {
+    const TIER_ORDER: Array<"flash" | "utility" | "dense"> = ["flash", "utility", "dense"];
+    const idx = TIER_ORDER.indexOf(input.tier as any);
+    if (idx >= 0 && idx < TIER_ORDER.length - 1) {
+      const primaryModel = input.config.tiers[input.tier as keyof typeof input.config.tiers];
+      const fallbacks = TIER_ORDER.slice(idx + 1)
+        .filter(t => input.config!.tiers[t] !== primaryModel)
+        .map(t => {
+          const fb = createTierAdapter(t, input.config!).client;
+          return lcTools.length > 0 && fb.bindTools ? fb.bindTools(lcTools) as unknown as BaseChatModel : fb;
+        });
+      if (fallbacks.length > 0) {
+        client = client.withFallbacks({ fallbacks }) as unknown as BaseChatModel;
+      }
+    }
   }
 
   // Initialize the permission gate for this turn execution context
@@ -223,7 +230,7 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
   for (let round = 0; round < maxToolRounds; round++) {
     if (input.signal?.aborted) break;
     if (round > 0) input.onChunk({ type: "status", message: "Thinking..." });
-    const response = await streamWithRetry(client, currentMessages, input.onChunk, input.signal);
+    const response = await streamModel(client, mergeMessageRuns(currentMessages) as BaseMessage[], input.onChunk, input.signal);
     finalResponse = response;
 
     if (input.signal?.aborted) break;
@@ -367,7 +374,7 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
   if (finalResponse && finalResponse.toolCalls.length > 0 && !finalResponse.text.trim()) {
     // Add a nudge to get the model to respond with text instead of more tool calls
     currentMessages.push(new SystemMessage("Based on the tool results above, provide your response to the user. Do not call any more tools."));
-    const textResponse = await streamWithRetry(input.client, currentMessages, input.onChunk, input.signal);
+    const textResponse = await streamModel(input.client, mergeMessageRuns(currentMessages) as BaseMessage[], input.onChunk, input.signal);
     finalResponse = textResponse;
   }
 
