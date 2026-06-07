@@ -1295,7 +1295,7 @@ export function ContextPanel({
       {page === 4 && <Box flexDirection="column">
         <Text><Text bold>Tokens </Text><Text dimColor>{fmt(voidTotal)}</Text></Text>
         <Text> </Text>
-        <Text bold>Messages <Text dimColor>({messages.length})</Text></Text>
+        <Text><Text bold>Messages </Text><Text dimColor>{messages.length}</Text></Text>
         {messages.slice(-10).map((m, i) => <Text key={i} dimColor wrap="truncate">[{m.role}] {m.content.slice(0, 100)}{m.content.length > 100 ? "…" : ""}</Text>)}
         {messages.length > 10 && <Text dimColor>  … {messages.length - 10} older</Text>}
         <Text> </Text>
