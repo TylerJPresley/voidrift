@@ -561,12 +561,7 @@ function App({ engine }: { engine: EngineContext }) {
             const name = chunk.message.slice(6);
             resolvedModel = engine.agents.active.modelTier === "auto" ? `auto[${name}]` : name;
           }
-          // Flush any accumulated text to history when a new round starts
-          if (chunk.message === "Thinking..." && fullText.trim()) {
-            setStreaming(null);
-            setHistory(h => [...h, { id: id(), type: "assistant", model: resolvedModel, text: fullText }]);
-            fullText = "";
-          }
+          setStreaming(null);
           setThinking(chunk.message.startsWith("model:") ? "Thinking..." : chunk.message);
         }
       },
