@@ -145,7 +145,7 @@ function describeToolCall(name: string, argsStr: string): { label: string; descr
 
 function ToolGroup({ tools }: { tools: ToolCall[] }) {
   return (
-    <Box flexDirection="column" marginLeft={1} marginTop={1}>
+    <Box flexDirection="column" marginLeft={1}>
       {tools.map((tool, i) => {
         const { label, description, color } = describeToolCall(tool.name, tool.args);
         return (
