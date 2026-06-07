@@ -561,7 +561,7 @@ function App({ engine }: { engine: EngineContext }) {
 
     if (tools.length) {
       setPendingTools(null);
-      setHistory(h => [...h, { id: id(), type: "tools", tools }]);
+      setHistory(h => [...h, { id: id(), type: "tools", tools: [...tools] }]);
     }
 
     if (result) {
