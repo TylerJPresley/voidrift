@@ -1230,16 +1230,31 @@ export function ContextPanel({
       <Text> </Text>
       <Text bold>{modelName} · {fmt(totalUsed)}/{fmt(totalLimit)} ({pct(totalUsed)}%) <Text dimColor>Free: {fmt(freeTokens)}</Text></Text>
       </>}
-      {page === 1 && <Box flexDirection="column">
-        <Text bold>Persona <Text dimColor>({fmt(personaTokens)} tok)</Text></Text>
-        <Text dimColor>{context.context.agent.activePersona.slice(0, 200)}{context.context.agent.activePersona.length > 200 ? "…" : ""}</Text>
-        <Text> </Text>
-        <Text bold>Tools <Text dimColor>({tools.length})</Text></Text>
-        <Text dimColor>{tools.join(", ")}</Text>
-        <Text> </Text>
-        <Text bold>Bound Skills <Text dimColor>({boundSkills.length})</Text></Text>
-        {boundSkills.length === 0 ? <Text dimColor>none</Text> : boundSkills.map((s, i) => <Text key={i} dimColor>{s.slice(0, 80)}…</Text>)}
-      </Box>}
+      {page === 1 && (() => {
+        const agentLines: React.ReactNode[] = [];
+        const agent = context.context.agent;
+        const allTools = TOOL_SCHEMAS.filter(t => agent.activeTools.includes(t.name));
+        // Tools
+        agentLines.push(<Text key="h-tools" bold>Tools <Text dimColor>({allTools.length})</Text></Text>);
+        for (const [i, t] of allTools.entries()) {
+          const approved = true; // all tools bound are available
+          agentLines.push(<Text key={`t-${i}`} dimColor>  {t.name.padEnd(18)} {t.description}</Text>);
+        }
+        agentLines.push(<Text key="sp1">{" "}</Text>);
+        // Bound Skills
+        agentLines.push(<Text key="h-skills" bold>Bound Skills <Text dimColor>({boundSkills.length})</Text></Text>);
+        if (boundSkills.length === 0) { agentLines.push(<Text key="sk-none" dimColor>  none</Text>); }
+        else { for (const [i, s] of boundSkills.entries()) { agentLines.push(<Text key={`sk-${i}`} dimColor>  {s.slice(0, 100)}</Text>); }}
+        agentLines.push(<Text key="sp2">{" "}</Text>);
+        // Persona
+        agentLines.push(<Text key="h-persona" bold>Persona <Text dimColor>({fmt(personaTokens)} tok)</Text></Text>);
+        for (const [i, line] of agent.activePersona.split("\n").entries()) {
+          agentLines.push(<Text key={`p-${i}`} dimColor>{line}</Text>);
+        }
+        agentLines.push(<Text key="sp3">{" "}</Text>);
+        agentLines.push(<Text key="total" dimColor>Total: {fmt(agentTotal)} tok</Text>);
+        return <ScrollView height={20} lines={agentLines} />;
+      })()}
       {page === 2 && <Box flexDirection="column">
         <Text bold>Active Skills <Text dimColor>({activeSkills.length} triggered)</Text></Text>
         {activeSkills.length === 0 ? <Text dimColor>none</Text> : activeSkills.map((s, i) => <Text key={i} dimColor>{s.slice(0, 100)}…</Text>)}
