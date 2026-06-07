@@ -38,7 +38,8 @@ function createClient(config: ModelConfig, maxConcurrency?: number): BaseChatMod
         maxConcurrency,
       });
 
-    case "anthropic":
+    case "anthropic": {
+      const headers = { ...config.additionalHeaders, "anthropic-beta": "prompt-caching-2024-07-31" };
       return new ChatAnthropic({
         anthropicApiKey: apiKey,
         modelName: config.model,
@@ -46,12 +47,14 @@ function createClient(config: ModelConfig, maxConcurrency?: number): BaseChatMod
         maxTokens: config.maxOutputTokens ?? 4096,
         topP: config.topP,
         topK: config.topK,
-        clientOptions: config.baseUrl && !config.baseUrl.includes("api.anthropic.com") ? { baseURL: config.baseUrl, timeout: DEFAULT_TIMEOUT_MS } : { timeout: DEFAULT_TIMEOUT_MS },
+        clientOptions: config.baseUrl && !config.baseUrl.includes("api.anthropic.com")
+          ? { baseURL: config.baseUrl, timeout: DEFAULT_TIMEOUT_MS, defaultHeaders: headers }
+          : { timeout: DEFAULT_TIMEOUT_MS, defaultHeaders: headers },
         streaming: true,
         maxRetries: DEFAULT_MAX_RETRIES,
         maxConcurrency,
-        ...(config.additionalHeaders && { headers: config.additionalHeaders }),
       });
+    }
 
     case "google":
       return new ChatGoogleGenerativeAI({
