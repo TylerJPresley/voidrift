@@ -34,6 +34,9 @@ export async function streamModel(
     return { text: "", toolCalls: [], usage, timing: { requestStart, firstTokenAt: null, endAt: Date.now() } };
   }
 
+  // Enforce: system messages must be at the beginning (OpenAI-compatible requirement)
+  validateMessageOrder(messages);
+
   try {
     const stream = await client.stream(messages, { signal });
 
