@@ -567,9 +567,6 @@ function App({ engine }: { engine: EngineContext }) {
       },
     });
 
-    setStreaming(null); setThinking(null); setBusy(false);
-    setPendingTools(null);
-
     if (result) {
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
       const tokPerSec = tokenCount > 0 ? (tokenCount / +elapsed).toFixed(1) : "0";
@@ -578,6 +575,9 @@ function App({ engine }: { engine: EngineContext }) {
         stats: `↑ ${result.response.usage.promptTokens} · ↓ ${tokenCount} · ${tokPerSec} tok/s · ${elapsed}s`,
       }]);
     }
+
+    setStreaming(null); setThinking(null); setBusy(false);
+    setPendingTools(null);
   }, [busy, engine]);
 
   // Subscribe to scheduled task triggers (queue if busy)
