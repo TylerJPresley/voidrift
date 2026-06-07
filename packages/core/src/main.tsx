@@ -527,17 +527,18 @@ function App({ engine }: { engine: EngineContext }) {
           setThinking(null);
           fullText += chunk.text;
           tokenCount++;
-          const elapsed = +((Date.now() - startTime) / 1000).toFixed(1);
-          setStreaming({ model: resolvedModel, text: fullText, elapsed, tokens: tokenCount });
+          // Update the live streaming display (stays in pendingTurn on tool_call)
+          setStreaming({ model: resolvedModel, text: fullText, elapsed: +((Date.now() - startTime) / 1000).toFixed(1), tokens: tokenCount });
         }
         if (chunk.type === "tool_call") {
-          // Flush narration text to live turn items
+          // Commit streaming text to pendingTurn (keeps it permanent)
           if (fullText.trim()) {
-            turnItems.push({ id: id(), type: "assistant", model: resolvedModel, text: fullText });
+            turnItems.push({ id: id(), type: "assistant", model: resolvedModel, text: fullText } as any);
             fullText = "";
+            setStreaming(null);
           }
-          setStreaming(null);
           setThinking(null);
+          // Commit tool and update live display in the same setState call
           if (chunk.status === "executing") {
             const toolId = id();
             const toolItem: any = { name: chunk.name, args: chunk.args, status: "executing" };
