@@ -31,6 +31,14 @@ export function compilePrompt(ctx: SessionContext): CompiledMessage[] {
 
   // Layer 2: Orbit (project landscape, changes ~5% of turns)
   const orbitParts: string[] = [];
+  orbitParts.push(`--- Context Guide ---
+Your context has four layers:
+• Agent: Your identity, tools, and rules. Do not repeat these back.
+• Orbit: Project landscape — workspace map, plan, memory. Reference for navigation.
+• Drift: Active files — SUMMARIES ONLY. You do NOT have full file content. Use read_file() to access actual content before quoting or editing.
+• Void: Conversation history and diagnostics.
+
+Files shown in Drift are summaries for awareness. Always call read_file(path, offset, limit) for real content.`);
   if (ctx.orbit.activeSkills.length) {
     orbitParts.push("--- Active Skills ---\n" + ctx.orbit.activeSkills.join("\n\n"));
   }
