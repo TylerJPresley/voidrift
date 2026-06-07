@@ -208,7 +208,12 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
       description: t.description,
       parameters: {
         type: "object",
-        properties: Object.fromEntries(t.parameters.map((p) => [p.name, { type: p.type, description: p.description }])),
+        properties: Object.fromEntries(t.parameters.map((p) => {
+          if (p.type.endsWith("[]")) {
+            return [p.name, { type: "array", items: { type: p.type.slice(0, -2) }, description: p.description }];
+          }
+          return [p.name, { type: p.type, description: p.description }];
+        })),
         required: t.parameters.filter((p) => p.required).map((p) => p.name),
       },
     },
