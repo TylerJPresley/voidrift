@@ -6,7 +6,7 @@ import { HumanMessage, AIMessage } from "@langchain/core/messages";
 import { runTurn } from "./orchestration/graph.js";
 import { createTierAdapter, createAdapter } from "./adapters/factory.js";
 import type { Tier } from "./adapters/factory.js";
-import { routeTier } from "./router/index.js";
+import { routeTier, shouldEscalate, escalateTier } from "./router/index.js";
 import { compilePrompt } from "./session/compiler.js";
 import type { EngineContext } from "./engine.js";
 import type { StreamChunk } from "./adapters/types.js";
@@ -28,6 +28,16 @@ export async function executeTurn(engine: EngineContext, userMessage: string, ca
       inputLength: userMessage.length, 
       mentionedFiles: 0 
     });
+  }
+  // De-escalation: if tier was escalated but context usage has dropped, revert to auto routing
+  if (tier !== "auto" && engine.agents.active.modelTier !== "auto") {
+    const modelKey = engine.container.config.tiers[tier as keyof typeof engine.container.config.tiers];
+    const modelConfig = modelKey ? engine.container.config.models[modelKey] : undefined;
+    const contextLimit = modelConfig?.contextLimit ?? 32768;
+    if (engine.budget.state.used < contextLimit * 0.5) {
+      engine.agents.active.modelTier = "auto";
+      tier = routeTier({ inputLength: userMessage.length, mentionedFiles: 0 });
+    }
   }
   const isTierKey = tier === "flash" || tier === "utility" || tier === "dense";
   const resolved = isTierKey
@@ -87,6 +97,19 @@ export async function executeTurn(engine: EngineContext, userMessage: string, ca
     engine.stats.recordTurn(resolved.name, result.response.usage.promptTokens, result.response.usage.completionTokens || 0, 0, 0);
     engine.context.addMessage({ role: "assistant", content: result.response.text });
     engine.budget.add(result.response.usage.totalTokens || 0);
+
+    // Post-turn escalation check: if context usage is high, escalate tier for next turn
+    if (isTierKey) {
+      const modelConfig = engine.container.config.models[engine.container.config.tiers[tier as keyof typeof engine.container.config.tiers]];
+      const contextLimit = modelConfig?.contextLimit ?? 32768;
+      if (shouldEscalate(engine.budget.state.used, contextLimit, 0)) {
+        const next = escalateTier(tier as Tier);
+        if (next && engine.agents.active.modelTier === "auto") {
+          engine.agents.active.modelTier = next;
+          callbacks.onChunk({ type: "status", message: `escalated:${next}` });
+        }
+      }
+    }
   }
 
   return result;

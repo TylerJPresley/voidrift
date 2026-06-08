@@ -925,6 +925,8 @@ const engine: EngineContext = await (async () => {
   if (compiledPlan) context.setPlan(compiledPlan);
 
   skills.index([join(workspaceRoot, ".voidrift", "skills"), join(homedir(), ".config", "voidrift", "resources", "skills")]);
+  // Build skill discovery index — lightweight name+description list so model knows what's available
+  context.setSkillDiscoveryIndex(skills.indexed.map(s => `- ${s.name}: ${s.description}`));
   memory.index([join(workspaceRoot, ".voidrift", "memory"), join(homedir(), ".config", "voidrift", "memory")]);
   logger.attach(container.bus);
   brain.attach(() => context.context, () => agents.active.id);
