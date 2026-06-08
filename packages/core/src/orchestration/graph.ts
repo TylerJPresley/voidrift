@@ -104,18 +104,63 @@ async function executeToolCall(toolName: string, argsJson: string, workspaceRoot
       const result = await webSearch(args.query ?? args.keywords ?? "", searchConfig);
       return result.error ? `Error: ${result.error}` : result.output;
     }
-    case "read_plan":
-      return context?.context.orbit.activePlan || "(no active plan)";
-    case "write_plan":
-      if (context) context.setPlan(args.content ?? "");
-      return "Plan updated.";
-    case "update_plan":
-      if (context) {
-        const current = context.context.orbit.activePlan || "";
-        const updated = current.replace(args.search ?? "", args.replace ?? "");
-        context.setPlan(updated);
+    case "read_plan": {
+      if (!_planManager) return "(no plan manager available)";
+      if (args.action === "load" && args.name) {
+        const body = _planManager.loadBody(`${args.name}.md`);
+        return body ?? `Error: Plan item "${args.name}" not found.`;
       }
-      return "Plan section updated.";
+      const items = _planManager.all();
+      if (items.length === 0) return "(no plan items)";
+      const groups: Record<string, any[]> = { now: [], next: [], later: [] };
+      for (const item of items) groups[item.priority]?.push(item);
+      const lines: string[] = [];
+      for (const [pri, list] of Object.entries(groups)) {
+        if (list.length === 0) continue;
+        lines.push(`\n## ${pri.toUpperCase()}`);
+        for (const item of list) {
+          lines.push(`- **${item.filename.replace(".md", "")}**: ${item.description}${item.rationale ? ` — ${item.rationale}` : ""}`);
+        }
+      }
+      return lines.join("\n");
+    }
+    case "write_plan": {
+      if (!_planManager) return "Error: Plan manager not available.";
+      const action = args.action ?? "";
+      switch (action) {
+        case "add": {
+          const name = args.name ?? `item-${Date.now().toString(36)}`;
+          const filename = _planManager.add(name, args.description ?? "", args.rationale ?? "", args.priority ?? "now", args.body ?? "");
+          // Refresh context
+          if (context) context.setPlan(_planManager.compile() || "");
+          return `Plan item added: ${filename}`;
+        }
+        case "remove":
+          if (_planManager.remove(`${args.name}.md`)) {
+            if (context) context.setPlan(_planManager.compile() || "");
+            return `Plan item "${args.name}" removed.`;
+          }
+          return `Error: Item "${args.name}" not found.`;
+        case "prioritize":
+          if (_planManager.updatePriority(`${args.name}.md`, args.priority ?? "now")) {
+            if (context) context.setPlan(_planManager.compile() || "");
+            return `Priority updated: ${args.name} → ${args.priority}`;
+          }
+          return `Error: Item "${args.name}" not found.`;
+        default:
+          return `Error: Unknown action "${action}". Use: add, remove, prioritize.`;
+      }
+    }
+    case "update_plan": {
+      if (!_planManager) return "Error: Plan manager not available.";
+      const item = _planManager.get(`${args.name}.md`);
+      if (!item) return `Error: Item "${args.name}" not found.`;
+      const updated = item.body.replace(args.search ?? "", args.replace ?? "");
+      if (updated === item.body) return `Error: Search text not found in "${args.name}".`;
+      // Rewrite the file with updated body
+      _planManager.add(args.name, item.description, item.rationale, item.priority, updated);
+      return `Plan item "${args.name}" updated.`;
+    }
     case "save_memory": {
       const title = args.title ?? "Untitled";
       const content = args.content ?? "";
@@ -145,34 +190,6 @@ async function executeToolCall(toolName: string, argsJson: string, workspaceRoot
         return `Scheduled recurring task [${task.id}] with pattern "${args.cron}".`;
       }
       return "Error: Provide either 'delay' or 'cron' parameter.";
-    }
-    case "plan": {
-      if (!_planManager) return "Error: Plan manager not available.";
-      const action = args.action ?? "";
-      switch (action) {
-        case "add": {
-          const name = args.name ?? `item-${Date.now().toString(36)}`;
-          const filename = _planManager.add(name, args.description ?? "", args.rationale ?? "", args.priority ?? "now", args.body ?? "");
-          return `Plan item added: ${filename}`;
-        }
-        case "backlog": {
-          const name = args.name ?? `item-${Date.now().toString(36)}`;
-          const filename = _planManager.add(name, args.description ?? "", args.rationale ?? "", "later", args.body ?? "");
-          return `Backlogged: ${filename}`;
-        }
-        case "load": {
-          const body = _planManager.loadBody(args.name ? `${args.name}.md` : "");
-          return body ?? "Error: Item not found.";
-        }
-        case "prioritize":
-          return _planManager.updatePriority(args.name ? `${args.name}.md` : "", args.priority ?? "now")
-            ? `Priority updated.` : "Error: Item not found.";
-        case "remove":
-          return _planManager.remove(args.name ? `${args.name}.md` : "")
-            ? `Item removed.` : "Error: Item not found.";
-        default:
-          return `Error: Unknown plan action "${action}". Use: add, backlog, load, prioritize, remove.`;
-      }
     }
     case "run_task_agent":
       return `Error: run_task_agent must be handled by the orchestration layer.`;
