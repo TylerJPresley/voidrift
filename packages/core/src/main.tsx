@@ -637,6 +637,7 @@ function App({ engine }: { engine: EngineContext }) {
       })}
       {pendingTools && <ToolGroup tools={pendingTools} />}
       {thinking && <ThinkingIndicator label={thinking} />}
+      {!thinking && busy && !streaming && <ThinkingIndicator label="Thinking..." />}
       {streaming && <StreamingResponse {...streaming} />}
 
       <Box flexDirection="column" marginTop={1}>
