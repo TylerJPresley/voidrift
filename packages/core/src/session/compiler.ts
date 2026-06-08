@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "fs";
 import { join, resolve } from "path";
 import { platform, release } from "os";
 import type { SessionContext } from "./context.js";
+import type { PromptRegistry } from "../prompts/registry.js";
 
 export interface CompiledMessage {
   role: "system" | "user" | "assistant" | "tool";
@@ -12,6 +13,7 @@ export interface CompileOptions {
   workspaceRoot: string;
   modelName?: string;
   shell?: string;
+  prompts?: PromptRegistry;
 }
 
 /**
@@ -58,18 +60,19 @@ export function compilePrompt(ctx: SessionContext, opts?: CompileOptions): Compi
 
 function buildAgentLayer(ctx: SessionContext, opts?: CompileOptions): string {
   const sections: string[] = [];
+  const r = opts?.prompts;
 
   // § Preamble — identity
   sections.push(ctx.agent.activePersona);
 
   // § Context Guide
-  sections.push(sectionContextGuide());
+  sections.push(r?.resolve("core.context-guide")?.body ?? sectionContextGuide());
 
   // § Rules — behavioral constraints
-  sections.push(sectionRules());
+  sections.push(r?.resolve("core.rules")?.body ?? sectionRules());
 
   // § Tool Usage — context efficiency, parallel calls
-  sections.push(sectionToolUsage());
+  sections.push(r?.resolve("core.tool-usage")?.body ?? sectionToolUsage());
 
   // § Environment — working dir, git, platform, model
   if (opts) sections.push(sectionEnvironment(opts));

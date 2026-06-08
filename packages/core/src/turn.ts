@@ -52,6 +52,7 @@ export async function executeTurn(engine: EngineContext, userMessage: string, ca
   const compiled = compilePrompt(engine.context.context, {
     workspaceRoot: engine.workspaceRoot,
     modelName: resolved.name,
+    prompts: engine.prompts,
   });
 
   // Extract system prompt: merge all system messages (governance + workspace) into one block
