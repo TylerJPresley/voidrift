@@ -1,0 +1,12 @@
+  {
+    "command": "npx",
+    "args": ["-y", "@longbridge/mcp-server"],
+    "auth": {
+      "type": "oauth2",
+      "authorizeUrl": "https://openapi.longbridge.com/oauth/authorize",
+      "tokenUrl": "https://openapi.longbridge.com/oauth/token",
+      "clientIdEnv": "LONGBRIDGE_CLIENT_ID",
+      "scopes": ["read"],
+      "tokenEnvVar": "LONGBRIDGE_ACCESS_TOKEN"
+    }
+  }

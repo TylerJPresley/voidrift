@@ -620,8 +620,8 @@ export function MemoryPanel({ memory, context, onClose }: { memory: MemoryRegist
 export function MCPPanel({ mcp, config, onClose }: { mcp: MCPEngine; config: VoidRiftConfig; onClose: () => void }) {
   const [cursor, setCursor] = useState(0);
   const [message, setMessage] = useState<string | null>(null);
-  const [createState, setCreateState] = useState<{ step: "name" } | null>(null);
-  const [createName, setCreateName] = useState("");
+  const [createState, setCreateState] = useState<{ step: "name" | "url"; name?: string } | null>(null);
+  const [inputValue, setInputValue] = useState("");
 
   const configs = mcp.loadConfigs();
   const servers = mcp.all;
@@ -633,21 +633,49 @@ export function MCPPanel({ mcp, config, onClose }: { mcp: MCPEngine; config: Voi
 
   useInput((input, key) => {
     if (createState) {
-      if (key.escape) { setCreateState(null); setCreateName(""); setMessage(null); return; }
-      if (key.return && createName.length > 0) {
-        mcp.saveConfig({ name: createName, command: "npx", args: ["-y", "@example/mcp-server"] });
-        setCreateState(null);
-        setCreateName("");
-        if (config.editor) {
-          openInEditor(join(mcp["configDirs"][0], `${createName}.json`), config.editor);
-          setMessage(`Created ${createName} — editing`);
-        } else {
-          setMessage(`Created: .voidrift/mcp/${createName}.json (set "editor" in config)`);
+      if (key.escape) { setCreateState(null); setInputValue(""); setMessage(null); return; }
+      if (createState.step === "name") {
+        if (key.return && inputValue.length > 0) {
+          setCreateState({ step: "url", name: inputValue });
+          setInputValue("");
+          setMessage("Enter server URL:");
+          return;
         }
-        return;
+        if (key.backspace || key.delete) { setInputValue(n => n.slice(0, -1)); return; }
+        if (input && /^[a-z0-9-]$/.test(input)) { setInputValue(n => n + input); return; }
+      } else if (createState.step === "url") {
+        if (key.return && inputValue.length > 0) {
+          const name = createState.name!;
+          const url = inputValue;
+          setMessage("Discovering server...");
+          setInputValue("");
+          import("./mcp/discovery.js").then(({ discoverMCPServer, buildConfigFromDiscovery }) => {
+            discoverMCPServer(url, setMessage).then((discovery) => {
+              if (discovery.error) {
+                setMessage(`Discovery failed: ${discovery.error}`);
+                // Still save a basic config
+                mcp.saveConfig({ name, command: "", args: [], env: {} });
+                const cfgPath = join(mcp["configDirs"][0], `${name}.json`);
+                writeFileSync(cfgPath, JSON.stringify({ transport: "http-sse", url }, null, 2), "utf-8");
+              } else {
+                const cfg = buildConfigFromDiscovery(name, discovery);
+                const cfgPath = join(mcp["configDirs"][0], `${name}.json`);
+                mkdirSync(dirname(cfgPath), { recursive: true });
+                writeFileSync(cfgPath, JSON.stringify(cfg, null, 2), "utf-8");
+                if (discovery.requiresAuth) {
+                  setMessage(`Created ${name} — auth required. Press 'o' to authenticate.`);
+                } else {
+                  setMessage(`Created ${name} — no auth needed. Press 'x' to connect.`);
+                }
+              }
+              setCreateState(null);
+            });
+          });
+          return;
+        }
+        if (key.backspace || key.delete) { setInputValue(n => n.slice(0, -1)); return; }
+        if (input) { setInputValue(n => n + input); return; }
       }
-      if (key.backspace || key.delete) { setCreateName(n => n.slice(0, -1)); return; }
-      if (input && /^[a-z0-9-]$/.test(input)) { setCreateName(n => n + input); return; }
       return;
     }
 
@@ -732,7 +760,7 @@ export function MCPPanel({ mcp, config, onClose }: { mcp: MCPEngine; config: Voi
       <Text> </Text>
       <Text dimColor><Text color="#61afef" bold>↑↓</Text> Navigate  <Text color="#61afef" bold>enter</Text> Edit  <Text color="#61afef" bold>esc</Text> Close  │  <Text color="#61afef" bold>c</Text> create  <Text color="#61afef" bold>del</Text> delete  <Text color="#61afef" bold>x</Text> connect  <Text color="#61afef" bold>o</Text> oauth</Text>
       {message && <Text color="#4ec9b0">{message}</Text>}
-      {createState && <Text color="#61afef">  &gt; {createName}<Text color="#4ec9b0">█</Text></Text>}
+      {createState && <Text color="#61afef">  &gt; {inputValue}<Text color="#4ec9b0">█</Text></Text>}
       <Text> </Text>
     </Box>
   );
