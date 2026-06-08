@@ -15,23 +15,23 @@ const noop = async () => "";
 export const langchainTools = [
   tool(noop, {
     name: "read_file",
-    description: "Read file content from the workspace. Returns 1000 lines by default. Use offset/limit for specific ranges.",
+    description: "Read file content from the workspace. Returns up to 1000 lines by default. For small files (< 1000 lines), omit offset/limit to read the entire file. For large files, use offset/limit for targeted reads of specific sections. If the file is too large, the harness returns a guidance message with available sections. Always read a file before editing it.",
     schema: z.object({
       path: z.string().describe("Relative file path"),
-      offset: z.number().optional().describe("Line offset to start reading from"),
-      limit: z.number().optional().describe("Maximum number of lines to read"),
+      offset: z.number().optional().describe("Line offset to start reading from (0-indexed)"),
+      limit: z.number().optional().describe("Maximum number of lines to read (capped at config max)"),
     }),
   }),
   tool(noop, {
     name: "glob_files",
-    description: "Search for files by glob pattern",
+    description: "Search for files by glob pattern. Use this instead of execute_command with 'find' or 'ls'. Prefer narrow patterns to reduce noise.",
     schema: z.object({
-      pattern: z.string().describe("Glob pattern (e.g. '**/*.ts')"),
+      pattern: z.string().describe("Glob pattern (e.g. '**/*.ts', 'src/**/*.test.*')"),
     }),
   }),
   tool(noop, {
     name: "write_file",
-    description: "Create a new file or overwrite an existing one entirely",
+    description: "Create a new file or overwrite an existing one entirely. Prefer edit_file for modifying existing files. Never use placeholders like '// rest of code' — provide complete content.",
     schema: z.object({
       path: z.string().describe("Relative file path"),
       content: z.string().describe("Full file content to write"),
@@ -39,19 +39,19 @@ export const langchainTools = [
   }),
   tool(noop, {
     name: "edit_file",
-    description: "Perform a surgical search-and-replace edit on an existing file",
+    description: "Perform a surgical search-and-replace edit. The search string must be an exact match of existing content (including whitespace/indentation). If search is ambiguous (matches multiple locations), the edit will fail — provide more surrounding context to make it unique. You must read_file before editing.",
     schema: z.object({
       path: z.string().describe("Relative file path"),
-      search: z.string().describe("Exact text block to find"),
+      search: z.string().describe("Exact text block to find (must be unique in the file)"),
       replace: z.string().describe("Replacement text"),
     }),
   }),
   tool(noop, {
     name: "execute_command",
-    description: "Run a shell command (build, test, lint, git). Timeout: 30s default.",
+    description: "Run a shell command (build, test, lint, git). Use dedicated tools for file operations. Do not use cat/head/tail/sed/find when read_file/edit_file/glob_files exist. Commands timeout after 30s by default.",
     schema: z.object({
       command: z.string().describe("Shell command to execute"),
-      timeout: z.number().optional().describe("Timeout in milliseconds"),
+      timeout: z.number().optional().describe("Timeout in milliseconds (max 120000)"),
     }),
   }),
   tool(noop, {

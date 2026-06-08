@@ -49,7 +49,10 @@ export async function executeTurn(engine: EngineContext, userMessage: string, ca
   engine.context.setActiveSkills(resolvedSkills);
 
   // Compile the full three-partition context via the Prompt Cache Optimizer
-  const compiled = compilePrompt(engine.context.context);
+  const compiled = compilePrompt(engine.context.context, {
+    workspaceRoot: engine.workspaceRoot,
+    modelName: resolved.name,
+  });
 
   // Extract system prompt: merge all system messages (governance + workspace) into one block
   const systemParts = compiled.filter(m => m.role === "system").map(m => m.content);

@@ -1,8 +1,17 @@
+import { existsSync, readFileSync } from "fs";
+import { join, resolve } from "path";
+import { platform, release } from "os";
 import type { SessionContext } from "./context.js";
 
 export interface CompiledMessage {
   role: "system" | "user" | "assistant" | "tool";
   content: string;
+}
+
+export interface CompileOptions {
+  workspaceRoot: string;
+  modelName?: string;
+  shell?: string;
 }
 
 /**
@@ -16,11 +25,11 @@ export interface CompiledMessage {
  *
  * This ordering maximizes prompt cache reuse on providers that support it.
  */
-export function compilePrompt(ctx: SessionContext): CompiledMessage[] {
+export function compilePrompt(ctx: SessionContext, opts?: CompileOptions): CompiledMessage[] {
   const messages: CompiledMessage[] = [];
 
   // Layer 1: Agent (session-locked cache anchor)
-  messages.push({ role: "system", content: buildAgentLayer(ctx) });
+  messages.push({ role: "system", content: buildAgentLayer(ctx, opts) });
 
   // Layer 2: Orbit (project landscape, changes ~5% of turns)
   const orbit = buildOrbitLayer(ctx);
@@ -45,35 +54,157 @@ export function compilePrompt(ctx: SessionContext): CompiledMessage[] {
   return messages;
 }
 
-function buildAgentLayer(ctx: SessionContext): string {
-  const parts: string[] = [ctx.agent.activePersona];
+// ─── Agent Layer Composition ─────────────────────────────────────────────────
 
-  // Context Guide — part of agent identity
-  parts.push(`
---- Context Guide ---
-Your context has four layers:
-• Agent: Your identity, tools, and rules. Do not repeat these back.
-• Orbit: Project landscape — workspace map, plan, memory, skills. Reference for navigation.
-• Drift: Active files — SUMMARIES ONLY. You do NOT have full file content. Use read_file() to access actual content before quoting or editing.
-• Void: Conversation history and diagnostics.
+function buildAgentLayer(ctx: SessionContext, opts?: CompileOptions): string {
+  const sections: string[] = [];
 
-Available systems:
-• File Map: Shows all workspace files. Use read_file(path, offset, limit) for content.
-• Plan: Persistent task tracker. Use plan() tool to add/backlog/complete/remove items. Priority: now/next/later.
-• Memory: Long-term facts and preferences. Use save_memory() to store. Relevant memories are auto-surfaced.
-• Skills: Technical guidelines loaded based on file context. Auto-managed by the harness.
-• Schedule: Use schedule() tool to set timers or recurring tasks.
-• Task Agents: Use run_task_agent() to delegate background work to specialized agents.
+  // § Preamble — identity
+  sections.push(ctx.agent.activePersona);
 
-Files in Drift are summaries for awareness. Always call read_file(path, offset, limit) for real content.`);
+  // § Context Guide
+  sections.push(sectionContextGuide());
 
+  // § Rules — behavioral constraints
+  sections.push(sectionRules());
+
+  // § Tool Usage — context efficiency, parallel calls
+  sections.push(sectionToolUsage());
+
+  // § Environment — working dir, git, platform, model
+  if (opts) sections.push(sectionEnvironment(opts));
+
+  // § User Context — VOIDRIFT.md
+  const userCtx = opts ? loadUserContext(opts.workspaceRoot) : null;
+  if (userCtx) sections.push(userCtx);
+
+  // § Skills
   if (ctx.agent.boundSkills.length) {
-    parts.push("\n--- Agent Skills ---\n" + ctx.agent.boundSkills.join("\n\n"));
+    sections.push("# Agent Skills\n" + ctx.agent.boundSkills.join("\n\n"));
   }
   if (ctx.agent.skillDiscoveryIndex.length) {
-    parts.push("\n--- Available Skills ---\n" + ctx.agent.skillDiscoveryIndex.join("\n"));
+    sections.push("# Available Skills\n" + ctx.agent.skillDiscoveryIndex.join("\n"));
   }
-  return parts.join("\n");
+
+  return sections.join("\n\n");
+}
+
+// ─── § Context Guide ─────────────────────────────────────────────────────────
+
+function sectionContextGuide(): string {
+  return `# Context Guide
+
+Your context has four layers:
+• Agent: Your identity, tools, and rules. Do not repeat these back.
+• Orbit: Project landscape — workspace map, plan, memory, skills.
+• Drift: Active files — SUMMARIES ONLY. Use read_file() for actual content.
+• Void: Conversation history.
+
+Available systems: File Map, Plan (plan tool), Memory (save_memory tool), Skills (auto-loaded), Schedule (schedule tool), Task Agents (run_task_agent tool).
+
+Files in Drift are summaries. Always call read_file(path, offset, limit) for real content before quoting or editing.`;
+}
+
+// ─── § Rules ─────────────────────────────────────────────────────────────────
+
+function sectionRules(): string {
+  return `# Rules
+
+## Directive vs Inquiry
+Distinguish between **Directives** (explicit requests for action) and **Inquiries** (questions, analysis, opinions).
+- Assume requests are Inquiries unless they contain an explicit instruction to implement, fix, create, or modify.
+- For Inquiries: research and respond. Do NOT modify files until a Directive is issued.
+- For Directives: work autonomously. Only clarify if critically underspecified.
+
+## Engineering Standards
+- Rigorously follow existing project conventions, patterns, and style.
+- Never assume a library is available — verify its usage in the project first.
+- Read files before modifying them. Understand existing code before suggesting changes.
+- Prefer editing existing files over creating new ones.
+- Do not add features, refactoring, or error handling beyond what was requested.
+- Always search for and update related tests after code changes.
+- Do not revert changes unless explicitly asked. Fix forward.
+
+## Retry Protocol
+If an approach has failed 3 times:
+1. Stop and restate the original goal.
+2. List your current assumptions and identify which may be wrong.
+3. Propose a fundamentally different approach rather than patching the current one.
+
+## Safety
+- Never introduce code that exposes secrets, API keys, or credentials.
+- For destructive or hard-to-reverse actions (force push, delete, drop tables), explain the action and wait for confirmation.
+- Match the scope of actions to what was actually requested.
+
+## Conciseness
+- Be direct and concise. Aim for minimal text output outside of code/tool use.
+- No conversational filler, preambles ("I'll now..."), or postambles ("I've finished...").
+- Use tools for actions. Use text only for communication.
+- After completing a task, provide a brief summary — not a play-by-play.`;
+}
+
+// ─── § Tool Usage ────────────────────────────────────────────────────────────
+
+function sectionToolUsage(): string {
+  return `# Tool Usage
+
+## Context Efficiency
+Minimize unnecessary context consumption while maintaining quality:
+- Prefer grep/glob to identify targets before reading full files.
+- For large files, use offset/limit for targeted reads. Read only what you need.
+- If a file fits in context (< 1000 lines), read it fully rather than making multiple partial reads.
+- Combine independent tool calls in parallel. Sequential only when one depends on another's result.
+- Do not re-read files you have already read in the same turn unless they may have changed.
+
+## Tool Preferences
+- Read files: use read_file (not execute_command with cat/head)
+- Edit files: use edit_file (not execute_command with sed)
+- Search files: use glob_files (not execute_command with find)
+- Reserve execute_command for builds, tests, git, and system operations.
+
+## Parallel Execution
+Call multiple independent tools in a single response. Only use sequential calls when a result is needed as input to the next call.`;
+}
+
+// ─── § Environment ───────────────────────────────────────────────────────────
+
+function sectionEnvironment(opts: CompileOptions): string {
+  const isGit = existsSync(join(opts.workspaceRoot, ".git"));
+  const shell = opts.shell || process.env.SHELL || "unknown";
+  const lines = [
+    `# Environment`,
+    `- Working directory: ${opts.workspaceRoot}`,
+    `- Git repository: ${isGit ? "Yes" : "No"}`,
+    `- Platform: ${platform()}`,
+    `- OS: ${platform()} ${release()}`,
+    `- Shell: ${shell}`,
+  ];
+  if (opts.modelName) lines.push(`- Model: ${opts.modelName}`);
+  return lines.join("\n");
+}
+
+// ─── § User Context (VOIDRIFT.md) ────────────────────────────────────────────
+
+function loadUserContext(workspaceRoot: string): string | null {
+  const candidates = [
+    join(workspaceRoot, "VOIDRIFT.md"),
+    join(workspaceRoot, ".voidrift", "VOIDRIFT.md"),
+  ];
+  // Also check global context
+  const home = process.env.HOME || process.env.USERPROFILE || "";
+  if (home) candidates.push(join(home, ".config", "voidrift", "VOIDRIFT.md"));
+
+  const contents: string[] = [];
+  for (const path of candidates) {
+    if (existsSync(path)) {
+      try {
+        const text = readFileSync(path, "utf-8").trim();
+        if (text) contents.push(text);
+      } catch { /* skip unreadable */ }
+    }
+  }
+  if (!contents.length) return null;
+  return `# User Context (VOIDRIFT.md)\nThe following instructions take precedence over general system prompt rules.\n\n${contents.join("\n\n---\n\n")}`;
 }
 
 function buildOrbitLayer(ctx: SessionContext): string | null {
