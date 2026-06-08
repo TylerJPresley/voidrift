@@ -32,8 +32,8 @@ export interface EventPayloadMap {
   RESOURCE_CHANGED: { path: string; type: string };
   USER_INPUT: { text: string };
   TOKEN_STREAM: { token: string; done: boolean };
-  TOOL_CONFIRMATION_REQUEST: { tool: string; args: Record<string, unknown>; requestId?: string; diff?: string[] };
-  TOOL_CONFIRMATION_RESPONSE: { approved: boolean; requestId?: string };
+  TOOL_CONFIRMATION_REQUEST: { tool: string; args: Record<string, unknown>; requestId?: string; diff?: string[]; inferredPattern?: string };
+  TOOL_CONFIRMATION_RESPONSE: { approved: boolean; requestId?: string; persist?: boolean };
   ERROR_OCCURRED: { message: string; source?: string };
   TURN_COMPLETE: { turnId: string };
   LOCKS_UPDATED: { activeLocks: string[] };

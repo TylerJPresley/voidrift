@@ -318,7 +318,7 @@ function App({ engine }: { engine: EngineContext }) {
   const [, forceRender] = useState(0);
 
   // Tool confirmation state
-  const [confirmRequest, setConfirmRequest] = useState<{ tool: string; args: Record<string, unknown>; requestId: string; diff?: string[] } | null>(null);
+  const [confirmRequest, setConfirmRequest] = useState<{ tool: string; args: Record<string, unknown>; requestId: string; diff?: string[]; inferredPattern?: string } | null>(null);
 
   // Subscribe to tool confirmation requests from the permission gate
   useEffect(() => {
@@ -328,9 +328,9 @@ function App({ engine }: { engine: EngineContext }) {
   }, []);
 
   // Handle confirmation response
-  const respondConfirmation = useCallback((approved: boolean) => {
+  const respondConfirmation = useCallback((approved: boolean, persist?: boolean) => {
     if (confirmRequest) {
-      engine.container.bus.publish("TOOL_CONFIRMATION_RESPONSE", { requestId: confirmRequest.requestId, approved } as any);
+      engine.container.bus.publish("TOOL_CONFIRMATION_RESPONSE", { requestId: confirmRequest.requestId, approved, persist } as any);
       setConfirmRequest(null);
     }
   }, [confirmRequest]);
@@ -390,7 +390,8 @@ function App({ engine }: { engine: EngineContext }) {
   useInput((ch, key) => {
     // Handle tool confirmation dialog
     if (confirmRequest) {
-      if (ch === "y" || ch === "Y" || key.return) { respondConfirmation(true); return; }
+      if (ch === "y" || ch === "Y" || key.return) { respondConfirmation(true, false); return; }
+      if (ch === "a" || ch === "A") { respondConfirmation(true, true); return; }
       if (ch === "n" || ch === "N" || key.escape) { respondConfirmation(false); return; }
       return; // Block all other input while confirming
     }
@@ -672,7 +673,7 @@ function App({ engine }: { engine: EngineContext }) {
               {confirmRequest.diff.length > 8 && <Text dimColor>  ...{confirmRequest.diff.length - 8} more lines</Text>}
             </Box>
           )}
-          <Text dimColor>  y/enter to approve · n/esc to deny</Text>
+          <Text dimColor>  y/enter = allow once · a = always allow{confirmRequest.inferredPattern ? ` (${confirmRequest.inferredPattern})` : ""} · n/esc = deny</Text>
         </Box>
       )}
       {thinking && <ThinkingIndicator label={thinking} />}

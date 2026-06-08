@@ -1,0 +1,302 @@
+/**
+ * Policy Engine — rule-based permission decisions for tool execution.
+ *
+ * Architecture:
+ * - Rules evaluated by priority (highest wins)
+ * - Multi-tier sources: workspace > user > defaults (higher tier overrides)
+ * - Shell command classification: safe auto-approves, dangerous always asks
+ * - Pattern matching on tool args (glob for paths, prefix for commands)
+ * - Session-scoped and persistent rules
+ */
+
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
+import { join, dirname } from "path";
+import { homedir } from "os";
+
+// ─── Types ───────────────────────────────────────────────────────────────────
+
+export type PolicyDecision = "allow" | "deny" | "ask";
+
+export type RuleSource = "default" | "workspace" | "user" | "session";
+
+export interface PolicyRule {
+  /** Tool name or "*" for all tools */
+  tool: string;
+  /** Glob pattern matched against args (e.g., path arg for file tools, command for shell) */
+  pattern?: string;
+  /** The decision when this rule matches */
+  decision: PolicyDecision;
+  /** Higher priority wins. Defaults: session=300, workspace=200, user=100, default=0 */
+  priority: number;
+  /** Where the rule came from */
+  source: RuleSource;
+  /** Human-readable description */
+  label?: string;
+}
+
+export interface PolicyCheckResult {
+  decision: PolicyDecision;
+  rule?: PolicyRule;
+  /** Inferred pattern for "always allow" persistence */
+  inferredPattern?: string;
+}
+
+// ─── Shell Classification ────────────────────────────────────────────────────
+
+const SAFE_COMMAND_PREFIXES = [
+  "git status", "git log", "git diff", "git branch", "git show", "git remote",
+  "git rev-parse", "git describe", "git stash list", "git tag",
+  "ls", "cat", "head", "tail", "wc", "pwd", "echo", "date", "whoami",
+  "find", "grep", "rg", "fd", "tree", "file", "which", "type",
+  "node --version", "npm --version", "npx --version", "bun --version",
+  "python --version", "pip --version",
+  "tsc --noEmit", "npx tsc --noEmit",
+];
+
+const DANGEROUS_PATTERNS = [
+  /\brm\s+(-[a-zA-Z]*f|-[a-zA-Z]*r|--force|--recursive)\b/,
+  /\brm\s+-rf\b/,
+  /\bchmod\s/,
+  /\bchown\s/,
+  /\bmkfs\b/,
+  /\bdd\s/,
+  /\b(curl|wget)\b.*\|\s*(sh|bash|zsh)\b/,
+  /\bsudo\s/,
+  /\b(shutdown|reboot|halt|poweroff)\b/,
+  />\s*\/dev\/sd/,
+  /\bgit\s+(push\s+--force|reset\s+--hard|clean\s+-f)/,
+  /\bgit\s+branch\s+-D\b/,
+  /\bdrop\s+(database|table)\b/i,
+  /\btruncate\s+table\b/i,
+  /\bformat\s+[a-z]:/i,
+];
+
+export type ShellSafety = "safe" | "dangerous" | "unknown";
+
+export function classifyCommand(command: string): ShellSafety {
+  const trimmed = command.trim();
+
+  // Check dangerous first — takes priority
+  for (const pattern of DANGEROUS_PATTERNS) {
+    if (pattern.test(trimmed)) return "dangerous";
+  }
+
+  // Check safe prefixes
+  for (const prefix of SAFE_COMMAND_PREFIXES) {
+    if (trimmed === prefix || trimmed.startsWith(prefix + " ") || trimmed.startsWith(prefix + "\n")) {
+      return "safe";
+    }
+  }
+
+  // Pipe chains with only safe commands are safe
+  const parts = trimmed.split(/\s*\|\s*/);
+  if (parts.length > 1 && parts.every(p => classifyCommand(p) === "safe")) {
+    return "safe";
+  }
+
+  return "unknown";
+}
+
+// ─── Pattern Matching ────────────────────────────────────────────────────────
+
+function matchGlob(value: string, pattern: string): boolean {
+  const regexStr = pattern
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*\*/g, "§GLOBSTAR§")
+    .replace(/\*/g, "[^/]*")
+    .replace(/§GLOBSTAR§/g, ".*")
+    .replace(/\?/g, ".");
+  return new RegExp(`^${regexStr}$`).test(value);
+}
+
+function ruleMatchesTool(rule: PolicyRule, tool: string, args: Record<string, unknown>): boolean {
+  // Tool name match
+  if (rule.tool !== "*" && rule.tool !== tool) return false;
+
+  // Pattern match (if rule has one)
+  if (rule.pattern) {
+    const matchValue = getMatchValue(tool, args);
+    if (!matchValue) return false;
+    return matchGlob(matchValue, rule.pattern);
+  }
+
+  return true;
+}
+
+/** Extract the value to match against from tool args */
+function getMatchValue(tool: string, args: Record<string, unknown>): string | undefined {
+  if ((tool === "write_file" || tool === "edit_file" || tool === "read_file" || tool === "glob_files") && typeof args.path === "string") {
+    return args.path;
+  }
+  if (tool === "execute_command" && typeof args.command === "string") {
+    return args.command;
+  }
+  return undefined;
+}
+
+/** Infer a pattern for "always allow" from the current tool call */
+export function inferPattern(tool: string, args: Record<string, unknown>): string | undefined {
+  if ((tool === "write_file" || tool === "edit_file") && typeof args.path === "string") {
+    // Infer directory glob: "src/utils/foo.ts" → "src/utils/**"
+    const parts = (args.path as string).split("/");
+    if (parts.length > 1) {
+      return parts.slice(0, -1).join("/") + "/**";
+    }
+    return "*";
+  }
+  if (tool === "execute_command" && typeof args.command === "string") {
+    // Infer command prefix: "npm run test" → "npm run *"
+    const cmd = (args.command as string).trim();
+    const firstSpace = cmd.indexOf(" ");
+    if (firstSpace > 0) {
+      const prefix = cmd.slice(0, firstSpace);
+      return prefix + " *";
+    }
+    return cmd;
+  }
+  return undefined;
+}
+
+// ─── Policy Engine ───────────────────────────────────────────────────────────
+
+export class PolicyEngine {
+  private rules: PolicyRule[] = [];
+  private workspacePolicyPath: string | undefined;
+  private userPolicyPath: string;
+
+  constructor(workspaceRoot?: string) {
+    this.userPolicyPath = join(homedir(), ".config", "voidrift", "policies.json");
+    if (workspaceRoot) {
+      this.workspacePolicyPath = join(workspaceRoot, ".voidrift", "policies.json");
+    }
+    this.loadRules();
+  }
+
+  /** Evaluate rules for a tool call. Returns the decision and matched rule. */
+  check(tool: string, args: Record<string, unknown>, approvalMode: "prompt" | "deny" | "autonomous"): PolicyCheckResult {
+    // Autonomous mode: always allow
+    if (approvalMode === "autonomous") return { decision: "allow" };
+
+    // Deny mode: only allow if an explicit allow rule exists
+    if (approvalMode === "deny") {
+      const match = this.findMatchingRule(tool, args, "allow");
+      if (match) return { decision: "allow", rule: match };
+      return { decision: "deny" };
+    }
+
+    // Prompt mode: check rules, shell classification, then ask
+    // Shell classification for execute_command
+    if (tool === "execute_command" && typeof args.command === "string") {
+      const safety = classifyCommand(args.command);
+      if (safety === "safe") return { decision: "allow", inferredPattern: inferPattern(tool, args) };
+      if (safety === "dangerous") return { decision: "ask", inferredPattern: inferPattern(tool, args) };
+    }
+
+    // Find highest-priority matching rule
+    const match = this.findHighestPriorityMatch(tool, args);
+    if (match) {
+      return { decision: match.decision, rule: match, inferredPattern: inferPattern(tool, args) };
+    }
+
+    // Default: ask for write tools, allow for read tools
+    const writeTools = ["write_file", "edit_file", "execute_command"];
+    if (writeTools.includes(tool)) {
+      return { decision: "ask", inferredPattern: inferPattern(tool, args) };
+    }
+
+    return { decision: "allow" };
+  }
+
+  /** Add a session-scoped rule (lost on restart) */
+  addSessionRule(rule: Omit<PolicyRule, "source" | "priority">): void {
+    this.rules.push({ ...rule, source: "session", priority: 300 });
+    this.sortRules();
+  }
+
+  /** Persist a rule to workspace policies (survives restart) */
+  persistRule(rule: Omit<PolicyRule, "source" | "priority">): void {
+    const policyPath = this.workspacePolicyPath || this.userPolicyPath;
+    const existing = this.loadFile(policyPath);
+    const newRule: PolicyRule = { ...rule, source: policyPath === this.workspacePolicyPath ? "workspace" : "user", priority: policyPath === this.workspacePolicyPath ? 200 : 100 };
+    existing.push(newRule);
+    this.saveFile(policyPath, existing);
+    this.rules.push(newRule);
+    this.sortRules();
+  }
+
+  /** Get all loaded rules (for panel display) */
+  getRules(): PolicyRule[] {
+    return [...this.rules];
+  }
+
+  /** Reload rules from disk */
+  reload(): void {
+    this.rules = this.rules.filter(r => r.source === "session");
+    this.loadRules();
+  }
+
+  // ─── Private ─────────────────────────────────────────────────────────────
+
+  private loadRules(): void {
+    // Load defaults
+    this.rules.push(...DEFAULT_RULES);
+
+    // Load user rules (lower tier)
+    const userRules = this.loadFile(this.userPolicyPath);
+    for (const r of userRules) {
+      this.rules.push({ ...r, source: "user", priority: r.priority ?? 100 });
+    }
+
+    // Load workspace rules (higher tier)
+    if (this.workspacePolicyPath) {
+      const wsRules = this.loadFile(this.workspacePolicyPath);
+      for (const r of wsRules) {
+        this.rules.push({ ...r, source: "workspace", priority: r.priority ?? 200 });
+      }
+    }
+
+    this.sortRules();
+  }
+
+  private loadFile(path: string): PolicyRule[] {
+    if (!existsSync(path)) return [];
+    try {
+      const content = readFileSync(path, "utf-8");
+      const parsed = JSON.parse(content);
+      if (Array.isArray(parsed)) return parsed;
+      if (parsed.rules && Array.isArray(parsed.rules)) return parsed.rules;
+      return [];
+    } catch {
+      return [];
+    }
+  }
+
+  private saveFile(path: string, rules: PolicyRule[]): void {
+    const dir = dirname(path);
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    writeFileSync(path, JSON.stringify({ rules }, null, 2), "utf-8");
+  }
+
+  private sortRules(): void {
+    this.rules.sort((a, b) => b.priority - a.priority);
+  }
+
+  private findHighestPriorityMatch(tool: string, args: Record<string, unknown>): PolicyRule | undefined {
+    // Rules are already sorted by priority (descending)
+    return this.rules.find(rule => ruleMatchesTool(rule, tool, args));
+  }
+
+  private findMatchingRule(tool: string, args: Record<string, unknown>, decision: PolicyDecision): PolicyRule | undefined {
+    return this.rules.find(rule => ruleMatchesTool(rule, tool, args) && rule.decision === decision);
+  }
+}
+
+// ─── Default Rules ───────────────────────────────────────────────────────────
+
+const DEFAULT_RULES: PolicyRule[] = [
+  // Read tools always allowed
+  { tool: "read_file", decision: "allow", priority: 0, source: "default", label: "Read files always allowed" },
+  { tool: "glob_files", decision: "allow", priority: 0, source: "default", label: "Glob always allowed" },
+  { tool: "list_directory", decision: "allow", priority: 0, source: "default", label: "List directory always allowed" },
+  { tool: "search_content", decision: "allow", priority: 0, source: "default", label: "Search always allowed" },
+];

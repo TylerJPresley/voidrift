@@ -1,35 +1,12 @@
 import { randomUUID } from "crypto";
-import { resolve, join } from "path";
 import type { EventBus } from "../events/bus.js";
 import { computeDiff, computeEditDiff } from "../safeguards/diff.js";
-import type { AgentManifest, ApprovalMode } from "../agents/registry.js";
-
-/** Simple helper to convert glob pattern string to RegExp */
-function matchGlob(pathStr: string, pattern: string): boolean {
-  const regexStr = pattern
-    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-    .replace(/\*\*/g, ".*")
-    .replace(/\*/g, "[^/]*")
-    .replace(/\?/g, ".");
-  const regex = new RegExp(`^${regexStr}$`);
-  return regex.test(pathStr);
-}
-
-function resolveGlobToAbsolute(pattern: string, workspaceRoot: string): string {
-  let resolved = pattern;
-  if (pattern.startsWith("./")) {
-    resolved = join(workspaceRoot, pattern.slice(2));
-  } else if (pattern.startsWith("~/")) {
-    resolved = join(process.env.HOME || "", pattern.slice(2));
-  }
-  return resolved;
-}
+import type { ApprovalMode } from "../agents/registry.js";
+import { PolicyEngine, inferPattern, type PolicyCheckResult } from "./policy-engine.js";
 
 export interface PendingRequest {
   requestId: string;
   toolName: string;
-  arguments: Record<string, unknown>;
-  requestedAt: number;
 }
 
 export interface GateResult {
@@ -38,87 +15,55 @@ export interface GateResult {
 }
 
 const GATE_TIMEOUT_MS = 120_000;
-const REJECTION_MESSAGE = "Error: Operation rejected by user permission gate.";
 
 /**
- * Interactive Permission Gate (G-07).
+ * Interactive Permission Gate.
  *
- * Uses async Promise suspension to pause tool execution without blocking Node's event loop.
- * Maintains a pendingRequests registry keyed by requestId (UUID).
- *
- * Behavior per approvalMode:
- * - deny: All mutating tools rejected outright
- * - prompt: Suspends via Promise if tool is not in allowedTools
- * - autonomous: All tools auto-approved
+ * Delegates policy decisions to PolicyEngine, handles UI suspension for "ask" decisions.
+ * Supports 3-option response: allow once, always allow (persist), deny.
  */
 export class PermissionGate {
-  private pendingRequests = new Map<string, { resolve: (approved: boolean) => void }>();
+  private pendingRequests = new Map<string, { resolve: (response: { approved: boolean; persist?: boolean }) => void }>();
+  readonly engine: PolicyEngine;
 
-  constructor(private bus: EventBus, private workspaceRoot?: string) {
+  constructor(private bus: EventBus, workspaceRoot?: string) {
+    this.engine = new PolicyEngine(workspaceRoot);
+
     this.bus.subscribe("TOOL_CONFIRMATION_RESPONSE", (event) => {
-      const { requestId, approved } = event.payload as any;
+      const { requestId, approved, persist } = event.payload as any;
       if (requestId) {
         const pending = this.pendingRequests.get(requestId);
         if (pending) {
           this.pendingRequests.delete(requestId);
-          pending.resolve(approved);
+          pending.resolve({ approved, persist });
         }
       } else {
         const first = this.pendingRequests.entries().next().value;
         if (first) {
           this.pendingRequests.delete(first[0]);
-          first[1].resolve(approved);
+          first[1].resolve({ approved, persist });
         }
       }
     });
   }
 
-  get pending(): PendingRequest[] {
-    return [...this.pendingRequests.keys()].map((id) => ({
-      requestId: id,
-      toolName: "",
-      arguments: {},
-      requestedAt: 0,
-    }));
-  }
-
-  async check(tool: string, args: Record<string, unknown>, agent: { approvalMode: ApprovalMode; allowedTools: string[]; toolsSettings?: Record<string, any> }): Promise<GateResult> {
-    // 1. Enforce allowedPaths glob constraints for file mutation tools
-    if ((tool === "write_file" || tool === "edit_file") && this.workspaceRoot) {
-      const allowedPaths: string[] = agent.toolsSettings?.[tool]?.allowedPaths || [];
-      if (allowedPaths.length > 0 && typeof args.path === "string") {
-        const absolutePath = resolve(this.workspaceRoot, args.path);
-        const isAllowed = allowedPaths.some(p => {
-          const absPattern = resolveGlobToAbsolute(p, this.workspaceRoot!);
-          return matchGlob(absolutePath, absPattern);
-        });
-        if (!isAllowed) {
-          return { approved: false, reason: `Error: Write path "${args.path}" violates agent write boundaries.` };
-        }
-      }
-    }
-
-    // 2. Bypass gate if execute_command is read-only and autoAllowReadonly is true
-    if (tool === "execute_command" && typeof args.command === "string") {
-      const autoAllowReadonly = agent.toolsSettings?.execute_command?.autoAllowReadonly;
-      if (autoAllowReadonly) {
-        const isReadOnly = /^(git status|git log|git diff|cat|ls|pwd|echo|find|grep)\b/.test(args.command.trim());
-        if (isReadOnly) return { approved: true };
-      }
-    }
-
-    // Autonomous: all tools auto-approved
-    if (agent.approvalMode === "autonomous") return { approved: true };
-
-    // Tool is in allowedTools: auto-approved regardless of mode
+  async check(tool: string, args: Record<string, unknown>, agent: { approvalMode: ApprovalMode; allowedTools: string[] }): Promise<GateResult> {
+    // Auto-approve tools explicitly in allowedTools (read tools for chat agent)
     if (agent.allowedTools.includes(tool)) return { approved: true };
 
-    // Deny mode: reject anything not in allowedTools
-    if (agent.approvalMode === "deny") {
-      return { approved: false, reason: `Tool "${tool}" is blocked by agent` };
+    // Delegate to PolicyEngine
+    const result = this.engine.check(tool, args, agent.approvalMode);
+
+    if (result.decision === "allow") return { approved: true };
+    if (result.decision === "deny") {
+      return { approved: false, reason: result.rule?.label || `Tool "${tool}" denied by policy` };
     }
 
-    // Prompt mode: suspend and ask the operator
+    // Decision is "ask" — suspend and show confirmation UI
+    return this.requestConfirmation(tool, args, result);
+  }
+
+  private requestConfirmation(tool: string, args: Record<string, unknown>, policyResult: PolicyCheckResult): Promise<GateResult> {
     const requestId = randomUUID();
 
     return new Promise<GateResult>((resolve) => {
@@ -128,26 +73,44 @@ export class PermissionGate {
       }, GATE_TIMEOUT_MS);
 
       this.pendingRequests.set(requestId, {
-        resolve: (approved: boolean) => {
+        resolve: (response) => {
           clearTimeout(timer);
+          if (response.approved && response.persist && policyResult.inferredPattern) {
+            this.engine.persistRule({
+              tool,
+              pattern: policyResult.inferredPattern,
+              decision: "allow",
+              label: `Auto: allow ${tool} for ${policyResult.inferredPattern}`,
+            });
+          } else if (response.approved && !response.persist) {
+            // Session-only rule for this exact pattern
+            if (policyResult.inferredPattern) {
+              this.engine.addSessionRule({ tool, pattern: policyResult.inferredPattern, decision: "allow" });
+            }
+          }
           resolve({
-            approved,
-            reason: approved ? undefined : REJECTION_MESSAGE,
+            approved: response.approved,
+            reason: response.approved ? undefined : "Operation denied by user.",
           });
         },
       });
 
-      this.bus.publish("TOOL_CONFIRMATION_REQUEST", { tool, args, requestId, diff: this.computeToolDiff(tool, args) } as any);
+      this.bus.publish("TOOL_CONFIRMATION_REQUEST", {
+        tool,
+        args,
+        requestId,
+        diff: this.computeToolDiff(tool, args),
+        inferredPattern: policyResult.inferredPattern,
+      } as any);
     });
   }
 
   private computeToolDiff(tool: string, args: Record<string, unknown>): string[] | undefined {
-    if (!this.workspaceRoot) return undefined;
     if (tool === "write_file" && typeof args.path === "string" && typeof args.content === "string") {
-      return computeDiff(this.workspaceRoot, args.path, args.content);
+      return computeDiff(".", args.path, args.content);
     }
     if (tool === "edit_file" && typeof args.path === "string" && typeof args.search === "string" && typeof args.replace === "string") {
-      return computeEditDiff(this.workspaceRoot, args.path, args.search, args.replace);
+      return computeEditDiff(".", args.path, args.search, args.replace);
     }
     return undefined;
   }

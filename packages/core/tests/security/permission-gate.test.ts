@@ -26,7 +26,7 @@ describe("PermissionGate", () => {
     const gate = new PermissionGate(bus);
     const result = await gate.check("write_file", { path: "x.ts", content: "" }, planAgent);
     expect(result.approved).toBe(false);
-    expect(result.reason).toContain("blocked");
+    expect(result.reason).toContain("denied");
   });
 
   it("publishes TOOL_CONFIRMATION_REQUEST when tool not in allowedTools (prompt mode)", async () => {
@@ -53,7 +53,7 @@ describe("PermissionGate", () => {
 
     const result = await gate.check("execute_command", { command: "rm -rf /" }, chatAgent);
     expect(result.approved).toBe(false);
-    expect(result.reason).toContain("rejected by user permission gate");
+    expect(result.reason).toContain("denied by user");
   });
 
   it("supports legacy response without requestId (resolves oldest)", async () => {
