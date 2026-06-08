@@ -414,8 +414,8 @@ function App({ engine }: { engine: EngineContext }) {
   useInput((ch, key) => {
     // Handle tool confirmation dialog
     if (confirmRequest) {
-      if (ch === "c" && key.ctrl) {
-        // Cancel entire turn — deny this request and abort
+      if ((ch === "c" && key.ctrl) || key.escape) {
+        // Cancel entire turn
         respondConfirmation(confirmOptions.length - 1);
         abortRef.current?.abort();
         setBusy(false); setThinking(null); setStreaming(null);
@@ -426,7 +426,6 @@ function App({ engine }: { engine: EngineContext }) {
       if (key.upArrow) { setConfirmIdx(i => Math.max(0, i - 1)); return; }
       if (key.downArrow) { setConfirmIdx(i => Math.min(confirmOptions.length - 1, i + 1)); return; }
       if (key.return) { respondConfirmation(confirmIdx); return; }
-      if (key.escape) { respondConfirmation(confirmOptions.length - 1); return; } // last option is always "No"
       return; // Block all other input while confirming
     }
     if (key.escape) {
