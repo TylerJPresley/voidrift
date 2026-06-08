@@ -9,7 +9,7 @@ export const TOOL_SCHEMAS: ToolSchema[] = [
     parameters: [
       { name: "path", type: "string", description: "Relative file path", required: true },
       { name: "offset", type: "number", description: "Line offset to start reading from (0-indexed)", required: false },
-      { name: "limit", type: "number", description: "Maximum number of lines to read (default 200)", required: false },
+      { name: "limit", type: "number", description: "Maximum number of lines to read (default 1000)", required: false },
     ],
   },
   {

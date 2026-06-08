@@ -17,7 +17,7 @@ export interface ToolResult {
  * read_file: Reads file text with optional offset and limit for incremental loading.
  * Returns line count metadata so the model knows if there's more to read.
  */
-export function readFile(workspaceRoot: string, path: string, offset = 0, limit = 200): ToolResult {
+export function readFile(workspaceRoot: string, path: string, offset = 0, limit = 1000): ToolResult {
   const fullPath = resolvePath(workspaceRoot, path);
   if (!existsSync(fullPath)) {
     return { success: false, output: "", error: `File not found: ${path}` };

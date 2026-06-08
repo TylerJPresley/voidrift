@@ -15,7 +15,7 @@ const noop = async () => "";
 export const langchainTools = [
   tool(noop, {
     name: "read_file",
-    description: "Read file content from the workspace. Returns 200 lines by default. Use offset/limit for specific ranges.",
+    description: "Read file content from the workspace. Returns 1000 lines by default. Use offset/limit for specific ranges.",
     schema: z.object({
       path: z.string().describe("Relative file path"),
       offset: z.number().optional().describe("Line offset to start reading from"),
@@ -174,7 +174,7 @@ export async function getAnthropicNativeTools(toolNames: string[], workspaceRoot
     native.push(tools.textEditor_20250728({
       execute: async (args) => {
         switch (args.command) {
-          case "view": return readFile(workspaceRoot, args.path, 0, 200).output || "";
+          case "view": return readFile(workspaceRoot, args.path, 0, 1000).output || "";
           case "str_replace": return editFile(workspaceRoot, args.path, args.old_str!, args.new_str ?? "").output;
           case "create": return writeFile(workspaceRoot, args.path, args.file_text ?? "").output;
           case "insert": {
