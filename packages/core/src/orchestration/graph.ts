@@ -71,7 +71,7 @@ async function executeToolCall(toolName: string, argsJson: string, workspaceRoot
         const lines = content.split("\n");
         const totalLines = lines.length;
         // Estimate: ~4 chars per token. File fits if estimated tokens < 25% of context limit.
-        const contextLimit = config?.contextLimit ?? 32768;
+        const contextLimit = (config as any)?.contextLimit ?? 32768;
         const estimatedTokens = Math.ceil(content.length / 4);
         const fits = estimatedTokens < contextLimit * 0.25;
 
