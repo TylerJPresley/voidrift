@@ -18,10 +18,10 @@ describe("MCPEngine", () => {
     expect(engine.all).toHaveLength(0);
   });
 
-  it("loads configs from mcp.json", () => {
-    mkdirSync(join(TMP, ".voidrift"), { recursive: true });
-    writeFileSync(join(TMP, ".voidrift", "mcp.json"), JSON.stringify({
-      servers: [{ name: "test-db", command: "echo", args: ["hello"] }],
+  it("loads configs from per-file directory", () => {
+    mkdirSync(join(TMP, ".voidrift", "mcp"), { recursive: true });
+    writeFileSync(join(TMP, ".voidrift", "mcp", "test-db.json"), JSON.stringify({
+      command: "echo", args: ["hello"],
     }));
     const bus = new EventBus();
     const engine = new MCPEngine(TMP, bus);

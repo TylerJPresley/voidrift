@@ -618,29 +618,107 @@ export function MemoryPanel({ memory, context, onClose }: { memory: MemoryRegist
 // ─── /mcp ────────────────────────────────────────────────────────────────────
 
 export function MCPPanel({ mcp, onClose }: { mcp: MCPEngine; onClose: () => void }) {
+  const configs = mcp.loadConfigs();
   const servers = mcp.all;
+  const allNames = [...new Set([...configs.map(c => c.name), ...servers.map(s => s.name)])];
   const [selected, setSelected] = useState(0);
-  useInput((_, key) => {
+  const [status, setStatus] = useState("");
+
+  const getServerStatus = (name: string) => {
+    const s = servers.find(sv => sv.name === name);
+    return s?.status ?? "disconnected";
+  };
+  const getToolCount = (name: string) => {
+    const s = servers.find(sv => sv.name === name);
+    return s?.tools.length ?? 0;
+  };
+  const getConfig = (name: string) => configs.find(c => c.name === name);
+
+  useInput(async (ch, key) => {
     if (key.escape) onClose();
-    if (key.upArrow) setSelected((s) => Math.max(0, s - 1));
-    if (key.downArrow) setSelected((s) => Math.min(servers.length - 1, s + 1));
+    if (key.upArrow) setSelected(s => Math.max(0, s - 1));
+    if (key.downArrow) setSelected(s => Math.min(allNames.length - 1, s + 1));
+    if (ch === "a") {
+      // Add: create a minimal config
+      const name = `server-${Date.now().toString(36).slice(-4)}`;
+      mcp.saveConfig({ name, command: "npx", args: ["-y", "@example/mcp-server"] });
+      setStatus(`Created ${name}.json — edit to configure.`);
+    }
+    if (ch === "d" && allNames[selected]) {
+      const name = allNames[selected];
+      await mcp.disconnect(name);
+      mcp.removeConfig(name);
+      setStatus(`Removed ${name}.`);
+    }
+    if (ch === "c" && allNames[selected]) {
+      const name = allNames[selected];
+      const st = getServerStatus(name);
+      if (st === "connected") {
+        await mcp.disconnect(name);
+        setStatus(`Disconnected ${name}.`);
+      } else {
+        const config = getConfig(name);
+        if (config) {
+          setStatus(`Connecting ${name}...`);
+          await mcp.connect(config);
+          setStatus(`Connected ${name}.`);
+        }
+      }
+    }
+    if (ch === "o" && allNames[selected]) {
+      const name = allNames[selected];
+      const config = getConfig(name);
+      if (config?.auth?.type === "oauth2") {
+        setStatus("Starting OAuth flow...");
+        const { runOAuthFlow } = await import("./mcp/oauth.js");
+        const { execSync } = await import("child_process");
+        await runOAuthFlow(name, config.auth, (url) => {
+          try { execSync(`xdg-open "${url}" 2>/dev/null || open "${url}" 2>/dev/null`); } catch {}
+        }, setStatus);
+      } else {
+        setStatus("No OAuth config on this server.");
+      }
+    }
+    if (ch === "e" && allNames[selected]) {
+      const name = allNames[selected];
+      const { execSync } = await import("child_process");
+      const editor = process.env.EDITOR || "vim";
+      const configPath = join(mcp["configDirs"][0], `${name}.json`);
+      if (existsSync(configPath)) {
+        try { execSync(`${editor} "${configPath}"`, { stdio: "inherit" }); } catch {}
+        setStatus(`Edited ${name}.json`);
+      } else {
+        setStatus(`Config not found: ${configPath}`);
+      }
+    }
   });
+
   return (
     <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1}>
       <Text bold>MCP Servers</Text>
       <Text color="#5a6aa8">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
       <Text> </Text>
-      {servers.length === 0 && <Text dimColor>No MCP servers configured.</Text>}
-      {servers.map((s, i) => (
-        <Text key={s.name}>
-          <Text color={i === selected ? "#4ec9b0" : undefined}>{i === selected ? "▸ " : "  "}</Text>
-          <Text color={s.status === "connected" ? "green" : s.status === "error" ? "red" : "yellow"}>● </Text>
-          <Text color="#61afef">{s.name.padEnd(20)}</Text>
-          <Text dimColor>{s.status} · {s.tools.length} tools</Text>
-        </Text>
-      ))}
+      {allNames.length === 0 && <Text dimColor>No MCP servers configured. Press 'a' to add.</Text>}
+      {allNames.map((name, i) => {
+        const st = getServerStatus(name);
+        const tools = getToolCount(name);
+        const config = getConfig(name);
+        const hasAuth = !!config?.auth;
+        return (
+          <Text key={name}>
+            <Text color={i === selected ? "#4ec9b0" : undefined}>{i === selected ? "▸ " : "  "}</Text>
+            <Text color={st === "connected" ? "green" : st === "error" ? "red" : "yellow"}>● </Text>
+            <Text color="#61afef">{name.padEnd(20)}</Text>
+            <Text dimColor>{st.padEnd(14)}</Text>
+            <Text dimColor>{tools > 0 ? `${tools} tools` : ""} {hasAuth ? "🔑" : ""}</Text>
+          </Text>
+        );
+      })}
       <Text> </Text>
-      <Text dimColor><Text color="#61afef" bold>↑↓</Text> Navigate  <Text color="#61afef" bold>enter</Text> Actions  <Text color="#61afef" bold>esc</Text> Close</Text>
+      {status && <Text color="yellow">{status}</Text>}
+      <Text dimColor>
+        <Text color="#61afef" bold>a</Text> Add  <Text color="#61afef" bold>e</Text> Edit  <Text color="#61afef" bold>d</Text> Remove  <Text color="#61afef" bold>o</Text> Auth  <Text color="#61afef" bold>c</Text> Connect  <Text color="#61afef" bold>esc</Text> Close
+      </Text>
     </Box>
   );
 }
