@@ -1872,6 +1872,68 @@ export function AgentsPanel({
 
 // ─── Generic fallback ────────────────────────────────────────────────────────
 
+export function PolicyPanel({ engine, onClose }: { engine: import("./security/policy-engine.js").PolicyEngine; onClose: () => void }) {
+  useInput((_, key) => { if (key.escape) onClose(); });
+  const rules = engine.getRules();
+  return (
+    <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1}>
+      <Text bold>Policy Rules <Text dimColor>({rules.length})</Text></Text>
+      <Text color="#5a6aa8">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
+      <Text> </Text>
+      <Text dimColor>{"  "}{"Decision".padEnd(10)}{"Tool".padEnd(18)}{"Pattern".padEnd(25)}{"Source".padEnd(12)}{"Label"}</Text>
+      <Text dimColor color="#333333">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
+      {rules.length === 0 ? <Text dimColor>No rules loaded.</Text> : rules.map((r, i) => (
+        <Text key={i}>
+          {"  "}
+          <Text color={r.decision === "allow" ? "green" : r.decision === "deny" ? "red" : "yellow"}>{r.decision.padEnd(10)}</Text>
+          <Text>{(r.tool).padEnd(18)}</Text>
+          <Text dimColor>{(r.pattern || "*").padEnd(25)}</Text>
+          <Text>{(r.source).padEnd(12)}</Text>
+          <Text dimColor>{r.label || ""}</Text>
+        </Text>
+      ))}
+      <Text> </Text>
+      <Text dimColor><Text color="#61afef" bold>esc</Text> Close</Text>
+    </Box>
+  );
+}
+
+// ─── /history ────────────────────────────────────────────────────────────────
+
+export function HistoryPanel({ logger, onClose }: { logger: import("./logging/audit.js").AuditLogger; onClose: () => void }) {
+  const [entries, setEntries] = useState<Array<{ timestamp: string; source: string; message: string; data?: any }>>([]);
+  const termHeight = process.stdout.rows || 24;
+  const viewHeight = termHeight - 7;
+
+  useEffect(() => {
+    try {
+      const content = readFileSync(logger.localLogPath, "utf-8");
+      const lines = content.trim().split("\n").filter(Boolean);
+      const parsed = lines.map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+      setEntries(parsed);
+    } catch { setEntries([]); }
+  }, []);
+
+  useInput((_, key) => { if (key.escape) onClose(); });
+
+  const displayEntries = entries.slice(-50);
+  const lines = displayEntries.map((e, i) => {
+    const ts = e.timestamp?.slice(11, 19) || "";
+    const detail = e.data ? (e.data.toolName || e.data.text?.slice(0, 40) || JSON.stringify(e.data).slice(0, 40)) : "";
+    return <Text key={i}><Text dimColor>{ts}</Text> <Text color="#61afef">{(e.source || "").padEnd(8)}</Text> <Text>{(e.message || "").padEnd(30)}</Text> <Text dimColor>{detail}</Text></Text>;
+  });
+
+  return (
+    <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1}>
+      <Text bold>Audit History <Text dimColor>({entries.length} entries)</Text></Text>
+      <Text color="#5a6aa8">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
+      <Text> </Text>
+      <ScrollView height={viewHeight} lines={lines} />
+      <Text dimColor><Text color="#61afef" bold>↑↓</Text> Scroll  <Text color="#61afef" bold>esc</Text> Close</Text>
+    </Box>
+  );
+}
+
 export function GenericPanel({ name, onClose }: { name: string; onClose: () => void }) {
   useInput((_, key) => { if (key.escape) onClose(); });
   return (

@@ -20,6 +20,7 @@ import type { AgentRegistry } from "./agents/registry.js";
 import type { PromptRegistry } from "./prompts/registry.js";
 import type { PluginRegistry } from "./plugins/registry.js";
 import type { SessionBrain } from "./session/brain.js";
+import type { PolicyEngine } from "./security/policy-engine.js";
 
 export interface EngineContext {
   container: Container;
@@ -40,6 +41,7 @@ export interface EngineContext {
   planManager: PlanManager;
   brain: SessionBrain;
   pluginRegistry: PluginRegistry;
+  policyEngine: PolicyEngine;
   sessionId: string;
   branch: string | null;
   shortPath: string;

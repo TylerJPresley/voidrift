@@ -32,7 +32,7 @@ export { routeMCPToolCall, isMCPTool } from "./mcp/router.js";
 
 // Tier 4: Security Subsystem
 export { PermissionGate, type PendingRequest, type GateResult } from "./security/permission-gate.js";
-export { PolicyEngine, classifyCommand, inferPattern, inferPatterns, type PolicyRule, type PolicyDecision, type PolicyCheckResult } from "./security/policy-engine.js";
+export { PolicyEngine, classifyCommand, inferPattern, inferPatterns, getEquivalentMessage, type PolicyRule, type PolicyDecision, type PolicyCheckResult } from "./security/policy-engine.js";
 export { AgentRegistry, type AgentManifest, type AgentType, type ApprovalMode, type ModelTier, type ToolSettings, ALL_TOOLS, READ_TOOLS } from "./agents/registry.js";
 export { PromptRegistry, type PromptEntry, type ResolvedPrompt } from "./prompts/registry.js";
 

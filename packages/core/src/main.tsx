@@ -35,12 +35,13 @@ import {
   TaskScheduler,
   CoreAPI,
   AutocompleteEngine,
+  PolicyEngine,
 } from "./index.js";
 import {
   StatsPanel, HelpPanel, ToolsPanel, ModelPanel, MemoryPanel, GenericPanel,
   SkillsPanel, MCPPanel, TemplatesPanel, PromptsPanel, ContextPanel, TasksPanel,
   ResumePanel, RewindPanel, AgentsPanel, PlanPanel, DiffPanel,
-  PluginsPanel,
+  PluginsPanel, PolicyPanel, HistoryPanel,
 } from "./panels.js";
 import { PluginRegistry, discoverPlugins } from "./plugins/registry.js";
 import type { EngineContext } from "./engine.js";
@@ -315,6 +316,14 @@ function App({ engine }: { engine: EngineContext }) {
   const inputHistoryRef = React.useRef<string[]>([]);
   const [histIdx, setHistIdx] = useState(-1);
   const fileAcRef = React.useRef<AutocompleteEngine>((() => { const e = new AutocompleteEngine(); e.indexWorkspace(engine.workspaceRoot); return e; })());
+
+  // Re-index file completions when files are created/deleted
+  useEffect(() => {
+    const unsub1 = engine.container.bus.subscribe("FILE_CREATED", () => { fileAcRef.current.indexWorkspace(engine.workspaceRoot); });
+    const unsub2 = engine.container.bus.subscribe("FILE_DELETED", () => { fileAcRef.current.indexWorkspace(engine.workspaceRoot); });
+    return () => { unsub1(); unsub2(); };
+  }, []);
+
   const [exitPending, setExitPending] = useState(false);
   const exitTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const [, forceRender] = useState(0);
@@ -555,7 +564,7 @@ function App({ engine }: { engine: EngineContext }) {
         if (handler) {
           let captured = "";
           engine.setCmdOutput((t: string) => { captured += (captured ? "\n" : "") + t; });
-          engine.setOpenPanel((p: string) => { if (p === "diff" || p === "plan") { process.stdout.write("\x1b[2J\x1b[H"); setFullPanel(p); } else setPanel(p); });
+          engine.setOpenPanel((p: string) => { if (p === "diff" || p === "plan" || p === "history") { process.stdout.write("\x1b[2J\x1b[H"); setFullPanel(p); } else setPanel(p); });
           await handler.execute([]);
           engine.setCmdOutput(() => {});
           engine.setOpenPanel(() => {});
@@ -577,7 +586,7 @@ function App({ engine }: { engine: EngineContext }) {
       if (handler) {
         let captured = "";
         engine.setCmdOutput((t: string) => { captured += (captured ? "\n" : "") + t; });
-        engine.setOpenPanel((p: string) => { if (p === "diff" || p === "plan") { process.stdout.write("\x1b[2J\x1b[H"); setFullPanel(p); } else setPanel(p); });
+        engine.setOpenPanel((p: string) => { if (p === "diff" || p === "plan" || p === "history") { process.stdout.write("\x1b[2J\x1b[H"); setFullPanel(p); } else setPanel(p); });
         await handler.execute(args);
         engine.setCmdOutput(() => {});
         engine.setOpenPanel(() => {});
@@ -694,6 +703,7 @@ function App({ engine }: { engine: EngineContext }) {
     <Box flexDirection="column" height={fullPanel ? process.stdout.rows || 24 : undefined}>
       {fullPanel === "diff" && <DiffPanel workspaceRoot={engine.workspaceRoot} onClose={() => { setFullPanel(null); process.stdout.write("\x1b[2J\x1b[H"); }} />}
       {fullPanel === "plan" && <PlanPanel planManager={engine.planManager} config={engine.container.config} onClose={() => { setFullPanel(null); process.stdout.write("\x1b[2J\x1b[H"); }} />}
+      {fullPanel === "history" && <HistoryPanel logger={engine.logger} onClose={() => { setFullPanel(null); process.stdout.write("\x1b[2J\x1b[H"); }} />}
       {!fullPanel && <>
       <Static key={clearKey} items={[{ id: "welcome", type: "welcome" } as any, ...history]}>
         {(item: any, idx: number) => {
@@ -790,7 +800,9 @@ function App({ engine }: { engine: EngineContext }) {
       {panel === "rewind" && <RewindPanel turns={engine.stats.current.turns} onRewind={(t) => { engine.context.setMessages(engine.context.getMessages().slice(0, t * 2)); }} onClose={() => setPanel(null)} />}
       {panel === "agents" && <AgentsPanel agents={engine.agents} config={engine.container.config} workspaceRoot={engine.workspaceRoot} bus={engine.container.bus} onClose={() => setPanel(null)} />}
       {panel === "plugins" && <PluginsPanel plugins={engine.pluginRegistry} registry={engine.container.registry} agents={engine.agents} workspaceRoot={engine.workspaceRoot} onClose={() => setPanel(null)} />}
-      {panel && !["stats","help","tools","model","plan","memory","skills","mcp","templates","prompts","context","tasks","resume","rewind","agents","plugins"].includes(panel) && <GenericPanel name={panel} onClose={() => setPanel(null)} />}
+      {panel === "policy" && <PolicyPanel engine={engine.policyEngine} onClose={() => setPanel(null)} />}
+      {panel === "history" && <HistoryPanel logger={engine.logger} onClose={() => setPanel(null)} />}
+      {panel && !["stats","help","tools","model","plan","memory","skills","mcp","templates","prompts","context","tasks","resume","rewind","agents","plugins","policy","history"].includes(panel) && <GenericPanel name={panel} onClose={() => setPanel(null)} />}
       </>}
     </Box>
   );
@@ -899,6 +911,7 @@ const engine: EngineContext = await (async () => {
   const planManager = new PlanManager(workspaceRoot);
   const skills = new SkillManager();
   const logger = new AuditLogger({ workspaceRoot, sessionId });
+  const policyEngine = new PolicyEngine(workspaceRoot);
   const guard = new ExceptionGuard(container.bus, context);
   const stats = new StatsTracker(sessionId);
   const scheduler = new TaskScheduler(container.bus, (instruction) => {
@@ -949,6 +962,7 @@ const engine: EngineContext = await (async () => {
   registerCommands(container.registry, {
     config: container.config, context, budget, agents, brain, memory, stats,
     skills, templates, mcp, worktree, scheduler, checkpointer, bus: container.bus, workspaceRoot, sessionId,
+    policyEngine, logger,
     output: (text) => cmdOutputFn(text),
     openPanel: (panel) => openPanelFn(panel),
     switchModel: (name) => {
@@ -961,7 +975,7 @@ const engine: EngineContext = await (async () => {
 
   return {
     container, context, budget, agents, prompts, guard, stats, memory, skills, mcp, templates, logger,
-    worktree, scheduler, checkpointer, planManager, brain, sessionId, pluginRegistry,
+    worktree, scheduler, checkpointer, planManager, brain, sessionId, pluginRegistry, policyEngine,
     branch, shortPath, workspaceRoot,
     startupWarnings: [...startupWarnings, ...validateStartup(container.config), ...validateAssets(agents, skills).map(i => `[${i.type}] ${i.id}: ${i.message}`)],
     setCmdOutput: (fn: (text: string) => void) => { cmdOutputFn = fn; },

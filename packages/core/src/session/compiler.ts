@@ -162,6 +162,7 @@ Minimize unnecessary context consumption while maintaining quality:
 - Read files: use read_file (not execute_command with cat/head)
 - Edit files: use edit_file (not execute_command with sed)
 - Search files: use glob_files (not execute_command with find)
+- For reading files outside the workspace, use read_file with the absolute path — not cat or shell commands. read_file works with absolute paths after approval.
 - Reserve execute_command for shell operations that have no dedicated tool equivalent.
 
 ## Parallel Execution

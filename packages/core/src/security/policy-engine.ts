@@ -71,12 +71,38 @@ const DANGEROUS_PATTERNS = [
   /\bformat\s+[a-z]:/i,
 ];
 
-export type ShellSafety = "safe" | "dangerous" | "unknown";
+export type ShellSafety = "safe" | "dangerous" | "unknown" | "has_equivalent";
+
+/** Commands that have dedicated tool equivalents — auto-denied with guidance */
+const TOOL_EQUIVALENT_PREFIXES: Array<{ prefix: string; message: string }> = [
+  { prefix: "cat", message: "Use read_file instead of cat" },
+  { prefix: "find", message: "Use glob_files instead of find" },
+  { prefix: "grep", message: "Use search_content instead of grep" },
+  { prefix: "curl", message: "Use web_fetch tool instead of curl/wget" },
+  { prefix: "wget", message: "Use web_fetch tool instead of curl/wget" },
+  { prefix: "nc", message: "Use web_fetch tool instead of nc" },
+  { prefix: "ncat", message: "Use web_fetch tool instead of ncat" },
+  { prefix: "ssh", message: "Use web_fetch tool instead of ssh" },
+  { prefix: "scp", message: "Use web_fetch tool instead of scp" },
+];
+
+export function getEquivalentMessage(command: string): string | undefined {
+  const trimmed = command.trim();
+  for (const { prefix, message } of TOOL_EQUIVALENT_PREFIXES) {
+    if (trimmed === prefix || trimmed.startsWith(prefix + " ") || trimmed.startsWith(prefix + "\t")) {
+      return message;
+    }
+  }
+  return undefined;
+}
 
 export function classifyCommand(command: string): ShellSafety {
   const trimmed = command.trim();
 
-  // Check dangerous first — takes priority
+  // Check tool equivalents first — auto-deny with guidance
+  if (getEquivalentMessage(trimmed) !== undefined) return "has_equivalent";
+
+  // Check dangerous — takes priority
   for (const pattern of DANGEROUS_PATTERNS) {
     if (pattern.test(trimmed)) return "dangerous";
   }
@@ -223,6 +249,10 @@ export class PolicyEngine {
     // Shell classification for execute_command
     if (tool === "execute_command" && typeof args.command === "string") {
       const safety = classifyCommand(args.command);
+      if (safety === "has_equivalent") {
+        const reason = getEquivalentMessage(args.command) || "Use the dedicated tool instead of shell commands";
+        return { decision: "deny", rule: { tool, decision: "deny", priority: 999, source: "default", label: reason } };
+      }
       if (safety === "safe") return { decision: "allow", inferredPattern: inferPattern(tool, args) };
       if (safety === "dangerous") return { decision: "ask", inferredPattern: inferPattern(tool, args) };
     }

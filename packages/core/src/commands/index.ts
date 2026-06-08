@@ -16,6 +16,8 @@ import { compactHistory } from "../session/compactor.js";
 import { createTierAdapter } from "../adapters/factory.js";
 import { EventBus } from "../events/bus.js";
 import { execSync } from "child_process";
+import type { PolicyEngine } from "../security/policy-engine.js";
+import type { AuditLogger } from "../logging/audit.js";
 
 export interface CommandDeps {
   config: VoidRiftConfig;
@@ -34,6 +36,8 @@ export interface CommandDeps {
   bus: EventBus;
   workspaceRoot: string;
   sessionId: string;
+  policyEngine?: PolicyEngine;
+  logger?: AuditLogger;
   output: (text: string) => void;
   openPanel: (panel: string) => void;
   switchModel: (name: string, tier?: string) => boolean;
@@ -132,4 +136,22 @@ export function registerCommands(registry: CoreRegistry, deps: CommandDeps): voi
 
   // --- Plugins ---
   registry.registerSlashCommand({ name: "plugins", description: "Plugin manager", execute: async () => deps.openPanel("plugins") });
+
+  // --- Policy ---
+  registry.registerSlashCommand({ name: "policy", description: "View or add security policy rules", execute: async (args) => {
+    if (args.length === 0) { deps.openPanel("policy"); return; }
+    if (args[0] === "add" && deps.policyEngine && args.length >= 4) {
+      // /policy add <allow|deny> <tool> <pattern>
+      const decision = args[1] as "allow" | "deny";
+      const tool = args[2];
+      const pattern = args.slice(3).join(" ").replace(/^['"]|['"]$/g, "");
+      deps.policyEngine.persistRule({ tool, pattern, decision });
+      deps.output(`Rule added: ${decision} ${tool} "${pattern}"`);
+    } else {
+      deps.output("Usage: /policy add <allow|deny> <tool> <pattern>");
+    }
+  }});
+
+  // --- History ---
+  registry.registerSlashCommand({ name: "history", description: "Audit event history", execute: async () => deps.openPanel("history") });
 }
