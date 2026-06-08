@@ -1,5 +1,6 @@
 import { createServer, type Server } from "http";
 import { URL } from "url";
+import { randomBytes, createHash } from "crypto";
 import { saveCredential, type StoredCredential } from "./credentials.js";
 import type { MCPAuthConfig } from "./engine.js";
 
@@ -24,11 +25,18 @@ export async function runOAuthFlow(
   const redirectUri = `http://localhost:${CALLBACK_PORT}${CALLBACK_PATH}`;
   const scopes = auth.scopes?.join(" ") ?? "";
 
-  // Build authorize URL
+  // Build authorize URL with PKCE and state
+  const state = randomBytes(16).toString("hex");
+  const codeVerifier = randomBytes(32).toString("base64url");
+  const codeChallenge = createHash("sha256").update(codeVerifier).digest("base64url");
+
   const params = new URLSearchParams({
     response_type: "code",
     client_id: clientId,
     redirect_uri: redirectUri,
+    state,
+    code_challenge: codeChallenge,
+    code_challenge_method: "S256",
     ...(scopes ? { scope: scopes } : {}),
   });
   const authorizeUrl = `${auth.authorizeUrl}?${params.toString()}`;
@@ -37,7 +45,7 @@ export async function runOAuthFlow(
   openBrowser(authorizeUrl);
 
   // Wait for callback
-  const code = await waitForCallback(onStatus);
+  const code = await waitForCallback(state, onStatus);
   if (!code) return null;
 
   onStatus?.("Exchanging code for token...");
@@ -48,6 +56,7 @@ export async function runOAuthFlow(
     code,
     redirect_uri: redirectUri,
     client_id: clientId,
+    code_verifier: codeVerifier,
     ...(clientSecret ? { client_secret: clientSecret } : {}),
   });
 
@@ -81,7 +90,7 @@ export async function runOAuthFlow(
   }
 }
 
-function waitForCallback(onStatus?: (msg: string) => void): Promise<string | null> {
+function waitForCallback(expectedState: string, onStatus?: (msg: string) => void): Promise<string | null> {
   return new Promise((resolve) => {
     let server: Server;
     const timeout = setTimeout(() => {
@@ -98,8 +107,9 @@ function waitForCallback(onStatus?: (msg: string) => void): Promise<string | nul
 
       const code = url.searchParams.get("code");
       const error = url.searchParams.get("error");
+      const returnedState = url.searchParams.get("state");
 
-      if (error) {
+      if (error || (returnedState && returnedState !== expectedState)) {
         res.writeHead(200, { "Content-Type": "text/html" });
         res.end("<html><body><h2>Authorization failed</h2><p>You can close this tab.</p></body></html>");
         clearTimeout(timeout);
