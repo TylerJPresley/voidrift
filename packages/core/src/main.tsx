@@ -438,12 +438,27 @@ function App({ engine }: { engine: EngineContext }) {
       // File path completion: tab on non-slash input
       if (!key.shift && input && !input.startsWith("/")) {
         const matches = fileAcRef.current.complete(input);
-        if (matches.length > 0) {
-          // Replace the last word with the first match
+        if (matches.length === 1) {
           const words = input.split(/\s+/);
           words[words.length - 1] = matches[0];
           setInput(words.join(" "));
           setInputKey(k => k + 1);
+          return;
+        }
+        if (matches.length > 1) {
+          // Complete to longest common prefix
+          let prefix = matches[0];
+          for (let i = 1; i < matches.length; i++) {
+            while (!matches[i].startsWith(prefix)) {
+              prefix = prefix.slice(0, -1);
+            }
+          }
+          const words = input.split(/\s+/);
+          if (prefix.length > words[words.length - 1].length) {
+            words[words.length - 1] = prefix;
+            setInput(words.join(" "));
+            setInputKey(k => k + 1);
+          }
           return;
         }
       }
