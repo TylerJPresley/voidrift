@@ -70,12 +70,10 @@ async function executeToolCall(toolName: string, argsJson: string, workspaceRoot
         const content = readFileSync(fullPath, "utf-8");
         const lines = content.split("\n");
         const totalLines = lines.length;
-        // Estimate: ~4 chars per token. File fits if estimated tokens < 25% of context limit.
-        const contextLimit = (config as any)?.contextLimit ?? 32768;
+        // Estimate: ~4 chars per token. File fits if under 30K tokens (safe for any modern model).
         const estimatedTokens = Math.ceil(content.length / 4);
-        const fits = estimatedTokens < contextLimit * 0.25;
 
-        if (fits) {
+        if (estimatedTokens < 30000) {
           // File fits in context — return it all
           return content;
         }
