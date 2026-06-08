@@ -5,6 +5,7 @@
  */
 import React, { useState, useEffect } from "react";
 import { Box, Text, useInput } from "ink";
+import TextInput from "ink-text-input";
 import { Markdown } from "./ui/markdown.js";
 import { Table, type TableRow } from "./ui/table.js";
 import { ScrollView } from "./ui/scroll-view.js";
@@ -634,48 +635,7 @@ export function MCPPanel({ mcp, config, onClose }: { mcp: MCPEngine; config: Voi
   useInput((input, key) => {
     if (createState) {
       if (key.escape) { setCreateState(null); setInputValue(""); setMessage(null); return; }
-      if (createState.step === "name") {
-        if (key.return && inputValue.length > 0) {
-          setCreateState({ step: "url", name: inputValue });
-          setInputValue("");
-          setMessage("Enter server URL:");
-          return;
-        }
-        if (key.backspace || key.delete) { setInputValue(n => n.slice(0, -1)); return; }
-        if (input && /^[a-z0-9-]$/.test(input)) { setInputValue(n => n + input); return; }
-      } else if (createState.step === "url") {
-        if (key.return && inputValue.length > 0) {
-          const name = createState.name!;
-          const url = inputValue;
-          setMessage("Discovering server...");
-          setInputValue("");
-          import("./mcp/discovery.js").then(({ discoverMCPServer, buildConfigFromDiscovery }) => {
-            discoverMCPServer(url, setMessage).then((discovery) => {
-              if (discovery.error) {
-                setMessage(`Discovery failed: ${discovery.error}`);
-                // Still save a basic config
-                mcp.saveConfig({ name, command: "", args: [], env: {} });
-                const cfgPath = join(mcp["configDirs"][0], `${name}.json`);
-                writeFileSync(cfgPath, JSON.stringify({ transport: "http-sse", url }, null, 2), "utf-8");
-              } else {
-                const cfg = buildConfigFromDiscovery(name, discovery);
-                const cfgPath = join(mcp["configDirs"][0], `${name}.json`);
-                mkdirSync(dirname(cfgPath), { recursive: true });
-                writeFileSync(cfgPath, JSON.stringify(cfg, null, 2), "utf-8");
-                if (discovery.requiresAuth) {
-                  setMessage(`Created ${name} — auth required. Press 'o' to authenticate.`);
-                } else {
-                  setMessage(`Created ${name} — no auth needed. Press 'x' to connect.`);
-                }
-              }
-              setCreateState(null);
-            });
-          });
-          return;
-        }
-        if (key.backspace || key.delete) { setInputValue(n => n.slice(0, -1)); return; }
-        if (input) { setInputValue(n => n + input); return; }
-      }
+      // TextInput handles all typing/pasting — useInput only needs esc
       return;
     }
 
@@ -760,7 +720,37 @@ export function MCPPanel({ mcp, config, onClose }: { mcp: MCPEngine; config: Voi
       <Text> </Text>
       <Text dimColor><Text color="#61afef" bold>↑↓</Text> Navigate  <Text color="#61afef" bold>enter</Text> Edit  <Text color="#61afef" bold>esc</Text> Close  │  <Text color="#61afef" bold>c</Text> create  <Text color="#61afef" bold>del</Text> delete  <Text color="#61afef" bold>x</Text> connect  <Text color="#61afef" bold>o</Text> oauth</Text>
       {message && <Text color="#4ec9b0">{message}</Text>}
-      {createState && <Text color="#61afef">  &gt; {inputValue}<Text color="#4ec9b0">█</Text></Text>}
+      {createState?.step === "name" && (
+        <Box><Text color="#61afef">  &gt; </Text><TextInput value={inputValue} onChange={setInputValue} onSubmit={(v) => {
+          if (v.length > 0) { setCreateState({ step: "url", name: v }); setInputValue(""); setMessage("Enter server URL (paste supported):"); }
+        }} placeholder="server-name" /></Box>
+      )}
+      {createState?.step === "url" && (
+        <Box><Text color="#61afef">  &gt; </Text><TextInput value={inputValue} onChange={setInputValue} onSubmit={(v) => {
+          if (v.length > 0) {
+            const name = createState.name!;
+            setMessage("Discovering server...");
+            setInputValue("");
+            import("./mcp/discovery.js").then(({ discoverMCPServer, buildConfigFromDiscovery }) => {
+              discoverMCPServer(v, setMessage).then((discovery) => {
+                if (discovery.error) {
+                  setMessage(`Discovery failed: ${discovery.error}`);
+                  const cfgPath = join(mcp["configDirs"][0], `${name}.json`);
+                  mkdirSync(dirname(cfgPath), { recursive: true });
+                  writeFileSync(cfgPath, JSON.stringify({ transport: "http-sse", url: v }, null, 2), "utf-8");
+                } else {
+                  const cfg = buildConfigFromDiscovery(name, discovery);
+                  const cfgPath = join(mcp["configDirs"][0], `${name}.json`);
+                  mkdirSync(dirname(cfgPath), { recursive: true });
+                  writeFileSync(cfgPath, JSON.stringify(cfg, null, 2), "utf-8");
+                  setMessage(discovery.requiresAuth ? `Created ${name} — auth required. Press 'o' to authenticate.` : `Created ${name} — press 'x' to connect.`);
+                }
+                setCreateState(null);
+              });
+            });
+          }
+        }} placeholder="https://mcp.example.com/mcp" /></Box>
+      )}
       <Text> </Text>
     </Box>
   );
