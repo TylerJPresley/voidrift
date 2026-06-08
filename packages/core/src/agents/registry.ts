@@ -45,7 +45,7 @@ export const ALL_TOOLS = [
   "execute_command", "web_search", "web_fetch",
   "lsp_definition", "lsp_references", "lsp_hover",
   "spawn_subagent", "connect_mcp_server", "run_task_agent",
-  "save_memory", "schedule", "plan",
+  "save_memory", "schedule", "read_plan", "write_plan", "update_plan",
 ];
 
 export const READ_TOOLS = [
