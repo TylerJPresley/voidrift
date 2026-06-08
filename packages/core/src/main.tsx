@@ -208,7 +208,6 @@ import { Markdown } from "./ui/markdown.js";
 function AssistantMessage({ model, text, stats, prevType }: { model: string; text: string; stats?: string; prevType?: string }) {
   return (
     <Box flexDirection="column" marginTop={prevType === "user" ? 0 : 1}>
-      <Text dimColor italic>  {model}</Text>
       <Box borderLeft borderColor="#6a7ec8" borderRight={false} borderTop={false} borderBottom={false} paddingLeft={1} flexDirection="column">
         <Markdown text={text.trim()} />
       </Box>
@@ -220,7 +219,6 @@ function AssistantMessage({ model, text, stats, prevType }: { model: string; tex
 function StreamingResponse({ model, text, elapsed, tokens }: { model: string; text: string; elapsed: number; tokens: number }) {
   return (
     <Box flexDirection="column" marginTop={1}>
-      <Text dimColor italic>  {model}</Text>
       <Box borderLeft borderColor="#6a7ec8" borderRight={false} borderTop={false} borderBottom={false} paddingLeft={1} flexDirection="column">
         <Markdown text={text.trim()} />
         <Text color="#6a7ec8">▊</Text>
