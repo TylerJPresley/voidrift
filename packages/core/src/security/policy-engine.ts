@@ -109,6 +109,15 @@ function matchGlob(value: string, pattern: string): boolean {
   return new RegExp(`^${regexStr}$`).test(value);
 }
 
+/** For command patterns, * matches anything (including slashes) */
+function matchCommandPattern(value: string, pattern: string): boolean {
+  const regexStr = pattern
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*/g, ".*")
+    .replace(/\?/g, ".");
+  return new RegExp(`^${regexStr}$`).test(value);
+}
+
 function ruleMatchesTool(rule: PolicyRule, tool: string, args: Record<string, unknown>): boolean {
   // Tool name match
   if (rule.tool !== "*" && rule.tool !== tool) return false;
@@ -117,6 +126,8 @@ function ruleMatchesTool(rule: PolicyRule, tool: string, args: Record<string, un
   if (rule.pattern) {
     const matchValue = getMatchValue(tool, args);
     if (!matchValue) return false;
+    // Commands use simple wildcard (cat * matches cat /any/path), file tools use path-aware glob
+    if (tool === "execute_command") return matchCommandPattern(matchValue, rule.pattern);
     return matchGlob(matchValue, rule.pattern);
   }
 
