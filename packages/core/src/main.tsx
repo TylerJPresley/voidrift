@@ -317,6 +317,24 @@ function App({ engine }: { engine: EngineContext }) {
   const exitTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const [, forceRender] = useState(0);
 
+  // Tool confirmation state
+  const [confirmRequest, setConfirmRequest] = useState<{ tool: string; args: Record<string, unknown>; requestId: string; diff?: string[] } | null>(null);
+
+  // Subscribe to tool confirmation requests from the permission gate
+  useEffect(() => {
+    return engine.container.bus.subscribe("TOOL_CONFIRMATION_REQUEST", (event: any) => {
+      setConfirmRequest(event.payload);
+    });
+  }, []);
+
+  // Handle confirmation response
+  const respondConfirmation = useCallback((approved: boolean) => {
+    if (confirmRequest) {
+      engine.container.bus.publish("TOOL_CONFIRMATION_RESPONSE", { requestId: confirmRequest.requestId, approved } as any);
+      setConfirmRequest(null);
+    }
+  }, [confirmRequest]);
+
   // Helper: activate an agent — sets persona, mode, loads resources
   const activateAgent = (agentId: string) => {
     const agent = engine.agents.setActive(agentId);
@@ -370,6 +388,12 @@ function App({ engine }: { engine: EngineContext }) {
     : [];
 
   useInput((ch, key) => {
+    // Handle tool confirmation dialog
+    if (confirmRequest) {
+      if (ch === "y" || ch === "Y" || key.return) { respondConfirmation(true); return; }
+      if (ch === "n" || ch === "N" || key.escape) { respondConfirmation(false); return; }
+      return; // Block all other input while confirming
+    }
     if (key.escape) {
       if (busy) {
         abortRef.current?.abort();
@@ -636,6 +660,21 @@ function App({ engine }: { engine: EngineContext }) {
         }
       })}
       {pendingTools && <ToolGroup tools={pendingTools} />}
+      {confirmRequest && (
+        <Box flexDirection="column" marginTop={1} borderStyle="round" borderColor="yellow" paddingX={1}>
+          <Text color="yellow" bold>⚠ Tool requires approval</Text>
+          <Text>  <Text bold>{confirmRequest.tool}</Text>({Object.entries(confirmRequest.args).map(([k,v]) => `${k}: ${typeof v === "string" && v.length > 60 ? v.slice(0, 57) + "..." : JSON.stringify(v)}`).join(", ")})</Text>
+          {confirmRequest.diff && confirmRequest.diff.length > 0 && (
+            <Box flexDirection="column" paddingLeft={2} marginTop={1}>
+              {confirmRequest.diff.slice(0, 8).map((line, i) => (
+                <Text key={i} color={line.startsWith("+") ? "green" : line.startsWith("-") ? "red" : undefined} dimColor={line.startsWith("@@")}>{line}</Text>
+              ))}
+              {confirmRequest.diff.length > 8 && <Text dimColor>  ...{confirmRequest.diff.length - 8} more lines</Text>}
+            </Box>
+          )}
+          <Text dimColor>  y/enter to approve · n/esc to deny</Text>
+        </Box>
+      )}
       {thinking && <ThinkingIndicator label={thinking} />}
       {!thinking && busy && !streaming && <ThinkingIndicator label="Thinking..." />}
       {streaming && <StreamingResponse {...streaming} />}
