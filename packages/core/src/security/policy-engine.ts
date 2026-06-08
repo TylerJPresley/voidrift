@@ -170,9 +170,15 @@ export function inferPatterns(tool: string, args: Record<string, unknown>): stri
     const results: string[] = [];
     // Exact command
     results.push(cmd);
-    // Command prefix (first word + wildcard)
+    // Directory-level: "cat /path/to/dir/*" (if command has a path argument)
     const firstSpace = cmd.indexOf(" ");
     if (firstSpace > 0) {
+      const cmdArg = cmd.slice(firstSpace + 1).trim();
+      const lastSlash = cmdArg.lastIndexOf("/");
+      if (lastSlash > 0) {
+        results.push(cmd.slice(0, firstSpace) + " " + cmdArg.slice(0, lastSlash) + "/*");
+      }
+      // Broad: "cat *"
       results.push(cmd.slice(0, firstSpace) + " *");
     }
     return results;
