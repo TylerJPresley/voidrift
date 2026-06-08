@@ -414,6 +414,15 @@ function App({ engine }: { engine: EngineContext }) {
   useInput((ch, key) => {
     // Handle tool confirmation dialog
     if (confirmRequest) {
+      if (ch === "c" && key.ctrl) {
+        // Cancel entire turn — deny this request and abort
+        respondConfirmation(confirmOptions.length - 1);
+        abortRef.current?.abort();
+        setBusy(false); setThinking(null); setStreaming(null);
+        setHistory(h => [...h, { id: String(h.length+1), type: "system" as const, text: "Turn cancelled." }]);
+        setPendingTools(null);
+        return;
+      }
       if (key.upArrow) { setConfirmIdx(i => Math.max(0, i - 1)); return; }
       if (key.downArrow) { setConfirmIdx(i => Math.min(confirmOptions.length - 1, i + 1)); return; }
       if (key.return) { respondConfirmation(confirmIdx); return; }
