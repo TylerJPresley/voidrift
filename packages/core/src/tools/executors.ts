@@ -120,7 +120,9 @@ export function executeCommand(workspaceRoot: string, command: string, timeoutMs
 }
 
 function resolvePath(root: string, path: string): string {
-  // Prevent path traversal
+  // Absolute paths are allowed if they passed the permission gate
+  if (path.startsWith("/")) return path;
+  // Prevent path traversal for relative paths
   const resolved = join(root, path);
   if (!resolved.startsWith(root)) {
     throw new Error(`Path traversal detected: ${path}`);

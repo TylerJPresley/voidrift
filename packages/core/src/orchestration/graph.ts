@@ -56,7 +56,7 @@ async function executeToolCall(toolName: string, argsJson: string, workspaceRoot
     case "read_file":
       const maxLines = config?.maxReadLines ?? 1000;
       const filePath = args.path ?? "";
-      const fullPath = join(workspaceRoot, filePath);
+      const fullPath = filePath.startsWith("/") ? filePath : join(workspaceRoot, filePath);
 
       // Surgical read: model specified offset/limit — honor it
       if (args.offset !== undefined || args.limit !== undefined) {
