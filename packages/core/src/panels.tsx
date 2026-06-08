@@ -617,78 +617,86 @@ export function MemoryPanel({ memory, context, onClose }: { memory: MemoryRegist
 
 // ─── /mcp ────────────────────────────────────────────────────────────────────
 
-export function MCPPanel({ mcp, onClose }: { mcp: MCPEngine; onClose: () => void }) {
+export function MCPPanel({ mcp, config, onClose }: { mcp: MCPEngine; config: VoidRiftConfig; onClose: () => void }) {
+  const [cursor, setCursor] = useState(0);
+  const [message, setMessage] = useState<string | null>(null);
+  const [createState, setCreateState] = useState<{ step: "name" } | null>(null);
+  const [createName, setCreateName] = useState("");
+
   const configs = mcp.loadConfigs();
   const servers = mcp.all;
   const allNames = [...new Set([...configs.map(c => c.name), ...servers.map(s => s.name)])];
-  const [selected, setSelected] = useState(0);
-  const [status, setStatus] = useState("");
 
-  const getServerStatus = (name: string) => {
-    const s = servers.find(sv => sv.name === name);
-    return s?.status ?? "disconnected";
-  };
-  const getToolCount = (name: string) => {
-    const s = servers.find(sv => sv.name === name);
-    return s?.tools.length ?? 0;
-  };
-  const getConfig = (name: string) => configs.find(c => c.name === name);
+  const getStatus = (name: string) => servers.find(s => s.name === name)?.status ?? "not connected";
+  const getToolCount = (name: string) => servers.find(s => s.name === name)?.tools.length ?? 0;
+  const hasAuth = (name: string) => !!configs.find(c => c.name === name)?.auth;
 
-  useInput(async (ch, key) => {
-    if (key.escape) onClose();
-    if (key.upArrow) setSelected(s => Math.max(0, s - 1));
-    if (key.downArrow) setSelected(s => Math.min(allNames.length - 1, s + 1));
-    if (ch === "a") {
-      // Add: create a minimal config
-      const name = `server-${Date.now().toString(36).slice(-4)}`;
-      mcp.saveConfig({ name, command: "npx", args: ["-y", "@example/mcp-server"] });
-      setStatus(`Created ${name}.json — edit to configure.`);
-    }
-    if (ch === "d" && allNames[selected]) {
-      const name = allNames[selected];
-      await mcp.disconnect(name);
-      mcp.removeConfig(name);
-      setStatus(`Removed ${name}.`);
-    }
-    if (ch === "c" && allNames[selected]) {
-      const name = allNames[selected];
-      const st = getServerStatus(name);
-      if (st === "connected") {
-        await mcp.disconnect(name);
-        setStatus(`Disconnected ${name}.`);
-      } else {
-        const config = getConfig(name);
-        if (config) {
-          setStatus(`Connecting ${name}...`);
-          await mcp.connect(config);
-          setStatus(`Connected ${name}.`);
+  useInput((input, key) => {
+    if (createState) {
+      if (key.escape) { setCreateState(null); setCreateName(""); setMessage(null); return; }
+      if (key.return && createName.length > 0) {
+        mcp.saveConfig({ name: createName, command: "npx", args: ["-y", "@example/mcp-server"] });
+        setCreateState(null);
+        setCreateName("");
+        if (config.editor) {
+          openInEditor(join(mcp["configDirs"][0], `${createName}.json`), config.editor);
+          setMessage(`Created ${createName} — editing`);
+        } else {
+          setMessage(`Created: .voidrift/mcp/${createName}.json (set "editor" in config)`);
         }
+        return;
+      }
+      if (key.backspace || key.delete) { setCreateName(n => n.slice(0, -1)); return; }
+      if (input && /^[a-z0-9-]$/.test(input)) { setCreateName(n => n + input); return; }
+      return;
+    }
+
+    if (key.escape) { onClose(); return; }
+    if (key.upArrow) setCursor(s => Math.max(0, s - 1));
+    if (key.downArrow) setCursor(s => Math.min(allNames.length - 1, s + 1));
+
+    if (key.return && allNames[cursor] && config.editor) {
+      const path = join(mcp["configDirs"][0], `${allNames[cursor]}.json`);
+      if (existsSync(path)) openInEditor(path, config.editor);
+      else setMessage(`Config not found: ${path}`);
+    }
+    if (input === "c") {
+      setCreateState({ step: "name" });
+      setMessage("Enter server id (lower-case, hyphens only):");
+    }
+    if (key.delete && allNames[cursor]) {
+      const name = allNames[cursor];
+      mcp.disconnect(name);
+      mcp.removeConfig(name);
+      setMessage(`Deleted: ${name}`);
+    }
+    if (input === "o" && allNames[cursor]) {
+      const name = allNames[cursor];
+      const cfg = configs.find(c => c.name === name);
+      if (cfg?.auth?.type === "oauth2") {
+        setMessage("Starting OAuth flow — check browser...");
+        import("./mcp/oauth.js").then(({ runOAuthFlow }) => {
+          const { execSync } = require("child_process");
+          runOAuthFlow(name, cfg.auth!, (url: string) => {
+            try { execSync(`xdg-open "${url}" 2>/dev/null || open "${url}" 2>/dev/null`); } catch {}
+          }, (msg: string) => setMessage(msg));
+        });
+      } else {
+        setMessage("No OAuth config on this server. Add an 'auth' section to the config.");
       }
     }
-    if (ch === "o" && allNames[selected]) {
-      const name = allNames[selected];
-      const config = getConfig(name);
-      if (config?.auth?.type === "oauth2") {
-        setStatus("Starting OAuth flow...");
-        const { runOAuthFlow } = await import("./mcp/oauth.js");
-        const { execSync } = await import("child_process");
-        await runOAuthFlow(name, config.auth, (url) => {
-          try { execSync(`xdg-open "${url}" 2>/dev/null || open "${url}" 2>/dev/null`); } catch {}
-        }, setStatus);
+    if (input === "x" && allNames[cursor]) {
+      const name = allNames[cursor];
+      const st = getStatus(name);
+      if (st === "connected") {
+        mcp.disconnect(name);
+        setMessage(`Disconnected: ${name}`);
       } else {
-        setStatus("No OAuth config on this server.");
-      }
-    }
-    if (ch === "e" && allNames[selected]) {
-      const name = allNames[selected];
-      const { execSync } = await import("child_process");
-      const editor = process.env.EDITOR || "vim";
-      const configPath = join(mcp["configDirs"][0], `${name}.json`);
-      if (existsSync(configPath)) {
-        try { execSync(`${editor} "${configPath}"`, { stdio: "inherit" }); } catch {}
-        setStatus(`Edited ${name}.json`);
-      } else {
-        setStatus(`Config not found: ${configPath}`);
+        const cfg = configs.find(c => c.name === name);
+        if (cfg) {
+          setMessage(`Connecting ${name}...`);
+          mcp.connect(cfg).then(() => setMessage(`Connected: ${name}`));
+        }
       }
     }
   });
@@ -698,27 +706,34 @@ export function MCPPanel({ mcp, onClose }: { mcp: MCPEngine; onClose: () => void
       <Text bold>MCP Servers</Text>
       <Text color="#5a6aa8">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
       <Text> </Text>
-      {allNames.length === 0 && <Text dimColor>No MCP servers configured. Press 'a' to add.</Text>}
-      {allNames.map((name, i) => {
-        const st = getServerStatus(name);
-        const tools = getToolCount(name);
-        const config = getConfig(name);
-        const hasAuth = !!config?.auth;
-        return (
-          <Text key={name}>
-            <Text color={i === selected ? "#4ec9b0" : undefined}>{i === selected ? "▸ " : "  "}</Text>
-            <Text color={st === "connected" ? "green" : st === "error" ? "red" : "yellow"}>● </Text>
-            <Text color="#61afef">{name.padEnd(20)}</Text>
-            <Text dimColor>{st.padEnd(14)}</Text>
-            <Text dimColor>{tools > 0 ? `${tools} tools` : ""} {hasAuth ? "🔑" : ""}</Text>
-          </Text>
-        );
-      })}
+      {allNames.length === 0 ? (
+        <Text dimColor>No MCP servers configured. Press 'c' to create.</Text>
+      ) : (<>
+        <Text dimColor>{"  "}{"Name".padEnd(20)}{"Status".padEnd(16)}{"Tools".padEnd(8)}{"Auth"}</Text>
+        <Text dimColor color="#333333">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
+        {allNames.map((name, i) => {
+          const st = getStatus(name);
+          return (
+            <Text key={name}>
+              <Text color={i === cursor ? "#4ec9b0" : undefined}>{i === cursor ? "▸ " : "  "}</Text>
+              <Text color={st === "connected" ? "green" : st === "error" ? "red" : "yellow"}>● </Text>
+              <Text bold color="#61afef">{trunc(name, 18, 18)}</Text>
+              <Text>{st.padEnd(16)}</Text>
+              <Text>{getToolCount(name) > 0 ? String(getToolCount(name)).padEnd(8) : "—".padEnd(8)}</Text>
+              <Text>{hasAuth(name) ? "🔑" : ""}</Text>
+            </Text>
+          );
+        })}
+      </>)}
       <Text> </Text>
-      {status && <Text color="yellow">{status}</Text>}
-      <Text dimColor>
-        <Text color="#61afef" bold>a</Text> Add  <Text color="#61afef" bold>e</Text> Edit  <Text color="#61afef" bold>d</Text> Remove  <Text color="#61afef" bold>o</Text> Auth  <Text color="#61afef" bold>c</Text> Connect  <Text color="#61afef" bold>esc</Text> Close
-      </Text>
+      <Text bold>Locations</Text>
+      <Text dimColor>  Workspace:  .voidrift/mcp/</Text>
+      <Text dimColor>  Global:     ~/.config/voidrift/mcp/</Text>
+      <Text> </Text>
+      <Text dimColor><Text color="#61afef" bold>↑↓</Text> Navigate  <Text color="#61afef" bold>enter</Text> Edit  <Text color="#61afef" bold>esc</Text> Close  │  <Text color="#61afef" bold>c</Text> create  <Text color="#61afef" bold>del</Text> delete  <Text color="#61afef" bold>x</Text> connect  <Text color="#61afef" bold>o</Text> oauth</Text>
+      {message && <Text color="#4ec9b0">{message}</Text>}
+      {createState && <Text color="#61afef">  &gt; {createName}<Text color="#4ec9b0">█</Text></Text>}
+      <Text> </Text>
     </Box>
   );
 }

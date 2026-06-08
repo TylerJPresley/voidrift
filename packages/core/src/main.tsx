@@ -779,7 +779,7 @@ function App({ engine }: { engine: EngineContext }) {
       {panel === "model" && <ModelPanel config={engine.container.config} agents={engine.agents} onClose={() => setPanel(null)} />}
       {panel === "memory" && <MemoryPanel memory={engine.memory} context={engine.context} onClose={() => setPanel(null)} />}
       {panel === "skills" && <SkillsPanel skills={engine.skills} config={engine.container.config} workspaceRoot={engine.workspaceRoot} agents={engine.agents} onClose={() => setPanel(null)} />}
-      {panel === "mcp" && <MCPPanel mcp={engine.mcp} onClose={() => setPanel(null)} />}
+      {panel === "mcp" && <MCPPanel mcp={engine.mcp} config={engine.container.config} onClose={() => setPanel(null)} />}
       {panel === "templates" && <TemplatesPanel templates={engine.templates} config={engine.container.config} workspaceRoot={engine.workspaceRoot} onClose={() => setPanel(null)} />}
       {panel === "prompts" && <PromptsPanel prompts={engine.prompts} config={engine.container.config} workspaceRoot={engine.workspaceRoot} onClose={() => setPanel(null)} />}
       {panel === "context" && <ContextPanel budget={engine.budget} context={engine.context} stats={engine.stats} modelName={footerModel} skills={engine.skills} onClose={() => setPanel(null)} />}
