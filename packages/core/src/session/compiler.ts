@@ -166,6 +166,17 @@ Minimize unnecessary context consumption while maintaining quality:
 
 ## Parallel Execution
 Call multiple independent tools in a single response. Only use sequential calls when a result is needed as input to the next call.`;
+
+  /*
+   * ARCHITECTURE NOTE — Prompt Responsibility Separation:
+   *
+   *   Agent prompt:  WHO you are (identity, role framing)
+   *   Core prompts:  HOW you behave (rules, tool usage, efficiency)
+   *   Skills:        WHAT you know about this domain (loaded contextually)
+   *
+   * Agent prompts must NOT contain behavioral rules — those belong in
+   * core.rules and core.tool-usage where they're overridable and DRY.
+   */
 }
 
 // ─── § Environment ───────────────────────────────────────────────────────────
