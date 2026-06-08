@@ -268,48 +268,6 @@ function SlashAutocomplete({ input, registry, selected }: { input: string; regis
   );
 }
 
-function getFileCompletions(input: string, workspaceRoot: string): string[] {
-  if (!input.includes("@")) return [];
-  const lastAt = input.lastIndexOf("@");
-  const partial = input.slice(lastAt + 1);
-  try {
-    const { readdirSync, statSync } = require("fs");
-    const { join, dirname, basename } = require("path");
-    const dir = partial.includes("/") ? join(workspaceRoot, dirname(partial)) : workspaceRoot;
-    const prefix = partial.includes("/") ? basename(partial) : partial;
-    const entries = readdirSync(dir, { withFileTypes: true }) as Array<{ name: string; isDirectory: () => boolean }>;
-    const relDir = partial.includes("/") ? dirname(partial) + "/" : "";
-    return entries
-      .filter(e => e.name.startsWith(prefix) && !e.name.startsWith("."))
-      .slice(0, 20)
-      .map(e => relDir + e.name + (e.isDirectory() ? "/" : ""));
-  } catch { return []; }
-}
-
-function FileAutocomplete({ files, selected }: { files: string[]; selected: number }) {
-  if (!files.length) return null;
-  const maxVisible = 5;
-  const start = Math.min(Math.max(0, selected - 2), Math.max(0, files.length - maxVisible));
-  const visible = files.slice(start, start + maxVisible);
-  const remaining = files.length - start - visible.length;
-  return (
-    <Box flexDirection="column" marginLeft={1}>
-      <Text dimColor>{'─'.repeat((process.stdout.columns || 80) - 1)}</Text>
-      {visible.map((f, i) => {
-        const idx = start + i;
-        return (
-          <Box key={f}>
-            <Text color={idx === selected ? "#6a7ec8" : undefined}>{idx === selected ? "❯" : " "} </Text>
-            <Text color={idx === selected ? "#6a7ec8" : "white"}>{f}</Text>
-          </Box>
-        );
-      })}
-      {remaining > 0 && <Text dimColor>  ↓ {remaining} more</Text>}
-      <Text dimColor>  tab complete · esc close</Text>
-    </Box>
-  );
-}
-
 function Footer({ mode, model, contextPct, workspace, branch }: { mode: string; model: string; contextPct: number; workspace: string; branch: string | null }) {
   const ctxColor = contextPct < 50 ? "green" : contextPct < 80 ? "yellow" : "red";
   return (
@@ -451,10 +409,6 @@ function App({ engine }: { engine: EngineContext }) {
     ? engine.container.registry.listSlashCommands().filter(n => input === "" || n.startsWith(input.slice(1).toLowerCase()))
     : [];
 
-  // File path completion (triggered by @)
-  const fileCompletions = !busy && !panel && input.includes("@") ? getFileCompletions(input, engine.workspaceRoot) : [];
-  const showFileAc = fileCompletions.length > 0 && !showAutocomplete;
-
   useInput((ch, key) => {
     // Handle tool confirmation dialog
     if (confirmRequest) {
@@ -475,14 +429,6 @@ function App({ engine }: { engine: EngineContext }) {
     if (key.tab && !busy && !panel) {
       if (showAutocomplete && acCommands.length && !key.shift) {
         setInput("/" + acCommands[acIdx]);
-        setAcIdx(0);
-        setInputKey(k => k + 1);
-        return;
-      }
-      if (showFileAc && !key.shift) {
-        // Replace @partial with @completed
-        const lastAt = input.lastIndexOf("@");
-        setInput(input.slice(0, lastAt + 1) + fileCompletions[acIdx]);
         setAcIdx(0);
         setInputKey(k => k + 1);
         return;
@@ -778,9 +724,6 @@ function App({ engine }: { engine: EngineContext }) {
 
       {showAutocomplete && acCommands.length > 0 && (
         <SlashAutocomplete input={input} registry={engine.container.registry} selected={acIdx} />
-      )}
-      {showFileAc && (
-        <FileAutocomplete files={fileCompletions} selected={acIdx} />
       )}
 
       {panel === "stats" && <StatsPanel stats={engine.stats} budget={engine.budget} onClose={() => setPanel(null)} />}
