@@ -9,3 +9,4 @@ mockup/node_modules/
 .voidrift/index_cache.json
 .voidrift/locks.json
 .voidrift/lock_queue.json
+.voidrift/mcp/
