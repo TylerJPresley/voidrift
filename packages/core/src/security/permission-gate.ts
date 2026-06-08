@@ -2,7 +2,7 @@ import { randomUUID } from "crypto";
 import type { EventBus } from "../events/bus.js";
 import { computeDiff, computeEditDiff } from "../safeguards/diff.js";
 import type { ApprovalMode } from "../agents/registry.js";
-import { PolicyEngine, inferPattern, type PolicyCheckResult } from "./policy-engine.js";
+import { PolicyEngine, inferPattern, inferPatterns, type PolicyCheckResult } from "./policy-engine.js";
 
 export interface PendingRequest {
   requestId: string;
@@ -23,19 +23,19 @@ const GATE_TIMEOUT_MS = 120_000;
  * Supports 3-option response: allow once, always allow (persist), deny.
  */
 export class PermissionGate {
-  private pendingRequests = new Map<string, { resolve: (response: { approved: boolean; persist?: boolean }) => void }>();
+  private pendingRequests = new Map<string, { resolve: (response: { approved: boolean; persist?: boolean; chosenPattern?: string }) => void }>();
   readonly engine: PolicyEngine;
 
   constructor(private bus: EventBus, workspaceRoot?: string) {
     this.engine = new PolicyEngine(workspaceRoot);
 
     this.bus.subscribe("TOOL_CONFIRMATION_RESPONSE", (event) => {
-      const { requestId, approved, persist } = event.payload as any;
+      const { requestId, approved, persist, chosenPattern } = event.payload as any;
       if (requestId) {
         const pending = this.pendingRequests.get(requestId);
         if (pending) {
           this.pendingRequests.delete(requestId);
-          pending.resolve({ approved, persist });
+          pending.resolve({ approved, persist, chosenPattern });
         }
       } else {
         const first = this.pendingRequests.entries().next().value;
@@ -65,6 +65,7 @@ export class PermissionGate {
 
   private requestConfirmation(tool: string, args: Record<string, unknown>, policyResult: PolicyCheckResult): Promise<GateResult> {
     const requestId = randomUUID();
+    const patterns = inferPatterns(tool, args);
 
     return new Promise<GateResult>((resolve) => {
       const timer = setTimeout(() => {
@@ -75,18 +76,19 @@ export class PermissionGate {
       this.pendingRequests.set(requestId, {
         resolve: (response) => {
           clearTimeout(timer);
-          if (response.approved && response.persist && policyResult.inferredPattern) {
+          const chosenPattern = response.chosenPattern;
+          if (response.approved && response.persist && chosenPattern) {
             this.engine.persistRule({
               tool,
-              pattern: policyResult.inferredPattern,
+              pattern: chosenPattern,
               decision: "allow",
-              label: `Auto: allow ${tool} for ${policyResult.inferredPattern}`,
+              label: `Auto: allow ${tool} for ${chosenPattern}`,
             });
-          } else if (response.approved && !response.persist) {
-            // Session-only rule for this exact pattern
-            if (policyResult.inferredPattern) {
-              this.engine.addSessionRule({ tool, pattern: policyResult.inferredPattern, decision: "allow" });
-            }
+          } else if (response.approved && response.persist && !chosenPattern) {
+            // Trust the tool entirely (no pattern constraint)
+            this.engine.addSessionRule({ tool, decision: "allow" });
+          } else if (response.approved && !response.persist && chosenPattern) {
+            this.engine.addSessionRule({ tool, pattern: chosenPattern, decision: "allow" });
           }
           resolve({
             approved: response.approved,
@@ -100,7 +102,7 @@ export class PermissionGate {
         args,
         requestId,
         diff: this.computeToolDiff(tool, args),
-        inferredPattern: policyResult.inferredPattern,
+        inferredPatterns: patterns,
       } as any);
     });
   }

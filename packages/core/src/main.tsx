@@ -318,8 +318,22 @@ function App({ engine }: { engine: EngineContext }) {
   const [, forceRender] = useState(0);
 
   // Tool confirmation state
-  const [confirmRequest, setConfirmRequest] = useState<{ tool: string; args: Record<string, unknown>; requestId: string; diff?: string[]; inferredPattern?: string } | null>(null);
+  const [confirmRequest, setConfirmRequest] = useState<{ tool: string; args: Record<string, unknown>; requestId: string; diff?: string[]; inferredPatterns?: string[] } | null>(null);
   const [confirmIdx, setConfirmIdx] = useState(0);
+
+  // Build dynamic options from the confirmation request
+  const confirmOptions = React.useMemo(() => {
+    if (!confirmRequest) return [];
+    const opts: { label: string; approved: boolean; persist?: boolean; pattern?: string }[] = [
+      { label: "Yes, allow once", approved: true },
+    ];
+    const patterns = confirmRequest.inferredPatterns || [];
+    for (const p of patterns) {
+      opts.push({ label: `Trust "${p}" in this session`, approved: true, persist: true, pattern: p });
+    }
+    opts.push({ label: "No", approved: false });
+    return opts;
+  }, [confirmRequest]);
 
   // Subscribe to tool confirmation requests from the permission gate
   useEffect(() => {
@@ -330,12 +344,18 @@ function App({ engine }: { engine: EngineContext }) {
   }, []);
 
   // Handle confirmation response
-  const respondConfirmation = useCallback((approved: boolean, persist?: boolean) => {
-    if (confirmRequest) {
-      engine.container.bus.publish("TOOL_CONFIRMATION_RESPONSE", { requestId: confirmRequest.requestId, approved, persist } as any);
+  const respondConfirmation = useCallback((optionIdx: number) => {
+    if (confirmRequest && confirmOptions[optionIdx]) {
+      const opt = confirmOptions[optionIdx];
+      engine.container.bus.publish("TOOL_CONFIRMATION_RESPONSE", {
+        requestId: confirmRequest.requestId,
+        approved: opt.approved,
+        persist: opt.persist,
+        chosenPattern: opt.pattern,
+      } as any);
       setConfirmRequest(null);
     }
-  }, [confirmRequest]);
+  }, [confirmRequest, confirmOptions]);
 
   // Helper: activate an agent — sets persona, mode, loads resources
   const activateAgent = (agentId: string) => {
@@ -393,14 +413,9 @@ function App({ engine }: { engine: EngineContext }) {
     // Handle tool confirmation dialog
     if (confirmRequest) {
       if (key.upArrow) { setConfirmIdx(i => Math.max(0, i - 1)); return; }
-      if (key.downArrow) { setConfirmIdx(i => Math.min(2, i + 1)); return; }
-      if (key.return) {
-        if (confirmIdx === 0) respondConfirmation(true, false);
-        else if (confirmIdx === 1) respondConfirmation(true, true);
-        else respondConfirmation(false);
-        return;
-      }
-      if (key.escape) { respondConfirmation(false); return; }
+      if (key.downArrow) { setConfirmIdx(i => Math.min(confirmOptions.length - 1, i + 1)); return; }
+      if (key.return) { respondConfirmation(confirmIdx); return; }
+      if (key.escape) { respondConfirmation(confirmOptions.length - 1); return; } // last option is always "No"
       return; // Block all other input while confirming
     }
     if (key.escape) {
@@ -682,9 +697,9 @@ function App({ engine }: { engine: EngineContext }) {
             </Box>
           )}
           <Box flexDirection="column" marginTop={1} paddingLeft={1}>
-            <Text color={confirmIdx === 0 ? "green" : undefined}>{confirmIdx === 0 ? "❯ " : "  "}<Text bold={confirmIdx === 0}>Yes, allow once</Text></Text>
-            <Text color={confirmIdx === 1 ? "green" : undefined}>{confirmIdx === 1 ? "❯ " : "  "}<Text bold={confirmIdx === 1}>Trust, always allow in this session{confirmRequest.inferredPattern ? ` (${confirmRequest.inferredPattern})` : ""}</Text></Text>
-            <Text color={confirmIdx === 2 ? "green" : undefined}>{confirmIdx === 2 ? "❯ " : "  "}<Text bold={confirmIdx === 2}>No</Text></Text>
+            {confirmOptions.map((opt, i) => (
+              <Text key={i} color={confirmIdx === i ? "green" : undefined}>{confirmIdx === i ? "❯ " : "  "}<Text bold={confirmIdx === i}>{opt.label}</Text></Text>
+            ))}
           </Box>
           <Text dimColor>  ↑↓ navigate · enter select · esc deny</Text>
         </Box>

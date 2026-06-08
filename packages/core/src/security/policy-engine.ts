@@ -136,27 +136,38 @@ function getMatchValue(tool: string, args: Record<string, unknown>): string | un
 
 /** Infer a pattern for "always allow" from the current tool call */
 export function inferPattern(tool: string, args: Record<string, unknown>): string | undefined {
-  if ((tool === "write_file" || tool === "edit_file") && typeof args.path === "string") {
-    // Infer directory glob: "src/utils/foo.ts" → "src/utils/**"
-    const parts = (args.path as string).split("/");
-    if (parts.length > 1) {
-      return parts.slice(0, -1).join("/") + "/**";
-    }
-    return "*";
-  }
-  if (tool === "execute_command" && typeof args.command === "string") {
-    // Infer command prefix: "npm run test" → "npm run *"
-    const cmd = (args.command as string).trim();
-    const firstSpace = cmd.indexOf(" ");
-    if (firstSpace > 0) {
-      const prefix = cmd.slice(0, firstSpace);
-      return prefix + " *";
-    }
-    return cmd;
-  }
-  return undefined;
+  const patterns = inferPatterns(tool, args);
+  return patterns.length > 0 ? patterns[0] : undefined;
 }
 
+/** Infer multiple trust patterns — from specific to broad */
+export function inferPatterns(tool: string, args: Record<string, unknown>): string[] {
+  if ((tool === "write_file" || tool === "edit_file") && typeof args.path === "string") {
+    const path = args.path as string;
+    const parts = path.split("/");
+    const results: string[] = [];
+    // Exact path
+    results.push(path);
+    // Directory glob
+    if (parts.length > 1) {
+      results.push(parts.slice(0, -1).join("/") + "/**");
+    }
+    return results;
+  }
+  if (tool === "execute_command" && typeof args.command === "string") {
+    const cmd = (args.command as string).trim();
+    const results: string[] = [];
+    // Exact command
+    results.push(cmd);
+    // Command prefix (first word + wildcard)
+    const firstSpace = cmd.indexOf(" ");
+    if (firstSpace > 0) {
+      results.push(cmd.slice(0, firstSpace) + " *");
+    }
+    return results;
+  }
+  return [];
+}
 // ─── Policy Engine ───────────────────────────────────────────────────────────
 
 export class PolicyEngine {
