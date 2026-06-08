@@ -517,7 +517,6 @@ function App({ engine }: { engine: EngineContext }) {
     let tokenCount = 0;
     let fullText = "";
     const tools: ToolCall[] = [];
-    const turnItems: HistoryItem[] = [];
     let resolvedModel = engine.agents.active.modelTier === "auto" ? "auto" : (engine.container.config.models[engine.container.config.tiers[engine.agents.active.modelTier as keyof typeof engine.container.config.tiers]]?.model ?? engine.agents.active.modelTier);
 
     const result = await executeTurn(engine, trimmed, {
@@ -532,37 +531,34 @@ function App({ engine }: { engine: EngineContext }) {
           }
         }
         if (chunk.type === "tool_call") {
-          // Commit streaming text to pendingTurn (keeps it permanent)
+          // Commit narration text to Static immediately (it's complete)
           if (fullText.trim()) {
-            turnItems.push({ id: id(), type: "assistant", model: resolvedModel, text: fullText } as any);
+            setHistory(h => [...h, { id: id(), type: "assistant", model: resolvedModel, text: fullText } as any]);
             fullText = "";
           }
           setStreaming(null);
           setThinking(null);
-          // Commit tool and update live display in the same setState call
           if (chunk.status === "executing") {
+            // Tool starting — add to live area
             const toolId = id();
-            const toolItem: any = { name: chunk.name, args: chunk.args, status: "executing" };
-            tools.push({ ...toolItem, _histId: toolId } as any);
-            turnItems.push({ id: toolId, type: "tools", tools: [toolItem] });
+            tools.push({ name: chunk.name, args: chunk.args, status: "executing", _histId: toolId } as any);
+            setPendingTurn(prev => [...prev, { id: toolId, type: "tools", tools: [{ name: chunk.name, args: chunk.args, status: "executing" }] } as any]);
           } else {
-            // Tool finished — update in turnItems
+            // Tool finished — move from live to Static
             const tool = tools.find(t => t.name === chunk.name && t.status === "executing");
             if (tool) {
               tool.status = chunk.status === "error" ? "error" : "success";
               tool.elapsed = `${((Date.now() - startTime) / 1000).toFixed(1)}s`;
               const histId = (tool as any)._histId;
-              const idx = turnItems.findIndex(item => item.id === histId);
-              if (idx >= 0) turnItems[idx] = { ...turnItems[idx], tools: [{ ...tool }] } as any;
+              // Commit completed tool to Static, remove from live
+              setHistory(h => [...h, { id: histId, type: "tools", tools: [{ ...tool }] } as any]);
+              setPendingTurn(prev => prev.filter(item => item.id !== histId));
             }
           }
-          // Update live display
-          setPendingTurn([...turnItems]);
         }
         if (chunk.type === "error") {
           setThinking(null); setStreaming(null);
-          turnItems.push({ id: id(), type: "system", text: `⚠️ ${chunk.message}` } as any);
-          setPendingTurn([...turnItems]);
+          setHistory(h => [...h, { id: id(), type: "system", text: `⚠️ ${chunk.message}` } as any]);
         }
         if (chunk.type === "status") {
           if (chunk.message.startsWith("model:")) {
@@ -578,14 +574,10 @@ function App({ engine }: { engine: EngineContext }) {
     if (result) {
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
       const tokPerSec = tokenCount > 0 ? (tokenCount / +elapsed).toFixed(1) : "0";
-      // Commit all accumulated turn items + final response to Static in one batch
-      const finalItem: HistoryItem = {
+      setHistory(h => [...h, {
         id: id(), type: "assistant", model: resolvedModel, text: result.response.text,
         stats: `↑ ${result.response.usage.promptTokens} · ↓ ${tokenCount} · ${tokPerSec} tok/s · ${elapsed}s`,
-      } as any;
-      setHistory(h => [...h, ...turnItems, finalItem]);
-    } else if (turnItems.length) {
-      setHistory(h => [...h, ...turnItems]);
+      } as any]);
     }
 
     setStreaming(null); setThinking(null); setBusy(false);
