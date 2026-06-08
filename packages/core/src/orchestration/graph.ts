@@ -58,28 +58,31 @@ async function executeToolCall(toolName: string, argsJson: string, workspaceRoot
       const filePath = args.path ?? "";
       const fullPath = join(workspaceRoot, filePath);
 
-      // Surgical read: model specified offset/limit — honor it, capped to maxLines
+      // Surgical read: model specified offset/limit — honor it
       if (args.offset !== undefined || args.limit !== undefined) {
-        const rf = readFile(workspaceRoot, filePath, args.offset ?? 0, Math.min(args.limit ?? maxLines, maxLines));
+        const rf = readFile(workspaceRoot, filePath, args.offset ?? 0, args.limit ?? maxLines);
         return rf.output || rf.error || "";
       }
 
-      // Full file request: check if it fits in context
+      // Full file request: check if it fits in context budget
       try {
         const { readFileSync } = await import("fs");
         const content = readFileSync(fullPath, "utf-8");
         const lines = content.split("\n");
         const totalLines = lines.length;
+        // Estimate: ~4 chars per token. File fits if estimated tokens < 25% of context limit.
+        const contextLimit = config?.contextLimit ?? 32768;
+        const estimatedTokens = Math.ceil(content.length / 4);
+        const fits = estimatedTokens < contextLimit * 0.25;
 
-        if (totalLines <= maxLines) {
-          // File fits within maxReadLines — return it all
-          const rf = readFile(workspaceRoot, filePath, 0, totalLines);
-          return rf.output || rf.error || "";
+        if (fits) {
+          // File fits in context — return it all
+          return content;
         }
 
-        // File too large — return first chunk + guidance
+        // File too large for context — return first chunk + guidance
         const rf = readFile(workspaceRoot, filePath, 0, maxLines);
-        const guidance = `\n\n[NOTE: File has ${totalLines} lines. Returned first ${maxLines}. Use offset/limit for remaining sections, or reference the Workspace Map for specific section line ranges.]`;
+        const guidance = `\n\n[NOTE: File has ${totalLines} lines (~${estimatedTokens} tokens). Returned first ${maxLines}. Use offset/limit for remaining sections.]`;
         return (rf.output || rf.error || "") + guidance;
       } catch {
         const rf = readFile(workspaceRoot, filePath, 0, maxLines);
