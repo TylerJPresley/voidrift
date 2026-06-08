@@ -55,8 +55,36 @@ async function executeToolCall(toolName: string, argsJson: string, workspaceRoot
   switch (toolName) {
     case "read_file":
       const maxLines = config?.maxReadLines ?? 1000;
-      const rf = readFile(workspaceRoot, args.path ?? "", args.offset ?? 0, Math.min(args.limit ?? maxLines, maxLines));
-      return rf.output || rf.error || "";
+      const filePath = args.path ?? "";
+      const fullPath = join(workspaceRoot, filePath);
+
+      // Surgical read: model specified offset/limit — honor it, capped to maxLines
+      if (args.offset !== undefined || args.limit !== undefined) {
+        const rf = readFile(workspaceRoot, filePath, args.offset ?? 0, Math.min(args.limit ?? maxLines, maxLines));
+        return rf.output || rf.error || "";
+      }
+
+      // Full file request: check if it fits in context
+      try {
+        const { readFileSync } = await import("fs");
+        const content = readFileSync(fullPath, "utf-8");
+        const lines = content.split("\n");
+        const totalLines = lines.length;
+
+        if (totalLines <= maxLines) {
+          // File fits within maxReadLines — return it all
+          const rf = readFile(workspaceRoot, filePath, 0, totalLines);
+          return rf.output || rf.error || "";
+        }
+
+        // File too large — return first chunk + guidance
+        const rf = readFile(workspaceRoot, filePath, 0, maxLines);
+        const guidance = `\n\n[NOTE: File has ${totalLines} lines. Returned first ${maxLines}. Use offset/limit for remaining sections, or reference the Workspace Map for specific section line ranges.]`;
+        return (rf.output || rf.error || "") + guidance;
+      } catch {
+        const rf = readFile(workspaceRoot, filePath, 0, maxLines);
+        return rf.output || rf.error || "";
+      }
     case "glob_files":
       return globFiles(workspaceRoot, args.pattern ?? "").output;
     case "write_file":
