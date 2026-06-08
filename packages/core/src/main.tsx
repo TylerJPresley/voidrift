@@ -123,7 +123,7 @@ function describeToolCall(name: string, argsStr: string): { label: string; descr
   switch (name) {
     case "read_file": {
       const path = args.path || "file";
-      const range = args.offset !== undefined ? `:${args.offset + 1}-${(args.offset || 0) + (args.limit || 200)}` : "";
+      const range = args.offset !== undefined ? `:${args.offset + 1}-${(args.offset || 0) + (args.limit || "end")}` : "";
       return { label, description: `${path}${range}`, color: "green" };
     }
     case "glob_files":

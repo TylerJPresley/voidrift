@@ -347,7 +347,7 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
               if (existing) {
                 // Update read ranges for targeted reads
                 if (tc.name === "read_file" && args.offset !== undefined) {
-                  const range: [number, number] = [args.offset, args.offset + (args.limit ?? 200)];
+                  const range: [number, number] = [args.offset, args.offset + (args.limit ?? input.config?.maxReadLines ?? 1000)];
                   input.context.focusFile(filePath, existing.summary, totalLines, range);
                 }
               } else {
