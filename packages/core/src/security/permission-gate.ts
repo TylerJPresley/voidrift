@@ -77,17 +77,8 @@ export class PermissionGate {
         resolve: (response) => {
           clearTimeout(timer);
           const chosenPattern = response.chosenPattern;
-          if (response.approved && response.persist && chosenPattern) {
-            this.engine.persistRule({
-              tool,
-              pattern: chosenPattern,
-              decision: "allow",
-              label: `Auto: allow ${tool} for ${chosenPattern}`,
-            });
-          } else if (response.approved && response.persist && !chosenPattern) {
-            // Trust the tool entirely (no pattern constraint)
-            this.engine.persistRule({ tool, decision: "allow", label: `Auto: allow ${tool}` });
-          } else if (response.approved && !response.persist && chosenPattern) {
+          if (response.approved && chosenPattern) {
+            // "Trust" option — session-scoped rule for this pattern
             this.engine.addSessionRule({ tool, pattern: chosenPattern, decision: "allow" });
           }
           resolve({

@@ -329,7 +329,7 @@ function App({ engine }: { engine: EngineContext }) {
     ];
     const patterns = confirmRequest.inferredPatterns || [];
     for (const p of patterns) {
-      opts.push({ label: `Trust, always allow "${p}"`, approved: true, persist: true, pattern: p });
+      opts.push({ label: `Trust, always allow "${p}"`, approved: true, persist: false, pattern: p });
     }
     opts.push({ label: "No", approved: false });
     return opts;
