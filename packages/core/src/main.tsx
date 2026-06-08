@@ -319,11 +319,13 @@ function App({ engine }: { engine: EngineContext }) {
 
   // Tool confirmation state
   const [confirmRequest, setConfirmRequest] = useState<{ tool: string; args: Record<string, unknown>; requestId: string; diff?: string[]; inferredPattern?: string } | null>(null);
+  const [confirmIdx, setConfirmIdx] = useState(0);
 
   // Subscribe to tool confirmation requests from the permission gate
   useEffect(() => {
     return engine.container.bus.subscribe("TOOL_CONFIRMATION_REQUEST", (event: any) => {
       setConfirmRequest(event.payload);
+      setConfirmIdx(0);
     });
   }, []);
 
@@ -390,9 +392,15 @@ function App({ engine }: { engine: EngineContext }) {
   useInput((ch, key) => {
     // Handle tool confirmation dialog
     if (confirmRequest) {
-      if (ch === "y" || ch === "Y" || key.return) { respondConfirmation(true, false); return; }
-      if (ch === "a" || ch === "A") { respondConfirmation(true, true); return; }
-      if (ch === "n" || ch === "N" || key.escape) { respondConfirmation(false); return; }
+      if (key.upArrow) { setConfirmIdx(i => Math.max(0, i - 1)); return; }
+      if (key.downArrow) { setConfirmIdx(i => Math.min(2, i + 1)); return; }
+      if (key.return) {
+        if (confirmIdx === 0) respondConfirmation(true, false);
+        else if (confirmIdx === 1) respondConfirmation(true, true);
+        else respondConfirmation(false);
+        return;
+      }
+      if (key.escape) { respondConfirmation(false); return; }
       return; // Block all other input while confirming
     }
     if (key.escape) {
@@ -673,7 +681,12 @@ function App({ engine }: { engine: EngineContext }) {
               {confirmRequest.diff.length > 8 && <Text dimColor>  ...{confirmRequest.diff.length - 8} more lines</Text>}
             </Box>
           )}
-          <Text dimColor>  y/enter = allow once · a = always allow{confirmRequest.inferredPattern ? ` (${confirmRequest.inferredPattern})` : ""} · n/esc = deny</Text>
+          <Box flexDirection="column" marginTop={1} paddingLeft={1}>
+            <Text color={confirmIdx === 0 ? "green" : undefined}>{confirmIdx === 0 ? "❯ " : "  "}<Text bold={confirmIdx === 0}>Yes, allow once</Text></Text>
+            <Text color={confirmIdx === 1 ? "green" : undefined}>{confirmIdx === 1 ? "❯ " : "  "}<Text bold={confirmIdx === 1}>Trust, always allow in this session{confirmRequest.inferredPattern ? ` (${confirmRequest.inferredPattern})` : ""}</Text></Text>
+            <Text color={confirmIdx === 2 ? "green" : undefined}>{confirmIdx === 2 ? "❯ " : "  "}<Text bold={confirmIdx === 2}>No</Text></Text>
+          </Box>
+          <Text dimColor>  ↑↓ navigate · enter select · esc deny</Text>
         </Box>
       )}
       {thinking && <ThinkingIndicator label={thinking} />}
