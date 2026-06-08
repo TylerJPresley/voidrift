@@ -86,7 +86,7 @@ export class PermissionGate {
             });
           } else if (response.approved && response.persist && !chosenPattern) {
             // Trust the tool entirely (no pattern constraint)
-            this.engine.addSessionRule({ tool, decision: "allow" });
+            this.engine.persistRule({ tool, decision: "allow", label: `Auto: allow ${tool}` });
           } else if (response.approved && !response.persist && chosenPattern) {
             this.engine.addSessionRule({ tool, pattern: chosenPattern, decision: "allow" });
           }
