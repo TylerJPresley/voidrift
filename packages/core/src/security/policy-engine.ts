@@ -10,7 +10,7 @@
  */
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
-import { join, dirname } from "path";
+import { join, dirname, resolve } from "path";
 import { homedir } from "os";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -174,8 +174,10 @@ export class PolicyEngine {
   private rules: PolicyRule[] = [];
   private workspacePolicyPath: string | undefined;
   private userPolicyPath: string;
+  private workspaceRoot: string | undefined;
 
   constructor(workspaceRoot?: string) {
+    this.workspaceRoot = workspaceRoot;
     this.userPolicyPath = join(homedir(), ".config", "voidrift", "policies.json");
     if (workspaceRoot) {
       this.workspacePolicyPath = join(workspaceRoot, ".voidrift", "policies.json");
@@ -193,6 +195,11 @@ export class PolicyEngine {
       const match = this.findMatchingRule(tool, args, "allow");
       if (match) return { decision: "allow", rule: match };
       return { decision: "deny" };
+    }
+
+    // Workspace boundary enforcement — anything outside workspace requires approval
+    if (this.workspaceRoot && this.isOutsideWorkspace(tool, args)) {
+      return { decision: "ask", inferredPattern: inferPattern(tool, args) };
     }
 
     // Prompt mode: check rules, shell classification, then ask
@@ -247,6 +254,45 @@ export class PolicyEngine {
   }
 
   // ─── Private ─────────────────────────────────────────────────────────────
+
+  /** Check if a tool call references paths outside the workspace root */
+  private isOutsideWorkspace(tool: string, args: Record<string, unknown>): boolean {
+    const root = this.workspaceRoot!;
+
+    // File tools: check path arg
+    if ((tool === "write_file" || tool === "edit_file" || tool === "read_file") && typeof args.path === "string") {
+      const resolved = resolve(root, args.path);
+      return !resolved.startsWith(root + "/") && resolved !== root;
+    }
+
+    // Shell commands: extract paths from command string
+    if (tool === "execute_command" && typeof args.command === "string") {
+      return this.commandTargetsOutsideWorkspace(args.command, root);
+    }
+
+    return false;
+  }
+
+  /** Heuristic: does a shell command reference absolute paths outside workspace? */
+  private commandTargetsOutsideWorkspace(command: string, root: string): boolean {
+    // Extract absolute paths and ~ paths from the command
+    const pathMatches = command.match(/(?:^|\s)(\/[^\s;|&>]+|~[^\s;|&>]*)/g);
+    if (!pathMatches) return false;
+
+    for (const match of pathMatches) {
+      const p = match.trim();
+      let resolved: string;
+      if (p.startsWith("~/") || p === "~") {
+        resolved = join(homedir(), p.slice(2));
+      } else {
+        resolved = p;
+      }
+      if (!resolved.startsWith(root + "/") && resolved !== root) {
+        return true;
+      }
+    }
+    return false;
+  }
 
   private loadRules(): void {
     // Load defaults
