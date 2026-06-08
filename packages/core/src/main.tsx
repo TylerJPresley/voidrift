@@ -300,6 +300,7 @@ function App({ engine }: { engine: EngineContext }) {
   const [thinking, setThinking] = useState<string | null>(null);
   const [pendingTools, setPendingTools] = useState<ToolCall[] | null>(null);
   const [pendingTurn, setPendingTurn] = useState<HistoryItem[]>([]);
+  const [activeModel, setActiveModel] = useState<string>("");
   const [clearKey, setClearKey] = useState(0);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -561,6 +562,7 @@ function App({ engine }: { engine: EngineContext }) {
           if (chunk.message.startsWith("model:")) {
             const name = chunk.message.slice(6);
             resolvedModel = engine.agents.active.modelTier === "auto" ? `auto[${name}]` : name;
+            setActiveModel(name);
           }
           setStreaming(null);
           setThinking(chunk.message.startsWith("model:") ? null : chunk.message);
@@ -601,7 +603,7 @@ function App({ engine }: { engine: EngineContext }) {
     }
   }, [busy]);
 
-  const footerModel = engine.agents.active.modelTier === "auto" ? "auto" : (engine.container.config.models[engine.container.config.tiers[engine.agents.active.modelTier as keyof typeof engine.container.config.tiers]]?.model ?? engine.agents.active.modelTier);
+  const footerModel = activeModel || (engine.agents.active.modelTier === "auto" ? "auto" : (engine.container.config.models[engine.container.config.tiers[engine.agents.active.modelTier as keyof typeof engine.container.config.tiers]]?.model ?? engine.agents.active.modelTier));
 
   return (
     <Box flexDirection="column" height={fullPanel ? process.stdout.rows || 24 : undefined}>
