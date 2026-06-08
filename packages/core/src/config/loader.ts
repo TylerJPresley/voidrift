@@ -31,6 +31,7 @@ export const ConfigSchema = z.object({
   models: z.record(ModelSchema),
   editor: EditorSchema,
   summarizeThreshold: z.number().positive().default(500),
+  maxReadLines: z.number().positive().default(1000),
   maxConcurrentAgents: z.number().positive().default(1),
   plugins: z.array(z.string()).default([]),
   search: z.object({
@@ -76,6 +77,7 @@ const DEFAULT_CONFIG: VoidRiftConfig = {
     },
   },
   summarizeThreshold: 500,
+  maxReadLines: 1000,
   maxConcurrentAgents: 1,
   plugins: [],
   search: { provider: "duckduckgo" as const },

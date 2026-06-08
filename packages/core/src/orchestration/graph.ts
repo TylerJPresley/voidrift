@@ -54,7 +54,7 @@ async function executeToolCall(toolName: string, argsJson: string, workspaceRoot
 
   switch (toolName) {
     case "read_file":
-      const rf = readFile(workspaceRoot, args.path ?? "", args.offset ?? 0, args.limit ?? 200);
+      const rf = readFile(workspaceRoot, args.path ?? "", args.offset ?? 0, args.limit ?? config?.maxReadLines ?? 1000);
       return rf.output || rf.error || "";
     case "glob_files":
       return globFiles(workspaceRoot, args.pattern ?? "").output;
