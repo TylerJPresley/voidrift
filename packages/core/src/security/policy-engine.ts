@@ -46,8 +46,8 @@ export interface PolicyCheckResult {
 const SAFE_COMMAND_PREFIXES = [
   "git status", "git log", "git diff", "git branch", "git show", "git remote",
   "git rev-parse", "git describe", "git stash list", "git tag",
-  "ls", "cat", "head", "tail", "wc", "pwd", "echo", "date", "whoami",
-  "find", "grep", "rg", "fd", "tree", "file", "which", "type",
+  "ls", "head", "tail", "wc", "pwd", "echo", "date", "whoami",
+  "tree", "file", "which", "type",
   "node --version", "npm --version", "npx --version", "bun --version",
   "python --version", "pip --version",
   "tsc --noEmit", "npx tsc --noEmit",
