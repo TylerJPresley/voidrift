@@ -12,7 +12,7 @@ afterEach(() => { rmSync(TMP, { recursive: true, force: true }); });
 describe("TemplateService", () => {
   it("registers and resolves a template from default", () => {
     const svc = new TemplateService(TMP);
-    svc.register("unique-key", "template", "# Task {{id}}", "plugin-dev");
+    svc.register("unique-key", "template", "# Task {{id}}", "test-plugin");
     const resolved = svc.resolve("unique-key");
     expect(resolved?.source).toBe("default");
     expect(resolved?.body).toContain("{{id}}");
@@ -77,26 +77,26 @@ describe("TemplateService", () => {
   });
 
   it("plugin override replaces core base", () => {
-    const svc = new TemplateService(TMP, ["plugin-dev"]);
+    const svc = new TemplateService(TMP, ["test-plugin"]);
     svc.register("test-prompt", "prompt", "Core base", "core");
-    svc.registerOverride("test-prompt", "prompt", "Plugin override", "plugin-dev");
+    svc.registerOverride("test-prompt", "prompt", "Plugin override", "test-plugin");
     const resolved = svc.resolve("test-prompt");
     expect(resolved?.body).toBe("Plugin override");
   });
 
   it("plugin extension appends to core base", () => {
-    const svc = new TemplateService(TMP, ["plugin-dev"]);
+    const svc = new TemplateService(TMP, ["test-plugin"]);
     svc.register("chat", "prompt", "Core chat", "core");
-    svc.registerExtension("chat", "prompt", "Plugin extension", "plugin-dev");
+    svc.registerExtension("chat", "prompt", "Plugin extension", "test-plugin");
     const resolved = svc.resolve("chat");
     expect(resolved?.body).toContain("Core chat");
     expect(resolved?.body).toContain("Plugin extension");
   });
 
   it("operator override on base still gets plugin extension appended", () => {
-    const svc = new TemplateService(TMP, ["plugin-dev"]);
+    const svc = new TemplateService(TMP, ["test-plugin"]);
     svc.register("chat", "prompt", "Core chat", "core");
-    svc.registerExtension("chat", "prompt", "Plugin extension", "plugin-dev");
+    svc.registerExtension("chat", "prompt", "Plugin extension", "test-plugin");
     // Operator overrides the base
     mkdirSync(join(TMP, ".voidrift", "prompts", "core"), { recursive: true });
     writeFileSync(join(TMP, ".voidrift", "prompts", "core", "chat.md"), "My custom chat");
@@ -106,12 +106,12 @@ describe("TemplateService", () => {
   });
 
   it("operator can override the extension slot independently", () => {
-    const svc = new TemplateService(TMP, ["plugin-dev"]);
+    const svc = new TemplateService(TMP, ["test-plugin"]);
     svc.register("chat", "prompt", "Core chat", "core");
-    svc.registerExtension("chat", "prompt", "Plugin extension default", "plugin-dev");
+    svc.registerExtension("chat", "prompt", "Plugin extension default", "test-plugin");
     // Operator overrides the extension
-    mkdirSync(join(TMP, ".voidrift", "prompts", "plugin-dev"), { recursive: true });
-    writeFileSync(join(TMP, ".voidrift", "prompts", "plugin-dev", "chat.md"), "My custom extension");
+    mkdirSync(join(TMP, ".voidrift", "prompts", "test-plugin"), { recursive: true });
+    writeFileSync(join(TMP, ".voidrift", "prompts", "test-plugin", "chat.md"), "My custom extension");
     const resolved = svc.resolve("chat");
     expect(resolved?.body).toContain("Core chat");
     expect(resolved?.body).toContain("My custom extension");

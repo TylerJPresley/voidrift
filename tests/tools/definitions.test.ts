@@ -2,8 +2,8 @@ import { describe, it, expect } from "vitest";
 import { TOOL_SCHEMAS, getToolSchema } from "../../src/tools/definitions.js";
 
 describe("Tool Definitions", () => {
-  it("has exactly 19 tools", () => {
-    expect(TOOL_SCHEMAS.length).toBe(19);
+  it("has exactly 18 tools", () => {
+    expect(TOOL_SCHEMAS.length).toBe(18);
   });
 
   it("all gated tools are mutations or executions", () => {

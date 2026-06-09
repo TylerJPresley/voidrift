@@ -606,15 +606,15 @@ export PATH="$BUN_INSTALL/bin:$PATH"
 
 ## Contributing
 
-Contributions welcome. Please:
+Contributions are welcome! Please read our [CONTRIBUTING.md](./docs/CONTRIBUTING.md) for details on our development setup, testing, and pull request guidelines.
 
-1. Fork the repository
-2. Create a feature branch
-3. Write tests for new functionality
-4. Ensure `bun test` passes (305+ tests)
-5. Submit a pull request
+## Code of Conduct
 
-Keep changes focused. One PR per feature or fix. Follow existing code style and patterns.
+We expect all participants in our community to adhere to our [CODE_OF_CONDUCT.md](./docs/CODE_OF_CONDUCT.md) to foster a respectful and welcoming environment.
+
+## Security
+
+If you discover any security vulnerabilities, please refer to our [SECURITY.md](./docs/SECURITY.md) policy for instructions on reporting them privately.
 
 ## License
 

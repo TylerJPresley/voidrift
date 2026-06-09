@@ -11,16 +11,9 @@ export interface SlashCommandHook {
   execute: (args: string[]) => Promise<void>;
 }
 
-export interface ModeHook {
-  name: string;
-  allowedTools: string[];
-  permissionGate: boolean;
-}
-
 export class CoreRegistry {
   private capabilities = new Map<string, CapabilityHook>();
   private slashCommands = new Map<string, SlashCommandHook>();
-  private modes = new Map<string, ModeHook>();
 
   registerCapability(hook: CapabilityHook): void {
     if (this.capabilities.has(hook.name)) {
@@ -33,13 +26,6 @@ export class CoreRegistry {
     this.slashCommands.set(hook.name, hook);
   }
 
-  registerMode(hook: ModeHook): void {
-    if (this.modes.has(hook.name)) {
-      throw new Error(`Mode "${hook.name}" already registered`);
-    }
-    this.modes.set(hook.name, hook);
-  }
-
   async invokeCapability(name: string, args: Record<string, unknown>): Promise<unknown> {
     const cap = this.capabilities.get(name);
     if (!cap) throw new Error(`Capability "${name}" not registered`);
@@ -48,10 +34,6 @@ export class CoreRegistry {
 
   getSlashCommand(name: string): SlashCommandHook | undefined {
     return this.slashCommands.get(name);
-  }
-
-  getMode(name: string): ModeHook | undefined {
-    return this.modes.get(name);
   }
 
   listCapabilities(): string[] {
@@ -64,9 +46,5 @@ export class CoreRegistry {
 
   listSlashCommandHooks(): SlashCommandHook[] {
     return [...this.slashCommands.values()].sort((a, b) => a.name.localeCompare(b.name));
-  }
-
-  listModes(): string[] {
-    return [...this.modes.keys()];
   }
 }

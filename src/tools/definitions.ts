@@ -191,20 +191,6 @@ export const TOOL_SCHEMAS: ToolSchema[] = [
       { name: "cron", type: "string", description: "Recurring cron pattern (e.g. '*/5 * * * *'). Mutually exclusive with delay.", required: false },
     ],
   },
-  {
-    name: "plan",
-    description: "Manage the plan — add items, backlog ideas, change priority, remove completed items, or load full details",
-    actionLayer: "partition",
-    safetyProfile: "auto-approved",
-    parameters: [
-      { name: "action", type: "string", description: "One of: add, backlog, load, prioritize, remove", required: true },
-      { name: "name", type: "string", description: "Filename slug for the item (no .md extension)", required: false },
-      { name: "description", type: "string", description: "1-2 sentence summary of what this is", required: false },
-      { name: "rationale", type: "string", description: "Why this matters", required: false },
-      { name: "priority", type: "string", description: "now, next, or later", required: false },
-      { name: "body", type: "string", description: "Full detail (markdown) for the item", required: false },
-    ],
-  },
 ];
 
 export function getToolSchema(name: string): ToolSchema | undefined {

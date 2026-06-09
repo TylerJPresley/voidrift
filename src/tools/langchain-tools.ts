@@ -138,18 +138,6 @@ export const langchainTools = [
       cron: z.string().optional().describe("Recurring cron pattern (e.g. '*/5 * * * *')"),
     }),
   }),
-  tool(noop, {
-    name: "plan",
-    description: "Manage the plan — add items, backlog ideas, change priority, remove completed items, or load details",
-    schema: z.object({
-      action: z.enum(["add", "backlog", "load", "prioritize", "remove"]).describe("Action to perform"),
-      name: z.string().optional().describe("Filename slug for the item"),
-      description: z.string().optional().describe("1-2 sentence summary"),
-      rationale: z.string().optional().describe("Why this matters"),
-      priority: z.enum(["now", "next", "later"]).optional().describe("Priority level"),
-      body: z.string().optional().describe("Full detail markdown"),
-    }),
-  }),
 ];
 
 /** Get LangChain tool objects filtered by tool names from an agent manifest */

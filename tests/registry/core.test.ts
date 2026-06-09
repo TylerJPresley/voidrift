@@ -39,19 +39,6 @@ describe("CoreRegistry", () => {
     expect(reg.listSlashCommands()).toEqual(["stats"]);
   });
 
-  it("registers and retrieves modes", () => {
-    const reg = new CoreRegistry();
-    reg.registerMode({
-      name: "plan",
-      allowedTools: ["read_file", "glob_files"],
-      permissionGate: false,
-    });
-
-    const mode = reg.getMode("plan");
-    expect(mode?.allowedTools).toContain("read_file");
-    expect(reg.listModes()).toEqual(["plan"]);
-  });
-
   it("overwrites duplicate slash commands", () => {
     const reg = new CoreRegistry();
     const cmd1 = { name: "x", description: "first", execute: async () => {} };

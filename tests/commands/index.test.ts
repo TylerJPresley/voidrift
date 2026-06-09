@@ -222,10 +222,6 @@ describe("Slash Commands (all 24)", () => {
     expect(output[0]).toContain("Usage");
   });
 
-  it("/ideas opens ideas panel", async () => {
-    // Moved to plugin-dev tests
-  });
-
   it("/schedule --delay registers a delayed task", async () => {
     const { registry, output } = makeDeps();
     await registry.getSlashCommand("schedule")!.execute(["--delay", "10s", "check build status"]);

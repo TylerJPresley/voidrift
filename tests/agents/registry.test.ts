@@ -53,11 +53,11 @@ describe("AgentRegistry Source Tracking", () => {
       tools: [],
       allowedTools: [],
       approvalMode: "prompt"
-    }, "plugin-dev");
+    }, "test-plugin");
 
     const agent = registry.get("plugin-agent");
     expect(agent).toBeDefined();
-    expect(agent?.source).toBe("plugin-dev");
+    expect(agent?.source).toBe("test-plugin");
   });
 
   it("tracks override status for overridden core agents", () => {

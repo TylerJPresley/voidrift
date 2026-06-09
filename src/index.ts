@@ -2,7 +2,7 @@
 export { EventBus, type EventType, type EventPayloadMap, type VoidRiftEvent } from "./events/bus.js";
 export { loadConfig, ConfigSchema, type VoidRiftConfig, type ModelConfig, type LoadConfigOptions } from "./config/loader.js";
 export { WorkspaceWatcher, type WatcherStatus } from "./watcher/index.js";
-export { CoreRegistry, type CapabilityHook, type SlashCommandHook, type ModeHook } from "./registry/core.js";
+export { CoreRegistry, type CapabilityHook, type SlashCommandHook } from "./registry/core.js";
 export { cleanupWorktrees, writeWorktreeMeta, type CleanupResult, type WorktreeMeta } from "./bootstrap/cleanup.js";
 export { bootstrap, type Container, type ContainerOptions } from "./bootstrap/container.js";
 
@@ -63,8 +63,7 @@ export { registerCommands, type CommandDeps } from "./commands/index.js";
 export { directChat, runTurn, setWorkspaceRoot, setScheduler, setPlanManager, type OrchestrationInput, type OrchestrationResult } from "./orchestration/graph.js";
 export { runGoal, type GoalResult } from "./orchestration/goal.js";
 export { TaskScheduler, parseDelay, type ScheduledTask } from "./orchestration/scheduler.js";
-// developCR moved to @voidrift/plugin-dev
-export { importScan } from "./orchestration/import.js";
+
 
 // Section 9: Plugin Interface
 export { CoreAPI, type PanelDefinition, type PanelColumn, type PanelAction } from "./plugins/interface.js";
