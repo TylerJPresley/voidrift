@@ -10,8 +10,7 @@ import type { OnChunk } from "../adapters/stream.js";
 import type { ModelResponse } from "../adapters/types.js";
 import { streamModel } from "../adapters/stream.js";
 import { TOOL_SCHEMAS } from "../tools/definitions.js";
-import { readFile, globFiles, writeFile, editFile, executeCommand } from "../tools/executors.js";
-import { webFetch, webSearch, type SearchConfig } from "../tools/web.js";
+import { executeRegisteredTool } from "./tool-registry.js";
 import { summarizeFileWithFlash } from "../codemap/summarizer.js";
 import { IndexCache } from "../codemap/cache.js";
 import type { ContextManager } from "../session/context.js";
@@ -52,150 +51,13 @@ async function executeToolCall(toolName: string, argsJson: string, workspaceRoot
     return `Error: Failed to parse tool arguments: ${msg}`;
   }
 
-  switch (toolName) {
-    case "read_file":
-      const maxLines = config?.maxReadLines ?? 1000;
-      const filePath = args.path ?? "";
-      const fullPath = filePath.startsWith("/") ? filePath : join(workspaceRoot, filePath);
-
-      // Surgical read: model specified offset/limit — honor it
-      if (args.offset !== undefined || args.limit !== undefined) {
-        const rf = readFile(workspaceRoot, filePath, args.offset ?? 0, args.limit ?? maxLines);
-        return rf.output || rf.error || "";
-      }
-
-      // Full file request: check if it fits in context budget
-      try {
-        const { readFileSync } = await import("fs");
-        const content = readFileSync(fullPath, "utf-8");
-        const lines = content.split("\n");
-        const totalLines = lines.length;
-        // Estimate: ~4 chars per token. File fits if under 100K tokens.
-        const estimatedTokens = Math.ceil(content.length / 4);
-
-        if (estimatedTokens < 100000) {
-          // File fits in context — return it all
-          return content;
-        }
-
-        // File too large for context — return first chunk + guidance
-        const rf = readFile(workspaceRoot, filePath, 0, maxLines);
-        const guidance = `\n\n[NOTE: File has ${totalLines} lines (~${estimatedTokens} tokens). Returned first ${maxLines}. Use offset/limit for remaining sections.]`;
-        return (rf.output || rf.error || "") + guidance;
-      } catch {
-        const rf = readFile(workspaceRoot, filePath, 0, maxLines);
-        return rf.output || rf.error || "";
-      }
-    case "glob_files":
-      return globFiles(workspaceRoot, args.pattern ?? "").output;
-    case "write_file":
-      return writeFile(workspaceRoot, args.path ?? "", args.content ?? "").output;
-    case "edit_file":
-      return editFile(workspaceRoot, args.path ?? "", args.search ?? "", args.replace ?? "").output;
-    case "execute_command":
-      return executeCommand(workspaceRoot, args.command ?? "", args.timeout).output;
-    case "web_fetch": {
-      const result = await webFetch(args.url ?? "", workspaceRoot);
-      if (result.isPrivate) return "Error: This is a private/localhost URL. Permission required to access local services.";
-      return result.error ? `Error: ${result.error}` : result.output;
-    }
-    case "web_search": {
-      const searchConfig = config?.search;
-      const result = await webSearch(args.query ?? args.keywords ?? "", searchConfig);
-      return result.error ? `Error: ${result.error}` : result.output;
-    }
-    case "read_plan": {
-      if (!_planManager) return "(no plan manager available)";
-      if (args.action === "load" && args.name) {
-        const body = _planManager.loadBody(`${args.name}.md`);
-        return body ?? `Error: Plan item "${args.name}" not found.`;
-      }
-      const items = _planManager.all();
-      if (items.length === 0) return "(no plan items)";
-      const groups: Record<string, any[]> = { now: [], next: [], later: [] };
-      for (const item of items) groups[item.priority]?.push(item);
-      const lines: string[] = [];
-      for (const [pri, list] of Object.entries(groups)) {
-        if (list.length === 0) continue;
-        lines.push(`\n## ${pri.toUpperCase()}`);
-        for (const item of list) {
-          lines.push(`- **${item.filename.replace(".md", "")}**: ${item.description}${item.rationale ? ` — ${item.rationale}` : ""}`);
-        }
-      }
-      return lines.join("\n");
-    }
-    case "write_plan": {
-      if (!_planManager) return "Error: Plan manager not available.";
-      const action = args.action ?? "";
-      switch (action) {
-        case "add": {
-          const name = args.name ?? `item-${Date.now().toString(36)}`;
-          const filename = _planManager.add(name, args.description ?? "", args.rationale ?? "", args.priority ?? "now", args.body ?? "");
-          // Refresh context
-          if (context) context.setPlan(_planManager.compile() || "");
-          return `Plan item added: ${filename}`;
-        }
-        case "remove":
-          if (_planManager.remove(`${args.name}.md`)) {
-            if (context) context.setPlan(_planManager.compile() || "");
-            return `Plan item "${args.name}" removed.`;
-          }
-          return `Error: Item "${args.name}" not found.`;
-        case "prioritize":
-          if (_planManager.updatePriority(`${args.name}.md`, args.priority ?? "now")) {
-            if (context) context.setPlan(_planManager.compile() || "");
-            return `Priority updated: ${args.name} → ${args.priority}`;
-          }
-          return `Error: Item "${args.name}" not found.`;
-        default:
-          return `Error: Unknown action "${action}". Use: add, remove, prioritize.`;
-      }
-    }
-    case "update_plan": {
-      if (!_planManager) return "Error: Plan manager not available.";
-      const item = _planManager.get(`${args.name}.md`);
-      if (!item) return `Error: Item "${args.name}" not found.`;
-      const updated = item.body.replace(args.search ?? "", args.replace ?? "");
-      if (updated === item.body) return `Error: Search text not found in "${args.name}".`;
-      // Rewrite the file with updated body
-      _planManager.add(args.name, item.description, item.rationale, item.priority, updated);
-      return `Plan item "${args.name}" updated.`;
-    }
-    case "save_memory": {
-      const title = args.title ?? "Untitled";
-      const content = args.content ?? "";
-      const keywords = (args.keywords ?? "").split(",").map((k: string) => k.trim()).filter(Boolean);
-      const scope = args.scope === "global" ? "global" : "local";
-      const id = `mem-${Date.now().toString(36)}`;
-      const dir = scope === "global"
-        ? join(process.env.HOME || "", ".config", "voidrift", "memory")
-        : join(workspaceRoot, ".voidrift", "memory");
-      const { mkdirSync, writeFileSync } = await import("fs");
-      mkdirSync(dir, { recursive: true });
-      const filePath = join(dir, `${id}.md`);
-      const file = `---\nid: ${id}\ntitle: ${title}\nsummary: ${content.slice(0, 100)}\ncontext:\n  keywords: [${keywords.map((k: string) => `"${k}"`).join(", ")}]\n---\n\n${content}\n`;
-      writeFileSync(filePath, file, "utf-8");
-      return `Memory saved: "${title}" (${scope})`;
-    }
-    case "schedule": {
-      const instruction = args.instruction ?? "";
-      const { TaskScheduler, parseDelay } = await import("../orchestration/scheduler.js");
-      if (!_scheduler) return "Error: Scheduler not available.";
-      if (args.delay) {
-        const ms = parseDelay(args.delay);
-        const task = _scheduler.scheduleDelay(ms, instruction);
-        return `Scheduled one-shot task [${task.id}] firing in ${args.delay}.`;
-      } else if (args.cron) {
-        const task = _scheduler.scheduleCron(args.cron, instruction);
-        return `Scheduled recurring task [${task.id}] with pattern "${args.cron}".`;
-      }
-      return "Error: Provide either 'delay' or 'cron' parameter.";
-    }
-    case "run_task_agent":
-      return `Error: run_task_agent must be handled by the orchestration layer.`;
-    default:
-      return `Error: Tool "${toolName}" not implemented.`;
-  }
+  return executeRegisteredTool(toolName, args, {
+    workspaceRoot,
+    context,
+    config,
+    planManager: _planManager,
+    scheduler: _scheduler,
+  });
 }
 
 export interface OrchestrationInput {
