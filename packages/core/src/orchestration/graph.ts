@@ -324,9 +324,8 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
       input.onChunk({ type: "tool_call", id: tc.id, name: tc.name, args: tc.args, status: "executing" });
 
       // Execute the permission gate check if an active agent manifest is provided
-      // Permission gate — skip for MCP tools with readOnlyHint annotation
-      const skipGate = input.mcp && tc.name.startsWith("mcp_") && input.mcp.isToolReadOnly(tc.name);
-      if (input.agent && gate && !skipGate) {
+      // Permission gate
+      if (input.agent && gate) {
         const checkResult = await gate.check(tc.name, args, input.agent);
         if (!checkResult.approved) {
           const errMsg = checkResult.reason || "Error: Operation rejected by permission gate.";
