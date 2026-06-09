@@ -245,23 +245,29 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
 
   // Append MCP tools as dynamic LangChain tools
   if (_mcpEngine) {
-    const { DynamicStructuredTool } = await import("@langchain/core/tools");
+    const { tool } = await import("@langchain/core/tools");
     const { z } = await import("zod");
     for (const server of _mcpEngine.connected) {
-      for (const tool of server.tools) {
-        const fullName = `mcp_${server.name}_${tool.name}`;
-        lcTools.push(new DynamicStructuredTool({
-          name: fullName,
-          description: tool.description || tool.name,
-          schema: z.object({}).passthrough(),
-          func: async (args: Record<string, unknown>) => {
-            try {
-              return await _mcpEngine!.callTool(server.name, tool.name, args);
-            } catch (err) {
-              return `Error: ${err instanceof Error ? err.message : String(err)}`;
-            }
+      for (const mcpTool of server.tools) {
+        const fullName = `mcp_${server.name}_${mcpTool.name}`;
+        // Build zod schema from MCP inputSchema properties
+        const props = (mcpTool.inputSchema as any)?.properties ?? {};
+        const required = (mcpTool.inputSchema as any)?.required ?? [];
+        const schemaFields: Record<string, any> = {};
+        for (const [key, val] of Object.entries(props)) {
+          const desc = (val as any)?.description ?? "";
+          let field = z.string().describe(desc);
+          if (!required.includes(key)) field = field.optional() as any;
+          schemaFields[key] = field;
+        }
+        const schema = Object.keys(schemaFields).length > 0 ? z.object(schemaFields) : z.object({}).passthrough();
+        lcTools.push(tool(
+          async (args: Record<string, unknown>) => {
+            try { return await _mcpEngine!.callTool(server.name, mcpTool.name, args); }
+            catch (err) { return `Error: ${err instanceof Error ? err.message : String(err)}`; }
           },
-        }));
+          { name: fullName, description: (mcpTool.description || mcpTool.name).slice(0, 200), schema }
+        ));
       }
     }
   }

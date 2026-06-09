@@ -121,6 +121,15 @@ function describeToolCall(name: string, argsStr: string): { label: string; descr
     save_memory: "Remember", schedule: "Schedule", plan: "Plan",
     run_task_agent: "Task Agent",
   };
+
+  // MCP tools: mcp_server_toolname → MCP:toolname
+  if (name.startsWith("mcp_")) {
+    const parts = name.match(/^mcp_([^_]+)_(.+)$/);
+    const toolName = parts?.[2] ?? name;
+    const desc = Object.values(args).filter(v => typeof v === "string").join(", ").slice(0, 60) || argsStr.slice(0, 60);
+    return { label: `MCP:${toolName}`, description: desc, color: "magenta" };
+  }
+
   const label = friendly[name] || name;
 
   switch (name) {
