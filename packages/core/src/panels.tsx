@@ -734,16 +734,10 @@ export function MCPPanel({ mcp, config, onClose }: { mcp: MCPEngine; config: Voi
       setMessage("Create MCP server — scope: (w) workspace  (g) global");
     }
     if (key.delete && allNames[cursor]) {
-      if (message?.startsWith("Confirm delete")) {
-        const name = allNames[cursor];
-        mcp.disconnect(name);
-        mcp.removeConfig(name);
-        setMessage(`Deleted: ${name}`);
-      } else {
-        setMessage(`Confirm delete "${allNames[cursor]}"? Press del again.`);
-      }
-    } else if (message?.startsWith("Confirm delete")) {
-      setMessage(null);
+      const name = allNames[cursor];
+      mcp.disconnect(name);
+      mcp.removeConfig(name);
+      setMessage(`Deleted: ${name}`);
     }
   });
 
