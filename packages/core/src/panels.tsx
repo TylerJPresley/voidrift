@@ -648,6 +648,7 @@ export function MCPPanel({ mcp, config, onClose }: { mcp: MCPEngine; config: Voi
   const [message, setMessage] = useState<string | null>(null);
   const [createState, setCreateState] = useState<{ step: "scope" | "name" | "url"; scope?: "workspace" | "global"; name?: string } | null>(null);
   const [inputValue, setInputValue] = useState("");
+  const [detail, setDetail] = useState<string | null>(null);
 
   const configs = mcp.loadConfigs();
   const servers = mcp.all;
@@ -665,7 +666,17 @@ export function MCPPanel({ mcp, config, onClose }: { mcp: MCPEngine; config: Voi
         if (input === "g") { setCreateState({ step: "name", scope: "global" }); setMessage("Enter server id (lower-case, hyphens only):"); }
         return;
       }
-      // TextInput handles name and url steps
+      return;
+    }
+
+    if (detail) {
+      if (key.escape) { setDetail(null); return; }
+      if (input === "e" && config.editor) {
+        for (const dir of mcp["configDirs"]) {
+          const path = join(dir, `${detail}.json`);
+          if (existsSync(path)) { openInEditor(path, config.editor); setMessage(`Editing ${detail}`); break; }
+        }
+      }
       return;
     }
 
@@ -673,11 +684,7 @@ export function MCPPanel({ mcp, config, onClose }: { mcp: MCPEngine; config: Voi
     if (key.upArrow) setCursor(s => Math.max(0, s - 1));
     if (key.downArrow) setCursor(s => Math.min(allNames.length - 1, s + 1));
 
-    if (key.return && allNames[cursor] && config.editor) {
-      const path = join(mcp["configDirs"][0], `${allNames[cursor]}.json`);
-      if (existsSync(path)) openInEditor(path, config.editor);
-      else setMessage(`Config not found: ${path}`);
-    }
+    if (key.return && allNames[cursor]) { setDetail(allNames[cursor]); return; }
     if (input === "c") {
       setCreateState({ step: "scope" });
       setMessage("Create MCP server — scope: (w) workspace  (g) global");
@@ -724,6 +731,44 @@ export function MCPPanel({ mcp, config, onClose }: { mcp: MCPEngine; config: Voi
       }
     }
   });
+
+  if (detail) {
+    const cfg = configs.find(c => c.name === detail);
+    const srv = servers.find(s => s.name === detail);
+    const st = getStatus(detail);
+    const tools = srv?.tools ?? [];
+    const location = mcp["configDirs"].findIndex((d: string) => existsSync(join(d, `${detail}.json`)));
+    return (
+      <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1}>
+        <Text bold>MCP Servers <Text dimColor>›</Text> {detail}</Text>
+        <Text color="#5a6aa8">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
+        <Text> </Text>
+        <Text><Text color="#61afef">{"Name:".padEnd(16)}</Text>{detail}</Text>
+        <Text><Text color="#61afef">{"Status:".padEnd(16)}</Text><Text color={st === "connected" ? "green" : st === "error" ? "red" : "yellow"}>{st}</Text></Text>
+        <Text><Text color="#61afef">{"Location:".padEnd(16)}</Text>{location === 1 ? "global" : "workspace"}</Text>
+        <Text><Text color="#61afef">{"Transport:".padEnd(16)}</Text>{cfg?.transport ?? (cfg?.url ? "http-sse" : "stdio")}</Text>
+        {cfg?.url && <Text><Text color="#61afef">{"URL:".padEnd(16)}</Text>{cfg.url}</Text>}
+        {cfg?.command && <Text><Text color="#61afef">{"Command:".padEnd(16)}</Text>{cfg.command} {(cfg.args ?? []).join(" ")}</Text>}
+        <Text><Text color="#61afef">{"Auth:".padEnd(16)}</Text>{cfg?.auth ? `${cfg.auth.type} (${cfg.auth.scopes?.join(", ") ?? "no scopes"})` : "none"}</Text>
+        <Text><Text color="#61afef">{"Tools:".padEnd(16)}</Text>{tools.length}</Text>
+        {tools.length > 0 && <>
+          <Text> </Text>
+          <Text bold>Registered Tools</Text>
+          <Text dimColor color="#333333">{"─".repeat((process.stdout.columns || 80) - 4)}</Text>
+          {tools.slice(0, 15).map(t => <Text key={t.name}><Text color="#61afef">{"  " + t.name.padEnd(25)}</Text><Text dimColor>{t.description}</Text></Text>)}
+          {tools.length > 15 && <Text dimColor>  ...{tools.length - 15} more</Text>}
+        </>}
+        {srv && srv.errorLog.length > 0 && <>
+          <Text> </Text>
+          <Text bold color="red">Errors</Text>
+          {srv.errorLog.slice(-3).map((e, i) => <Text key={i} dimColor>  {e.trim().slice(0, 80)}</Text>)}
+        </>}
+        <Text> </Text>
+        <Text dimColor><Text color="#61afef" bold>e</Text> edit config  <Text color="#61afef" bold>esc</Text> back</Text>
+        {message && <Text color="#4ec9b0">{message}</Text>}
+      </Box>
+    );
+  }
 
   return (
     <Box flexDirection="column" borderStyle="single" borderColor="#5a6aa8" paddingX={1}>
