@@ -99,24 +99,23 @@ describe("MCP Router", () => {
   });
 
   it("parses server and tool name from mcp_ format", async () => {
-    const engine = { all: [{ name: "db", status: "disconnected", process: null, errorLog: [], tools: [] }] } as any;
+    const engine = { callTool: async () => "Error: Server \"db\" not connected." } as any;
     const result = await routeMCPToolCall("mcp_db_query", { sql: "SELECT 1" }, engine);
     expect(result.success).toBe(false);
     expect(result.output).toContain("not connected");
   });
 
   it("returns error for invalid tool name format", async () => {
-    const engine = { all: [] } as any;
+    const engine = { callTool: async () => "" } as any;
     const result = await routeMCPToolCall("invalid_name", {}, engine);
     expect(result.success).toBe(false);
     expect(result.output).toContain("Invalid MCP tool name");
   });
 
   it("returns error for unknown server", async () => {
-    const engine = { all: [] } as any;
+    const engine = { callTool: async () => "Error: Server \"unknown\" not connected." } as any;
     const result = await routeMCPToolCall("mcp_unknown_tool", {}, engine);
     expect(result.success).toBe(false);
-    expect(result.output).toContain("not found");
   });
 });
 

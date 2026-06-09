@@ -134,7 +134,7 @@ describe("Integration: MCP Routing", () => {
     expect(isMCPTool("mcp_db_query")).toBe(true);
     expect(isMCPTool("read_file")).toBe(false);
 
-    const engine = { all: [{ name: "db", status: "disconnected", process: null, errorLog: [], tools: [] }] } as any;
+    const engine = { callTool: async () => "Error: Server \"db\" not connected." } as any;
     const result = await routeMCPToolCall("mcp_db_query", { sql: "SELECT 1" }, engine);
     expect(result.success).toBe(false); // Not connected
   });
