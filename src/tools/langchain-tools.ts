@@ -138,6 +138,35 @@ export const langchainTools = [
       cron: z.string().optional().describe("Recurring cron pattern (e.g. '*/5 * * * *')"),
     }),
   }),
+  tool(noop, {
+    name: "read_plan",
+    description: "Read the active plan. Returns all plan items grouped by priority (now/next/later). Use action='load' with a name to get the full body of a specific item.",
+    schema: z.object({
+      action: z.string().optional().describe("Optional: 'load' to read full body of a specific item"),
+      name: z.string().optional().describe("Item name (without .md) when action=load"),
+    }),
+  }),
+  tool(noop, {
+    name: "write_plan",
+    description: "Add, remove, or reprioritize plan items. Actions: add (create item), remove (delete item), prioritize (change priority).",
+    schema: z.object({
+      action: z.enum(["add", "remove", "prioritize"]).describe("Action to perform"),
+      name: z.string().describe("Item name/id (no .md extension)"),
+      description: z.string().optional().describe("Short description (for add)"),
+      rationale: z.string().optional().describe("Why this item matters (for add)"),
+      priority: z.enum(["now", "next", "later"]).optional().describe("Priority level"),
+      body: z.string().optional().describe("Full detail markdown (for add)"),
+    }),
+  }),
+  tool(noop, {
+    name: "update_plan",
+    description: "Edit the body of an existing plan item using search/replace.",
+    schema: z.object({
+      name: z.string().describe("Item name (without .md)"),
+      search: z.string().describe("Exact text to find in the item body"),
+      replace: z.string().describe("Replacement text"),
+    }),
+  }),
 ];
 
 /** Get LangChain tool objects filtered by tool names from an agent manifest */
