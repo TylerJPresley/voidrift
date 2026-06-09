@@ -51,6 +51,7 @@ export interface MCPServer {
   tools: MCPToolSchema[];
   resources: MCPResource[];
   prompts: MCPPrompt[];
+  instructions?: string;
 }
 
 export interface MCPToolSchema {
@@ -132,8 +133,32 @@ export class MCPEngine {
 
     try {
       const transport = this.createTransport(config, token);
+      const serverRef = server;
+      const busRef = this.bus;
       const client = new Client({ name: "voidrift", version: "0.1.0" }, {
         capabilities: {},
+        listChanged: {
+          tools: {
+            onChanged: (tools: any) => {
+              serverRef.tools = (tools ?? []).map((t: any) => ({
+                name: t.name,
+                description: t.description ?? "",
+                inputSchema: (t.inputSchema as Record<string, unknown>) ?? {},
+              }));
+              busRef.publish("RESOURCE_CHANGED", { path: `mcp:${config.name}`, type: "tools_updated" } as any);
+            },
+          },
+          resources: {
+            onChanged: (resources: any) => {
+              serverRef.resources = (resources ?? []).map((r: any) => ({ uri: r.uri, name: r.name ?? r.uri, mimeType: r.mimeType }));
+            },
+          },
+          prompts: {
+            onChanged: (prompts: any) => {
+              serverRef.prompts = (prompts ?? []).map((p: any) => ({ name: p.name, description: p.description ?? "", arguments: p.arguments ?? [] }));
+            },
+          },
+        },
       });
       await client.connect(transport);
 
@@ -145,18 +170,8 @@ export class MCPEngine {
         inputSchema: (t.inputSchema as Record<string, unknown>) ?? {},
       }));
 
-      // Subscribe to tools/list_changed notification — refresh tools when server updates
-      client.setNotificationHandler({ method: "notifications/tools/list_changed" } as any, async () => {
-        try {
-          const refreshed = await client.listTools();
-          server.tools = (refreshed.tools ?? []).map(t => ({
-            name: t.name,
-            description: t.description ?? "",
-            inputSchema: (t.inputSchema as Record<string, unknown>) ?? {},
-          }));
-          this.bus.publish("RESOURCE_CHANGED", { path: `mcp:${config.name}`, type: "tools_updated" } as any);
-        } catch {}
-      });
+      // Get server instructions (additional system prompt context)
+      server.instructions = client.getInstructions() ?? undefined;
 
       // Discover resources if supported
       try {
@@ -229,6 +244,21 @@ export class MCPEngine {
     } catch (err) {
       return `Error: ${err instanceof Error ? err.message : String(err)}`;
     }
+  }
+
+  /** Ping a connected server to check health */
+  async ping(serverName: string): Promise<boolean> {
+    const server = this.servers.get(serverName);
+    if (!server?.client) return false;
+    try { await server.client.ping(); return true; }
+    catch { server.status = "error"; return false; }
+  }
+
+  /** Get all server instructions for injection into system prompt */
+  getAllInstructions(): string[] {
+    return this.connected
+      .filter(s => s.instructions)
+      .map(s => `[MCP:${s.name}] ${s.instructions}`);
   }
 
   /** Read a resource from a connected MCP server */

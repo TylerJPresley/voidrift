@@ -67,6 +67,9 @@ export async function executeTurn(engine: EngineContext, userMessage: string, ca
 
   // Extract system prompt: merge all system messages (governance + workspace) into one block
   const systemParts = compiled.filter(m => m.role === "system").map(m => m.content);
+  // Inject MCP server instructions if any connected servers provide them
+  const mcpInstructions = engine.mcp.getAllInstructions();
+  if (mcpInstructions.length) systemParts.push(mcpInstructions.join("\n"));
   const systemPrompt = systemParts.join("\n\n") || engine.context.context.agent.activePersona;
 
   // Extract conversation history (only user/assistant messages, exclude current turn)
