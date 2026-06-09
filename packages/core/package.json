@@ -3,12 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "main": "./src/index.ts",
+  "main": "./dist/index.js",
   "bin": {
-    "voidrift": "./src/main.ts"
+    "voidrift": "./dist/main.js"
   },
   "scripts": {
     "start": "bun src/main.tsx",
+    "build": "tsc && node -e \"const{cpSync}=require('fs');cpSync('dist','../../dist',{recursive:true})\"",
     "test": "vitest run",
     "test:watch": "vitest"
   },
