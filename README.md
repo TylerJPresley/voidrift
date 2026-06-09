@@ -287,18 +287,37 @@ bun --version
 ### Install VoidRift
 
 ```bash
-git clone https://github.com/TylerJPresley/voidrift.git
-cd voidrift
-bun install
+# Install globally
+npm install -g voidrift
+
+# Or with Bun
+bun install -g voidrift
 ```
 
 ### Run
 
 ```bash
-bun start
+# Navigate to your project
+cd ~/my-project
+
+# Launch
+voidrift
 ```
 
 VoidRift launches in the current directory as the workspace root. Type `/help` for the interactive guide, or just start typing.
+
+### Development Install (from source)
+
+If you want to contribute or run the latest unreleased version:
+
+```bash
+git clone https://github.com/TylerJPresley/voidrift.git
+cd voidrift
+bun install
+
+# Run from source
+bun start
+```
 
 ---
 
