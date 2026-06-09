@@ -260,17 +260,68 @@ VoidRift runs as a React/Ink application in your terminal. No browser, no Electr
 
 ---
 
-## Quick Start
+## Installation
+
+### Prerequisites
+
+| Requirement | Version | Purpose |
+|-------------|---------|---------|
+| [Bun](https://bun.sh) | ≥ 1.0 | Runtime and package manager |
+| [Git](https://git-scm.com) | ≥ 2.30 | Workspace checkpointing, worktree isolation |
+| A model endpoint | — | Ollama, vLLM, cloud API, or any OpenAI-compatible server |
+
+**Optional:**
+- [Ollama](https://ollama.ai) — easiest way to run local models
+- A text editor set in config (`vscode`, `vim`, `nvim`, `cursor`, `zed`, `emacs`, `nano`) — for skill/prompt editing via panels
+
+### Install Bun
 
 ```bash
-# Prerequisites: Bun runtime, a model endpoint
+# macOS / Linux
+curl -fsSL https://bun.sh/install | bash
 
-# Clone and install
+# Verify
+bun --version
+```
+
+### Install VoidRift
+
+```bash
 git clone https://github.com/TylerJPresley/voidrift.git
 cd voidrift
 bun install
+```
 
-# Configure your model
+### Run
+
+```bash
+bun start
+```
+
+VoidRift launches in the current directory as the workspace root. Type `/help` for the interactive guide, or just start typing.
+
+---
+
+## Configuration
+
+VoidRift needs at least one model configured to function. Configuration lives in two places:
+
+| Location | Scope | Purpose |
+|----------|-------|---------|
+| `~/.config/voidrift/config.json` | Global | Your default models and preferences |
+| `.voidrift/config.json` | Project | Per-project overrides (checked into git) |
+
+Project config is merged on top of global — you can override tiers, add models, or change settings per workspace.
+
+### Minimal Configuration (Local Model)
+
+If you're running Ollama locally:
+
+```bash
+# Pull a model first
+ollama pull qwen2.5-coder:7b-instruct
+
+# Create config
 mkdir -p ~/.config/voidrift
 cat > ~/.config/voidrift/config.json << 'EOF'
 {
@@ -282,7 +333,7 @@ cat > ~/.config/voidrift/config.json << 'EOF'
   "models": {
     "local": {
       "protocol": "openai",
-      "model": "qwen2.5-coder-7b-instruct",
+      "model": "qwen2.5-coder:7b-instruct",
       "baseUrl": "http://localhost:11434/v1",
       "contextLimit": 32768,
       "temperature": 0.2
@@ -290,12 +341,244 @@ cat > ~/.config/voidrift/config.json << 'EOF'
   }
 }
 EOF
-
-# Run
-bun start
 ```
 
-Once running, type `/help` for the interactive guide, or just start typing.
+### Multi-Model Configuration (Mixed Local + Cloud)
+
+Use cheap local models for simple tasks, cloud models for heavy reasoning:
+
+```json
+{
+  "tiers": {
+    "flash": "qwen-local",
+    "utility": "claude-sonnet",
+    "dense": "claude-opus"
+  },
+  "models": {
+    "qwen-local": {
+      "protocol": "openai",
+      "model": "qwen2.5-coder:7b-instruct",
+      "baseUrl": "http://localhost:11434/v1",
+      "contextLimit": 32768,
+      "temperature": 0.2
+    },
+    "claude-sonnet": {
+      "protocol": "anthropic",
+      "model": "claude-sonnet-4-20250514",
+      "baseUrl": "https://api.anthropic.com",
+      "apiKeyEnv": "ANTHROPIC_API_KEY",
+      "contextLimit": 200000,
+      "temperature": 0.2,
+      "maxOutputTokens": 8192
+    },
+    "claude-opus": {
+      "protocol": "anthropic",
+      "model": "claude-opus-4-20250514",
+      "baseUrl": "https://api.anthropic.com",
+      "apiKeyEnv": "ANTHROPIC_API_KEY",
+      "contextLimit": 200000,
+      "temperature": 0.2,
+      "maxOutputTokens": 16384
+    }
+  }
+}
+```
+
+### Google Gemini Configuration
+
+```json
+{
+  "tiers": {
+    "flash": "gemini-flash",
+    "utility": "gemini-pro",
+    "dense": "gemini-pro"
+  },
+  "models": {
+    "gemini-flash": {
+      "protocol": "google",
+      "model": "gemini-2.0-flash",
+      "baseUrl": "https://generativelanguage.googleapis.com",
+      "apiKeyEnv": "GOOGLE_API_KEY",
+      "contextLimit": 1000000,
+      "temperature": 0.2
+    },
+    "gemini-pro": {
+      "protocol": "google",
+      "model": "gemini-2.5-pro",
+      "baseUrl": "https://generativelanguage.googleapis.com",
+      "apiKeyEnv": "GOOGLE_API_KEY",
+      "contextLimit": 1000000,
+      "temperature": 0.2,
+      "maxOutputTokens": 65536
+    }
+  }
+}
+```
+
+### vLLM / OpenAI-Compatible Server
+
+Any endpoint that speaks the OpenAI chat completions API:
+
+```json
+{
+  "models": {
+    "my-server": {
+      "protocol": "openai",
+      "model": "meta-llama/Llama-3.1-70B-Instruct",
+      "baseUrl": "http://your-server:8000/v1",
+      "apiKeyEnv": "VLLM_API_KEY",
+      "contextLimit": 131072,
+      "temperature": 0.2
+    }
+  }
+}
+```
+
+### Environment Variables
+
+API keys are never stored in config files. Reference them by environment variable name:
+
+```bash
+# Add to your shell profile (~/.bashrc, ~/.zshrc, etc.)
+export ANTHROPIC_API_KEY="sk-ant-..."
+export GOOGLE_API_KEY="AIza..."
+export OPENAI_API_KEY="sk-..."
+```
+
+The `apiKeyEnv` field in model config tells VoidRift which env var to read.
+
+### Additional Config Options
+
+```json
+{
+  "editor": "nvim",
+  "summarizeThreshold": 500,
+  "maxReadLines": 1000,
+  "maxConcurrentAgents": 1,
+  "plugins": [],
+  "search": {
+    "provider": "duckduckgo"
+  }
+}
+```
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `editor` | none | Editor for opening skill/prompt/agent files from panels |
+| `summarizeThreshold` | 500 | Lines above which files get Flash-summarized instead of full-loaded |
+| `maxReadLines` | 1000 | Default max lines returned by read_file |
+| `maxConcurrentAgents` | 1 | How many background subagents can run simultaneously |
+| `plugins` | `[]` | Additional npm packages to load as plugins |
+| `search.provider` | `"duckduckgo"` | Web search backend (`duckduckgo`, `tavily`, `google`) |
+| `search.apiKey` | none | API key for Tavily or Google search (not needed for DuckDuckGo) |
+
+---
+
+## Troubleshooting
+
+### VoidRift won't start
+
+**"Cannot find module" or import errors:**
+```bash
+# Clean install
+rm -rf node_modules packages/*/node_modules
+bun install
+```
+
+**"bun: command not found":**
+```bash
+# Bun isn't in your PATH. Re-run the installer or add manually:
+export BUN_INSTALL="$HOME/.bun"
+export PATH="$BUN_INSTALL/bin:$PATH"
+```
+
+**Blank screen or immediate exit:**
+- Your terminal must support 256 colors and Unicode. Most modern terminals do (iTerm2, Alacritty, Kitty, Windows Terminal, GNOME Terminal). Older terminals like raw `xterm` may not work.
+- Minimum terminal size: 80 columns × 24 rows.
+
+### Model connection issues
+
+**"Connection refused" or timeout:**
+- Verify the model endpoint is running: `curl http://localhost:11434/v1/models` (for Ollama)
+- Check the `baseUrl` in your config — it should include `/v1` for OpenAI-compatible APIs
+- For remote endpoints, ensure the port is accessible and not firewalled
+
+**"401 Unauthorized" or "Invalid API key":**
+- Check that the environment variable specified in `apiKeyEnv` is set: `echo $ANTHROPIC_API_KEY`
+- Verify the key is valid with a direct curl: `curl -H "x-api-key: $ANTHROPIC_API_KEY" https://api.anthropic.com/v1/messages`
+- Environment variables must be set in the shell that launches VoidRift, not just in a `.env` file
+
+**"Model not found":**
+- For Ollama: run `ollama list` to see installed models. The `model` field in config must match exactly.
+- For cloud APIs: verify you have access to the model. Some models require waitlist approval.
+
+**Model responds but output is garbage or empty:**
+- Check `contextLimit` matches the actual model's limit. Setting it too high can cause silent failures.
+- Try increasing `temperature` slightly (some models produce empty output at 0.0).
+- Verify the model supports tool/function calling (required for VoidRift's tool system).
+
+### Permission issues
+
+**Model keeps asking for approval on everything:**
+- In Chat mode, all write operations require approval by design. Use Vibe mode (`Shift+Tab` twice) for autonomous execution.
+- Add policy rules for common patterns: `/policy add allow execute_command 'npm test'`
+- Trust broader patterns during the session (select the pattern option in the confirmation dialog)
+
+**"auto-denied: use read_file instead":**
+- The model tried to use `cat` or `grep` via shell. This is intentional — dedicated tools are safer and produce better context. The model should self-correct on the next attempt.
+
+**Can't read files outside workspace:**
+- By design. Approve the confirmation dialog to allow it, or use an absolute path which triggers the gate.
+
+### MCP server issues
+
+**"Server not connecting" or timeout:**
+- Verify the URL is reachable: `curl https://mcp.example.com/mcp`
+- Check if the server requires authentication. Open `/mcp`, select the server, press `o` to run the OAuth flow.
+- Some servers need a warm-up period after first connection.
+
+**"Schema is missing a method literal":**
+- Update VoidRift to the latest version. This was a bug in older versions related to SDK request handlers.
+
+**OAuth flow fails:**
+- Ensure your browser can open from the terminal (`xdg-open` on Linux, `open` on macOS)
+- The OAuth callback server runs on a random localhost port. Ensure no firewall blocks localhost connections.
+- Check that the server's OAuth configuration hasn't expired or been revoked.
+
+**MCP tools not appearing after connect:**
+- The server may have no tools (only resources or prompts). Check the detail view in `/mcp` for tool count.
+- Try disconnecting and reconnecting: detail view → `x` to disconnect → `x` again to connect.
+
+### Context and performance
+
+**Model seems to "forget" things from earlier:**
+- Check context usage with `/stats` or the status bar. If above 80%, run `/compact` to free space.
+- The model has limited working memory. Older conversation turns get compacted automatically, preserving key facts but losing detail.
+
+**Slow responses:**
+- Check `/stats` for tokens/second. If low, the model endpoint may be overloaded.
+- Local models are CPU-bound without GPU. A 7B model needs ~8GB VRAM for reasonable speed.
+- Large files in context slow everything down. Use the summarizer (files above `summarizeThreshold` get auto-summarized).
+
+**"Context limit exceeded":**
+- The model's context window is full. Run `/compact` or switch to a model with a larger `contextLimit`.
+- The router automatically escalates to denser models when context fills up, but only if a larger model is configured.
+
+### Git and workspace
+
+**"Not a git repository":**
+- VoidRift works without git, but checkpointing and `/rewind` require it. Initialize with `git init` if needed.
+- Subagent isolation (worktrees) requires git.
+
+**Unexpected file changes:**
+- Use `/diff` to see what changed. Use `/rewind` to roll back to a previous turn.
+- In Vibe mode, the model writes without asking. Switch to Chat mode if you want approval on changes.
+
+### Getting help
+
+- `/help` — built-in interactive guide
+- [DOCS.md](./DOCS.md) — full technical reference
+- [GitHub Issues](https://github.com/TylerJPresley/voidrift/issues) — bug reports and feature requests
 
 ## Further Reading
 
