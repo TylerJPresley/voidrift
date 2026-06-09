@@ -1,6 +1,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { ListRootsRequestSchema, CreateMessageRequestSchema, ElicitRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { existsSync, readFileSync, writeFileSync, readdirSync, unlinkSync, mkdirSync } from "fs";
 import { join, basename } from "path";
 import { homedir } from "os";
@@ -180,13 +181,13 @@ export class MCPEngine {
       await client.connect(transport);
 
       // Handle server-to-client requests: roots/list
-      client.setRequestHandler({ method: "roots/list" } as any, async () => ({
+      client.setRequestHandler(ListRootsRequestSchema, async () => ({
         roots: [{ uri: `file://${workspaceRootRef}`, name: "workspace" }],
       }));
 
       // Handle sampling request: server asks client to call a model
       if (samplingRef) {
-        client.setRequestHandler({ method: "sampling/createMessage" } as any, async (request: any) => {
+        client.setRequestHandler(CreateMessageRequestSchema, async (request: any) => {
           const messages = (request.params?.messages ?? []).map((m: any) => ({
             role: m.role ?? "user",
             content: typeof m.content === "string" ? m.content : m.content?.text ?? "",
@@ -201,7 +202,7 @@ export class MCPEngine {
 
       // Handle elicitation request: server asks user a question
       if (elicitationRef) {
-        client.setRequestHandler({ method: "elicitation/create" } as any, async (request: any) => {
+        client.setRequestHandler(ElicitRequestSchema, async (request: any) => {
           const message = request.params?.message ?? "";
           const schema = request.params?.requestedSchema;
           const result = await elicitationRef(message, schema);
