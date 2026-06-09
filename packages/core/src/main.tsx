@@ -350,7 +350,8 @@ function App({ engine }: { engine: EngineContext }) {
     ];
     const patterns = confirmRequest.inferredPatterns || [];
     for (const p of patterns) {
-      opts.push({ label: `Trust, always allow "${p}"`, approved: true, persist: false, pattern: p });
+      const displayPattern = p.startsWith("mcp_") ? p.replace(/^mcp_([^_]+)_(.+)$/, "MCP:$1:$2").replace(/^mcp_([^_]+)_\*$/, "MCP:$1:*") : p;
+      opts.push({ label: `Trust, always allow "${displayPattern}"`, approved: true, persist: false, pattern: p });
     }
     opts.push({ label: "No", approved: false });
     return opts;
@@ -744,7 +745,7 @@ function App({ engine }: { engine: EngineContext }) {
       {confirmRequest && (
         <Box flexDirection="column" marginTop={1} borderStyle="round" borderColor="yellow" paddingX={1}>
           <Text color="yellow" bold>⚠ Tool requires approval</Text>
-          <Text>  <Text bold>{confirmRequest.tool}</Text>({Object.entries(confirmRequest.args).map(([k,v]) => `${k}: ${typeof v === "string" && v.length > 60 ? v.slice(0, 57) + "..." : JSON.stringify(v)}`).join(", ")})</Text>
+          <Text>  <Text bold>{confirmRequest.tool.startsWith("mcp_") ? confirmRequest.tool.replace(/^mcp_([^_]+)_(.+)$/, "MCP:$1:$2") : confirmRequest.tool}</Text>({Object.entries(confirmRequest.args).map(([k,v]) => `${k}: ${typeof v === "string" && v.length > 60 ? v.slice(0, 57) + "..." : JSON.stringify(v)}`).join(", ")})</Text>
           {confirmRequest.diff && confirmRequest.diff.length > 0 && (
             <Box flexDirection="column" paddingLeft={2} marginTop={1}>
               {confirmRequest.diff.slice(0, 8).map((line, i) => (

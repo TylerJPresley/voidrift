@@ -247,14 +247,20 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
     for (const server of input.mcp.connected) {
       for (const mcpTool of server.tools) {
         const fullName = `mcp_${server.name}_${mcpTool.name}`;
-        // Build zod schema from MCP inputSchema properties
         const props = (mcpTool.inputSchema as any)?.properties ?? {};
-        const required = (mcpTool.inputSchema as any)?.required ?? [];
+        const required: string[] = (mcpTool.inputSchema as any)?.required ?? [];
         const schemaFields: Record<string, any> = {};
         for (const [key, val] of Object.entries(props)) {
           const desc = (val as any)?.description ?? "";
-          let field = z.string().describe(desc);
-          if (!required.includes(key)) field = field.optional() as any;
+          const type = (val as any)?.type ?? "string";
+          let field: any;
+          switch (type) {
+            case "number": case "integer": field = z.number().describe(desc); break;
+            case "boolean": field = z.boolean().describe(desc); break;
+            case "array": field = z.array(z.any()).describe(desc); break;
+            default: field = z.string().describe(desc); break;
+          }
+          if (!required.includes(key)) field = field.optional();
           schemaFields[key] = field;
         }
         const schema = Object.keys(schemaFields).length > 0 ? z.object(schemaFields) : z.object({}).passthrough();
