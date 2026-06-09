@@ -839,6 +839,12 @@ const engine: EngineContext = await (async () => {
   const templates = new TemplateService(workspaceRoot);
   const prompts = new PromptRegistry(workspaceRoot);
   const mcp = new MCPEngine(workspaceRoot, container.bus);
+  // Auto-connect MCP servers that have autoConnect: true
+  for (const cfg of mcp.loadConfigs()) {
+    if ((cfg as any).autoConnect !== false) {
+      mcp.connect(cfg).catch(() => {});
+    }
+  }
   const worktree = new WorktreeEngine(workspaceRoot, container.bus);
   const checkpointer = new GitCheckpointer(workspaceRoot, container.bus);
   checkpointer.attach();

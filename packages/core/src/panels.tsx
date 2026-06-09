@@ -646,7 +646,7 @@ export function MemoryPanel({ memory, context, onClose }: { memory: MemoryRegist
 export function MCPPanel({ mcp, config, onClose }: { mcp: MCPEngine; config: VoidRiftConfig; onClose: () => void }) {
   const [cursor, setCursor] = useState(0);
   const [message, setMessage] = useState<string | null>(null);
-  const [createState, setCreateState] = useState<{ step: "name" | "url"; name?: string } | null>(null);
+  const [createState, setCreateState] = useState<{ step: "scope" | "name" | "url"; scope?: "workspace" | "global"; name?: string } | null>(null);
   const [inputValue, setInputValue] = useState("");
 
   const configs = mcp.loadConfigs();
@@ -660,7 +660,12 @@ export function MCPPanel({ mcp, config, onClose }: { mcp: MCPEngine; config: Voi
   useInput((input, key) => {
     if (createState) {
       if (key.escape) { setCreateState(null); setInputValue(""); setMessage(null); return; }
-      // TextInput handles all typing/pasting — useInput only needs esc
+      if (createState.step === "scope") {
+        if (input === "w") { setCreateState({ step: "name", scope: "workspace" }); setMessage("Enter server id (lower-case, hyphens only):"); }
+        if (input === "g") { setCreateState({ step: "name", scope: "global" }); setMessage("Enter server id (lower-case, hyphens only):"); }
+        return;
+      }
+      // TextInput handles name and url steps
       return;
     }
 
@@ -674,8 +679,8 @@ export function MCPPanel({ mcp, config, onClose }: { mcp: MCPEngine; config: Voi
       else setMessage(`Config not found: ${path}`);
     }
     if (input === "c") {
-      setCreateState({ step: "name" });
-      setMessage("Enter server id (lower-case, hyphens only):");
+      setCreateState({ step: "scope" });
+      setMessage("Create MCP server — scope: (w) workspace  (g) global");
     }
     if (key.delete && allNames[cursor]) {
       const name = allNames[cursor];
@@ -760,20 +765,19 @@ export function MCPPanel({ mcp, config, onClose }: { mcp: MCPEngine; config: Voi
         <Box><Text color="#61afef">  &gt; </Text><TextInput value={inputValue} onChange={setInputValue} onSubmit={(v) => {
           if (v.length > 0) {
             const name = createState.name!;
+            const dirIdx = createState.scope === "global" ? 1 : 0;
             setMessage("Discovering server...");
             setInputValue("");
             import("./mcp/discovery.js").then(({ discoverMCPServer, buildConfigFromDiscovery }) => {
               discoverMCPServer(v, setMessage).then((discovery) => {
+                const cfgPath = join(mcp["configDirs"][dirIdx], `${name}.json`);
+                mkdirSync(dirname(cfgPath), { recursive: true });
                 if (discovery.error) {
                   setMessage(`Discovery failed: ${discovery.error}`);
-                  const cfgPath = join(mcp["configDirs"][0], `${name}.json`);
-                  mkdirSync(dirname(cfgPath), { recursive: true });
-                  writeFileSync(cfgPath, JSON.stringify({ transport: "http-sse", url: v }, null, 2), "utf-8");
+                  writeFileSync(cfgPath, JSON.stringify({ transport: "http-sse", url: v, autoConnect: true }, null, 2), "utf-8");
                 } else {
                   const cfg = buildConfigFromDiscovery(name, discovery);
-                  const cfgPath = join(mcp["configDirs"][0], `${name}.json`);
-                  mkdirSync(dirname(cfgPath), { recursive: true });
-                  writeFileSync(cfgPath, JSON.stringify(cfg, null, 2), "utf-8");
+                  writeFileSync(cfgPath, JSON.stringify({ ...cfg, autoConnect: true }, null, 2), "utf-8");
                   setMessage(discovery.requiresAuth ? `Created ${name} — auth required. Press 'o' to authenticate.` : `Created ${name} — press 'x' to connect.`);
                 }
                 setCreateState(null);
