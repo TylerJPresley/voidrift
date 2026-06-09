@@ -134,7 +134,7 @@ export class MCPEngine {
 
   private async connectHttp(server: MCPServer, config: MCPServerConfig, token?: string): Promise<MCPServer> {
     const url = config.url!;
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    const headers: Record<string, string> = { "Content-Type": "application/json", "Accept": "application/json, text/event-stream" };
     if (token) headers["Authorization"] = `Bearer ${token}`;
 
     try {
