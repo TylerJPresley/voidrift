@@ -670,7 +670,9 @@ export function MCPPanel({ mcp, config, onClose }: { mcp: MCPEngine; config: Voi
     }
 
     if (detail) {
-      if (key.escape) { setDetail(null); return; }
+      if (key.escape) { setDetail(null); setMessage(null); return; }
+      // Clear previous status on any new keypress
+      if (input || key.return) setMessage(null);
       if (input === "e" && config.editor) {
         for (const dir of mcp["configDirs"]) {
           const path = join(dir, `${detail}.json`);
