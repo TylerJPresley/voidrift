@@ -61,6 +61,10 @@ export interface MCPToolSchema {
   annotations?: Record<string, unknown>;
 }
 
+export type SamplingHandler = (messages: Array<{ role: string; content: string }>, options?: { maxTokens?: number; temperature?: number }) => Promise<{ role: string; content: string }>;
+export type ElicitationHandler = (message: string, schema?: Record<string, unknown>) => Promise<{ action: "accept" | "deny"; content?: Record<string, string> }>;
+
+/**
 /**
  * MCP Integration Engine (G-12).
  *
@@ -70,6 +74,8 @@ export interface MCPToolSchema {
 export class MCPEngine {
   private servers = new Map<string, MCPServer>();
   private configDirs: string[];
+  private samplingHandler?: SamplingHandler;
+  private elicitationHandler?: ElicitationHandler;
 
   constructor(private workspaceRoot: string, private bus: EventBus) {
     this.configDirs = [
@@ -77,6 +83,9 @@ export class MCPEngine {
       join(homedir(), ".config", "voidrift", "mcp"),
     ];
   }
+
+  setSamplingHandler(handler: SamplingHandler): void { this.samplingHandler = handler; }
+  setElicitationHandler(handler: ElicitationHandler): void { this.elicitationHandler = handler; }
 
   loadConfigs(): MCPServerConfig[] {
     const configs: MCPServerConfig[] = [];
@@ -137,9 +146,13 @@ export class MCPEngine {
       const serverRef = server;
       const busRef = this.bus;
       const workspaceRootRef = this.workspaceRoot;
+      const samplingRef = this.samplingHandler;
+      const elicitationRef = this.elicitationHandler;
       const client = new Client({ name: "voidrift", version: "0.1.0" }, {
         capabilities: {
           roots: { listChanged: true },
+          ...(this.samplingHandler ? { sampling: {} } : {}),
+          ...(this.elicitationHandler ? { elicitation: {} } : {}),
         },
         listChanged: {
           tools: {
@@ -170,6 +183,31 @@ export class MCPEngine {
       client.setRequestHandler({ method: "roots/list" } as any, async () => ({
         roots: [{ uri: `file://${workspaceRootRef}`, name: "workspace" }],
       }));
+
+      // Handle sampling request: server asks client to call a model
+      if (samplingRef) {
+        client.setRequestHandler({ method: "sampling/createMessage" } as any, async (request: any) => {
+          const messages = (request.params?.messages ?? []).map((m: any) => ({
+            role: m.role ?? "user",
+            content: typeof m.content === "string" ? m.content : m.content?.text ?? "",
+          }));
+          const result = await samplingRef(messages, {
+            maxTokens: request.params?.maxTokens,
+            temperature: request.params?.temperature,
+          });
+          return { model: "voidrift-proxy", role: result.role, content: { type: "text", text: result.content } };
+        });
+      }
+
+      // Handle elicitation request: server asks user a question
+      if (elicitationRef) {
+        client.setRequestHandler({ method: "elicitation/create" } as any, async (request: any) => {
+          const message = request.params?.message ?? "";
+          const schema = request.params?.requestedSchema;
+          const result = await elicitationRef(message, schema);
+          return { action: result.action, content: result.content };
+        });
+      }
 
       // List tools
       const toolsResult = await client.listTools();

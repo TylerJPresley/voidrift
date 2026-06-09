@@ -850,6 +850,37 @@ const engine: EngineContext = await (async () => {
   const templates = new TemplateService(workspaceRoot);
   const prompts = new PromptRegistry(workspaceRoot);
   const mcp = new MCPEngine(workspaceRoot, container.bus);
+
+  // Wire MCP sampling handler: server asks us to call a model
+  mcp.setSamplingHandler(async (messages: Array<{ role: string; content: string }>, options?: { maxTokens?: number; temperature?: number }) => {
+    const { createTierAdapter } = await import("./adapters/factory.js");
+    const { HumanMessage: HM, SystemMessage: SM, AIMessage: AM } = await import("@langchain/core/messages");
+    const adapter = createTierAdapter("flash", container.config);
+    const lcMessages = messages.map((m: { role: string; content: string }) => {
+      if (m.role === "system") return new SM(m.content);
+      if (m.role === "assistant") return new AM(m.content);
+      return new HM(m.content);
+    });
+    const response = await adapter.client.invoke(lcMessages);
+    const text = typeof response.content === "string" ? response.content : "";
+    return { role: "assistant", content: text };
+  });
+
+  // Wire MCP elicitation handler: server asks user a question via bus
+  mcp.setElicitationHandler(async (message: string) => {
+    return new Promise((resolve) => {
+      const requestId = `elicit-${Date.now()}`;
+      container.bus.publish("TOOL_CONFIRMATION_REQUEST", { tool: "mcp_elicitation", args: { message }, requestId, inferredPatterns: [] } as any);
+      const unsub = container.bus.subscribe("TOOL_CONFIRMATION_RESPONSE", (event: any) => {
+        if (event.payload.requestId === requestId) {
+          unsub();
+          resolve(event.payload.approved ? { action: "accept" } : { action: "deny" });
+        }
+      });
+      setTimeout(() => { unsub(); resolve({ action: "deny" }); }, 120_000);
+    });
+  });
+
   // Auto-connect MCP servers that have autoConnect: true
   for (const cfg of mcp.loadConfigs()) {
     if ((cfg as any).autoConnect !== false) {
