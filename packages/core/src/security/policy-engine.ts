@@ -145,8 +145,14 @@ function matchCommandPattern(value: string, pattern: string): boolean {
 }
 
 function ruleMatchesTool(rule: PolicyRule, tool: string, args: Record<string, unknown>): boolean {
-  // Tool name match
-  if (rule.tool !== "*" && rule.tool !== tool) return false;
+  // Tool name match (supports * wildcard)
+  if (rule.tool !== "*" && rule.tool !== tool) {
+    if (rule.tool.includes("*")) {
+      if (!matchCommandPattern(tool, rule.tool)) return false;
+    } else {
+      return false;
+    }
+  }
 
   // Pattern match (if rule has one)
   if (rule.pattern) {
@@ -179,6 +185,15 @@ export function inferPattern(tool: string, args: Record<string, unknown>): strin
 
 /** Infer multiple trust patterns — from specific to broad */
 export function inferPatterns(tool: string, args: Record<string, unknown>): string[] {
+  // MCP tools: trust this tool, or all tools from the server
+  if (tool.startsWith("mcp_")) {
+    const match = tool.match(/^(mcp_[^_]+)_(.+)$/);
+    if (match) {
+      return [tool, `${match[1]}_*`];
+    }
+    return [tool];
+  }
+
   if ((tool === "write_file" || tool === "edit_file") && typeof args.path === "string") {
     const path = args.path as string;
     const parts = path.split("/");
@@ -263,9 +278,9 @@ export class PolicyEngine {
       return { decision: match.decision, rule: match, inferredPattern: inferPattern(tool, args) };
     }
 
-    // Default: ask for write tools, allow for read tools
+    // Default: ask for write tools and MCP tools, allow for read tools
     const writeTools = ["write_file", "edit_file", "execute_command"];
-    if (writeTools.includes(tool)) {
+    if (writeTools.includes(tool) || tool.startsWith("mcp_")) {
       return { decision: "ask", inferredPattern: inferPattern(tool, args) };
     }
 

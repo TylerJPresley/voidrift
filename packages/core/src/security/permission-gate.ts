@@ -78,8 +78,13 @@ export class PermissionGate {
           clearTimeout(timer);
           const chosenPattern = response.chosenPattern;
           if (response.approved && chosenPattern) {
-            // "Trust" option — session-scoped rule for this pattern
-            this.engine.addSessionRule({ tool, pattern: chosenPattern, decision: "allow" });
+            if (chosenPattern.startsWith("mcp_")) {
+              // MCP: pattern is a tool name/wildcard — store as tool field
+              this.engine.addSessionRule({ tool: chosenPattern, decision: "allow" });
+            } else {
+              // Regular tools: store pattern on the specific tool
+              this.engine.addSessionRule({ tool, pattern: chosenPattern, decision: "allow" });
+            }
           }
           resolve({
             approved: response.approved,
