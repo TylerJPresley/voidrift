@@ -410,6 +410,14 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
         } else {
           result = await executeTask();
         }
+      } else if (tc.name.startsWith("mcp_") && input.mcp) {
+        // MCP tool — route through the MCP engine
+        const match = tc.name.match(/^mcp_([^_]+)_(.+)$/);
+        if (match) {
+          result = await input.mcp.callTool(match[1], match[2], args);
+        } else {
+          result = `Error: Invalid MCP tool name: ${tc.name}`;
+        }
       } else {
         result = await executeToolCall(tc.name, tc.args, _workspaceRoot, input.context, input.config);
 
