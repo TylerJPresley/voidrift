@@ -278,9 +278,9 @@ export class PolicyEngine {
       return { decision: match.decision, rule: match, inferredPattern: inferPattern(tool, args) };
     }
 
-    // Default: ask for write tools and MCP tools, allow for read tools
-    const writeTools = ["write_file", "edit_file", "execute_command"];
-    if (writeTools.includes(tool) || tool.startsWith("mcp_")) {
+    // Default: ask for write tools, MCP tools, and network tools. Allow read tools.
+    const gatedTools = ["write_file", "edit_file", "execute_command", "web_search", "web_fetch"];
+    if (gatedTools.includes(tool) || tool.startsWith("mcp_")) {
       return { decision: "ask", inferredPattern: inferPattern(tool, args) };
     }
 
