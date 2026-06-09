@@ -60,7 +60,7 @@ export { PlanManager, type PlanItem } from "./session/plan.js";
 export { registerCommands, type CommandDeps } from "./commands/index.js";
 
 // Section 8: Orchestration
-export { directChat, runTurn, setWorkspaceRoot, setScheduler, setPlanManager, type OrchestrationInput, type OrchestrationResult } from "./orchestration/graph.js";
+export { directChat, runTurn, setWorkspaceRoot, setScheduler, setPlanManager, setMCPEngine, type OrchestrationInput, type OrchestrationResult } from "./orchestration/graph.js";
 export { runGoal, type GoalResult } from "./orchestration/goal.js";
 export { TaskScheduler, parseDelay, type ScheduledTask } from "./orchestration/scheduler.js";
 // developCR moved to @voidrift/plugin-dev

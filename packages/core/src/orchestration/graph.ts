@@ -23,6 +23,7 @@ let _workspaceRoot = process.cwd();
 let _cache: IndexCache | null = null;
 let _scheduler: any = null;
 let _planManager: any = null;
+let _mcpEngine: import("../mcp/engine.js").MCPEngine | null = null;
 function getCache(root: string): IndexCache {
   if (!_cache) {
     _cache = new IndexCache(root);
@@ -38,6 +39,9 @@ export function setScheduler(scheduler: any) {
 }
 export function setPlanManager(pm: any) {
   _planManager = pm;
+}
+export function setMCPEngine(engine: any) {
+  _mcpEngine = engine;
 }
 
 import { mergeMessageRuns } from "@langchain/core/messages";
@@ -238,6 +242,25 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
   const lcTools = isAnthropic
     ? await getAnthropicNativeTools(toolNames, _workspaceRoot)
     : getLangchainTools(toolNames);
+
+  // Append MCP tools as dynamic LangChain tools
+  if (_mcpEngine) {
+    const { DynamicStructuredTool } = await import("@langchain/core/tools");
+    const { z } = await import("zod");
+    for (const server of _mcpEngine.connected) {
+      for (const tool of server.tools) {
+        const fullName = `mcp_${server.name}_${tool.name}`;
+        lcTools.push(new DynamicStructuredTool({
+          name: fullName,
+          description: tool.description || tool.name,
+          schema: z.record(z.any()),
+          func: async (args: Record<string, unknown>) => {
+            return _mcpEngine!.callTool(server.name, tool.name, args);
+          },
+        }));
+      }
+    }
+  }
 
   let client: BaseChatModel = input.client;
   try {

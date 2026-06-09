@@ -26,6 +26,7 @@ import {
   setWorkspaceRoot,
   setScheduler,
   setPlanManager,
+  setMCPEngine,
   generateCodeMap,
   getGitBranch,
   shortenPath,
@@ -925,6 +926,7 @@ const engine: EngineContext = await (async () => {
   });
   setScheduler(scheduler);
   setPlanManager(planManager);
+  setMCPEngine(mcp);
 
   // Inject persisted plan into orbit
   const compiledPlan = planManager.compile();
