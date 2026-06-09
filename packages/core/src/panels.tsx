@@ -778,7 +778,7 @@ export function MCPPanel({ mcp, config, onClose }: { mcp: MCPEngine; config: Voi
           {srv.errorLog.slice(-3).map((e, i) => <Text key={i} dimColor>  {e.trim().slice(0, 80)}</Text>)}
         </>}
         <Text> </Text>
-        <Text dimColor><Text color="#61afef" bold>x</Text> connect  <Text color="#61afef" bold>o</Text> auth  <Text color="#61afef" bold>e</Text> edit  <Text color="#61afef" bold>a</Text> auto-connect  <Text color="#61afef" bold>esc</Text> back</Text>
+        <Text dimColor><Text color="#61afef" bold>esc</Text> back  │  <Text color="#61afef" bold>x</Text> connect  <Text color="#61afef" bold>o</Text> auth  <Text color="#61afef" bold>e</Text> edit  <Text color="#61afef" bold>a</Text> auto-connect</Text>
         {message && <Text color="#4ec9b0">{message}</Text>}
       </Box>
     );
