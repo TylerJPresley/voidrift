@@ -596,13 +596,13 @@ export PATH="$BUN_INSTALL/bin:$PATH"
 ### Getting help
 
 - `/help` — built-in interactive guide
-- [DOCS.md](./DOCS.md) — full technical reference
+- [FEATURES.md](./docs/FEATURES.md) — full technical reference
 - [GitHub Issues](https://github.com/TylerJPresley/voidrift/issues) — bug reports and feature requests
 
 ## Further Reading
 
-- [DOCS.md](./DOCS.md) — Complete technical reference (commands, tools, configuration, permissions)
-- [PLUGINS.md](./PLUGINS.md) — Plugin development guide (CoreAPI, events, panels, agents)
+- [FEATURES.md](./docs/FEATURES.md) — Complete technical reference (commands, tools, configuration, permissions)
+- [PLUGINS.md](./docs/PLUGINS.md) — Plugin development guide (CoreAPI, events, panels, agents)
 
 ## Contributing
 
