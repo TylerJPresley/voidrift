@@ -89,6 +89,7 @@ export async function executeTurn(engine: EngineContext, userMessage: string, ca
       config: engine.container.config,
       tier: isTierKey ? tier as Tier : undefined,
       agent: engine.agents.active,
+      mcp: engine.mcp,
     }, engine.container.bus);
   });
 

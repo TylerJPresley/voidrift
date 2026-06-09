@@ -23,7 +23,6 @@ let _workspaceRoot = process.cwd();
 let _cache: IndexCache | null = null;
 let _scheduler: any = null;
 let _planManager: any = null;
-let _mcpEngine: import("../mcp/engine.js").MCPEngine | null = null;
 function getCache(root: string): IndexCache {
   if (!_cache) {
     _cache = new IndexCache(root);
@@ -39,9 +38,6 @@ export function setScheduler(scheduler: any) {
 }
 export function setPlanManager(pm: any) {
   _planManager = pm;
-}
-export function setMCPEngine(engine: any) {
-  _mcpEngine = engine;
 }
 
 import { mergeMessageRuns } from "@langchain/core/messages";
@@ -213,6 +209,7 @@ export interface OrchestrationInput {
   config?: VoidRiftConfig;
   tier?: Tier;
   agent?: AgentManifest;
+  mcp?: import("../mcp/engine.js").MCPEngine;
 }
 
 export interface OrchestrationResult {
@@ -244,10 +241,10 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
     : getLangchainTools(toolNames);
 
   // Append MCP tools as dynamic LangChain tools
-  if (_mcpEngine) {
+  if (input.mcp) {
     const { tool } = await import("@langchain/core/tools");
     const { z } = await import("zod");
-    for (const server of _mcpEngine.connected) {
+    for (const server of input.mcp.connected) {
       for (const mcpTool of server.tools) {
         const fullName = `mcp_${server.name}_${mcpTool.name}`;
         // Build zod schema from MCP inputSchema properties
@@ -261,9 +258,10 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
           schemaFields[key] = field;
         }
         const schema = Object.keys(schemaFields).length > 0 ? z.object(schemaFields) : z.object({}).passthrough();
+        const mcpRef = input.mcp;
         lcTools.push(tool(
           async (args: Record<string, unknown>) => {
-            try { return await _mcpEngine!.callTool(server.name, mcpTool.name, args); }
+            try { return await mcpRef.callTool(server.name, mcpTool.name, args); }
             catch (err) { return `Error: ${err instanceof Error ? err.message : String(err)}`; }
           },
           { name: fullName, description: (mcpTool.description || mcpTool.name).slice(0, 200), schema }
