@@ -683,7 +683,13 @@ export function MCPPanel({ mcp, config, onClose }: { mcp: MCPEngine; config: Voi
         const cfg = configs.find(c => c.name === name);
         if (cfg) {
           setMessage(`Connecting ${name}...`);
-          mcp.connect(cfg).then(() => setMessage(`Connected: ${name}`));
+          mcp.connect(cfg).then((result) => {
+            if (result.status === "connected") {
+              setMessage(`Connected: ${name} (${result.tools.length} tools)`);
+            } else {
+              setMessage(`Error: ${result.errorLog[result.errorLog.length - 1] || "connection failed"}`);
+            }
+          });
         }
       }
     }
