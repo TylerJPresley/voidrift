@@ -500,7 +500,7 @@ The `apiKeyEnv` field in model config tells VoidRift which env var to read.
 **"Cannot find module" or import errors:**
 ```bash
 # Clean install
-rm -rf node_modules packages/*/node_modules
+rm -rf node_modules
 bun install
 ```
 

@@ -20,7 +20,7 @@ jobs:
         run: bun install
 
       - name: Typecheck
-        run: cd packages/core && npx tsc --noEmit
+        run: npx tsc --noEmit
 
       - name: Run tests
         run: bun test

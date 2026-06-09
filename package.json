@@ -24,10 +24,10 @@
     "langchain"
   ],
   "type": "module",
+  "main": "./dist/index.js",
   "bin": {
     "voidrift": "./dist/main.js"
   },
-  "main": "./dist/index.js",
   "files": [
     "dist/",
     "README.md",
@@ -35,6 +35,14 @@
   ],
   "engines": {
     "node": ">=18.0.0"
+  },
+  "scripts": {
+    "start": "bun src/main.tsx",
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build && npm test"
   },
   "dependencies": {
     "@langchain/anthropic": "^1.4.0",
@@ -48,15 +56,10 @@
     "react": "^19.2.6",
     "zod": "^3.23.0"
   },
-  "workspaces": [
-    "packages/*"
-  ],
-  "scripts": {
-    "start": "bun packages/core/src/main.tsx",
-    "build": "cd packages/core && bun run build",
-    "test": "bun --cwd packages/core vitest run",
-    "typecheck": "cd packages/core && npx tsc --noEmit",
-    "prepublishOnly": "npm run build && npm test",
-    "prepack": "npm run build"
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.2.15",
+    "typescript": "^5.5.0",
+    "vitest": "^3.0.0"
   }
 }

@@ -97,8 +97,8 @@ npm deprecate voidrift@0.1.3 "Bug in permission gate. Upgrade to >=0.1.4"
 
 ## Files That Get Published
 
-Only what's in the `files` array in root `package.json`:
-- `dist/` — compiled JS from `packages/core/src/`
+Only what's in the `files` array in `package.json`:
+- `dist/` — compiled JS from `src/`
 - `README.md`
 - `LICENSE`
 
@@ -115,23 +115,18 @@ Everything else is excluded. Verify with `npm pack --dry-run`.
 
 **`.github/workflows/publish.yml`** — Runs when you push a `v*` tag:
 - Same as CI (typecheck + test)
-- Builds (`tsc` → copies to root `dist/`)
+- Builds (`tsc`)
 - Publishes to npm with provenance
 
 ---
 
-## Monorepo Notes
+## Project Structure
 
-- Source lives in `packages/core/src/`
-- Build compiles to `packages/core/dist/`, then copies to root `dist/`
-- Root `package.json` is what npm publishes (the `voidrift` package)
-- `packages/core/package.json` is private — never published directly
-- Dependencies are declared in `packages/core/package.json` but hoisted to root `node_modules/`
+- Source lives in `src/`
+- Build compiles to `dist/`
+- `package.json` at root is what npm publishes
 
 When adding a dependency:
 ```bash
-cd packages/core
 bun add some-package
 ```
-
-The root `package.json` doesn't list dependencies — they come from the workspace. But npm publish uses the root, so dependencies must also be in root for end users. **TODO: sync deps to root before first real publish.**

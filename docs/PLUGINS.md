@@ -15,7 +15,7 @@ Plugins extend VoidRift by registering commands, agents, prompts, panels, and ev
 VoidRift discovers plugins in two ways:
 
 1. **npm packages** with `"voidrift": { "plugin": true }` in their `package.json`
-2. **Workspace packages** under `packages/` in a monorepo
+2. **Local packages** in your workspace's `node_modules`
 
 A discovered plugin must export an `activate` function:
 

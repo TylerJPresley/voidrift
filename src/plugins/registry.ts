@@ -54,7 +54,6 @@ export class PluginRegistry {
 
 /**
  * Scans node_modules for packages with "voidrift": { "plugin": true } in package.json.
- * Also scans workspace packages (packages/*) for local development.
  */
 export function discoverPlugins(workspaceRoot: string): DiscoveredPlugin[] {
   const discovered: DiscoveredPlugin[] = [];
