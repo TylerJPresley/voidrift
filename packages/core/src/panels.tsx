@@ -338,6 +338,8 @@ export function PlanPanel({ planManager, config, onClose }: { planManager: PlanM
   const [cursor, setCursor] = useState(0);
   const [detail, setDetail] = useState<string | null>(null);
   const [, refresh] = useState(0);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
   const pages = ["now", "next", "later"] as const;
   const termHeight = process.stdout.rows || 24;
   const viewHeight = termHeight - 9;
@@ -365,8 +367,17 @@ export function PlanPanel({ planManager, config, onClose }: { planManager: PlanM
     if (key.return && items[cursor]) { setDetail(items[cursor].filename); }
     if (ch === "n" && items[cursor]) { planManager.updatePriority(items[cursor].filename, "now"); refresh(n => n + 1); }
     if (ch === "x" && items[cursor]) { planManager.updatePriority(items[cursor].filename, "next"); refresh(n => n + 1); }
+    if (confirmDelete) {
+      if (ch === "y") {
+        planManager.remove(items[cursor].filename); refresh(n => n + 1);
+        setConfirmDelete(false); setMessage(null);
+      } else {
+        setConfirmDelete(false); setMessage(null);
+      }
+      return;
+    }
     if (ch === "l" && items[cursor]) { planManager.updatePriority(items[cursor].filename, "later"); refresh(n => n + 1); }
-    if (key.delete && items[cursor]) { planManager.remove(items[cursor].filename); refresh(n => n + 1); }
+    if (key.delete && items[cursor]) { setConfirmDelete(true); setMessage(`Delete "${items[cursor].filename.replace(".md","")}"? (y/n)`); }
   });
 
   if (detail) {
@@ -407,6 +418,7 @@ export function PlanPanel({ planManager, config, onClose }: { planManager: PlanM
       }
       <Text> </Text>
       <Text dimColor><Text color="#61afef" bold>←/→</Text> Tab  <Text color="#61afef" bold>↑↓</Text> Navigate  <Text color="#61afef" bold>enter</Text> Details  <Text color="#61afef" bold>esc</Text> Close  │  <Text color="#61afef" bold>n</Text> now  <Text color="#61afef" bold>x</Text> next  <Text color="#61afef" bold>l</Text> later  <Text color="#61afef" bold>del</Text> Remove</Text>
+      {message && <Text color="#4ec9b0">{message}</Text>}
     </Box>
   );
 }
@@ -453,6 +465,7 @@ export function SkillsPanel({ skills, config, workspaceRoot, agents, onClose }: 
   const [createName, setCreateName] = useState("");
   const [renaming, setRenaming] = useState(false);
   const [renameName, setRenameName] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   // Use indexed skills from the manager (already parsed with agents/active)
   const allAgentIds = [...agents.listInteractive(), ...agents.listTask()].map(a => a.id);
@@ -544,9 +557,20 @@ export function SkillsPanel({ skills, config, workspaceRoot, agents, onClose }: 
       setRenameName("");
       setMessage(`Rename "${skillList[cursor].name}" — enter new id:`);
     }
+    if (confirmDelete) {
+      if (input === "y") {
+        unlinkSync(skillList[cursor].path);
+        setMessage(`Deleted: ${skillList[cursor].name}`);
+        setConfirmDelete(false);
+      } else {
+        setConfirmDelete(false);
+        setMessage(null);
+      }
+      return;
+    }
     if (key.delete && skillList[cursor]) {
-      unlinkSync(skillList[cursor].path);
-      setMessage(`Deleted: ${skillList[cursor].name}`);
+      setConfirmDelete(true);
+      setMessage(`Delete "${skillList[cursor].name}"? (y/n)`);
     }
   });
 
