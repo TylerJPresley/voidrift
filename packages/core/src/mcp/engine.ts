@@ -19,6 +19,8 @@ export interface MCPAuthConfig {
 
 export interface MCPServerConfig {
   name: string;
+  transport?: "stdio" | "http-sse";
+  url?: string;
   command: string;
   args?: string[];
   env?: Record<string, string>;
@@ -107,13 +109,13 @@ export class MCPEngine {
   /** Connect to an MCP server. Handles OAuth token injection if configured. */
   async connect(config: MCPServerConfig): Promise<MCPServer> {
     const server: MCPServer = { name: config.name, config, process: null, status: "disconnected", errorLog: [], tools: [] };
-    const env = { ...process.env, ...this.resolveEnvVars(config.env ?? {}) };
 
-    // Inject OAuth token if auth is configured
+    // Resolve auth token
+    let token: string | undefined;
     if (config.auth?.type === "oauth2") {
       const cred = await this.resolveAuth(config);
       if (cred) {
-        env[config.auth.tokenEnvVar] = cred.accessToken;
+        token = cred.accessToken;
       } else {
         server.status = "error";
         server.errorLog.push("OAuth: No credentials found. Run auth flow first.");
@@ -121,6 +123,60 @@ export class MCPEngine {
         return server;
       }
     }
+
+    const transport = config.transport ?? (config.url ? "http-sse" : "stdio");
+
+    if (transport === "http-sse") {
+      return this.connectHttp(server, config, token);
+    }
+    return this.connectStdio(server, config, token);
+  }
+
+  private async connectHttp(server: MCPServer, config: MCPServerConfig, token?: string): Promise<MCPServer> {
+    const url = config.url!;
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+
+    try {
+      // Initialize
+      const initRes = await fetch(url, {
+        method: "POST", headers,
+        body: JSON.stringify({ jsonrpc: "2.0", method: "initialize", id: 1, params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "voidrift", version: "0.1.0" } } }),
+      });
+      if (!initRes.ok) {
+        const body = await initRes.text().catch(() => "");
+        server.status = "error";
+        server.errorLog.push(`HTTP ${initRes.status}: ${body.slice(0, 200)}`);
+        this.servers.set(config.name, server);
+        return server;
+      }
+
+      // Query tools
+      const toolsRes = await fetch(url, {
+        method: "POST", headers,
+        body: JSON.stringify({ jsonrpc: "2.0", method: "tools/list", id: 2, params: {} }),
+      });
+      if (toolsRes.ok) {
+        const toolsData = await toolsRes.json() as any;
+        server.tools = toolsData.result?.tools ?? [];
+      }
+
+      server.status = "connected";
+      // Store headers for later tool calls
+      (server as any)._httpHeaders = headers;
+      (server as any)._httpUrl = url;
+    } catch (err) {
+      server.status = "error";
+      server.errorLog.push(err instanceof Error ? err.message : String(err));
+    }
+
+    this.servers.set(config.name, server);
+    return server;
+  }
+
+  private async connectStdio(server: MCPServer, config: MCPServerConfig, token?: string): Promise<MCPServer> {
+    const env = { ...process.env, ...this.resolveEnvVars(config.env ?? {}) };
+    if (token && config.auth?.tokenEnvVar) env[config.auth.tokenEnvVar] = token;
 
     try {
       const proc = spawn(config.command, config.args ?? [], { stdio: ["pipe", "pipe", "pipe"], env });
