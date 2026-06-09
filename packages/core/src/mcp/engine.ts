@@ -58,6 +58,7 @@ export interface MCPToolSchema {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
+  annotations?: Record<string, unknown>;
 }
 
 /**
@@ -135,8 +136,11 @@ export class MCPEngine {
       const transport = this.createTransport(config, token);
       const serverRef = server;
       const busRef = this.bus;
+      const workspaceRootRef = this.workspaceRoot;
       const client = new Client({ name: "voidrift", version: "0.1.0" }, {
-        capabilities: {},
+        capabilities: {
+          roots: { listChanged: true },
+        },
         listChanged: {
           tools: {
             onChanged: (tools: any) => {
@@ -162,12 +166,18 @@ export class MCPEngine {
       });
       await client.connect(transport);
 
+      // Handle server-to-client requests: roots/list
+      client.setRequestHandler({ method: "roots/list" } as any, async () => ({
+        roots: [{ uri: `file://${workspaceRootRef}`, name: "workspace" }],
+      }));
+
       // List tools
       const toolsResult = await client.listTools();
       server.tools = (toolsResult.tools ?? []).map(t => ({
         name: t.name,
         description: t.description ?? "",
         inputSchema: (t.inputSchema as Record<string, unknown>) ?? {},
+        annotations: (t as any).annotations as Record<string, unknown> | undefined,
       }));
 
       // Get server instructions (additional system prompt context)
@@ -233,6 +243,15 @@ export class MCPEngine {
     return names;
   }
 
+  /** Check if an MCP tool has readOnlyHint annotation */
+  isToolReadOnly(fullName: string): boolean {
+    const match = fullName.match(/^mcp_([^_]+)_(.+)$/);
+    if (!match) return false;
+    const server = this.servers.get(match[1]);
+    const tool = server?.tools.find(t => t.name === match[2]);
+    return tool?.annotations?.readOnlyHint === true;
+  }
+
   /** Call a tool on a connected MCP server */
   async callTool(serverName: string, toolName: string, args: Record<string, unknown>): Promise<string> {
     const server = this.servers.get(serverName);
@@ -240,7 +259,10 @@ export class MCPEngine {
     try {
       const result = await server.client.callTool({ name: toolName, arguments: args });
       const content = result.content as Array<{ type: string; text?: string }>;
-      return content?.map(c => c.text ?? "").join("") ?? JSON.stringify(result);
+      const text = content?.map(c => c.text ?? "").join("") ?? JSON.stringify(result);
+      // MCP spec: isError indicates the tool call failed
+      if ((result as any).isError) return `Error: ${text}`;
+      return text;
     } catch (err) {
       return `Error: ${err instanceof Error ? err.message : String(err)}`;
     }
