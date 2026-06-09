@@ -41,11 +41,18 @@ export async function runOAuthFlow(
   });
   const authorizeUrl = `${auth.authorizeUrl}?${params.toString()}`;
 
+  onStatus?.("Starting callback server...");
+  // Start listening BEFORE opening browser to avoid race condition
+  const codePromise = waitForCallback(state, onStatus);
+
+  // Small delay to ensure server is bound before browser redirects back
+  await new Promise(r => setTimeout(r, 100));
+
   onStatus?.("Opening browser for authorization...");
   openBrowser(authorizeUrl);
 
   // Wait for callback
-  const code = await waitForCallback(state, onStatus);
+  const code = await codePromise;
   if (!code) return null;
 
   onStatus?.("Exchanging code for token...");
@@ -68,7 +75,8 @@ export async function runOAuthFlow(
     });
 
     if (!res.ok) {
-      onStatus?.(`Token exchange failed: ${res.status} ${res.statusText}`);
+      const errBody = await res.text().catch(() => "");
+      onStatus?.(`Token exchange failed: ${res.status} ${res.statusText} — ${errBody.slice(0, 200)}`);
       return null;
     }
 
