@@ -46,6 +46,102 @@ VoidRift has three operating modes. Switch with **Shift+Tab**.
 | `/policy add <allow\|deny> <tool> <pattern>` | Add a persistent policy rule |
 | `/history` | Audit event history — chronological log of all actions |
 
+### Command Details
+
+#### `/plan`
+
+Opens a panel with three pages (←/→ to navigate): **now**, **next**, **later**. Each page shows plan items at that priority level.
+
+**Hotkeys:** `↑↓` navigate, `enter` view item body, `n` set priority to now, `x` set to next, `l` set to later, `del` remove (y/n confirm)
+
+Plan items persist as `.voidrift/plan/{name}.md`. The model can also manage plans via `read_plan`, `write_plan`, and `update_plan` tools in any mode.
+
+#### `/memory`
+
+Shows all saved memory entries (project-local + global). Memory is used by the model for persistent knowledge across sessions — facts, directives, preferences.
+
+**Hotkeys:** `↑↓` navigate, `enter` view full content, `l`/`u` load/unload from active context, `del` remove
+
+Memories live in `.voidrift/memory/` (local) and `~/.config/voidrift/memory/` (global).
+
+#### `/skills`
+
+Manage skill files that provide domain-specific guidance to the model.
+
+**Hotkeys:** `↑↓` navigate, `enter` open in editor, `c` create (scope: workspace/global), `r` rename, `del` delete (y/n confirm)
+
+Shows skill name, location (workspace/global), and validation status.
+
+#### `/agents`
+
+View and manage agent configurations. Shows all interactive and task agents with their model tier and tool count.
+
+**Hotkeys:** `↑↓` navigate, `enter` details, `c` create, `del` delete (y/n confirm)
+
+Agent overrides are stored in `.voidrift/agents/` or `~/.config/voidrift/agents/`.
+
+#### `/mcp`
+
+Full MCP server lifecycle management. See the [MCP section](#mcp-model-context-protocol) for complete details.
+
+#### `/templates`
+
+View registered templates with their content and source (core/plugin).
+
+#### `/prompts`
+
+View all prompt sections with their source (builtin/workspace/global/plugin). Press `enter` to open a prompt in your editor for override.
+
+**Override cascade:** workspace (`.voidrift/prompts/{key}.md`) → global (`~/.config/voidrift/prompts/{key}.md`) → builtin
+
+#### `/model [name]`
+
+Without arguments: opens model panel showing all configured models with their tier assignments.
+
+With argument: switches the active model. Example: `/model claude-sonnet`
+
+**Hotkeys in panel:** `↑↓` navigate, `enter` select as active, `d`/`u`/`f` assign to dense/utility/flash tier
+
+#### `/goal [instruction]`
+
+Launches an autonomous execution loop. The model works on the instruction independently, using tools and verifying results, until complete or budget exhausted.
+
+Example: `/goal refactor src/auth to use JWT tokens`
+
+#### `/schedule`
+
+View and manage timed tasks.
+
+**Subcommands:**
+- `/schedule delay 5m "run tests"` — one-shot after 5 minutes
+- `/schedule cron "*/30 * * * *" "check build status"` — recurring
+
+#### `/stats`
+
+Session analytics panel showing:
+- Total turns, tokens in/out
+- Per-model breakdown
+- Token rates and timing
+- Context budget usage
+
+#### `/context`
+
+Visualizer showing all four context partitions (Agent, Orbit, Drift, Void) with token counts and content summaries.
+
+#### `/diff`
+
+Shows `git diff` output with syntax highlighting (green additions, red deletions).
+
+#### `/policy`
+
+Without arguments: panel showing all active rules (source, tool, pattern, decision, priority).
+
+With arguments: `/policy add allow execute_command 'npm *'` — adds a persistent rule to `.voidrift/policies.json`.
+
+#### `/history`
+
+Full-page chronological audit log. Shows every tool call, approval, denial, and session event with timestamps.
+
 ---
 
 ## Tools
