@@ -17,3 +17,4 @@ NPM-PUBLISHING.md
 bun.lock
 package-lock.json
 .gitignore
+_internal/
