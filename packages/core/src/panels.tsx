@@ -649,6 +649,7 @@ export function MCPPanel({ mcp, config, onClose }: { mcp: MCPEngine; config: Voi
   const [createState, setCreateState] = useState<{ step: "scope" | "name" | "url"; scope?: "workspace" | "global"; name?: string } | null>(null);
   const [inputValue, setInputValue] = useState("");
   const [detail, setDetail] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const configs = mcp.loadConfigs();
   const servers = mcp.all;
@@ -724,6 +725,20 @@ export function MCPPanel({ mcp, config, onClose }: { mcp: MCPEngine; config: Voi
       return;
     }
 
+    if (confirmDelete) {
+      if (input === "y") {
+        const name = allNames[cursor];
+        mcp.disconnect(name);
+        mcp.removeConfig(name);
+        setMessage(`Deleted: ${name}`);
+        setConfirmDelete(false);
+      } else {
+        setConfirmDelete(false);
+        setMessage(null);
+      }
+      return;
+    }
+
     if (key.escape) { onClose(); return; }
     if (key.upArrow) setCursor(s => Math.max(0, s - 1));
     if (key.downArrow) setCursor(s => Math.min(allNames.length - 1, s + 1));
@@ -734,10 +749,8 @@ export function MCPPanel({ mcp, config, onClose }: { mcp: MCPEngine; config: Voi
       setMessage("Create MCP server — scope: (w) workspace  (g) global");
     }
     if (key.delete && allNames[cursor]) {
-      const name = allNames[cursor];
-      mcp.disconnect(name);
-      mcp.removeConfig(name);
-      setMessage(`Deleted: ${name}`);
+      setConfirmDelete(true);
+      setMessage(`Delete "${allNames[cursor]}"? (y/n)`);
     }
   });
 
