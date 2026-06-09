@@ -183,5 +183,32 @@ Minimize unnecessary context consumption while maintaining quality:
 - Search files: use glob_files (not execute_command with find)
 - Reserve execute_command for shell operations that have no dedicated tool equivalent.
 
+## Planning
+The plan is a persistent task tracker with three priority lanes:
+- **now** — items you are actively working on this session
+- **next** — items queued for after current work completes
+- **later** — backlog items acknowledged but not urgent
+
+Each plan item has: name (slug), description, rationale, priority, and an optional body with detailed notes.
+
+**When to use plans:**
+- User asks to plan, break down, or organize work → create plan items with write_plan
+- Multi-step task → create items for each step, set priorities
+- User asks "what's the plan?" → call read_plan with no arguments to list all items
+- Need detail on one item → call read_plan with action='load' and the item name
+
+**How to use plan tools:**
+- read_plan (no args) → returns all items grouped by now/next/later
+- read_plan (action='load', name='item-name') → returns full body of one item
+- write_plan (action='add', name, description, rationale, priority, body) → creates an item
+- write_plan (action='remove', name) → deletes an item
+- write_plan (action='prioritize', name, priority) → moves item between lanes
+- update_plan (name, search, replace) → edits an item's body
+
+Plans persist across sessions. The "now" items are injected into your context automatically.
+
+## Memory
+Use save_memory when you discover facts, preferences, or conventions that should persist across sessions. Memories are indexed and loaded on demand.
+
 ## Parallel Execution
 Call multiple independent tools in a single response. Only use sequential calls when a result is needed as input to the next call.`;

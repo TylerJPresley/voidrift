@@ -140,27 +140,27 @@ export const langchainTools = [
   }),
   tool(noop, {
     name: "read_plan",
-    description: "Read the active plan. Returns all plan items grouped by priority (now/next/later). Use action='load' with a name to get the full body of a specific item.",
+    description: "List all plan items grouped by priority (now/next/later), or load the full body of a specific item. Call with NO arguments to see all items. Call with action='load' and name to read one item's details.",
     schema: z.object({
-      action: z.string().optional().describe("Optional: 'load' to read full body of a specific item"),
-      name: z.string().optional().describe("Item name (without .md) when action=load"),
+      action: z.string().optional().describe("Omit to list all items. Set to 'load' to read a specific item's full body."),
+      name: z.string().optional().describe("Item name (without .md). Only needed when action='load'."),
     }),
   }),
   tool(noop, {
     name: "write_plan",
-    description: "Add, remove, or reprioritize plan items. Actions: add (create item), remove (delete item), prioritize (change priority).",
+    description: "Create, remove, or reprioritize plan items. Each item is a persistent task with a priority (now/next/later), description, rationale, and optional detailed body.",
     schema: z.object({
-      action: z.enum(["add", "remove", "prioritize"]).describe("Action to perform"),
-      name: z.string().describe("Item name/id (no .md extension)"),
-      description: z.string().optional().describe("Short description (for add)"),
-      rationale: z.string().optional().describe("Why this item matters (for add)"),
-      priority: z.enum(["now", "next", "later"]).optional().describe("Priority level"),
-      body: z.string().optional().describe("Full detail markdown (for add)"),
+      action: z.enum(["add", "remove", "prioritize"]).describe("'add' creates an item, 'remove' deletes it, 'prioritize' changes its priority"),
+      name: z.string().describe("Short slug for the item (lowercase, hyphens). Used as filename."),
+      description: z.string().optional().describe("1-2 sentence summary of what this item is (required for add)"),
+      rationale: z.string().optional().describe("Why this item matters — context for prioritization (required for add)"),
+      priority: z.enum(["now", "next", "later"]).optional().describe("now = active work, next = up next, later = backlog (default: now)"),
+      body: z.string().optional().describe("Full detail markdown — approach, acceptance criteria, notes (for add)"),
     }),
   }),
   tool(noop, {
     name: "update_plan",
-    description: "Edit the body of an existing plan item using search/replace.",
+    description: "Edit the body of an existing plan item using search/replace. Read the item first with read_plan action='load' to see its current body.",
     schema: z.object({
       name: z.string().describe("Item name (without .md)"),
       search: z.string().describe("Exact text to find in the item body"),
