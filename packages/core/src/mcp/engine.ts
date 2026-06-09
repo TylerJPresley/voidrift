@@ -30,6 +30,18 @@ export interface MCPServerConfig {
   auth?: MCPAuthConfig;
 }
 
+export interface MCPResource {
+  uri: string;
+  name: string;
+  mimeType?: string;
+}
+
+export interface MCPPrompt {
+  name: string;
+  description: string;
+  arguments: Array<{ name: string; description?: string; required?: boolean }>;
+}
+
 export interface MCPServer {
   name: string;
   config: MCPServerConfig;
@@ -37,6 +49,8 @@ export interface MCPServer {
   status: "connected" | "disconnected" | "error";
   errorLog: string[];
   tools: MCPToolSchema[];
+  resources: MCPResource[];
+  prompts: MCPPrompt[];
 }
 
 export interface MCPToolSchema {
@@ -101,7 +115,7 @@ export class MCPEngine {
   }
 
   async connect(config: MCPServerConfig): Promise<MCPServer> {
-    const server: MCPServer = { name: config.name, config, client: null, status: "disconnected", errorLog: [], tools: [] };
+    const server: MCPServer = { name: config.name, config, client: null, status: "disconnected", errorLog: [], tools: [], resources: [], prompts: [] };
 
     // Resolve auth token
     let token: string | undefined;
@@ -118,7 +132,9 @@ export class MCPEngine {
 
     try {
       const transport = this.createTransport(config, token);
-      const client = new Client({ name: "voidrift", version: "0.1.0" });
+      const client = new Client({ name: "voidrift", version: "0.1.0" }, {
+        capabilities: {},
+      });
       await client.connect(transport);
 
       // List tools
@@ -128,6 +144,39 @@ export class MCPEngine {
         description: t.description ?? "",
         inputSchema: (t.inputSchema as Record<string, unknown>) ?? {},
       }));
+
+      // Subscribe to tools/list_changed notification — refresh tools when server updates
+      client.setNotificationHandler({ method: "notifications/tools/list_changed" } as any, async () => {
+        try {
+          const refreshed = await client.listTools();
+          server.tools = (refreshed.tools ?? []).map(t => ({
+            name: t.name,
+            description: t.description ?? "",
+            inputSchema: (t.inputSchema as Record<string, unknown>) ?? {},
+          }));
+          this.bus.publish("RESOURCE_CHANGED", { path: `mcp:${config.name}`, type: "tools_updated" } as any);
+        } catch {}
+      });
+
+      // Discover resources if supported
+      try {
+        const resourcesResult = await client.listResources();
+        server.resources = (resourcesResult.resources ?? []).map(r => ({
+          uri: r.uri,
+          name: r.name ?? r.uri,
+          mimeType: r.mimeType,
+        }));
+      } catch { server.resources = []; }
+
+      // Discover prompts if supported
+      try {
+        const promptsResult = await client.listPrompts();
+        server.prompts = (promptsResult.prompts ?? []).map(p => ({
+          name: p.name,
+          description: p.description ?? "",
+          arguments: p.arguments ?? [],
+        }));
+      } catch { server.prompts = []; }
 
       server.client = client;
       server.status = "connected";
@@ -177,6 +226,32 @@ export class MCPEngine {
       const result = await server.client.callTool({ name: toolName, arguments: args });
       const content = result.content as Array<{ type: string; text?: string }>;
       return content?.map(c => c.text ?? "").join("") ?? JSON.stringify(result);
+    } catch (err) {
+      return `Error: ${err instanceof Error ? err.message : String(err)}`;
+    }
+  }
+
+  /** Read a resource from a connected MCP server */
+  async readResource(serverName: string, uri: string): Promise<string> {
+    const server = this.servers.get(serverName);
+    if (!server?.client) return `Error: Server "${serverName}" not connected.`;
+    try {
+      const result = await server.client.readResource({ uri });
+      const content = result.contents as Array<{ text?: string; uri: string }>;
+      return content?.map(c => c.text ?? "").join("") ?? "";
+    } catch (err) {
+      return `Error: ${err instanceof Error ? err.message : String(err)}`;
+    }
+  }
+
+  /** Get a prompt from a connected MCP server */
+  async getPrompt(serverName: string, promptName: string, args?: Record<string, string>): Promise<string> {
+    const server = this.servers.get(serverName);
+    if (!server?.client) return `Error: Server "${serverName}" not connected.`;
+    try {
+      const result = await server.client.getPrompt({ name: promptName, arguments: args });
+      const messages = result.messages as Array<{ role: string; content: { type: string; text?: string } }>;
+      return messages?.map(m => m.content?.text ?? "").join("\n") ?? "";
     } catch (err) {
       return `Error: ${err instanceof Error ? err.message : String(err)}`;
     }
