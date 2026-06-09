@@ -690,6 +690,35 @@ export function MCPPanel({ mcp, config, onClose }: { mcp: MCPEngine; config: Voi
           }
         }
       }
+      if (input === "x") {
+        const st = getStatus(detail);
+        if (st === "connected") {
+          mcp.disconnect(detail);
+          setMessage(`Disconnected.`);
+        } else {
+          const cfg = configs.find(c => c.name === detail);
+          if (cfg) {
+            setMessage("Connecting...");
+            mcp.connect(cfg).then((result) => {
+              setMessage(result.status === "connected" ? `Connected (${result.tools.length} tools)` : `Error: ${result.errorLog[result.errorLog.length - 1] || "failed"}`);
+            });
+          }
+        }
+      }
+      if (input === "o") {
+        const cfg = configs.find(c => c.name === detail);
+        if (cfg?.auth?.type === "oauth2") {
+          setMessage("Starting OAuth flow — check browser...");
+          import("./mcp/oauth.js").then(({ runOAuthFlow }) => {
+            const { execSync } = require("child_process");
+            runOAuthFlow(detail, cfg.auth!, (url: string) => {
+              try { execSync(`xdg-open "${url}" 2>/dev/null || open "${url}" 2>/dev/null`); } catch {}
+            }, (msg: string) => setMessage(msg));
+          });
+        } else {
+          setMessage("No OAuth config. Add 'auth' section to config.");
+        }
+      }
       return;
     }
 
@@ -703,45 +732,16 @@ export function MCPPanel({ mcp, config, onClose }: { mcp: MCPEngine; config: Voi
       setMessage("Create MCP server — scope: (w) workspace  (g) global");
     }
     if (key.delete && allNames[cursor]) {
-      const name = allNames[cursor];
-      mcp.disconnect(name);
-      mcp.removeConfig(name);
-      setMessage(`Deleted: ${name}`);
-    }
-    if (input === "o" && allNames[cursor]) {
-      const name = allNames[cursor];
-      const cfg = configs.find(c => c.name === name);
-      if (cfg?.auth?.type === "oauth2") {
-        setMessage("Starting OAuth flow — check browser...");
-        import("./mcp/oauth.js").then(({ runOAuthFlow }) => {
-          const { execSync } = require("child_process");
-          runOAuthFlow(name, cfg.auth!, (url: string) => {
-            try { execSync(`xdg-open "${url}" 2>/dev/null || open "${url}" 2>/dev/null`); } catch {}
-          }, (msg: string) => setMessage(msg));
-        });
-      } else {
-        setMessage("No OAuth config on this server. Add an 'auth' section to the config.");
-      }
-    }
-    if (input === "x" && allNames[cursor]) {
-      const name = allNames[cursor];
-      const st = getStatus(name);
-      if (st === "connected") {
+      if (message?.startsWith("Confirm delete")) {
+        const name = allNames[cursor];
         mcp.disconnect(name);
-        setMessage(`Disconnected: ${name}`);
+        mcp.removeConfig(name);
+        setMessage(`Deleted: ${name}`);
       } else {
-        const cfg = configs.find(c => c.name === name);
-        if (cfg) {
-          setMessage(`Connecting ${name}...`);
-          mcp.connect(cfg).then((result) => {
-            if (result.status === "connected") {
-              setMessage(`Connected: ${name} (${result.tools.length} tools)`);
-            } else {
-              setMessage(`Error: ${result.errorLog[result.errorLog.length - 1] || "connection failed"}`);
-            }
-          });
-        }
+        setMessage(`Confirm delete "${allNames[cursor]}"? Press del again.`);
       }
+    } else if (message?.startsWith("Confirm delete")) {
+      setMessage(null);
     }
   });
 
@@ -778,7 +778,7 @@ export function MCPPanel({ mcp, config, onClose }: { mcp: MCPEngine; config: Voi
           {srv.errorLog.slice(-3).map((e, i) => <Text key={i} dimColor>  {e.trim().slice(0, 80)}</Text>)}
         </>}
         <Text> </Text>
-        <Text dimColor><Text color="#61afef" bold>e</Text> edit config  <Text color="#61afef" bold>a</Text> toggle auto-connect  <Text color="#61afef" bold>esc</Text> back</Text>
+        <Text dimColor><Text color="#61afef" bold>x</Text> connect  <Text color="#61afef" bold>o</Text> auth  <Text color="#61afef" bold>e</Text> edit  <Text color="#61afef" bold>a</Text> auto-connect  <Text color="#61afef" bold>esc</Text> back</Text>
         {message && <Text color="#4ec9b0">{message}</Text>}
       </Box>
     );
@@ -813,7 +813,7 @@ export function MCPPanel({ mcp, config, onClose }: { mcp: MCPEngine; config: Voi
       <Text dimColor>  Workspace:  .voidrift/mcp/</Text>
       <Text dimColor>  Global:     ~/.config/voidrift/mcp/</Text>
       <Text> </Text>
-      <Text dimColor><Text color="#61afef" bold>↑↓</Text> Navigate  <Text color="#61afef" bold>enter</Text> Edit  <Text color="#61afef" bold>esc</Text> Close  │  <Text color="#61afef" bold>c</Text> create  <Text color="#61afef" bold>del</Text> delete  <Text color="#61afef" bold>x</Text> connect  <Text color="#61afef" bold>o</Text> oauth</Text>
+      <Text dimColor><Text color="#61afef" bold>↑↓</Text> Navigate  <Text color="#61afef" bold>enter</Text> Details  <Text color="#61afef" bold>esc</Text> Close  │  <Text color="#61afef" bold>c</Text> create  <Text color="#61afef" bold>del</Text> delete</Text>
       {message && <Text color="#4ec9b0">{message}</Text>}
       {createState?.step === "name" && (
         <Box><Text color="#61afef">  &gt; </Text><TextInput value={inputValue} onChange={setInputValue} onSubmit={(v) => {
