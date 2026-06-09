@@ -48,99 +48,627 @@ VoidRift has three operating modes. Switch with **Shift+Tab**.
 
 ### Command Details
 
-#### `/plan`
+---
 
-Opens a panel with three pages (←/→ to navigate): **now**, **next**, **later**. Each page shows plan items at that priority level.
+#### `/help` — Interactive Help
 
-**Hotkeys:** `↑↓` navigate, `enter` view item body, `n` set priority to now, `x` set to next, `l` set to later, `del` remove (y/n confirm)
+**Intent:** Give new and experienced users immediate access to the system's capabilities without leaving the terminal.
 
-Plan items persist as `.voidrift/plan/{name}.md`. The model can also manage plans via `read_plan`, `write_plan`, and `update_plan` tools in any mode.
+**Why it matters:** VoidRift has a lot of surface area — modes, tools, context layers, hotkeys. Without a built-in reference, users would have to context-switch to external docs. The help panel keeps you in flow.
 
-#### `/memory`
+**Walkthrough:**
 
-Shows all saved memory entries (project-local + global). Memory is used by the model for persistent knowledge across sessions — facts, directives, preferences.
+1. Type `/help` and press Enter
+2. The help panel opens with four pages:
+   - **general** — Version, workspace path, session ID
+   - **commands** — Every registered slash command (core + plugin)
+   - **shortcuts** — All keyboard bindings organized by context
+   - **context** — Detailed explanation of the 4-layer context architecture with what each sublayer contains
+3. Press `←` / `→` to navigate between pages
+4. Press `esc` to close
 
-**Hotkeys:** `↑↓` navigate, `enter` view full content, `l`/`u` load/unload from active context, `del` remove
+The commands page also shows plugin-contributed commands in a separate section, so you can see what extensions have added.
 
-Memories live in `.voidrift/memory/` (local) and `~/.config/voidrift/memory/` (global).
+---
 
-#### `/skills`
+#### `/plan` — Task Planning
 
-Manage skill files that provide domain-specific guidance to the model.
+**Intent:** Let you and the model collaborate on structured task breakdowns that persist across sessions and guide autonomous work.
 
-**Hotkeys:** `↑↓` navigate, `enter` open in editor, `c` create (scope: workspace/global), `r` rename, `del` delete (y/n confirm)
+**Why it matters:** Without a plan, conversations are ephemeral — the model forgets what you agreed to do. Plans create a persistent roadmap. When the model has an active plan in context, it works systematically instead of ad-hoc. Plans are also the input for `/goal` autonomous execution.
 
-Shows skill name, location (workspace/global), and validation status.
+**Walkthrough:**
 
-#### `/agents`
+1. Type `/plan` to open the plan panel
+2. The panel shows three priority pages: **now** (immediate), **next** (upcoming), **later** (backlog)
+3. Navigate with `←` / `→` between priority pages
+4. Use `↑` / `↓` to select items on the current page
+5. Press `enter` to open the detail view showing the full body of the plan item
+6. Reprioritize items directly:
+   - `n` — move item to "now"
+   - `x` — move item to "next"
+   - `l` — move item to "later"
+7. Press `del` then `y` to remove an item permanently
+8. In detail view, press `e` to open the item in your configured editor
 
-View and manage agent configurations. Shows all interactive and task agents with their model tier and tool count.
+**Storage:** `.voidrift/plan/{name}.md` — each item is a markdown file with YAML frontmatter (priority, description, rationale) and a body containing detailed implementation notes.
 
-**Hotkeys:** `↑↓` navigate, `enter` details, `c` create, `del` delete (y/n confirm)
+**Model integration:** The model has `read_plan`, `write_plan`, and `update_plan` tools. It can create items, change priorities, and update bodies as it works. This means you can say "plan out the refactor" and it produces structured items you can review and reprioritize.
 
-Agent overrides are stored in `.voidrift/agents/` or `~/.config/voidrift/agents/`.
+---
 
-#### `/mcp`
+#### `/memory` — Persistent Knowledge
 
-Full MCP server lifecycle management. See the [MCP section](#mcp-model-context-protocol) for complete details.
+**Intent:** Let the model learn facts, preferences, and directives that survive across sessions. Memories are indexed and selectively loaded into context when relevant.
 
-#### `/templates`
+**Why it matters:** Without memory, every new session starts from zero. You'd repeat "use tabs not spaces" or "the database is Postgres 15" every time. Memory lets the model accumulate project knowledge and personal preferences that compound over time.
 
-View registered templates with their content and source (core/plugin).
+**Walkthrough:**
 
-#### `/prompts`
+1. Type `/memory` to open the memory panel
+2. You'll see all indexed memories with their titles and summaries
+3. Navigate with `↑` / `↓`
+4. Items marked `[LOADED]` are currently active in the model's context
+5. Press `l` to load a memory into active context (model can see it this session)
+6. Press `u` to unload (removes from active context but keeps the memory stored)
+7. Press `esc` to close
 
-View all prompt sections with their source (builtin/workspace/global/plugin). Press `enter` to open a prompt in your editor for override.
+**How memories are created:** The model has a `save_memory` tool. When it discovers something important about your project or preferences, it can save it. You can also ask directly: "Remember that we use ESM imports only."
 
-**Override cascade:** workspace (`.voidrift/prompts/{key}.md`) → global (`~/.config/voidrift/prompts/{key}.md`) → builtin
+**Scopes:**
+- **Local** (`.voidrift/memory/`) — project-specific knowledge (tech stack, architecture decisions, naming conventions)
+- **Global** (`~/.config/voidrift/memory/`) — personal preferences that apply everywhere (coding style, communication preferences)
 
-#### `/model [name]`
+**Loading behavior:** The model always sees a lightweight index of all memories (title + summary). It loads full bodies on demand when they're relevant to the current task.
 
-Without arguments: opens model panel showing all configured models with their tier assignments.
+---
 
-With argument: switches the active model. Example: `/model claude-sonnet`
+#### `/skills` — Domain Knowledge Registry
 
-**Hotkeys in panel:** `↑↓` navigate, `enter` select as active, `d`/`u`/`f` assign to dense/utility/flash tier
+**Intent:** Manage skill files that inject domain-specific expertise and guidelines into the model's context. Skills are triggered automatically based on what you're working on.
 
-#### `/goal [instruction]`
+**Why it matters:** A general model doesn't know your team's patterns, your framework's conventions, or your project's architecture rules. Skills encode that knowledge. When you open a React file, the React skill loads automatically — the model immediately knows your component patterns, hook conventions, and testing approach.
 
-Launches an autonomous execution loop. The model works on the instruction independently, using tools and verifying results, until complete or budget exhausted.
+**Walkthrough:**
 
-Example: `/goal refactor src/auth to use JWT tokens`
+1. Type `/skills` to open the skills panel
+2. You'll see all skill files with their name, location (workspace/global), and validation status
+3. Skills marked `[X]` in red have validation issues (missing frontmatter fields, referencing non-existent agents)
+4. Navigate with `↑` / `↓`
+5. Press `enter` to open a skill in your editor for modification
+6. Press `c` to create a new skill:
+   - Choose scope: `w` for workspace (this project only) or `g` for global (all projects)
+   - Type a skill ID (lowercase, hyphens only)
+   - The skeleton file is created and opened in your editor
+7. Press `r` to rename a skill
+8. Press `del` then `y` to delete
 
-#### `/schedule`
+**Skill file format:**
 
-View and manage timed tasks.
+```markdown
+---
+name: "react-patterns"
+description: "React component and hook conventions"
+triggers:
+  extensions: [".tsx", ".jsx"]
+  files: ["package.json"]
+  keywords: ["component", "hook", "useEffect"]
+agents: ["chat", "vibe"]
+active: true
+---
 
-**Subcommands:**
-- `/schedule delay 5m "run tests"` — one-shot after 5 minutes
-- `/schedule cron "*/30 * * * *" "check build status"` — recurring
+## Component Rules
+- Functional components only, no class components
+- Props interfaces named {Component}Props
+...
+```
 
-#### `/stats`
+**Trigger system:** Skills load when:
+- You focus a file matching an extension trigger
+- The workspace contains a file matching a filename trigger
+- Your input contains a keyword trigger
+- The skill is bound to the active agent
 
-Session analytics panel showing:
-- Total turns, tokens in/out
-- Per-model breakdown
-- Token rates and timing
-- Context budget usage
+**Locations:**
+- Workspace: `.voidrift/skills/` — project-specific (checked into git)
+- Global: `~/.config/voidrift/skills/` — personal preferences across projects
 
-#### `/context`
+---
 
-Visualizer showing all four context partitions (Agent, Orbit, Drift, Void) with token counts and content summaries.
+#### `/agents` — Agent Configuration
 
-#### `/diff`
+**Intent:** View, create, and customize the agents (personas) that the model operates as. Each agent has different tools, permissions, model tiers, and behavioral instructions.
 
-Shows `git diff` output with syntax highlighting (green additions, red deletions).
+**Why it matters:** Different tasks need different personas. A code reviewer shouldn't have write access. A task agent should use the cheap model. A planning agent should think carefully without touching files. Agents let you define WHO the model is for each context.
 
-#### `/policy`
+**Walkthrough:**
 
-Without arguments: panel showing all active rules (source, tool, pattern, decision, priority).
+1. Type `/agents` to open the agents panel
+2. Four pages (navigate with `←` / `→`):
+   - **core interactive** — Built-in user-facing agents (chat, plan, vibe)
+   - **core task** — Built-in background agents
+   - **custom interactive** — Your custom user-facing agents
+   - **custom task** — Your custom background agents
+3. Navigate with `↑` / `↓`, press `enter` for detail view
+4. Detail view shows a cascade override system (like prompts/templates):
+   - **Default** — built-in behavior
+   - **Global** — `~/.config/voidrift/agents/{id}/`
+   - **Workspace** — `.voidrift/agents/{id}/`
+5. Press `enter` on a level to open/create an override file
+6. On custom pages: `c` create, `r` rename, `del` delete (y/n confirm)
 
-With arguments: `/policy add allow execute_command 'npm *'` — adds a persistent rule to `.voidrift/policies.json`.
+**Override system:** Each agent has two files:
+- `agent.json` — Configuration (model tier, tools, approval mode, type)
+- `prompt.md` — Identity/persona instructions
 
-#### `/history`
+Workspace overrides take precedence over global, which takes precedence over defaults. This means you can make the chat agent more aggressive for one project without affecting others.
 
-Full-page chronological audit log. Shows every tool call, approval, denial, and session event with timestamps.
+---
+
+#### `/mcp` — MCP Server Management
+
+**Intent:** Add, connect, authenticate with, and manage Model Context Protocol servers that extend the model's capabilities with external tools.
+
+**Why it matters:** MCP turns VoidRift into a universal client. Research databases, deployment tools, monitoring systems, internal APIs — anything with an MCP server becomes a tool the model can call. You go from "model that reads files" to "model that can search papers, deploy code, and query your database."
+
+**Walkthrough — Adding a server:**
+
+1. Type `/mcp` to open the MCP panel
+2. Press `c` to create a new server
+3. Choose scope: `w` (workspace — shared with team) or `g` (global — personal)
+4. Enter a server ID (e.g., `research`, `deploy-prod`)
+5. Paste the server URL (e.g., `https://mcp.example.com/mcp`)
+6. VoidRift auto-discovers the server:
+   - Probes the URL for MCP capabilities
+   - Checks `.well-known/mcp` for metadata
+   - Detects OAuth requirements
+   - Generates the config file automatically
+7. If auth is required, the panel shows a message. Press `o` to authenticate.
+
+**Walkthrough — Connecting:**
+
+1. In the server list, select a server and press `enter` for details
+2. Press `x` to connect (or disconnect if already connected)
+3. On connection, tools are registered and immediately available to the model
+4. Tool count appears in the detail view
+
+**Detail view hotkeys:**
+- `x` — Connect / disconnect
+- `o` — Run OAuth flow (opens browser for authentication)
+- `e` — Open config file in editor
+- `a` — Toggle auto-connect (whether to connect on startup)
+- `esc` — Back to list
+
+**List view hotkeys:**
+- `↑↓` — Navigate
+- `enter` — Detail view
+- `c` — Create new server
+- `del` then `y` — Delete server and its config
+
+**Auto-connect:** Servers with `autoConnect: true` (the default) connect automatically when VoidRift starts. Disable for servers you only use occasionally.
+
+---
+
+#### `/templates` — Template Manager
+
+**Intent:** View and manage reusable templates that structure the model's output and behavior. Templates use a cascade override system so you can customize core behavior per-project.
+
+**Why it matters:** Templates let you standardize output formats without repeating instructions. A PR description template, a commit message format, a code review checklist — define once, use everywhere. The cascade system means you can override core templates for specific projects without affecting your global setup.
+
+**Walkthrough:**
+
+1. Type `/templates` to open the templates panel
+2. Two pages (navigate with `←` / `→`):
+   - **system** — Core templates (persona formatting, output structure)
+   - **custom** — User-created templates
+3. On the system page:
+   - Navigate with `↑` / `↓`
+   - Press `enter` to see the override cascade (default → global → workspace)
+   - Select a level and press `enter` to view (default) or open/create an override (global/workspace)
+4. On the custom page:
+   - Navigate, press `enter` to open in editor
+   - `c` — Create new template (scope: workspace/global)
+   - `r` — Rename
+   - `del` — Delete
+
+**Override cascade:** When VoidRift resolves a template, it checks:
+1. `.voidrift/templates/{key}.md` (workspace — highest priority)
+2. `~/.config/voidrift/templates/{key}.md` (global)
+3. Built-in default (lowest priority)
+
+The panel shows which level is currently "active" for each template.
+
+---
+
+#### `/prompts` — System Prompt Manager
+
+**Intent:** View and override the system prompts that define HOW the model behaves — its rules, tool usage patterns, and persona instructions.
+
+**Why it matters:** The system prompt is the single biggest lever for model behavior. If the model is too verbose, not using the right tools, or ignoring conventions — the fix is usually a prompt override. This panel exposes every prompt section so you can tune behavior without modifying source code.
+
+**Walkthrough:**
+
+1. Type `/prompts` to open the prompts panel
+2. You'll see all registered prompt sections in a table:
+   - **Label** — Human-readable name
+   - **Source** — Who registered it (core, plugin name)
+   - **Override** — Where the active content comes from (default/global/workspace)
+   - **Description** — What this prompt section does
+3. Navigate with `↑` / `↓` and press `enter` for detail view
+4. Detail view shows the cascade (like templates):
+   - **Default** — press `enter` to view the built-in content (opens read-only in editor)
+   - **Global** — press `enter` to open/create `~/.config/voidrift/prompts/{key}.md`
+   - **Workspace** — press `enter` to open/create `.voidrift/prompts/{key}.md`
+
+**Key prompt sections:**
+
+| Key | What it controls |
+|-----|-----------------|
+| `core.context-guide` | Teaches the model about the 4-layer context system |
+| `core.rules` | Behavioral rules (retry limits, conciseness, verification) |
+| `core.tool-usage` | When and how to use each tool |
+| `chat` | Chat agent identity and expertise |
+| `plan` | Plan agent identity (read-only architect) |
+| `vibe` | Vibe agent identity (autonomous executor) |
+
+**Override cascade:** workspace → global → builtin (same as templates).
+
+---
+
+#### `/model` — Model Selection
+
+**Intent:** Switch the active model or assign models to tiers (flash/utility/dense). Controls which model handles your requests and how the automatic router behaves.
+
+**Why it matters:** Different models have different tradeoffs. A local 7B model is instant and free but less capable. Claude Opus is powerful but expensive and slow. The tier system lets you use cheap models for simple tasks and expensive ones for complex reasoning — automatically. This command gives you manual control when the router's choice isn't right.
+
+**Walkthrough:**
+
+**Quick switch:** `/model claude-sonnet` — immediately switches the active model.
+
+**Panel mode:** `/model` (no arguments) opens the full panel:
+
+1. See all configured models with their current tier assignments
+2. The currently active model shows a `✓` prefix
+3. Tier assignments shown as `[f]`, `[u]`, `[d]` (flash/utility/dense)
+4. Navigate with `↑` / `↓`
+5. Press `enter` to select a model as active for the current agent
+6. Press `d` to assign the selected model to the **dense** tier
+7. Press `u` to assign to the **utility** tier
+8. Press `f` to assign to the **flash** tier
+
+**Auto mode:** Select "auto" to let the three-tier router decide per-turn based on input complexity and context usage. The router escalates to denser models when context fills up (>85%), and de-escalates after compaction (<50%).
+
+Tier assignments persist to `~/.config/voidrift/config.json`.
+
+---
+
+#### `/context` — Context Visualizer
+
+**Intent:** Show exactly what's in the model's context window — every layer, every component, with token counts and visual representation.
+
+**Why it matters:** Context is your most limited resource. When the model seems to "forget" things or behaves strangely, it's usually a context issue — either something important isn't loaded, or junk is consuming budget. This visualizer lets you diagnose exactly what's happening inside the prompt.
+
+**Walkthrough:**
+
+1. Type `/context` to open the context panel
+2. Five pages (navigate with `←` / `→`):
+
+**Overview page:**
+- Shows all four layers with token counts and percentages
+- Each layer has a visual grid (colored blocks representing token allocation)
+- Legend maps symbols to content types (persona, tools, skills, etc.)
+- Shows total usage: `model-name · 12.5k/32k (39.1%) Free: 19.5k`
+
+**Agent page:**
+- Lists all bound tools with descriptions
+- Shows bound skills content
+- Displays the full persona prompt
+- Scrollable with `↑` / `↓`
+
+**Orbit page:**
+- Active skills (triggered by current work)
+- Loaded memories
+- Active plan content
+
+**Drift page:**
+- Git status (clean/modified)
+- File map stats (total files, active count)
+- Active files highlighted at top with path and line counts
+- Remaining workspace files listed below
+
+**Void page:**
+- Last 10 messages (role + content preview)
+- Tool result token counts
+- Active diagnostics
+
+---
+
+#### `/stats` — Session Analytics
+
+**Intent:** Show performance metrics for the current session — how many tokens you've used, which models handled which turns, and how fast they responded.
+
+**Why it matters:** Token usage directly correlates with cost (for cloud models) and latency. If your session feels slow, stats tells you whether it's the model, the tools, or the context size. It also helps you understand your usage patterns for model selection.
+
+**Walkthrough:**
+
+1. Type `/stats` to open the stats panel
+2. Sections shown:
+   - **Session** — ID, duration, total turns
+   - **Performance** — Wall time, total tool execution time
+   - **Tools** — Call count, success/failure ratio, success rate percentage
+   - **Model Usage** — Table with per-model breakdown:
+     - Model name, turns handled, input tokens, output tokens, tokens/second
+   - **Context** — Current budget usage with color indicator (green <50%, yellow <80%, red >80%)
+
+---
+
+#### `/resume` — Session Browser
+
+**Intent:** Browse and resume previous conversations. Picks up where you left off with full history restored.
+
+**Why it matters:** Real work spans multiple sessions. You start a refactor, take a break, come back the next day. Resume lets you continue without re-explaining context. The model gets the full conversation history back, so it remembers what was decided and what was done.
+
+**Walkthrough:**
+
+1. Type `/resume` to open the session browser
+2. Sessions are listed newest-first with:
+   - Session ID (first 8 chars), current session marked with `●`
+   - Turn count
+   - Last activity (relative time: "5m ago", "2h ago", "3d ago")
+   - Last user message (first 60 chars)
+3. Navigate with `↑` / `↓`
+4. Press `enter` to resume — conversation history is restored and you continue where you left off
+
+**Storage:** Sessions are saved in `.voidrift/sessions/{id}/` with:
+- `system.metadata.json` — session config and stats
+- `system.turns.json` — turn timestamps
+- `work.messages.json` — full conversation history
+
+---
+
+#### `/rewind` — Turn Rollback
+
+**Intent:** Undo the model's last action(s) by rolling back to an earlier turn. The git checkpoint system ensures file changes are also reverted.
+
+**Why it matters:** The model makes mistakes. It might edit the wrong file, produce broken code, or go down a wrong path. Instead of manually undoing changes, rewind restores both the conversation AND the workspace to an earlier state.
+
+**Walkthrough:**
+
+**Quick rewind:** `/rewind 5` — immediately rolls back to turn 5.
+
+**Panel mode:** `/rewind` (no number) opens a selector:
+
+1. See all turns listed (most recent at top)
+2. Navigate with `↑` / `↓`
+3. Press `enter` to rewind to the selected turn
+4. Conversation history is truncated to that point
+5. Git checkpoint is rolled back (file changes after that turn are undone)
+
+---
+
+#### `/diff` — Code Changes Viewer
+
+**Intent:** See all uncommitted changes in the workspace with syntax-colored output — additions in green, deletions in red.
+
+**Why it matters:** When the model edits files, you need to verify what changed. The diff panel shows the full `git diff` inline without switching terminals. It's your verification step before committing or continuing.
+
+**Walkthrough:**
+
+1. Type `/diff` to open the diff panel
+2. Shows `git diff --no-color` output with syntax coloring:
+   - Green: additions
+   - Red: deletions
+   - Cyan: hunk headers (`@@`)
+3. Scroll with `↑` / `↓` (and page up/down for large diffs)
+4. Shows "No uncommitted changes" if workspace is clean
+5. Press `esc` to close
+
+---
+
+#### `/goal` — Autonomous Execution
+
+**Intent:** Give the model a high-level objective and let it work independently until completion. Uses the dense (most capable) model and runs in a loop — thinking, acting, verifying, iterating.
+
+**Why it matters:** Some tasks are well-defined enough that you don't need to supervise every step. "Write tests for all the util functions" or "refactor this module to use async/await" — these are mechanical tasks where the model can self-direct. Goal mode lets you delegate and come back to results.
+
+**Walkthrough:**
+
+1. Type `/goal refactor src/auth to use JWT tokens`
+2. VoidRift:
+   - Acknowledges the goal
+   - Switches to the dense model (most capable)
+   - Enters an autonomous loop:
+     - Read relevant files
+     - Plan approach
+     - Make changes
+     - Run tests/builds to verify
+     - Fix issues
+     - Repeat until satisfied
+3. Progress updates appear as `[Goal Status]` messages
+4. On completion: reports success/failure, turns used, and termination reason
+
+**Termination conditions:**
+- Model declares the goal complete
+- Token budget exhausted
+- Error count exceeds threshold
+- User cancels with `esc`
+
+**Note:** In Chat mode, goal execution still respects the permission gate — you'll approve file writes and commands. In Vibe mode, it runs fully autonomous.
+
+---
+
+#### `/schedule` — Timed Tasks
+
+**Intent:** Schedule one-shot or recurring tasks that execute automatically after a delay or on a cron pattern.
+
+**Why it matters:** Some workflows need time-based triggers. "Run tests in 5 minutes after this build finishes." "Check deployment status every 30 minutes." Schedule lets you set up automation without external tools.
+
+**Walkthrough:**
+
+**One-shot delay:**
+```
+/schedule --delay 5m "run the test suite and report results"
+```
+Executes the instruction once after 5 minutes.
+
+**Recurring cron:**
+```
+/schedule */30 * * * * "check if the build passed on CI"
+```
+Executes every 30 minutes until cancelled.
+
+**Delay format:** `30s`, `5m`, `1h`, `2h30m`
+
+**Viewing tasks:** Type `/tasks` to see all scheduled and active background tasks.
+
+---
+
+#### `/tasks` — Background Task Monitor
+
+**Intent:** View all active background tasks — scheduled timers, running subagents, and their status.
+
+**Why it matters:** When you have autonomous work running (goal loops, scheduled tasks, subagents), you need visibility into what's happening. This panel shows what's running, what's pending, and what completed.
+
+**Walkthrough:**
+
+1. Type `/tasks` to open the task monitor
+2. Each task shows:
+   - Status indicator (green = active, grey = completed/pending)
+   - Task ID
+   - Type (delay, cron, subagent)
+   - Instruction text
+   - Current status
+3. Press `esc` to close
+
+---
+
+#### `/compact` — History Compaction
+
+**Intent:** Compress conversation history to free up context budget when you're running low on tokens.
+
+**Why it matters:** Long conversations consume context. When you hit 80%+ usage, the model starts losing access to earlier context and may behave erratically. Compaction summarizes older messages into a condensed form, preserving key decisions and facts while freeing budget for new work.
+
+**Walkthrough:**
+
+1. Type `/compact`
+2. VoidRift analyzes the conversation:
+   - If compactable: "Compacted: 48 → 12 messages"
+   - If not needed: "Nothing to compact."
+3. Older messages are summarized, recent ones preserved verbatim
+4. The model retains awareness of what was discussed but with less detail on old turns
+
+**When to use:** When `/stats` or the status bar shows context above 70%. Or when the model starts "forgetting" things from earlier in the conversation.
+
+---
+
+#### `/tools` — Tool Inspector
+
+**Intent:** Browse all tools available to the current agent with full parameter documentation and approval requirements.
+
+**Why it matters:** You need to know what the model can do and what requires your approval. The tools panel shows exactly which capabilities are loaded, whether they auto-approve or gate, and what parameters each tool accepts.
+
+**Walkthrough:**
+
+1. Type `/tools` to open the tools panel
+2. Two pages (navigate with `←` / `→`):
+   - **core** — Built-in tools (file ops, shell, web, planning, memory, LSP)
+   - **mcp** — Tools from connected MCP servers
+3. Each tool shows:
+   - Lock icon (🔒 = requires approval, ✓ = auto-approved)
+   - Name and description
+4. Navigate with `↑` / `↓`, press `enter` for detail view
+5. Detail view shows:
+   - Full name, description, approval status
+   - Parameters table: name, type, required/optional, description
+
+---
+
+#### `/policy` — Security Policy Manager
+
+**Intent:** View and manage persistent security rules that pre-approve or pre-deny specific tool calls. Rules survive sessions (unlike trust decisions from the confirmation dialog which are session-only).
+
+**Why it matters:** If you always want `npm test` approved without asking, or always want `rm -rf` denied, policy rules encode that permanently. They reduce confirmation fatigue for repetitive workflows while maintaining security for dangerous operations.
+
+**Walkthrough:**
+
+**View rules:** `/policy` opens a panel showing all active rules with their source, tool, pattern, decision, and priority.
+
+**Add a rule:**
+```
+/policy add allow execute_command 'npm *'
+/policy add allow execute_command 'git status'
+/policy add deny execute_command 'rm -rf *'
+/policy add allow edit_file 'src/**'
+```
+
+**Rule format:** `/policy add <allow|deny> <tool_name> <pattern>`
+
+**Pattern matching:**
+- `*` matches anything in that position
+- File patterns: `src/utils/**` matches all files under src/utils/
+- Command patterns: `npm *` matches any npm command
+
+**Storage:** `.voidrift/policies.json` (workspace) — check into git to share with your team. Global rules go in `~/.config/voidrift/policies.json`.
+
+**Priority:** Workspace rules override global rules. More specific patterns override broader ones.
+
+---
+
+#### `/history` — Audit Log
+
+**Intent:** View a chronological record of every action taken during the session — tool calls, approvals, denials, errors, and system events.
+
+**Why it matters:** Accountability and debugging. When something goes wrong, the audit log tells you exactly what happened and when. It's also useful for understanding the model's decision-making process — what tools it tried, what was approved, what failed.
+
+**Walkthrough:**
+
+1. Type `/history` to open the audit log
+2. Events listed chronologically with timestamps
+3. Each entry shows:
+   - Timestamp
+   - Event type (tool call, approval, denial, error, etc.)
+   - Details (tool name, arguments, result)
+4. Scroll with `↑` / `↓`
+5. Press `esc` to close
+
+---
+
+#### `/plugins` — Plugin Manager
+
+**Intent:** View installed plugins and their contributions to the system (commands, agents, prompts, panels).
+
+**Why it matters:** As you add plugins, you need to know what they've registered and whether they're active. This panel gives visibility into the plugin ecosystem.
+
+**Walkthrough:**
+
+1. Type `/plugins` to open the plugin panel
+2. Lists all discovered plugins with:
+   - Name, version, author
+   - License
+   - Contributed commands, agents, modes
+   - Active/inactive status
+
+See [PLUGINS.md](./PLUGINS.md) for the full plugin development guide.
+
+---
+
+#### `/clear` — Reset Session
+
+**Intent:** Wipe the conversation history and focused files. Starts fresh without exiting.
+
+**Why it matters:** Sometimes a conversation goes off the rails and it's faster to start over than to fix the context. Clear gives you a blank slate within the same session.
+
+**Walkthrough:** Type `/clear`. History is emptied, focused files are cleared. The model forgets everything from this session (but memories and plans persist since they're stored on disk).
+
+---
+
+#### `/exit` — Save and Quit
+
+**Intent:** Save the current session state and exit VoidRift cleanly.
+
+**Why it matters:** Sessions are auto-saved periodically, but `/exit` ensures a clean save point. You can resume this session later with `/resume`.
+
+**Walkthrough:** Type `/exit`. Session is saved to `.voidrift/sessions/{id}/`. VoidRift exits.
 
 ---
 
