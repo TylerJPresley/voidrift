@@ -677,6 +677,19 @@ export function MCPPanel({ mcp, config, onClose }: { mcp: MCPEngine; config: Voi
           if (existsSync(path)) { openInEditor(path, config.editor); setMessage(`Editing ${detail}`); break; }
         }
       }
+      if (input === "a") {
+        // Toggle autoConnect
+        for (const dir of mcp["configDirs"]) {
+          const path = join(dir, `${detail}.json`);
+          if (existsSync(path)) {
+            const raw = JSON.parse(readFileSync(path, "utf-8"));
+            raw.autoConnect = raw.autoConnect === false ? true : false;
+            writeFileSync(path, JSON.stringify(raw, null, 2), "utf-8");
+            setMessage(`autoConnect: ${raw.autoConnect}`);
+            break;
+          }
+        }
+      }
       return;
     }
 
@@ -750,6 +763,7 @@ export function MCPPanel({ mcp, config, onClose }: { mcp: MCPEngine; config: Voi
         {cfg?.url && <Text><Text color="#61afef">{"URL:".padEnd(16)}</Text>{cfg.url}</Text>}
         {cfg?.command && <Text><Text color="#61afef">{"Command:".padEnd(16)}</Text>{cfg.command} {(cfg.args ?? []).join(" ")}</Text>}
         <Text><Text color="#61afef">{"Auth:".padEnd(16)}</Text>{cfg?.auth ? `${cfg.auth.type} (${cfg.auth.scopes?.join(", ") ?? "no scopes"})` : "none"}</Text>
+        <Text><Text color="#61afef">{"Auto-Connect:".padEnd(16)}</Text>{(cfg as any)?.autoConnect === false ? <Text color="yellow">manual</Text> : <Text color="green">on startup</Text>}</Text>
         <Text><Text color="#61afef">{"Tools:".padEnd(16)}</Text>{tools.length}</Text>
         {tools.length > 0 && <>
           <Text> </Text>
@@ -764,7 +778,7 @@ export function MCPPanel({ mcp, config, onClose }: { mcp: MCPEngine; config: Voi
           {srv.errorLog.slice(-3).map((e, i) => <Text key={i} dimColor>  {e.trim().slice(0, 80)}</Text>)}
         </>}
         <Text> </Text>
-        <Text dimColor><Text color="#61afef" bold>e</Text> edit config  <Text color="#61afef" bold>esc</Text> back</Text>
+        <Text dimColor><Text color="#61afef" bold>e</Text> edit config  <Text color="#61afef" bold>a</Text> toggle auto-connect  <Text color="#61afef" bold>esc</Text> back</Text>
         {message && <Text color="#4ec9b0">{message}</Text>}
       </Box>
     );
