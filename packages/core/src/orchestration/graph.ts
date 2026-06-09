@@ -253,9 +253,13 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
         lcTools.push(new DynamicStructuredTool({
           name: fullName,
           description: tool.description || tool.name,
-          schema: z.record(z.any()),
+          schema: z.object({}).passthrough(),
           func: async (args: Record<string, unknown>) => {
-            return _mcpEngine!.callTool(server.name, tool.name, args);
+            try {
+              return await _mcpEngine!.callTool(server.name, tool.name, args);
+            } catch (err) {
+              return `Error: ${err instanceof Error ? err.message : String(err)}`;
+            }
           },
         }));
       }
