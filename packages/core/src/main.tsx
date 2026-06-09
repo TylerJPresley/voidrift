@@ -992,8 +992,8 @@ const engine: EngineContext = await (async () => {
     }, 2000);
   };
   container.bus.subscribe("FILE_MODIFIED", (e) => scheduleReindex(e.payload.path));
-  container.bus.subscribe("FILE_CREATED", (e) => scheduleReindex(e.payload.path));
-  container.bus.subscribe("FILE_DELETED", (e) => scheduleReindex(e.payload.path));
+  container.bus.subscribe("FILE_CREATED", (e) => { scheduleReindex(e.payload.path); mcp.notifyRootsChanged(); });
+  container.bus.subscribe("FILE_DELETED", (e) => { scheduleReindex(e.payload.path); mcp.notifyRootsChanged(); });
 
   // Resource watcher: tracks voidrift config directories (local + global)
   const resourceWatcher = new ResourceWatcher(workspaceRoot, join(homedir(), ".config", "voidrift"), container.bus);

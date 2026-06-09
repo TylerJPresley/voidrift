@@ -347,6 +347,44 @@ export class MCPEngine {
     }
   }
 
+  /** Request argument completion from an MCP server */
+  async complete(serverName: string, ref: { type: "ref/prompt" | "ref/resource"; name?: string; uri?: string }, argumentName: string, argumentValue: string): Promise<string[]> {
+    const server = this.servers.get(serverName);
+    if (!server?.client) return [];
+    try {
+      const result = await server.client.complete({ ref: ref as any, argument: { name: argumentName, value: argumentValue } });
+      return (result.completion?.values ?? []) as string[];
+    } catch { return []; }
+  }
+
+  /** Set the logging level on a connected MCP server */
+  async setLoggingLevel(serverName: string, level: "debug" | "info" | "warning" | "error" | "critical"): Promise<void> {
+    const server = this.servers.get(serverName);
+    if (!server?.client) return;
+    try { await server.client.setLoggingLevel(level); } catch {}
+  }
+
+  /** Subscribe to updates for a specific resource */
+  async subscribeResource(serverName: string, uri: string): Promise<void> {
+    const server = this.servers.get(serverName);
+    if (!server?.client) return;
+    try { await server.client.subscribeResource({ uri }); } catch {}
+  }
+
+  /** Unsubscribe from updates for a specific resource */
+  async unsubscribeResource(serverName: string, uri: string): Promise<void> {
+    const server = this.servers.get(serverName);
+    if (!server?.client) return;
+    try { await server.client.unsubscribeResource({ uri }); } catch {}
+  }
+
+  /** Notify all connected servers that the roots list has changed */
+  async notifyRootsChanged(): Promise<void> {
+    for (const server of this.connected) {
+      try { await server.client!.sendRootsListChanged(); } catch {}
+    }
+  }
+
   private createTransport(config: MCPServerConfig, token?: string) {
     const isHttp = config.transport === "http-sse" || config.url;
 
