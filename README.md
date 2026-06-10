@@ -68,7 +68,7 @@ Every AI tool that can write files and run commands is a potential footgun. Void
 
 Patterns are inferred automatically — if the model edits `src/utils/auth.ts`, you can trust `src/utils/**` with one keypress. Trust is session-scoped by default — restart VoidRift and all trust resets.
 
-**Persistent policy rules** (`/policy add`) let you pre-approve patterns permanently. `npm test` should always be allowed? Add a rule. `rm` should always be denied? Add a rule. Rules can be workspace-level (shared with your team via git) or global (personal).
+**Persistent policy rules** (`/policy add`) let you pre-approve patterns permanently. `npm test` should always be allowed? Add a rule. `rm` should always be denied? Add a rule. Rules can be workspace-level (per-project) or global (personal, across all projects).
 
 **Why this matters:** You can't productively use an AI tool if you're scared of what it might do. The permission system gives you confidence to grant the model real capabilities (shell, network, MCP) because you have real enforcement. It's not "the model promised to ask" — it physically cannot act without going through the gate.
 
@@ -197,7 +197,7 @@ A skill is a markdown file with trigger rules that you write for your domain. Wh
 
 **Progressive disclosure:** The model always sees a one-line description of every available skill. It doesn't pay the token cost of loading them all — just the ones triggered by current context. When you start working on something new, the relevant skill loads automatically.
 
-**Workspace vs. global:** Project-specific skills live in `.voidrift/skills/` (share with your team via git). Personal skills live in `~/.config/voidrift/skills/`.
+**Workspace vs. global:** Project-specific skills live in `.voidrift/skills/` (scoped to the workspace you're running in). Personal skills live in `~/.config/voidrift/skills/` (available across all workspaces).
 
 **Why this matters:** A general model knows a little about everything but isn't an expert in anything. Skills let you encode real expertise into the harness. The model performs like a domain expert because it has your domain-expert instructions loaded at the right time.
 
@@ -333,7 +333,7 @@ VoidRift needs at least one model configured to function. Configuration lives in
 | Location | Scope | Purpose |
 |----------|-------|---------|
 | `~/.config/voidrift/config.json` | Global | Your default models and preferences |
-| `.voidrift/config.json` | Project | Per-project overrides (checked into git) |
+| `.voidrift/config.json` | Project | Per-project overrides |
 
 Project config is merged on top of global — you can override tiers, add models, or change settings per workspace.
 

@@ -170,7 +170,7 @@ active: true
 - The skill is bound to the active agent
 
 **Locations:**
-- Workspace: `.voidrift/skills/` — project-specific (checked into git)
+- Workspace: `.voidrift/skills/` — project-specific (scoped to this workspace)
 - Global: `~/.config/voidrift/skills/` — personal preferences across projects
 
 ---
@@ -608,7 +608,7 @@ Executes every 30 minutes until cancelled.
 - File patterns: `src/utils/**` matches all files under src/utils/
 - Command patterns: `npm *` matches any npm command
 
-**Storage:** `.voidrift/policies.json` (workspace) — check into git to share with your team. Global rules go in `~/.config/voidrift/policies.json`.
+**Storage:** `.voidrift/policies.json` (workspace) for project-level rules. Global rules go in `~/.config/voidrift/policies.json`.
 
 **Priority:** Workspace rules override global rules. More specific patterns override broader ones.
 
