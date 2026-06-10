@@ -117,8 +117,10 @@ function describeToolCall(name: string, argsStr: string): { label: string; descr
   const friendly: Record<string, string> = {
     read_file: "Read", glob_files: "Glob", write_file: "Write", edit_file: "Edit",
     execute_command: "Run", web_search: "Search", web_fetch: "Fetch",
-    save_memory: "Remember", schedule: "Schedule", plan: "Plan",
-    run_task_agent: "Task Agent",
+    save_memory: "Remember", schedule: "Schedule",
+    read_plan: "Plan", write_plan: "Plan", update_plan: "Plan",
+    run_task_agent: "Task Agent", spawn_subagent: "Subagent",
+    lsp_definition: "Definition", lsp_references: "References", lsp_hover: "Hover",
   };
 
   // MCP tools: mcp_server_toolname → MCP:server:toolname
@@ -150,6 +152,18 @@ function describeToolCall(name: string, argsStr: string): { label: string; descr
       return { label, description: args.query?.slice(0, 60) || "query", color: "cyan" };
     case "web_fetch":
       return { label, description: args.url?.slice(0, 60) || "url", color: "cyan" };
+    case "read_plan":
+      return { label, description: args.action === "load" ? `load ${args.name}` : "list items", color: "#61afef" };
+    case "write_plan":
+      return { label, description: `${args.action || "?"} ${args.name || ""}`.trim(), color: "#61afef" };
+    case "update_plan":
+      return { label, description: `edit ${args.name || "item"}`, color: "#61afef" };
+    case "save_memory":
+      return { label, description: args.title?.slice(0, 40) || "memory", color: "#d19a66" };
+    case "lsp_definition":
+    case "lsp_references":
+    case "lsp_hover":
+      return { label, description: `${args.path || "file"}:${args.line || "?"}`, color: "green" };
     default:
       return { label, description: argsStr.slice(0, 60), color: "gray" };
   }
