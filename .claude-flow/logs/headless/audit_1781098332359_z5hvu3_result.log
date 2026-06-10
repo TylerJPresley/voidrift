@@ -1,0 +1,82 @@
+[2026-06-10T13:32:43.429Z] RESULT
+============================================================
+{
+  "success": true,
+  "output": "Looking at the VoidRift codebase, I've identified several security vulnerabilities across the application. Here's my analysis:\n\n```json\n{\n  \"vulnerabilities\": [\n    {\n      \"severity\": \"high\",\n      \"file\": \"src/mcp/discovery.ts\",\n      \"line\": 66,\n      \"description\": \"SSRF (Server-Side Request Forgery) vulnerability. The discovery function fetches URLs from `resourceMetaUrl` and `authMetaUrl` without validating the origin. An attacker could manipulate the auth config to make the application fetch from arbitrary internal/private URLs.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"file\": \"src/codemap/summarizer.ts\",\n      \"line\": 26,\n      \"description\": \"Information disclosure. Full file content (including potentially hardcoded secrets, API keys, credentials) is sent to external LLM APIs. No filtering for sensitive data patterns before transmission.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"file\": \"src/mcp/discovery.ts\",\n      \"line\": 92,\n      \"description\": \"Missing HTTPS enforcement. OAuth token exchanges and credential retrieval occur over unvalidated URLs without requiring HTTPS, exposing tokens to man-in-the-middle attacks.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"file\": \"src/logging/audit.ts\",\n      \"line\": 73,\n      \"description\": \"Sensitive data exposure in logs. Tool arguments are logged directly (line 73: `this.local('info', 'tool', call:${e.payload.toolName}', { args: e.payload.arguments })`), which could include API keys, credentials, or auth tokens.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"file\": \"src/mcp/credentials.ts\",\n      \"line\": 12,\n      \"description\": \"Weak credential encryption key derivation. The encryption key is deterministic and based on `homedir()`. If the filesystem is compromised (e.g., via physical access or privilege escalation), credentials can be decrypted.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"file\": \"src/bootstrap/cleanup.ts\",\n      \"line\": 50,\n      \"description\": \"Potential command injection in execSync. String interpolation: `execSync(\\\\`git worktree remove --force \\\"${wtPath}\\\"\\\\`, ...)`. While wtPath is filesystem-derived (low immediate risk), path traversal or special characters could be exploited.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"file\": \"src/adapters/factory.ts\",\n      \"line\": 23,\n      \"description\": \"Missing API key validation. Fallback value 'not-needed' masks missing credentials: `openAIApiKey: apiKey || \\\"not-needed\\\"`. This could cause silent failures or unexpected behavior when API keys are not configured.\"\n    },\n    {\n      \"severity\": \"low\",\n      \"file\": \"src/codemap/index.ts\",\n      \"line\": 88,\n      \"description\": \"Potential ReDoS (Regular Expression Denial of Service). Complex regex patterns: `/^export\\\\s+(?:default\\\\s+)?(?:async\\\\s+)?(function|class|interface|type|const|let|enum)\\\\s+(\\\\w+)/`. While patterns appear safe, malformed input could cause exponential backtracking.\"\n    },\n    {\n      \"severity\": \"low\",\n      \"file\": \"src/logging/audit.ts\",\n      \"line\": 75,\n      \"description\": \"Audit logs stored unencrypted. Workspace logs (`.voidrift/logs/<session-id>.log`) contain model responses and tool arguments in plaintext, vulnerable if workspace directory is accessed.\"\n    }\n  ],\n  \"riskScore\": 72,\n  \"recommendations\": [\n    \"Implement SSRF protection in mcp/discovery.ts: validate `resourceMetaUrl` and auth server URLs against a whitelist, enforce HTTPS-only, and validate hostname/port ranges\",\n    \"Add data sanitization before sending file content to external LLMs: filter/mask patterns for common secrets (API_KEY=, password:, token:, etc.)\",\n    \"Encrypt audit logs at rest: use AES-256-GCM encryption (like credentials.ts) for log files in `.voidrift/logs/`\",\n    \"Enforce HTTPS for all OAuth2 flows: reject non-HTTPS auth URLs and token endpoints\",\n    \"Improve credential key derivation: use random salt stored with credential file instead of deterministic homedir-based key, or integrate with OS keyring (libsecret on Linux, Keychain on macOS, DPAPI on Windows)\",\n    \"Remove plaintext fallback 'not-needed' in factory.ts: throw error if required API keys are missing rather than masking the failure\",\n    \"Sanitize tool arguments before logging: filter/mask known secret patterns and sensitive fields from audit logs\",\n    \"Add input validation for filesystem paths in cleanup.ts: use `path.resolve()` and verify paths are within expected worktree directory before executing git commands\",\n    \"Add regex complexity limits: use timeouts or complexity analysis for regex parsing to prevent ReDoS attacks on user-provided files\"\n  ]\n}\n```\n\n**Key Findings:**\n\nThe application has solid patterns (credential encryption, audit logging, permission gates) but lacks critical controls around:\n- **External API calls** (no SSRF protection, unvalidated URLs)\n- **Data exfiltration** (secrets sent to LLMs without filtering)\n- **Credential protection** (deterministic encryption keys, unencrypted logs)\n\n**Recommended Priority:**\n1. Fix SSRF in discovery.ts (blocks untrusted MCP server connections)\n2. Add secret filtering before LLM API calls (prevents credential leakage)\n3. Encrypt audit logs (workspace isolation)\n",
+  "parsedOutput": {
+    "vulnerabilities": [
+      {
+        "severity": "high",
+        "file": "src/mcp/discovery.ts",
+        "line": 66,
+        "description": "SSRF (Server-Side Request Forgery) vulnerability. The discovery function fetches URLs from `resourceMetaUrl` and `authMetaUrl` without validating the origin. An attacker could manipulate the auth config to make the application fetch from arbitrary internal/private URLs."
+      },
+      {
+        "severity": "high",
+        "file": "src/codemap/summarizer.ts",
+        "line": 26,
+        "description": "Information disclosure. Full file content (including potentially hardcoded secrets, API keys, credentials) is sent to external LLM APIs. No filtering for sensitive data patterns before transmission."
+      },
+      {
+        "severity": "high",
+        "file": "src/mcp/discovery.ts",
+        "line": 92,
+        "description": "Missing HTTPS enforcement. OAuth token exchanges and credential retrieval occur over unvalidated URLs without requiring HTTPS, exposing tokens to man-in-the-middle attacks."
+      },
+      {
+        "severity": "medium",
+        "file": "src/logging/audit.ts",
+        "line": 73,
+        "description": "Sensitive data exposure in logs. Tool arguments are logged directly (line 73: `this.local('info', 'tool', call:${e.payload.toolName}', { args: e.payload.arguments })`), which could include API keys, credentials, or auth tokens."
+      },
+      {
+        "severity": "medium",
+        "file": "src/mcp/credentials.ts",
+        "line": 12,
+        "description": "Weak credential encryption key derivation. The encryption key is deterministic and based on `homedir()`. If the filesystem is compromised (e.g., via physical access or privilege escalation), credentials can be decrypted."
+      },
+      {
+        "severity": "medium",
+        "file": "src/bootstrap/cleanup.ts",
+        "line": 50,
+        "description": "Potential command injection in execSync. String interpolation: `execSync(\\`git worktree remove --force \"${wtPath}\"\\`, ...)`. While wtPath is filesystem-derived (low immediate risk), path traversal or special characters could be exploited."
+      },
+      {
+        "severity": "medium",
+        "file": "src/adapters/factory.ts",
+        "line": 23,
+        "description": "Missing API key validation. Fallback value 'not-needed' masks missing credentials: `openAIApiKey: apiKey || \"not-needed\"`. This could cause silent failures or unexpected behavior when API keys are not configured."
+      },
+      {
+        "severity": "low",
+        "file": "src/codemap/index.ts",
+        "line": 88,
+        "description": "Potential ReDoS (Regular Expression Denial of Service). Complex regex patterns: `/^export\\s+(?:default\\s+)?(?:async\\s+)?(function|class|interface|type|const|let|enum)\\s+(\\w+)/`. While patterns appear safe, malformed input could cause exponential backtracking."
+      },
+      {
+        "severity": "low",
+        "file": "src/logging/audit.ts",
+        "line": 75,
+        "description": "Audit logs stored unencrypted. Workspace logs (`.voidrift/logs/<session-id>.log`) contain model responses and tool arguments in plaintext, vulnerable if workspace directory is accessed."
+      }
+    ],
+    "riskScore": 72,
+    "recommendations": [
+      "Implement SSRF protection in mcp/discovery.ts: validate `resourceMetaUrl` and auth server URLs against a whitelist, enforce HTTPS-only, and validate hostname/port ranges",
+      "Add data sanitization before sending file content to external LLMs: filter/mask patterns for common secrets (API_KEY=, password:, token:, etc.)",
+      "Encrypt audit logs at rest: use AES-256-GCM encryption (like credentials.ts) for log files in `.voidrift/logs/`",
+      "Enforce HTTPS for all OAuth2 flows: reject non-HTTPS auth URLs and token endpoints",
+      "Improve credential key derivation: use random salt stored with credential file instead of deterministic homedir-based key, or integrate with OS keyring (libsecret on Linux, Keychain on macOS, DPAPI on Windows)",
+      "Remove plaintext fallback 'not-needed' in factory.ts: throw error if required API keys are missing rather than masking the failure",
+      "Sanitize tool arguments before logging: filter/mask known secret patterns and sensitive fields from audit logs",
+      "Add input validation for filesystem paths in cleanup.ts: use `path.resolve()` and verify paths are within expected worktree directory before executing git commands",
+      "Add regex complexity limits: use timeouts or complexity analysis for regex parsing to prevent ReDoS attacks on user-provided files"
+    ]
+  },
+  "durationMs": 31070,
+  "model": "haiku",
+  "sandboxMode": "strict",
+  "workerType": "audit",
+  "timestamp": "2026-06-10T13:32:43.429Z",
+  "executionId": "audit_1781098332359_z5hvu3"
+}

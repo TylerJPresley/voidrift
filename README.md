@@ -183,9 +183,11 @@ Every time the model discovers something important — a naming convention, an a
 
 ### Skills System
 
-Skills are injectable expertise — domain knowledge the model loads based on what you're working on.
+Skills are injectable expertise — domain knowledge the model loads based on what you're working on. VoidRift provides the skill system; you bring the skills.
 
-A skill is a markdown file with trigger rules. When you open a React file, the React skill loads automatically. When you're working on database code, the SQL skill activates. Each skill contains guidelines, patterns, conventions, and anti-patterns specific to that domain.
+A skill is a markdown file with trigger rules that you write for your domain. When you open a React file, your React skill loads automatically. When you're working on database code, your SQL skill activates. Each skill contains the guidelines, patterns, conventions, and anti-patterns that matter to your team.
+
+**You author skills for your workflow.** VoidRift doesn't ship pre-built skills — it gives you the infrastructure to encode your own expertise. Your team's component patterns. Your company's API standards. Your security policies. Write them once as markdown, and the model loads them at the right time.
 
 **Trigger types:**
 - **Extensions** — load when you focus files with matching extensions (`.tsx`, `.py`, `.rs`)
@@ -197,7 +199,7 @@ A skill is a markdown file with trigger rules. When you open a React file, the R
 
 **Workspace vs. global:** Project-specific skills live in `.voidrift/skills/` (share with your team via git). Personal skills live in `~/.config/voidrift/skills/`.
 
-**Why this matters:** A general model knows a little about everything but isn't an expert in anything. Skills let you encode real expertise — your team's exact React patterns, your company's API standards, your security policies. The model performs like a domain expert because it has domain-expert instructions loaded at the right time.
+**Why this matters:** A general model knows a little about everything but isn't an expert in anything. Skills let you encode real expertise into the harness. The model performs like a domain expert because it has your domain-expert instructions loaded at the right time.
 
 ---
 
@@ -266,9 +268,12 @@ VoidRift runs as a React/Ink application in your terminal. No browser, no Electr
 
 | Requirement | Version | Purpose |
 |-------------|---------|---------|
-| [Bun](https://bun.sh) | ≥ 1.0 | Runtime and package manager |
+| [Node.js](https://nodejs.org) | ≥ 22 | Runtime |
 | [Git](https://git-scm.com) | ≥ 2.30 | Workspace checkpointing, worktree isolation |
 | A model endpoint | — | Ollama, vLLM, cloud API, or any OpenAI-compatible server |
+
+**For development only:**
+- [Bun](https://bun.sh) ≥ 1.0 — package manager and dev server
 
 **Optional:**
 - [Ollama](https://ollama.ai) — easiest way to run local models

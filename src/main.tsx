@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 import React, { useState, useEffect, useCallback } from "react";
 import { render, Box, Text, Static, useInput, useApp } from "ink";
 import TextInput from "ink-text-input";
