@@ -16,33 +16,23 @@ import { IndexCache } from "../codemap/cache.js";
 import type { ContextManager } from "../session/context.js";
 import type { VoidRiftConfig } from "../config/loader.js";
 import type { Tier } from "../adapters/factory.js";
-
-// Workspace root — set by the harness on bootstrap
-let _workspaceRoot = process.cwd();
-let _cache: IndexCache | null = null;
-let _scheduler: any = null;
-let _planManager: any = null;
-function getCache(root: string): IndexCache {
-  if (!_cache) {
-    _cache = new IndexCache(root);
-  }
-  return _cache;
-}
-export function setWorkspaceRoot(root: string) {
-  _workspaceRoot = root;
-  _cache = null; // Reset cache reference if workspace root changes
-}
-export function setScheduler(scheduler: any) {
-  _scheduler = scheduler;
-}
-export function setPlanManager(pm: any) {
-  _planManager = pm;
-}
-
 import { mergeMessageRuns } from "@langchain/core/messages";
 import { createTierAdapter } from "../adapters/factory.js";
 
-async function executeToolCall(toolName: string, argsJson: string, workspaceRoot: string, context?: ContextManager, config?: VoidRiftConfig): Promise<string> {
+interface OrchestrationDeps {
+  workspaceRoot: string;
+  cache: IndexCache;
+  scheduler: any;
+  planManager: any;
+}
+
+async function executeToolCall(
+  toolName: string,
+  argsJson: string,
+  deps: OrchestrationDeps,
+  context?: ContextManager,
+  config?: VoidRiftConfig,
+): Promise<string> {
   let args: Record<string, any>;
   try {
     args = JSON.parse(argsJson);
@@ -52,11 +42,11 @@ async function executeToolCall(toolName: string, argsJson: string, workspaceRoot
   }
 
   return executeRegisteredTool(toolName, args, {
-    workspaceRoot,
+    workspaceRoot: deps.workspaceRoot,
     context,
     config,
-    planManager: _planManager,
-    scheduler: _scheduler,
+    planManager: deps.planManager,
+    scheduler: deps.scheduler,
   });
 }
 
