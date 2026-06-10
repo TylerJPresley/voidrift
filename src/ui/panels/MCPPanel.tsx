@@ -78,10 +78,11 @@ export function MCPPanel({ mcp, config, onClose }: { mcp: MCPEngine; config: Voi
         if (cfg?.auth?.type === "oauth2") {
           setMessage("Starting OAuth flow — check browser...");
           import("../../mcp/oauth.js").then(({ runOAuthFlow }) => {
-            const { execSync } = require("child_process");
+            import("child_process").then(({ execSync }) => {
             runOAuthFlow(detail, cfg.auth!, (url: string) => {
               try { execSync(`xdg-open "${url}" 2>/dev/null || open "${url}" 2>/dev/null`); } catch {}
             }, (msg: string) => setMessage(msg));
+            });
           });
         } else {
           setMessage("No OAuth config. Add 'auth' section to config.");

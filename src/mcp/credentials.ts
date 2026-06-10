@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from "crypto";
@@ -59,7 +59,6 @@ export function loadCredential(serverName: string): StoredCredential | null {
 export function deleteCredential(serverName: string): void {
   const path = join(CRED_DIR, `${serverName}.json`);
   if (existsSync(path)) {
-    const { unlinkSync } = require("fs");
     unlinkSync(path);
   }
 }

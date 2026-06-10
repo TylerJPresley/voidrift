@@ -1,7 +1,31 @@
 node_modules/
 dist/
 *.DS_Store
-.voidrift/
 .kiro/
 .claude-flow/
 _internal/
+
+# .voidrift — allow tracking of plans, agents, skills, prompts, templates
+.voidrift/*
+!.voidrift/plan/
+!.voidrift/agents/
+!.voidrift/prompts/
+!.voidrift/skills/
+!.voidrift/templates/
+
+# Always ignore runtime state
+.voidrift/config.json
+.voidrift/models.json
+.voidrift/policies.json
+.voidrift/session.json
+.voidrift/session_state.json
+.voidrift/index_cache.json
+.voidrift/locks.json
+.voidrift/lock_queue.json
+.voidrift/voidrift.log
+.voidrift/sessions/
+.voidrift/cache/
+.voidrift/logs/
+.voidrift/mcp/
+.voidrift/worktrees/
+.voidrift/ideas/

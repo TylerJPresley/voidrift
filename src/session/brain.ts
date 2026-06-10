@@ -4,7 +4,7 @@
  * Writes session state to individual files at `.voidrift/sessions/<session-id>/`
  * after each turn. Supports crash recovery, rewind, and agent switch.
  */
-import { writeFileSync, readFileSync, existsSync, mkdirSync } from "fs";
+import { writeFileSync, readFileSync, existsSync, mkdirSync, readdirSync, statSync } from "fs";
 import { join } from "path";
 import { execSync } from "child_process";
 import type { SessionContext } from "../session/context.js";
@@ -124,7 +124,6 @@ export class SessionBrain {
   listSessions(): Array<{ id: string; startTime: number; turnCount: number; lastActivity: number }> {
     const sessionsDir = join(this.workspaceRoot, ".voidrift", "sessions");
     if (!existsSync(sessionsDir)) return [];
-    const { readdirSync, statSync } = require("fs") as typeof import("fs");
     const entries: Array<{ id: string; startTime: number; turnCount: number; lastActivity: number }> = [];
     for (const name of readdirSync(sessionsDir)) {
       const metaPath = join(sessionsDir, name, "system.metadata.json");

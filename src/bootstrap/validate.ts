@@ -9,6 +9,7 @@
  */
 import type { AgentRegistry } from "../agents/registry.js";
 import type { SkillManager } from "../skills/manager.js";
+import { readFileSync } from "fs";
 
 export interface ValidationIssue {
   type: "skill" | "agent" | "template" | "prompt";
@@ -38,7 +39,7 @@ export function validateAssets(agents: AgentRegistry, skills: SkillManager): Val
     }
     // Check for missing frontmatter structure
     try {
-      const raw = require("fs").readFileSync(skill.filePath, "utf-8");
+      const raw = readFileSync(skill.filePath, "utf-8");
       const missing: string[] = [];
       if (!raw.includes("triggers:")) missing.push("triggers");
       if (!raw.includes("agents:")) missing.push("agents");
