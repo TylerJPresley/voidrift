@@ -19,17 +19,34 @@ import type { Tier } from "../adapters/factory.js";
 import { mergeMessageRuns } from "@langchain/core/messages";
 import { createTierAdapter } from "../adapters/factory.js";
 
-interface OrchestrationDeps {
-  workspaceRoot: string;
-  cache: IndexCache;
-  scheduler: any;
-  planManager: any;
+// Module-level state — set by the harness on bootstrap
+let _workspaceRoot = process.cwd();
+let _cache: IndexCache | null = null;
+let _scheduler: any = null;
+let _planManager: any = null;
+
+function getCache(root: string): IndexCache {
+  if (!_cache) _cache = new IndexCache(root);
+  return _cache;
+}
+
+export function setWorkspaceRoot(root: string) {
+  _workspaceRoot = root;
+  _cache = null;
+}
+
+export function setScheduler(scheduler: any) {
+  _scheduler = scheduler;
+}
+
+export function setPlanManager(pm: any) {
+  _planManager = pm;
 }
 
 async function executeToolCall(
   toolName: string,
   argsJson: string,
-  deps: OrchestrationDeps,
+  workspaceRoot: string,
   context?: ContextManager,
   config?: VoidRiftConfig,
 ): Promise<string> {
@@ -42,11 +59,11 @@ async function executeToolCall(
   }
 
   return executeRegisteredTool(toolName, args, {
-    workspaceRoot: deps.workspaceRoot,
+    workspaceRoot,
     context,
     config,
-    planManager: deps.planManager,
-    scheduler: deps.scheduler,
+    planManager: _planManager,
+    scheduler: _scheduler,
   });
 }
 
