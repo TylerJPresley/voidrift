@@ -27,7 +27,8 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "voidrift": "./dist/main.js"
+    "voidrift": "./dist/main.js",
+    "voidrift-serve": "./dist/serve.js"
   },
   "files": [
     "dist/",

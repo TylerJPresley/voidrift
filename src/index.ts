@@ -71,3 +71,7 @@ export { CoreAPI, type PanelDefinition, type PanelColumn, type PanelAction } fro
 // Engine & Turn
 export type { EngineContext } from "./engine.js";
 export { executeTurn, type TurnCallbacks } from "./turn.js";
+export { OperatorAPI } from "./operator/api.js";
+export { createHeadlessHost, type HeadlessHost, type HeadlessHostOptions } from "./bootstrap/headless.js";
+export { PROTOCOL_VERSION, Methods, Notifications } from "./operator/protocol.js";
+export type * from "./operator/dto.js";

@@ -1,0 +1,173 @@
+#!/usr/bin/env node
+/**
+ * voidrift serve — headless host for external frontends.
+ *
+ * Boots the engine without a TUI. Communicates over stdio using JSON-RPC 2.0.
+ * Frontends (VS Code, etc.) spawn this as a child process.
+ *
+ * Usage: voidrift serve [--workspace <path>]
+ */
+import { createHeadlessHost } from "./bootstrap/headless.js";
+import { OperatorAPI } from "./operator/api.js";
+import { PROTOCOL_VERSION, Methods, Notifications } from "./operator/protocol.js";
+
+const args = process.argv.slice(2);
+let workspaceRoot: string | undefined;
+
+for (let i = 0; i < args.length; i++) {
+  if (args[i] === "--workspace" && args[i + 1]) {
+    workspaceRoot = args[i + 1];
+    i++;
+  }
+}
+
+function sendNotification(method: string, params: any) {
+  const msg = JSON.stringify({ jsonrpc: "2.0", method, params });
+  process.stdout.write(msg + "\n");
+}
+
+function sendResult(id: string | number, result: any) {
+  const msg = JSON.stringify({ jsonrpc: "2.0", id, result });
+  process.stdout.write(msg + "\n");
+}
+
+function sendError(id: string | number, code: number, message: string) {
+  const msg = JSON.stringify({ jsonrpc: "2.0", id, error: { code, message } });
+  process.stdout.write(msg + "\n");
+}
+
+async function main() {
+  const host = await createHeadlessHost({ workspaceRoot });
+  const op = host.operator;
+
+  // Forward bus events as notifications
+  host.bus.subscribe("TOKEN_STREAM", (e) => {
+    sendNotification(Notifications.TOKEN_STREAM, e.payload);
+  });
+  host.bus.subscribe("TOOL_CONFIRMATION_REQUEST", (e) => {
+    sendNotification(Notifications.TOOL_CONFIRMATION_REQUEST, {
+      requestId: e.payload.requestId,
+      tool: e.payload.tool,
+      args: e.payload.args,
+      diff: e.payload.diff,
+      patterns: e.payload.inferredPatterns,
+    });
+  });
+  host.bus.subscribe("TURN_COMPLETE", (e) => {
+    sendNotification(Notifications.TURN_COMPLETE, e.payload);
+  });
+  host.bus.subscribe("ERROR_OCCURRED", (e) => {
+    if (e.payload.source === "output") {
+      sendNotification(Notifications.OUTPUT, { text: e.payload.message });
+    } else if (e.payload.source === "panel") {
+      sendNotification(Notifications.PANEL_OPEN, { name: e.payload.message.replace("panel:", "") });
+    } else {
+      sendNotification(Notifications.ERROR, e.payload);
+    }
+  });
+  host.bus.subscribe("MODE_CHANGED", (e) => {
+    sendNotification(Notifications.MODE_CHANGED, { previous: e.payload.previousMode, current: e.payload.newMode });
+  });
+  host.bus.subscribe("AFTER_TOOL_EXECUTE", (e) => {
+    sendNotification(Notifications.TOOL_CALL_END, {
+      id: "", name: e.payload.toolName, status: e.payload.status, output: e.payload.output, elapsed: 0,
+    });
+  });
+  host.bus.subscribe("WORKSPACE_CHANGED", (e) => {
+    sendNotification(Notifications.WORKSPACE_CHANGED, { paths: e.payload.filePaths, type: e.payload.changeType });
+  });
+
+  // Send handshake
+  sendNotification("initialized", { protocolVersion: PROTOCOL_VERSION, sessionId: host.engine.sessionId });
+
+  // Read JSON-RPC requests from stdin
+  let buffer = "";
+  process.stdin.setEncoding("utf-8");
+  process.stdin.on("data", (chunk: string) => {
+    buffer += chunk;
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      handleRequest(line, op);
+    }
+  });
+
+  process.stdin.on("end", () => {
+    host.shutdown();
+    process.exit(0);
+  });
+}
+
+async function handleRequest(line: string, op: OperatorAPI) {
+  let req: any;
+  try {
+    req = JSON.parse(line);
+  } catch {
+    sendError(0, -32700, "Parse error");
+    return;
+  }
+
+  const { id, method, params } = req;
+
+  try {
+    let result: any;
+
+    switch (method) {
+      case Methods.SESSION_SEND_INPUT: result = await op.sendInput(params); break;
+      case Methods.SESSION_CANCEL: op.cancel(); result = null; break;
+      case Methods.SESSION_CLEAR: op.clear(); result = null; break;
+      case Methods.SESSION_COMPACT: result = op.compact(); break;
+      case Methods.SESSION_CONFIRM_TOOL: op.confirmTool(params); result = null; break;
+
+      case Methods.MODEL_LIST: result = op.listModels(); break;
+      case Methods.MODEL_SWITCH: op.switchModel(params); result = null; break;
+      case Methods.MODEL_GET_STATS: result = op.getStats(); break;
+      case Methods.MODEL_GET_CONTEXT: result = op.getContextStats(); break;
+
+      case Methods.AGENT_LIST: result = op.listAgents(); break;
+      case Methods.AGENT_GET: result = op.getAgent(params.id); break;
+      case Methods.AGENT_ACTIVATE: op.activateAgent(params.id); result = null; break;
+      case Methods.AGENT_CYCLE: result = op.cycleAgent(); break;
+
+      case Methods.PLAN_LIST: result = op.listPlan(); break;
+      case Methods.PLAN_GET: result = op.getPlan(params.filename); break;
+      case Methods.PLAN_ADD: result = op.addPlanItem(params); break;
+      case Methods.PLAN_UPDATE_PRIORITY: op.updatePlanPriority(params); result = null; break;
+      case Methods.PLAN_UPDATE_BODY: op.updatePlanBody(params); result = null; break;
+      case Methods.PLAN_REMOVE: op.removePlanItem(params.filename); result = null; break;
+
+      case Methods.SKILL_LIST: result = op.listSkills(); break;
+      case Methods.SKILL_TOGGLE: op.toggleSkill(params.name, params.active); result = null; break;
+      case Methods.SKILL_REINDEX: result = op.reindexSkills(); break;
+
+      case Methods.TEMPLATE_LIST: result = op.listTemplates(); break;
+      case Methods.TEMPLATE_GET: result = op.getTemplate(params.key); break;
+
+      case Methods.PROMPT_LIST: result = op.listPrompts(); break;
+      case Methods.PROMPT_GET: result = op.getPrompt(params.key); break;
+
+      case Methods.MCP_LIST_SERVERS: result = op.listMCPServers(); break;
+      case Methods.MCP_CONNECT: await op.connectMCP(params.name); result = null; break;
+      case Methods.MCP_DISCONNECT: op.disconnectMCP(params.name); result = null; break;
+
+      case Methods.MEMORY_LIST: result = op.listMemory(); break;
+      case Methods.MEMORY_LOAD: op.loadMemory(params.id); result = null; break;
+      case Methods.MEMORY_UNLOAD: op.unloadMemory(params.id); result = null; break;
+
+      default:
+        sendError(id, -32601, `Method not found: ${method}`);
+        return;
+    }
+
+    sendResult(id, result);
+  } catch (err: any) {
+    sendError(id, -32000, err.message || "Internal error");
+  }
+}
+
+main().catch((err) => {
+  process.stderr.write(`Fatal: ${err.message}\n`);
+  process.exit(1);
+});
