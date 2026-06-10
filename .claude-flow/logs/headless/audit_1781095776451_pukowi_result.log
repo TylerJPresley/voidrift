@@ -1,0 +1,89 @@
+[2026-06-10T12:50:15.640Z] RESULT
+============================================================
+{
+  "success": true,
+  "output": "Based on my analysis of the VoidRift codebase, here's the comprehensive security vulnerability report:\n\n```json\n{\n  \"vulnerabilities\": [\n    {\n      \"severity\": \"high\",\n      \"file\": \"src/bootstrap/cleanup.ts\",\n      \"line\": 63,\n      \"description\": \"Command injection via unvalidated worktree paths. The path is wrapped in quotes but paths containing quotes or escape sequences could break out: execSync(`git worktree remove --force \\\"${wtPath}\\\"`, ...)\"\n    },\n    {\n      \"severity\": \"high\",\n      \"file\": \"src/bootstrap/cli.ts\",\n      \"line\": 73,\n      \"description\": \"Unsafe dynamic imports allowing arbitrary code execution. Plugin IDs are imported directly without validation: await import(dp.id). Attackers controlling plugin configuration could execute arbitrary code.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"file\": \"src/mcp/discovery.ts\",\n      \"line\": 34,\n      \"description\": \"Server-Side Request Forgery (SSRF) vulnerability. The discoverMCPServer() function fetches from user-controlled URLs without validation: fetch(url). Could allow probing internal networks or accessing sensitive endpoints.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"file\": \"src/codemap/summarizer.ts\",\n      \"line\": 24,\n      \"description\": \"Prompt injection vulnerability. File content is directly interpolated into LLM prompts without escaping: new HumanMessage(`File: ${path}...\\\\n\\\\n${content}`). Malicious file content could manipulate model behavior.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"file\": \"src/mcp/credentials.ts\",\n      \"line\": 24,\n      \"description\": \"Weak credential encryption with fixed salt. scryptSync() uses hardcoded salt 'voidrift-salt' instead of random per-credential salt, making credentials vulnerable to rainbow table attacks.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"file\": \"src/mcp/credentials.ts\",\n      \"line\": 19,\n      \"description\": \"Predictable encryption key derivation. Key is derived deterministically from homedir() + fixed salt. While per-user, it means the same key is used for all credentials if compromise occurs.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"file\": \"src/mcp/credentials.ts\",\n      \"line\": 108,\n      \"description\": \"Insecure credential naming. Credentials are saved using serverName derived from tokenUrl.split('/')[2] which could collide or be manipulated: saveCredential(auth.tokenUrl.split('/')[2] || 'unknown', updated)\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"file\": \"src/adapters/factory.ts\",\n      \"line\": 27,\n      \"description\": \"Silent API key failure. Falls back to hardcoded string 'not-needed' when API key is missing: openAIApiKey: apiKey || 'not-needed'. Could mask configuration errors and allow unexpected API call failures.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"file\": \"src/codemap/index.ts\",\n      \"line\": 93,\n      \"description\": \"ReDoS vulnerability in regex parsing. extractSymbols() uses complex regex patterns on untrusted file content that could cause denial of service with crafted input.\"\n    },\n    {\n      \"severity\": \"low\",\n      \"file\": \"src/mcp/discovery.ts\",\n      \"line\": 82,\n      \"description\": \"Dynamic client registration stores client_secret without validation or secure storage: result.clientSecret = regData.client_secret. Should encrypt or warn about storage.\"\n    }\n  ],\n  \"riskScore\": 67,\n  \"recommendations\": [\n    \"Validate and sanitize all worktree paths before passing to execSync(). Use path.resolve() and check against workspace root.\",\n    \"Implement plugin signature verification or sandboxing before dynamic imports. Only load plugins from trusted sources.\",\n    \"Add URL validation to SSRF-vulnerable functions. Whitelist allowed hosts, block private IP ranges (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8).\",\n    \"Sanitize file content before injecting into LLM prompts. Use structured prompts or escape special characters.\",\n    \"Regenerate scrypt salt randomly for each credential. Store salt with encrypted data (standard practice).\",\n    \"Use a key derivation function with random salt per session, or store encrypted keys securely with OS keyring.\",\n    \"Use UUID or hash(serverName + timestamp) for credential naming to prevent collisions.\",\n    \"Require explicit API key configuration. Log warnings and fail fast if keys are missing rather than using fallback strings.\",\n    \"Use anchored regex patterns and limit file size before processing. Add timeout/resource limits for regex matching.\",\n    \"Encrypt client_secret using the same credential encryption mechanism. Warn users about secure storage implications.\"\n  ]\n}\n```\n\n**Key Findings:**\n\n1. **Critical**: Plugin system can execute arbitrary code - implement signature verification\n2. **Critical**: SSRF in MCP discovery - add URL validation and IP range blocking  \n3. **High**: Command injection in worktree cleanup - use `path` module for path validation\n4. **High**: Prompt injection risk - structured prompts prevent content-based manipulation\n5. **Encryption**: Use per-credential random salts and consider OS keyring integration\n\nThe risk score reflects that most vulnerabilities require configuration/content manipulation, but the dynamic import and SSRF issues represent true code execution/access control risks.\n",
+  "parsedOutput": {
+    "vulnerabilities": [
+      {
+        "severity": "high",
+        "file": "src/bootstrap/cleanup.ts",
+        "line": 63,
+        "description": "Command injection via unvalidated worktree paths. The path is wrapped in quotes but paths containing quotes or escape sequences could break out: execSync(`git worktree remove --force \"${wtPath}\"`, ...)"
+      },
+      {
+        "severity": "high",
+        "file": "src/bootstrap/cli.ts",
+        "line": 73,
+        "description": "Unsafe dynamic imports allowing arbitrary code execution. Plugin IDs are imported directly without validation: await import(dp.id). Attackers controlling plugin configuration could execute arbitrary code."
+      },
+      {
+        "severity": "high",
+        "file": "src/mcp/discovery.ts",
+        "line": 34,
+        "description": "Server-Side Request Forgery (SSRF) vulnerability. The discoverMCPServer() function fetches from user-controlled URLs without validation: fetch(url). Could allow probing internal networks or accessing sensitive endpoints."
+      },
+      {
+        "severity": "medium",
+        "file": "src/codemap/summarizer.ts",
+        "line": 24,
+        "description": "Prompt injection vulnerability. File content is directly interpolated into LLM prompts without escaping: new HumanMessage(`File: ${path}...\\n\\n${content}`). Malicious file content could manipulate model behavior."
+      },
+      {
+        "severity": "medium",
+        "file": "src/mcp/credentials.ts",
+        "line": 24,
+        "description": "Weak credential encryption with fixed salt. scryptSync() uses hardcoded salt 'voidrift-salt' instead of random per-credential salt, making credentials vulnerable to rainbow table attacks."
+      },
+      {
+        "severity": "medium",
+        "file": "src/mcp/credentials.ts",
+        "line": 19,
+        "description": "Predictable encryption key derivation. Key is derived deterministically from homedir() + fixed salt. While per-user, it means the same key is used for all credentials if compromise occurs."
+      },
+      {
+        "severity": "medium",
+        "file": "src/mcp/credentials.ts",
+        "line": 108,
+        "description": "Insecure credential naming. Credentials are saved using serverName derived from tokenUrl.split('/')[2] which could collide or be manipulated: saveCredential(auth.tokenUrl.split('/')[2] || 'unknown', updated)"
+      },
+      {
+        "severity": "medium",
+        "file": "src/adapters/factory.ts",
+        "line": 27,
+        "description": "Silent API key failure. Falls back to hardcoded string 'not-needed' when API key is missing: openAIApiKey: apiKey || 'not-needed'. Could mask configuration errors and allow unexpected API call failures."
+      },
+      {
+        "severity": "medium",
+        "file": "src/codemap/index.ts",
+        "line": 93,
+        "description": "ReDoS vulnerability in regex parsing. extractSymbols() uses complex regex patterns on untrusted file content that could cause denial of service with crafted input."
+      },
+      {
+        "severity": "low",
+        "file": "src/mcp/discovery.ts",
+        "line": 82,
+        "description": "Dynamic client registration stores client_secret without validation or secure storage: result.clientSecret = regData.client_secret. Should encrypt or warn about storage."
+      }
+    ],
+    "riskScore": 67,
+    "recommendations": [
+      "Validate and sanitize all worktree paths before passing to execSync(). Use path.resolve() and check against workspace root.",
+      "Implement plugin signature verification or sandboxing before dynamic imports. Only load plugins from trusted sources.",
+      "Add URL validation to SSRF-vulnerable functions. Whitelist allowed hosts, block private IP ranges (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8).",
+      "Sanitize file content before injecting into LLM prompts. Use structured prompts or escape special characters.",
+      "Regenerate scrypt salt randomly for each credential. Store salt with encrypted data (standard practice).",
+      "Use a key derivation function with random salt per session, or store encrypted keys securely with OS keyring.",
+      "Use UUID or hash(serverName + timestamp) for credential naming to prevent collisions.",
+      "Require explicit API key configuration. Log warnings and fail fast if keys are missing rather than using fallback strings.",
+      "Use anchored regex patterns and limit file size before processing. Add timeout/resource limits for regex matching.",
+      "Encrypt client_secret using the same credential encryption mechanism. Warn users about secure storage implications."
+    ]
+  },
+  "durationMs": 39189,
+  "model": "haiku",
+  "sandboxMode": "strict",
+  "workerType": "audit",
+  "timestamp": "2026-06-10T12:50:15.640Z",
+  "executionId": "audit_1781095776451_pukowi"
+}

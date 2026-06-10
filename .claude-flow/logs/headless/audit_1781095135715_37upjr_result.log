@@ -1,0 +1,91 @@
+[2026-06-10T12:39:36.449Z] RESULT
+============================================================
+{
+  "success": true,
+  "output": "```json\n{\n  \"vulnerabilities\": [\n    {\n      \"severity\": \"high\",\n      \"file\": \"src/mcp/credentials.ts\",\n      \"line\": 11,\n      \"description\": \"Weak encryption key derivation: Using homedir() path as entropy source for AES key generation. Home directory paths are not cryptographically secret and could be easily guessed. An attacker knowing the user's home directory can derive the encryption key via scryptSync(ENCRYPTION_KEY_SOURCE, 'voidrift-salt', 32).\"\n    },\n    {\n      \"severity\": \"high\",\n      \"file\": \"src/mcp/credentials.ts\",\n      \"line\": 20,\n      \"description\": \"Insecure encryption implementation: Uses AES-256-CBC without authentication tag (HMAC or GCM). Attackers can flip bits in encrypted credentials without detection. Replace with AES-256-GCM which provides integrity verification.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"file\": \"src/mcp/discovery.ts\",\n      \"line\": 58,\n      \"description\": \"No HTTPS enforcement for OAuth redirect URIs: Uses 'http://localhost:9876/callback' for OAuth redirect. While localhost HTTP is acceptable for local dev, production deployments could be vulnerable to MITM attacks if this endpoint is exposed. Should enforce HTTPS and validate redirect_uri matches registered origin.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"file\": \"src/mcp/discovery.ts\",\n      \"line\": 46,\n      \"description\": \"Missing URL validation in MCP discovery: Authorization server URLs from discovered metadata are used without validation. Could enable SSRF attacks if a malicious MCP server returns URLs pointing to internal services. Validate that discovered URLs are HTTPS and not in reserved IP ranges (127.0.0.1, 10.0.0.0/8, etc.).\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"file\": \"src/mcp/credentials.ts\",\n      \"line\": 11,\n      \"description\": \"Static salt in key derivation: Uses hardcoded salt 'voidrift-salt' instead of random bytes. Makes credential storage predictable across users. Should use a random salt per-user and store it alongside encrypted data.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"file\": \"src/logging/audit.ts\",\n      \"line\": 46,\n      \"description\": \"Sensitive data logged to disk: Tool arguments and model responses (including API credentials, tool outputs) are logged to .voidrift/logs/<session-id>.log without encryption. Logs may contain API keys, OAuth tokens, or user secrets. Implement log encryption or filter sensitive fields.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"file\": \"src/adapters/factory.ts\",\n      \"line\": 20,\n      \"description\": \"Fallback API key placeholder: When apiKeyEnv is undefined, OpenAI client receives 'not-needed' as API key instead of null/undefined. This could cause confusing error messages or failed API calls. Remove the fallback or throw an error if required keys are missing.\"\n    },\n    {\n      \"severity\": \"low\",\n      \"file\": \"src/bootstrap/cli.ts\",\n      \"line\": 67,\n      \"description\": \"Predictable request IDs: Uses `Date.now()` for requestId which is timestamp-based and predictable. An attacker could guess requestIds to accept/deny tool confirmations. Use `crypto.randomUUID()` or `randomBytes(16).toString('hex')` instead.\"\n    },\n    {\n      \"severity\": \"low\",\n      \"file\": \"src/bootstrap/cleanup.ts\",\n      \"line\": 50,\n      \"description\": \"TOCTOU race condition: Code checks if process is alive, then later removes the worktree. Between the check and removal, the process could be killed and a new process could start with the same PID, causing deletion of active worktrees. Use atomic operations or file locks.\"\n    },\n    {\n      \"severity\": \"low\",\n      \"file\": \"src/config/loader.ts\",\n      \"line\": 92,\n      \"description\": \"No validation of baseUrl format: MCP server baseUrl could be any string without validation. Should validate it's a valid HTTPS URL (or http://localhost for local dev) to prevent SSRF or injection attacks.\"\n    }\n  ],\n  \"riskScore\": 72,\n  \"recommendations\": [\n    \"URGENT: Replace weak encryption key derivation in credentials.ts with cryptographically secure key derivation using a random salt stored with the encrypted data\",\n    \"Switch from AES-256-CBC to AES-256-GCM for authenticated encryption of stored credentials\",\n    \"Implement URL validation for all discovered MCP server endpoints to prevent SSRF attacks (whitelist HTTPS, validate against internal IP ranges)\",\n    \"Encrypt or redact sensitive fields in audit logs (API keys, tokens, user secrets, tool arguments containing credentials)\",\n    \"Replace predictable requestId generation with cryptographic randomness (crypto.randomUUID())\",\n    \"Add validation for all user-provided and discovered URLs to ensure they're HTTPS (except localhost) and not in reserved IP ranges\",\n    \"Implement proper error handling when required API keys are missing instead of using placeholder strings\",\n    \"Add file integrity checks (HMAC) to encrypted credential files to detect tampering\",\n    \"Use atomic operations with file locks in worktree cleanup to prevent TOCTOU race conditions\",\n    \"Implement secure log rotation and retention policies to limit exposure of sensitive logged data\",\n    \"Add dependency scanning via `npm audit` or Snyk to identify vulnerable transitive dependencies\",\n    \"Document and enforce the requirement that OAuth credentials use HTTPS endpoints in production\"\n  ]\n}\n```\n\n**Key findings summary:**\n\nThe highest-risk issues center around **credential encryption** — the key derivation uses non-secret entropy (homedir path) and the encryption lacks authentication tags, making stored credentials vulnerable to both derivation attacks and tampering.\n\nThe second category involves **URL validation** in MCP discovery and configuration — missing HTTPS enforcement and origin validation could enable SSRF attacks or interception of OAuth flows.\n\nThird is **sensitive data exposure** — audit logs capture tool arguments and API responses without redaction, potentially leaking credentials.\n\nWould you like me to provide patches for any of these vulnerabilities?\n",
+  "parsedOutput": {
+    "vulnerabilities": [
+      {
+        "severity": "high",
+        "file": "src/mcp/credentials.ts",
+        "line": 11,
+        "description": "Weak encryption key derivation: Using homedir() path as entropy source for AES key generation. Home directory paths are not cryptographically secret and could be easily guessed. An attacker knowing the user's home directory can derive the encryption key via scryptSync(ENCRYPTION_KEY_SOURCE, 'voidrift-salt', 32)."
+      },
+      {
+        "severity": "high",
+        "file": "src/mcp/credentials.ts",
+        "line": 20,
+        "description": "Insecure encryption implementation: Uses AES-256-CBC without authentication tag (HMAC or GCM). Attackers can flip bits in encrypted credentials without detection. Replace with AES-256-GCM which provides integrity verification."
+      },
+      {
+        "severity": "high",
+        "file": "src/mcp/discovery.ts",
+        "line": 58,
+        "description": "No HTTPS enforcement for OAuth redirect URIs: Uses 'http://localhost:9876/callback' for OAuth redirect. While localhost HTTP is acceptable for local dev, production deployments could be vulnerable to MITM attacks if this endpoint is exposed. Should enforce HTTPS and validate redirect_uri matches registered origin."
+      },
+      {
+        "severity": "medium",
+        "file": "src/mcp/discovery.ts",
+        "line": 46,
+        "description": "Missing URL validation in MCP discovery: Authorization server URLs from discovered metadata are used without validation. Could enable SSRF attacks if a malicious MCP server returns URLs pointing to internal services. Validate that discovered URLs are HTTPS and not in reserved IP ranges (127.0.0.1, 10.0.0.0/8, etc.)."
+      },
+      {
+        "severity": "medium",
+        "file": "src/mcp/credentials.ts",
+        "line": 11,
+        "description": "Static salt in key derivation: Uses hardcoded salt 'voidrift-salt' instead of random bytes. Makes credential storage predictable across users. Should use a random salt per-user and store it alongside encrypted data."
+      },
+      {
+        "severity": "medium",
+        "file": "src/logging/audit.ts",
+        "line": 46,
+        "description": "Sensitive data logged to disk: Tool arguments and model responses (including API credentials, tool outputs) are logged to .voidrift/logs/<session-id>.log without encryption. Logs may contain API keys, OAuth tokens, or user secrets. Implement log encryption or filter sensitive fields."
+      },
+      {
+        "severity": "medium",
+        "file": "src/adapters/factory.ts",
+        "line": 20,
+        "description": "Fallback API key placeholder: When apiKeyEnv is undefined, OpenAI client receives 'not-needed' as API key instead of null/undefined. This could cause confusing error messages or failed API calls. Remove the fallback or throw an error if required keys are missing."
+      },
+      {
+        "severity": "low",
+        "file": "src/bootstrap/cli.ts",
+        "line": 67,
+        "description": "Predictable request IDs: Uses `Date.now()` for requestId which is timestamp-based and predictable. An attacker could guess requestIds to accept/deny tool confirmations. Use `crypto.randomUUID()` or `randomBytes(16).toString('hex')` instead."
+      },
+      {
+        "severity": "low",
+        "file": "src/bootstrap/cleanup.ts",
+        "line": 50,
+        "description": "TOCTOU race condition: Code checks if process is alive, then later removes the worktree. Between the check and removal, the process could be killed and a new process could start with the same PID, causing deletion of active worktrees. Use atomic operations or file locks."
+      },
+      {
+        "severity": "low",
+        "file": "src/config/loader.ts",
+        "line": 92,
+        "description": "No validation of baseUrl format: MCP server baseUrl could be any string without validation. Should validate it's a valid HTTPS URL (or http://localhost for local dev) to prevent SSRF or injection attacks."
+      }
+    ],
+    "riskScore": 72,
+    "recommendations": [
+      "URGENT: Replace weak encryption key derivation in credentials.ts with cryptographically secure key derivation using a random salt stored with the encrypted data",
+      "Switch from AES-256-CBC to AES-256-GCM for authenticated encryption of stored credentials",
+      "Implement URL validation for all discovered MCP server endpoints to prevent SSRF attacks (whitelist HTTPS, validate against internal IP ranges)",
+      "Encrypt or redact sensitive fields in audit logs (API keys, tokens, user secrets, tool arguments containing credentials)",
+      "Replace predictable requestId generation with cryptographic randomness (crypto.randomUUID())",
+      "Add validation for all user-provided and discovered URLs to ensure they're HTTPS (except localhost) and not in reserved IP ranges",
+      "Implement proper error handling when required API keys are missing instead of using placeholder strings",
+      "Add file integrity checks (HMAC) to encrypted credential files to detect tampering",
+      "Use atomic operations with file locks in worktree cleanup to prevent TOCTOU race conditions",
+      "Implement secure log rotation and retention policies to limit exposure of sensitive logged data",
+      "Add dependency scanning via `npm audit` or Snyk to identify vulnerable transitive dependencies",
+      "Document and enforce the requirement that OAuth credentials use HTTPS endpoints in production"
+    ]
+  },
+  "durationMs": 40734,
+  "model": "haiku",
+  "sandboxMode": "strict",
+  "workerType": "audit",
+  "timestamp": "2026-06-10T12:39:36.449Z",
+  "executionId": "audit_1781095135715_37upjr"
+}

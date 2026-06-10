@@ -1,0 +1,89 @@
+[2026-06-10T13:01:10.904Z] RESULT
+============================================================
+{
+  "success": true,
+  "output": "Based on my analysis of the codebase, here is the security vulnerability assessment:\n\n```json\n{\n  \"vulnerabilities\": [\n    {\n      \"severity\": \"high\",\n      \"file\": \"src/mcp/credentials.ts\",\n      \"line\": 8,\n      \"description\": \"Weak encryption key derivation. Key source is deterministic (homedir path) and not truly secret. ENCRYPTION_KEY_SOURCE = `voidrift-${homedir()}` uses predictable data. Additionally uses hardcoded salt 'voidrift-salt' with scryptSync, reducing effective entropy.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"file\": \"src/mcp/credentials.ts\",\n      \"line\": 44,\n      \"description\": \"Insufficient file permissions on credential storage. Directory created with default permissions via mkdirSync(CRED_DIR, { recursive: true }). Should use explicit mode 0700 to prevent world-readable access to encrypted tokens.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"file\": \"src/mcp/discovery.ts\",\n      \"line\": 39,\n      \"description\": \"Insecure HTTP requests in OAuth discovery flow. MCP server discovery makes unauthenticated fetch() calls to arbitrary URLs without certificate pinning or validation, enabling MITM attacks on OAuth metadata.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"file\": \"src/adapters/factory.ts\",\n      \"line\": 29,\n      \"description\": \"API key fallback placeholder. OpenAI client initialized with apiKey || 'not-needed' masks missing credentials. Silent failure when apiKeyEnv is undefined could hide configuration errors.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"file\": \"src/mcp/credentials.ts\",\n      \"line\": 78,\n      \"description\": \"Insufficient validation in OAuth refresh token flow. clientId and clientSecret read from environment without validation that they exist or have reasonable values, then sent to untrusted server.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"file\": \"src/mcp/credentials.ts\",\n      \"line\": 96,\n      \"description\": \"No response validation in token refresh. OAuth token endpoint response not validated for required fields before accessing data.access_token, data.expires_in, potentially causing silent failures or type errors.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"file\": \"src/bootstrap/cli.ts\",\n      \"line\": 99,\n      \"description\": \"Long timeout on tool confirmation gate (120 seconds). MCP elicitation handler waits 120 seconds for confirmation before defaulting to deny, allowing extended unmonitored operation if confirmation mechanism fails silently.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"file\": \"src/config/loader.ts\",\n      \"line\": 101,\n      \"description\": \"Configuration validation doesn't enforce secure transport. ConfigSchema allows baseUrl with http:// protocol instead of requiring https:// for API endpoints, enabling man-in-the-middle attacks.\"\n    },\n    {\n      \"severity\": \"low\",\n      \"file\": \"src/adapters/factory.ts\",\n      \"line\": 20,\n      \"description\": \"No validation that apiKeyEnv environment variable exists. resolveApiKey() only checks if apiKeyEnv field is defined, not whether the referenced environment variable is set, enabling silent null key usage.\"\n    },\n    {\n      \"severity\": \"low\",\n      \"file\": \"src/bootstrap/cleanup.ts\",\n      \"line\": 107,\n      \"description\": \"Process alive check returns false positive. isProcessAlive(pid) returns true for processes that exist but lack signal permission (EPERM), when actual killing would fail.\"\n    }\n  ],\n  \"riskScore\": 72,\n  \"recommendations\": [\n    \"Replace deterministic encryption key with cryptographically random key stored in secure file (~/.config/voidrift/key with mode 0600) or use system keychain (node-keytar)\",\n    \"Set explicit file permissions: mkdirSync(CRED_DIR, { recursive: true, mode: 0o700 }) on line 44\",\n    \"Add URL validation in MCP discovery: check for https:// only, validate domain against allowlist, implement certificate pinning for OAuth endpoints\",\n    \"Add response schema validation in token refresh flow using Zod or similar before accessing response.data fields\",\n    \"Reduce MCP elicitation timeout from 120_000ms to 30_000ms (30 seconds) to prevent extended unmonitored operation\",\n    \"Add https:// requirement to ConfigSchema for baseUrl validation: z.string().url().refine(u => u.startsWith('https://'), 'Must use HTTPS')\",\n    \"Validate that apiKeyEnv environment variables are defined at startup in createEngine() before attempting to use them\",\n    \"Improve process alive check to distinguish between EPERM (process exists, can't signal) and ESRCH (process doesn't exist)\",\n    \"Add rate limiting to credential refresh to prevent token refresh bombing attacks\",\n    \"Add CSRF token validation to OAuth callback handling (when implemented)\"\n  ]\n}\n```\n\n**Key Risk Summary:**\n\nThe main vulnerabilities center around **credential storage and OAuth handling**. The encryption key is insufficiently random (high), file permissions are not restricted (high), and MCP OAuth discovery lacks transport security (high). Medium-severity issues include missing validation in refresh flows and overly-long timeouts. The codebase would benefit from adopting industry-standard patterns: system keychains for secrets, HTTPS enforcement, and proper OAuth response validation.\n",
+  "parsedOutput": {
+    "vulnerabilities": [
+      {
+        "severity": "high",
+        "file": "src/mcp/credentials.ts",
+        "line": 8,
+        "description": "Weak encryption key derivation. Key source is deterministic (homedir path) and not truly secret. ENCRYPTION_KEY_SOURCE = `voidrift-${homedir()}` uses predictable data. Additionally uses hardcoded salt 'voidrift-salt' with scryptSync, reducing effective entropy."
+      },
+      {
+        "severity": "high",
+        "file": "src/mcp/credentials.ts",
+        "line": 44,
+        "description": "Insufficient file permissions on credential storage. Directory created with default permissions via mkdirSync(CRED_DIR, { recursive: true }). Should use explicit mode 0700 to prevent world-readable access to encrypted tokens."
+      },
+      {
+        "severity": "high",
+        "file": "src/mcp/discovery.ts",
+        "line": 39,
+        "description": "Insecure HTTP requests in OAuth discovery flow. MCP server discovery makes unauthenticated fetch() calls to arbitrary URLs without certificate pinning or validation, enabling MITM attacks on OAuth metadata."
+      },
+      {
+        "severity": "medium",
+        "file": "src/adapters/factory.ts",
+        "line": 29,
+        "description": "API key fallback placeholder. OpenAI client initialized with apiKey || 'not-needed' masks missing credentials. Silent failure when apiKeyEnv is undefined could hide configuration errors."
+      },
+      {
+        "severity": "medium",
+        "file": "src/mcp/credentials.ts",
+        "line": 78,
+        "description": "Insufficient validation in OAuth refresh token flow. clientId and clientSecret read from environment without validation that they exist or have reasonable values, then sent to untrusted server."
+      },
+      {
+        "severity": "medium",
+        "file": "src/mcp/credentials.ts",
+        "line": 96,
+        "description": "No response validation in token refresh. OAuth token endpoint response not validated for required fields before accessing data.access_token, data.expires_in, potentially causing silent failures or type errors."
+      },
+      {
+        "severity": "medium",
+        "file": "src/bootstrap/cli.ts",
+        "line": 99,
+        "description": "Long timeout on tool confirmation gate (120 seconds). MCP elicitation handler waits 120 seconds for confirmation before defaulting to deny, allowing extended unmonitored operation if confirmation mechanism fails silently."
+      },
+      {
+        "severity": "medium",
+        "file": "src/config/loader.ts",
+        "line": 101,
+        "description": "Configuration validation doesn't enforce secure transport. ConfigSchema allows baseUrl with http:// protocol instead of requiring https:// for API endpoints, enabling man-in-the-middle attacks."
+      },
+      {
+        "severity": "low",
+        "file": "src/adapters/factory.ts",
+        "line": 20,
+        "description": "No validation that apiKeyEnv environment variable exists. resolveApiKey() only checks if apiKeyEnv field is defined, not whether the referenced environment variable is set, enabling silent null key usage."
+      },
+      {
+        "severity": "low",
+        "file": "src/bootstrap/cleanup.ts",
+        "line": 107,
+        "description": "Process alive check returns false positive. isProcessAlive(pid) returns true for processes that exist but lack signal permission (EPERM), when actual killing would fail."
+      }
+    ],
+    "riskScore": 72,
+    "recommendations": [
+      "Replace deterministic encryption key with cryptographically random key stored in secure file (~/.config/voidrift/key with mode 0600) or use system keychain (node-keytar)",
+      "Set explicit file permissions: mkdirSync(CRED_DIR, { recursive: true, mode: 0o700 }) on line 44",
+      "Add URL validation in MCP discovery: check for https:// only, validate domain against allowlist, implement certificate pinning for OAuth endpoints",
+      "Add response schema validation in token refresh flow using Zod or similar before accessing response.data fields",
+      "Reduce MCP elicitation timeout from 120_000ms to 30_000ms (30 seconds) to prevent extended unmonitored operation",
+      "Add https:// requirement to ConfigSchema for baseUrl validation: z.string().url().refine(u => u.startsWith('https://'), 'Must use HTTPS')",
+      "Validate that apiKeyEnv environment variables are defined at startup in createEngine() before attempting to use them",
+      "Improve process alive check to distinguish between EPERM (process exists, can't signal) and ESRCH (process doesn't exist)",
+      "Add rate limiting to credential refresh to prevent token refresh bombing attacks",
+      "Add CSRF token validation to OAuth callback handling (when implemented)"
+    ]
+  },
+  "durationMs": 55259,
+  "model": "haiku",
+  "sandboxMode": "strict",
+  "workerType": "audit",
+  "timestamp": "2026-06-10T13:01:10.904Z",
+  "executionId": "audit_1781096415645_w15xwa"
+}

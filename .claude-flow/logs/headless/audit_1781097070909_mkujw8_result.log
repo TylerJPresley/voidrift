@@ -1,0 +1,83 @@
+[2026-06-10T13:11:41.221Z] RESULT
+============================================================
+{
+  "success": true,
+  "output": "```json\n{\n  \"vulnerabilities\": [\n    {\n      \"severity\": \"high\",\n      \"file\": \"src/mcp/credentials.ts\",\n      \"line\": 14,\n      \"description\": \"Weak encryption key derivation: key source is deterministic and predictable (homedir path). All users on same system share derivable encryption key. An attacker with file system access can decrypt stored OAuth tokens.\"\n    },\n    {\n      \"severity\": \"high\",\n      \"file\": \"src/codemap/summarizer.ts\",\n      \"line\": 20,\n      \"description\": \"Prompt injection vulnerability: file content is directly embedded in user message without sanitization. Malicious file content with special tokens or prompt instructions could manipulate model behavior.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"file\": \"src/bootstrap/cleanup.ts\",\n      \"line\": 53,\n      \"description\": \"Command injection risk: git worktree path is user-controlled and passed to execSync(). While quoted, specially crafted paths could still escape shell escaping and execute arbitrary commands.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"file\": \"src/adapters/factory.ts\",\n      \"line\": 19,\n      \"description\": \"Insecure fallback value: OpenAI API key falls back to 'not-needed' string when environment variable is missing. This masks configuration errors and could allow requests with invalid credentials.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"file\": \"src/logging/audit.ts\",\n      \"line\": 74,\n      \"description\": \"Sensitive data leakage in logs: model responses (including first 1000 chars of text) are logged to disk. If model output contains secrets, API keys, or user data, these are persisted in cleartext in .voidrift/logs/.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"file\": \"src/config/loader.ts\",\n      \"line\": 12,\n      \"description\": \"No validation against hardcoded secrets: configuration schema allows arbitrary string values in `additionalHeaders` and `baseUrl` fields. Users could accidentally commit API keys to config files (.voidrift/config.json is often checked into source control).\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"file\": \"src/mcp/discovery.ts\",\n      \"line\": 52,\n      \"description\": \"Unsafe OAuth redirect URI: dynamic client registration uses hardcoded redirect URI 'http://localhost:9876/callback' without validation. No check that registered client metadata matches expected values before storing credentials.\"\n    },\n    {\n      \"severity\": \"medium\",\n      \"file\": \"src/mcp/credentials.ts\",\n      \"line\": 39,\n      \"description\": \"OAuth token refresh accepts any response without schema validation. Missing expiration and token type validation could allow accepting malformed or malicious tokens from authorization server.\"\n    },\n    {\n      \"severity\": \"low\",\n      \"file\": \"src/codemap/index.ts\",\n      \"line\": 72,\n      \"description\": \"Regex-based parsing without resource limits: extractSymbols() uses regex on entire file content without size limits. Pathological regexes could cause ReDoS (Regular Expression Denial of Service) on specially crafted code files.\"\n    }\n  ],\n  \"riskScore\": 68,\n  \"recommendations\": [\n    \"CRITICAL: Replace encryption key derivation in mcp/credentials.ts with user-provided passphrase or hardware-backed key storage (macOS Keychain, Windows DPAPI, Linux Secret Service API)\",\n    \"CRITICAL: Sanitize file content before sending to models - strip or escape potential prompt injection markers and limit to first N chars\",\n    \"HIGH: Add input validation for git worktree paths - use path.resolve() to canonicalize paths and reject paths outside workspace root\",\n    \"HIGH: Remove 'not-needed' fallback for API keys and fail fast with clear error messages when required credentials are missing\",\n    \"HIGH: Disable logging of model text content or implement redaction for common secret patterns (API key prefixes, token patterns)\",\n    \"MEDIUM: Document that .voidrift/config.json should be added to .gitignore; scan config loader for secret patterns and warn at startup\",\n    \"MEDIUM: Validate OAuth discovery results - verify authorization_endpoint domain matches known safe list, implement PKCE, validate token response schema\",\n    \"MEDIUM: Add rate limiting and timeout to regex-based parsing operations; consider using proper AST parsing library instead of regex for code files\",\n    \"MEDIUM: Review all execSync() calls (bootstrap/cleanup.ts, commands/index.ts) - replace with child_process.spawn() using array args to eliminate shell injection\",\n    \"LOW: Add audit log rotation and encryption at rest - sensitive logs should not persist indefinitely in plaintext\"\n  ]\n}\n```\n\n## Summary\n\nThe codebase has **9 vulnerabilities** with a **68/100 risk score**. The most critical issues are:\n\n1. **Weak credential encryption** (mcp/credentials.ts) — encryption keys are derived from predictable sources and would be compromised if filesystem is accessed\n2. **Prompt injection** (codemap/summarizer.ts) — raw file content sent to models without escaping could enable injection attacks\n3. **Command injection** (bootstrap/cleanup.ts) — git paths passed to shell commands could be exploited\n\nThe design does show good security awareness (config schema validation, MCP OAuth2 support, audit logging), but several implementation details need hardening before production use.\n",
+  "parsedOutput": {
+    "vulnerabilities": [
+      {
+        "severity": "high",
+        "file": "src/mcp/credentials.ts",
+        "line": 14,
+        "description": "Weak encryption key derivation: key source is deterministic and predictable (homedir path). All users on same system share derivable encryption key. An attacker with file system access can decrypt stored OAuth tokens."
+      },
+      {
+        "severity": "high",
+        "file": "src/codemap/summarizer.ts",
+        "line": 20,
+        "description": "Prompt injection vulnerability: file content is directly embedded in user message without sanitization. Malicious file content with special tokens or prompt instructions could manipulate model behavior."
+      },
+      {
+        "severity": "medium",
+        "file": "src/bootstrap/cleanup.ts",
+        "line": 53,
+        "description": "Command injection risk: git worktree path is user-controlled and passed to execSync(). While quoted, specially crafted paths could still escape shell escaping and execute arbitrary commands."
+      },
+      {
+        "severity": "medium",
+        "file": "src/adapters/factory.ts",
+        "line": 19,
+        "description": "Insecure fallback value: OpenAI API key falls back to 'not-needed' string when environment variable is missing. This masks configuration errors and could allow requests with invalid credentials."
+      },
+      {
+        "severity": "medium",
+        "file": "src/logging/audit.ts",
+        "line": 74,
+        "description": "Sensitive data leakage in logs: model responses (including first 1000 chars of text) are logged to disk. If model output contains secrets, API keys, or user data, these are persisted in cleartext in .voidrift/logs/."
+      },
+      {
+        "severity": "medium",
+        "file": "src/config/loader.ts",
+        "line": 12,
+        "description": "No validation against hardcoded secrets: configuration schema allows arbitrary string values in `additionalHeaders` and `baseUrl` fields. Users could accidentally commit API keys to config files (.voidrift/config.json is often checked into source control)."
+      },
+      {
+        "severity": "medium",
+        "file": "src/mcp/discovery.ts",
+        "line": 52,
+        "description": "Unsafe OAuth redirect URI: dynamic client registration uses hardcoded redirect URI 'http://localhost:9876/callback' without validation. No check that registered client metadata matches expected values before storing credentials."
+      },
+      {
+        "severity": "medium",
+        "file": "src/mcp/credentials.ts",
+        "line": 39,
+        "description": "OAuth token refresh accepts any response without schema validation. Missing expiration and token type validation could allow accepting malformed or malicious tokens from authorization server."
+      },
+      {
+        "severity": "low",
+        "file": "src/codemap/index.ts",
+        "line": 72,
+        "description": "Regex-based parsing without resource limits: extractSymbols() uses regex on entire file content without size limits. Pathological regexes could cause ReDoS (Regular Expression Denial of Service) on specially crafted code files."
+      }
+    ],
+    "riskScore": 68,
+    "recommendations": [
+      "CRITICAL: Replace encryption key derivation in mcp/credentials.ts with user-provided passphrase or hardware-backed key storage (macOS Keychain, Windows DPAPI, Linux Secret Service API)",
+      "CRITICAL: Sanitize file content before sending to models - strip or escape potential prompt injection markers and limit to first N chars",
+      "HIGH: Add input validation for git worktree paths - use path.resolve() to canonicalize paths and reject paths outside workspace root",
+      "HIGH: Remove 'not-needed' fallback for API keys and fail fast with clear error messages when required credentials are missing",
+      "HIGH: Disable logging of model text content or implement redaction for common secret patterns (API key prefixes, token patterns)",
+      "MEDIUM: Document that .voidrift/config.json should be added to .gitignore; scan config loader for secret patterns and warn at startup",
+      "MEDIUM: Validate OAuth discovery results - verify authorization_endpoint domain matches known safe list, implement PKCE, validate token response schema",
+      "MEDIUM: Add rate limiting and timeout to regex-based parsing operations; consider using proper AST parsing library instead of regex for code files",
+      "MEDIUM: Review all execSync() calls (bootstrap/cleanup.ts, commands/index.ts) - replace with child_process.spawn() using array args to eliminate shell injection",
+      "LOW: Add audit log rotation and encryption at rest - sensitive logs should not persist indefinitely in plaintext"
+    ]
+  },
+  "durationMs": 30312,
+  "model": "haiku",
+  "sandboxMode": "strict",
+  "workerType": "audit",
+  "timestamp": "2026-06-10T13:11:41.221Z",
+  "executionId": "audit_1781097070909_mkujw8"
+}

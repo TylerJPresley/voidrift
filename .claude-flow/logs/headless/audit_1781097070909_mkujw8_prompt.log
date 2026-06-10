@@ -1,0 +1,2017 @@
+[2026-06-10T13:11:10.938Z] PROMPT
+============================================================
+Analyze this codebase for security vulnerabilities:
+- Check for hardcoded secrets (API keys, passwords)
+- Identify SQL injection risks
+- Find XSS vulnerabilities
+- Check for insecure dependencies
+- Identify authentication/authorization issues
+
+Provide a JSON report with:
+{
+  "vulnerabilities": [{ "severity": "high|medium|low", "file": "...", "line": N, "description": "..." }],
+  "riskScore": 0-100,
+  "recommendations": ["..."]
+}
+
+## Codebase Context
+
+--- src/adapters/cache.ts ---
+/**
+ * LangChain InMemoryCache for repeated model calls.
+ *
+ * Caches identical prompt → response pairs so that repeated
+ * summarization calls (same file content) hit cache instead of the model.
+ */
+import { InMemoryCache } from "@langchain/core/caches";
+
+// Singleton cache instance shared across all model calls
+const _cache = new InMemoryCache();
+
+/**
+ * Returns the shared InMemoryCache.
+ * Pass to model constructor: `new ChatOpenAI({ cache: getModelCache() })`
+ */
+export function getModelCache(): InMemoryCache {
+  return _cache;
+}
+
+
+--- src/adapters/factory.ts ---
+import { ChatOpenAI } from "@langchain/openai";
+import { ChatAnthropic } from "@langchain/anthropic";
+import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
+import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
+import type { ModelConfig, VoidRiftConfig } from "../config/loader.js";
+
+export type Tier = "flash" | "utility" | "dense";
+
+export interface ResolvedModel {
+  name: string;
+  config: ModelConfig;
+  client: BaseChatModel;
+}
+
+const DEFAULT_MAX_RETRIES = 3;
+const DEFAULT_TIMEOUT_MS = 60_000;
+
+function resolveApiKey(config: ModelConfig): string | undefined {
+  if (!config.apiKeyEnv) return undefined;
+  return process.env[config.apiKeyEnv];
+}
+
+function createClient(config: ModelConfig, maxConcurrency?: number): BaseChatModel {
+  const apiKey = resolveApiKey(config);
+
+  switch (config.protocol) {
+    case "openai":
+      return new ChatOpenAI({
+        openAIApiKey: apiKey || "not-needed",
+        modelName: config.model,
+        temperature: config.temperature,
+        maxTokens: config.maxOutputTokens,
+        topP: config.topP,
+        configuration: { baseURL: config.baseUrl },
+        streaming: true,
+        maxRetries: DEFAULT_MAX_RETRIES,
+        timeout: DEFAULT_TIMEOUT_MS,
+        maxConcurrency,
+      });
+
+    case "anthropic": {
+      const headers = { ...config.additionalHeaders, "anthropic-beta": "prompt-caching-2024-07-31" };
+      return new ChatAnthropic({
+        anthropicApiKey: apiKey,
+        modelName: config.model,
+        temperature: config.temperature,
+        maxTokens: config.maxOutputTokens ?? 4096,
+        topP: config.topP,
+        topK: config.topK,
+        clientOptions: config.baseUrl && !config.baseUrl.includes("api.anthropic.com")
+          ? { baseURL: config.baseUrl, timeout: DEFAULT_TIMEOUT_MS, defaultHeaders: headers }
+          : { timeout: DEFAULT_TIMEOUT_MS, defaultHeaders: headers },
+        streaming: true,
+        maxRetries: DEFAULT_MAX_RETRIES,
+        maxConcurrency,
+      });
+    }
+
+    case "google":
+      return new ChatGoogleGenerativeAI({
+        apiKey: apiKey,
+        model: config.model,
+        temperature: config.temperature,
+        maxOutputTokens: config.maxOutputTokens,
+        topP: config.topP,
+        topK: config.topK,
+        streaming: true,
+        maxRetries: DEFAULT_MAX_RETRIES,
+        maxConcurrency,
+      });
+
+    default:
+      throw new Error(`Unknown protocol: ${(config as ModelConfig).protocol}`);
+  }
+}
+
+export function createAdapter(modelName: string, appConfig: VoidRiftConfig): ResolvedModel {
+  const config = appConfig.models[modelName];
+  if (!config) throw new Error(`Model "${modelName}" not found in config`);
+  return { name: modelName, config, client: createClient(config, appConfig.maxConcurrentAgents) };
+}
+
+export function createTierAdapter(tier: Tier, appConfig: VoidRiftConfig): ResolvedModel {
+  const modelName = appConfig.tiers[tier];
+  return createAdapter(modelName, appConfig);
+}
+
+
+--- src/adapters/stream.ts (truncated) ---
+/**
+ * Model Streaming.
+ *
+ * Uses .stream() as the primary streaming method (works universally on all
+ * BaseChatModel, RunnableBinding, and bound-tool models).
+ *
+ * AIMessageChunk.concat() handles fragment accumulation for tool calls.
+ * Usage metadata extracted from final chunk.
+ */
+import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
+import type { BaseMessage } from "@langchain/core/messages";
+import { AIMessageChunk } from "@langchain/core/messages";
+import type { StreamChunk, ToolCallChunk, ModelResponse, TokenUsage } from "./types.js";
+
+export type OnChunk = (chunk: StreamChunk) => void;
+
+/**
+ * Streams a model invocation using .stream() for universal compatibility.
+ * Accumulates AIMessageChunks via .concat() for tool call assembly.
+ */
+export async function streamModel(
+  client: BaseChatModel,
+  messages: BaseMessage[],
+  onChunk: OnChunk,
+  signal?: AbortSignal
+): Promise<ModelResponse> {
+  let text = "";
+  let accumulated: AIMessageChunk | null = null;
+  let usage: TokenUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+  const requestStart = Date.now();
+  let firstTokenAt: number | null = null;
+
+  if (signal?.aborted) {
+    return { text: "", toolCalls: [], usage, timing: { requestStart, firstTokenAt: null, endAt: Date.now() } };
+  }
+
+  // Enforce: system messages must be at the beginning (OpenAI-compatible requirement)
+  validateMessageOrder(messages);
+
+  try {
+    const stream = await client.stream(messages, { signal });
+
+    try {
+      for await (const chunk of stream) {
+        if (signal?.aborted) break;
+
+        // Extract text content
+        const content = extractContent(chunk.content);
+        if (content) {
+          if (!firstTokenAt) firstTokenAt = Date.now();
+          text += content;
+          onChunk({ type: "content", text: content });
+        }
+
+        // Accumulate chunks via LangChain's .concat() for tool call assembly
+        if (accumulated && typeof accumulated.concat === "function") {
+          accumulated = accumulated.concat(chunk);
+        } else if (!accumulated) {
+          accumulated = chunk;
+        } else {
+          // Fallback: manually merge tool_call_chunks for non-AIMessageChunk objects
+          const prevChunks = (accumulated as any).tool_call_chunks || [];
+          const newChunks = chunk.tool_call_chunks || [];
+          const prevCalls = (accumulated as any).tool_calls || [];
+          const newCalls = chunk.tool_calls || [];
+          accumulated = {
+            ...accumulated,
+            content: (accumulated.content || "") + (extractContent(chunk.content) || ""),
+            tool_call_chunks: [...prevChunks, ...newChunks],
+            tool_calls: [...prevCalls, ...newCalls],
+          } as any;
+        }
+
+        // Usage metadata (usually on final chunk)
+        if (chunk.usage_metadata) {
+          usage = {
+            promptTokens: chunk.usage_metadata.input_tokens ?? 0,
+            completionTokens: chunk.usage_metadata.output_tokens ?? 0,
+            totalTokens: chunk.usage_metadata.total_tokens ?? 0,
+          };
+        }
+      }
+    } catch (err: unknown) {
+      // Mid-stream error
+      if (signal?.aborted) {
+        return { text, toolCalls: extractToolCalls(accumulated), usage, timing: { requestStart, firstTokenAt, endAt: Date.now() } };
+      }
+      const message = err instanceof Error ? err.message : String(err);
+      onChunk({ type: "error", message, retryable: isRetryable(message) });
+      return { text, toolCalls: extractToolCalls(accumulated), usage, timing: { requestStart, firstTokenAt, endAt: Date.now() } };
+    }
+  } catch (err: unknown) {
+    // Pre-stream error (failed to initiate)
+    if (signal?.aborted) {
+      return { text, toolCalls: [], usage, timing: { requestStart, firstTokenAt, endAt: Date.now() } };
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    onChunk({ type: "error", message, retryable: isRetryable(message) });
+    return { text, toolCalls: [], usage, timing: { requestStart, firstTokenAt, endAt: Date.now() } };
+  }
+
+  // Extract tool calls from the accumulated AIMessageChunk
+  const toolCalls = extractToolCalls(accumulated);
+  onChunk({ type: "done", usage });
+  return { text, toolCalls, usage, timing: { requestStart, firstTokenAt, endAt: Date.now() } };
+}
+
+/**
+ * Extracts tool calls from the fully accumulated AIMessageChunk.
+ * LangChain's .concat() assembles partial tool_call_chunks into complete tool_calls.
+ */
+function extractToolCalls(accumulated: AIMessageChunk | null): ToolCallChunk[] {
+  if (!accumulated) return [];
+
+  // Prefer fully-assembled tool_calls (from .concat() accumulation)
+  if (accumulated.tool_calls?.length) {
+    return accumulated.tool_calls.map((tc) => ({
+      type: "tool_call" as const,
+      id: tc.id || `tool_${Math.random().toString(36).slice(2, 8)}`,
+      name: tc.name,
+      args: JSON.stringify(tc.args),
+    }));
+  }
+
+  // Fallback: assemble from tool_call_chunks if tool_calls is empty
+  if (a
+
+--- src/adapters/types.ts ---
+export interface ContentChunk {
+  type: "content";
+  text: string;
+}
+
+export interface ToolCallChunk {
+  type: "tool_call";
+  id: string;
+  name: string;
+  args: string; // JSON string of accumulated arguments
+  status?: "executing" | "complete" | "error"; // lifecycle state for live UI updates
+}
+
+export interface DoneChunk {
+  type: "done";
+  usage?: TokenUsage;
+}
+
+export interface ErrorChunk {
+  type: "error";
+  message: string;
+  retryable: boolean;
+}
+
+export interface StatusChunk {
+  type: "status";
+  message: string;
+}
+
+export type StreamChunk = ContentChunk | ToolCallChunk | DoneChunk | ErrorChunk | StatusChunk;
+
+export interface TokenUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
+export interface StreamTiming {
+  requestStart: number;
+  firstTokenAt: number | null;
+  endAt: number;
+}
+
+export interface ModelResponse {
+  text: string;
+  toolCalls: ToolCallChunk[];
+  usage: TokenUsage;
+  timing?: StreamTiming;
+}
+
+
+--- src/agents/registry.ts (truncated) ---
+/**
+ * Agent Registry.
+ *
+ * Discovers, resolves, and manages agent manifests from three sources:
+ * 1. Core defaults (hardcoded)
+ * 2. Plugin registrations (runtime)
+ * 3. Filesystem (workspace + global auto-discovery)
+ *
+ * Resolution cascade: workspace override → global override → plugin → core default.
+ */
+import { existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync, unlinkSync, statSync } from "fs";
+import { join, dirname } from "path";
+
+export type AgentType = "interactive" | "task";
+export type ApprovalMode = "prompt" | "deny" | "autonomous";
+export type ModelTier = "flash" | "utility" | "dense" | "auto" | (string & {});
+
+export interface ToolSettings {
+  allowedPaths?: string[];
+  autoAllowReadonly?: boolean;
+}
+
+export interface AgentManifest {
+  id: string;
+  name: string;
+  description: string;
+  type: AgentType;
+  modelTier: ModelTier;
+  prompt: string;
+  tools: string[];
+  approvalMode: ApprovalMode;
+  allowedTools: string[];
+  toolsSettings?: Record<string, ToolSettings>;
+  resources?: string[];
+  welcomeMessage?: string;
+  async?: boolean;
+  active?: boolean;
+  source?: string;
+  overrideStatus?: "default" | "global" | "workspace";
+  overridePath?: string;
+}
+
+export const ALL_TOOLS = [
+  "read_file", "glob_files", "write_file", "edit_file",
+  "execute_command", "web_search", "web_fetch",
+  "lsp_definition", "lsp_references", "lsp_hover",
+  "spawn_subagent", "connect_mcp_server", "run_task_agent",
+  "save_memory", "schedule", "read_plan", "write_plan", "update_plan",
+];
+
+export const READ_TOOLS = [
+  "read_file", "glob_files", "web_search", "web_fetch",
+  "lsp_definition", "lsp_references", "lsp_hover",
+];
+
+// ─── Core Agent Prompts (equivalent to prompt.md files) ──────────────────────
+
+const PROMPT_CHAT = `You are a collaborative assistant with full workspace access. You help users accomplish their goals — writing, editing, organizing, researching, or building. Behavioral rules, tool usage guidelines, and domain knowledge are provided separately.`;
+
+const PROMPT_PLAN = `You are an architect and planner. You analyze, design, and produce structured implementation plans. You do NOT write or edit workspace files — you produce plans that others implement.
+
+Your output format:
+1. **Objective** — what we're trying to achieve
+2. **Analysis** — current state and what needs to change
+3. **Plan** — ordered steps with file paths and descriptions
+4. **Acceptance Criteria** — how to verify the work is complete`;
+
+const PROMPT_VIBE = `You are operating in fully autonomous mode. All tool calls execute immediately without operator approval. You have complete workspace control. Act decisively, verify your work, and keep going until the task is complete.`;
+
+const PROMPT_INDEXER = `## Role: Codebase Indexer
+
+You are the Indexer. Your purpose is to parse files, generate search indices, and summarize codebase files for context discovery.`;
+
+const PROMPT_SUMMARIZER = `## Role: Content Summarizer
+
+You receive content and a question or instruction. Your purpose is to extract and summarize the relevant information concisely.
+
+### How you work:
+- Read the provided content carefully
+- Extract only what's relevant to the instruction
+- Return a structured, dense summary
+- Preserve key details: names, values, code snippets, URLs
+- Omit filler, navigation, boilerplate
+
+### Output:
+- Direct answer to the instruction
+- Bullet points for multiple items
+- Code blocks for code snippets
+- Keep under 500 words unless explicitly asked for more`;
+
+// ─── Core Agent Configs ──────────────────────────────────────────────────────
+
+const CORE_AGENTS: AgentManifest[] = [
+  {
+    id: "chat",
+    name: "Chat",
+    description: "General-purpose assistant with full tool access",
+    type: "interactive",
+    modelTier: "auto",
+    prompt: PROMPT_CHAT,
+    tools: ALL_TOOLS,
+    approvalMode: "prompt",
+    allowedTools: READ_TOOLS,
+    welcomeMessage: "How can I help?",
+    active: true,
+  },
+  {
+    id: "plan",
+    name: "Plan",
+    description: "Read-only planning and architecture mode",
+    type: "interactive",
+    modelTier: "auto",
+    prompt: PROMPT_PLAN,
+    tools: [...READ_TOOLS, "read_plan", "write_plan", "update_plan"],
+    approvalMode: "deny",
+    allowedTools: [...READ_TOOLS, "read_plan", "write_plan", "update_plan"],
+    welcomeMessage: "What would you like to plan?",
+    active: true,
+  },
+  {
+    id: "vibe",
+    name: "Vibe",
+    description: "Autonomous execution with no approval gates",
+    type: "interactive",
+    modelTier: "auto",
+    prompt: PROMPT_VIBE,
+    tools: ALL_TOOLS,
+    approvalMode: "autonomous",
+    allowedTools: ALL_TOOLS,
+    welcomeMessage: "Vibe mode — running autonomously.",
+    active: true,
+  },
+  {
+    id: "indexer",
+    name: "Indexer",
+    description: "Codebase indexer and search model",
+    type: "task",
+    modelTier: "flash",
+    prompt: PROMPT_INDEXER,
+    tools: READ_TOOLS,
+    approvalMode: "autonomous",
+    allowedTools: READ_TOOLS,
+    async: true,
+    active: true,
+  },
+  {
+    i
+
+--- src/bootstrap/cleanup.ts (truncated) ---
+import { execSync } from "child_process";
+import { existsSync, rmSync, writeFileSync, mkdirSync, readdirSync, readFileSync, statSync } from "fs";
+import { join } from "path";
+
+export interface CleanupResult {
+  prunedWorktrees: string[];
+  preservedWorktrees: string[];
+  clearedLocks: boolean;
+  errors: string[];
+}
+
+export interface WorktreeMeta {
+  pid: number;
+  createdAt: string;
+}
+
+const TTL_MINUTES = 120;
+
+/**
+ * Harness Boot Clean-up Guard (G-02).
+ *
+ * Runs once on startup to ensure a clean, predictable state:
+ * 1. Scans .voidrift/worktrees/ for each subdirectory
+ * 2. Reads .meta.json for PID and createdAt
+ * 3. Checks if PID is still alive via signal 0
+ * 4. Enforces 2-hour TTL safety buffer before pruning dead worktrees
+ * 5. Prunes stale worktrees and releases their locks
+ * 6. Resets locks.json to only contain still-active locks
+ */
+export function cleanupWorktrees(workspaceRoot: string): CleanupResult {
+  const result: CleanupResult = { prunedWorktrees: [], preservedWorktrees: [], clearedLocks: false, errors: [] };
+  const voidriftDir = join(workspaceRoot, ".voidrift");
+  const worktreeDir = join(voidriftDir, "worktrees");
+  const locksPath = join(voidriftDir, "locks.json");
+
+  mkdirSync(voidriftDir, { recursive: true });
+  mkdirSync(worktreeDir, { recursive: true });
+
+  // Scan worktree subdirectories
+  let entries: string[];
+  try {
+    entries = readdirSync(worktreeDir);
+  } catch {
+    entries = [];
+  }
+
+  const stalePaths: string[] = [];
+
+  for (const entry of entries) {
+    const wtPath = join(worktreeDir, entry);
+    let stat;
+    try { stat = statSync(wtPath); } catch { continue; }
+    if (!stat.isDirectory()) continue;
+
+    const metaPath = join(wtPath, ".meta.json");
+    const meta = readMeta(metaPath);
+
+    if (!meta) {
+      // No meta or corrupted — check age
+      const ageMinutes = (Date.now() - stat.ctimeMs) / 60000;
+      if (ageMinutes >= TTL_MINUTES) {
+        stalePaths.push(wtPath);
+        result.prunedWorktrees.push(entry);
+      } else {
+        result.preservedWorktrees.push(entry);
+      }
+      continue;
+    }
+
+    const alive = isProcessAlive(meta.pid);
+    if (alive) {
+      result.preservedWorktrees.push(entry);
+      continue;
+    }
+
+    // PID is dead — check TTL
+    const createdAt = new Date(meta.createdAt).getTime();
+    const ageMinutes = (Date.now() - createdAt) / 60000;
+    if (ageMinutes < TTL_MINUTES) {
+      result.preservedWorktrees.push(entry);
+    } else {
+      stalePaths.push(wtPath);
+      result.prunedWorktrees.push(entry);
+    }
+  }
+
+  // Prune stale worktrees
+  for (const wtPath of stalePaths) {
+    try {
+      execSync(`git worktree remove --force "${wtPath}"`, { cwd: workspaceRoot, stdio: "ignore" });
+    } catch {
+      try { rmSync(wtPath, { recursive: true, force: true }); } catch {}
+    }
+  }
+
+  // Run git worktree prune
+  if (isGitRepo(workspaceRoot)) {
+    try {
+      execSync("git worktree prune", { cwd: workspaceRoot, stdio: "ignore" });
+    } catch (err) {
+      result.errors.push(`git worktree prune failed: ${err instanceof Error ? err.message : err}`);
+    }
+  }
+
+  // Reset locks — remove entries for pruned worktrees
+  try {
+    const currentLocks = readLocks(locksPath);
+    // Keep only locks that belong to preserved (still-alive) worktrees
+    const activeLocks = currentLocks.filter(() => false); // Clear all on boot — active subagents will re-register
+    writeFileSync(locksPath, JSON.stringify({ activeLocks }, null, 2));
+    result.clearedLocks = true;
+  } catch (err) {
+    result.errors.push(`locks reset failed: ${err instanceof Error ? err.message : err}`);
+  }
+
+  return result;
+}
+
+/**
+ * Creates a .meta.json for a new worktree (called when provisioning).
+ */
+export function writeWorktreeMeta(worktreePath: string): void {
+  const meta: WorktreeMeta = { pid: process.pid, createdAt: new Date().toISOString() };
+  writeFileSync(join(worktreePath, ".meta.json"), JSON.stringify(meta, null, 2));
+}
+
+/**
+ * Cross-platform process-alive check via signal 0.
+ */
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err: any) {
+    // ESRCH = process doesn't exist. Other errors = it exists but we can't signal it.
+    return err.code !== "ESRCH";
+  }
+}
+
+function readMeta(metaPath: string): WorktreeMeta | null {
+  if (!existsSync(metaPath)) return null;
+  try {
+    const raw = JSON.parse(readFileSync(metaPath, "utf-8"));
+    if (typeof raw.pid !== "number" || typeof raw.createdAt !== "string") return null;
+    return raw;
+  } catch {
+    return null;
+  }
+}
+
+function readLocks(locksPath: string): string[] {
+  if (!existsSync(locksPath)) return [];
+  try {
+    const raw = JSON.parse(readFileSync(locksPath, "utf-8"));
+    return Array.isArray(raw.activeLocks) ? raw.activeLocks : [];
+  } catch {
+    return [];
+  }
+}
+
+function isGitRepo(cwd: string): boolean {
+  try {
+    execSync("git rev-parse --is-inside-work-tree", { cwd, stdio: "ignore" });
+    return true;
+  } catch {
+    return false
+
+--- src/bootstrap/cli.ts (truncated) ---
+/**
+ * CLI Bootstrap — initializes all subsystems and returns the EngineContext.
+ * Separated from UI rendering per SRP.
+ */
+import { randomUUID } from "crypto";
+import { join } from "path";
+import { homedir } from "os";
+import {
+  bootstrap,
+  ContextManager,
+  TokenBudgetWatcher,
+  SessionBrain,
+  MemoryRegistry,
+  PlanManager,
+  SkillManager,
+  AuditLogger,
+  ExceptionGuard,
+  StatsTracker,
+  TemplateService,
+  MCPEngine,
+  WorktreeEngine,
+  GitCheckpointer,
+  CoreRegistry,
+  registerCommands,
+  setWorkspaceRoot,
+  setScheduler,
+  setPlanManager,
+  generateCodeMap,
+  getGitBranch,
+  shortenPath,
+  AgentRegistry,
+  PromptRegistry,
+  TaskScheduler,
+  CoreAPI,
+  PolicyEngine,
+} from "../index.js";
+import { PluginRegistry, discoverPlugins } from "../plugins/registry.js";
+import type { EngineContext } from "../engine.js";
+import { validateEditor } from "../utils/editor.js";
+import { validateAssets } from "./validate.js";
+import { ResourceWatcher } from "../watcher/resources.js";
+
+function validateStartup(config: any): string[] {
+  const warnings: string[] = [];
+  if (config.editor) {
+    const err = validateEditor(config.editor);
+    if (err) warnings.push(err);
+  }
+  return warnings;
+}
+
+export async function createEngine(): Promise<EngineContext> {
+  const workspaceRoot = process.cwd();
+  const sessionId = randomUUID().slice(0, 8);
+  const branch = getGitBranch(workspaceRoot);
+  const shortPath = shortenPath(workspaceRoot);
+
+  let container;
+  try {
+    container = await bootstrap({ workspaceRoot });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    process.stderr.write(`\n  \x1b[31m✗ VoidRift failed to start\x1b[0m\n\n  ${msg.replace(/\n/g, "\n  ")}\n\n  Fix your config at:\n    Global: ~/.config/voidrift/config.json\n    Local:  ${workspaceRoot}/.voidrift/config.json\n\n`);
+    process.exit(1);
+  }
+  setWorkspaceRoot(workspaceRoot);
+  const codeMap = generateCodeMap(workspaceRoot);
+  const agents = new AgentRegistry();
+  const templates = new TemplateService(workspaceRoot);
+  const prompts = new PromptRegistry(workspaceRoot);
+  const mcp = new MCPEngine(workspaceRoot, container.bus);
+
+  // Wire MCP sampling handler
+  mcp.setSamplingHandler(async (messages: Array<{ role: string; content: string }>, options?: { maxTokens?: number; temperature?: number }) => {
+    const { createTierAdapter } = await import("../adapters/factory.js");
+    const { HumanMessage: HM, SystemMessage: SM, AIMessage: AM } = await import("@langchain/core/messages");
+    const adapter = createTierAdapter("flash", container.config);
+    const lcMessages = messages.map((m: { role: string; content: string }) => {
+      if (m.role === "system") return new SM(m.content);
+      if (m.role === "assistant") return new AM(m.content);
+      return new HM(m.content);
+    });
+    const response = await adapter.client.invoke(lcMessages);
+    const text = typeof response.content === "string" ? response.content : "";
+    return { role: "assistant", content: text };
+  });
+
+  // Wire MCP elicitation handler
+  mcp.setElicitationHandler(async (message: string) => {
+    return new Promise((resolve) => {
+      const requestId = `elicit-${Date.now()}`;
+      container.bus.publish("TOOL_CONFIRMATION_REQUEST", { tool: "mcp_elicitation", args: { message }, requestId, inferredPatterns: [] } as any);
+      const unsub = container.bus.subscribe("TOOL_CONFIRMATION_RESPONSE", (event: any) => {
+        if (event.payload.requestId === requestId) {
+          unsub();
+          resolve(event.payload.approved ? { action: "accept" } : { action: "deny" });
+        }
+      });
+      setTimeout(() => { unsub(); resolve({ action: "deny" }); }, 120_000);
+    });
+  });
+
+  // Auto-connect MCP servers
+  for (const cfg of mcp.loadConfigs()) {
+    if ((cfg as any).autoConnect !== false) {
+      mcp.connect(cfg).catch(() => {});
+    }
+  }
+
+  const worktree = new WorktreeEngine(workspaceRoot, container.bus);
+  const checkpointer = new GitCheckpointer(workspaceRoot, container.bus);
+  checkpointer.attach();
+
+  // Plugin loading
+  const startupWarnings: string[] = [];
+  templates.setActivePlugins(container.config.plugins);
+  const pluginRegistry = new PluginRegistry();
+  const discovered = discoverPlugins(workspaceRoot);
+  const activePluginIds = new Set(container.config.plugins);
+
+  for (const dp of discovered) {
+    const isActive = activePluginIds.has(dp.id);
+    if (!isActive) {
+      pluginRegistry.register({ id: dp.id, name: dp.id, version: dp.version, description: dp.description, author: dp.author, license: dp.license, homepage: dp.homepage, active: false, commands: [], agents: [], modes: [], templates: [], prompts: [], skills: [] });
+      continue;
+    }
+    try {
+      const pluginInterface = new CoreAPI(container.registry, container.bus, worktree, workspaceRoot, templates, agents, prompts, undefined, dp.id);
+      const mod = await import(dp.id);
+      if (typeof mod.register === "function") mod.register(pluginInterface);
+      const cmds
+
+--- src/bootstrap/container.ts ---
+import { EventBus } from "../events/bus.js";
+import { loadConfig, type VoidRiftConfig, type LoadConfigOptions } from "../config/loader.js";
+import { WorkspaceWatcher } from "../watcher/index.js";
+import { CoreRegistry } from "../registry/core.js";
+import { cleanupWorktrees, type CleanupResult } from "./cleanup.js";
+
+export interface ContainerOptions {
+  workspaceRoot: string;
+  globalConfigPath?: string;
+  skipWatcher?: boolean;
+}
+
+export interface Container {
+  bus: EventBus;
+  config: VoidRiftConfig;
+  registry: CoreRegistry;
+  watcher: WorkspaceWatcher;
+  cleanup: CleanupResult;
+  shutdown: () => Promise<void>;
+}
+
+/**
+ * Application Container (Composition Root).
+ *
+ * Initializes the central Event Bus, loads configuration, runs boot cleanup,
+ * starts the file watcher, and returns the fully wired container.
+ * This is the single entry point for bootstrapping the harness.
+ */
+export async function bootstrap(opts: ContainerOptions): Promise<Container> {
+  const bus = new EventBus();
+  const registry = new CoreRegistry();
+
+  // 1. Load configuration (global + local workspace override)
+  const config = loadConfig({
+    globalConfigPath: opts.globalConfigPath,
+    workspaceRoot: opts.workspaceRoot,
+  });
+
+  // 2. Run boot cleanup (prune worktrees, reset locks)
+  const cleanup = cleanupWorktrees(opts.workspaceRoot);
+
+  // 3. Start file watcher
+  const watcher = new WorkspaceWatcher(opts.workspaceRoot, bus);
+  if (!opts.skipWatcher) {
+    await watcher.start();
+  }
+
+  // 4. Return the wired container
+  return {
+    bus,
+    config,
+    registry,
+    watcher,
+    cleanup,
+    shutdown: async () => {
+      await watcher.stop();
+    },
+  };
+}
+
+
+--- src/bootstrap/validate.ts ---
+/**
+ * Startup Validation Scan.
+ *
+ * Checks all custom assets for issues on boot:
+ * - Skills referencing nonexistent agents
+ * - Agents with missing config/prompt files
+ *
+ * Returns warnings to display on startup.
+ */
+import type { AgentRegistry } from "../agents/registry.js";
+import type { SkillManager } from "../skills/manager.js";
+
+export interface ValidationIssue {
+  type: "skill" | "agent" | "template" | "prompt";
+  id: string;
+  message: string;
+}
+
+export function validateAssets(agents: AgentRegistry, skills: SkillManager): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+
+  // Get all known agent ids
+  const allAgentIds = [
+    ...agents.listInteractive().map(a => a.id),
+    ...agents.listTask().map(a => a.id),
+  ];
+
+  // Validate skills
+  for (const skill of skills.indexed) {
+    // Check for missing required metadata
+    if (!skill.name || !skill.description) {
+      issues.push({
+        type: "skill",
+        id: skill.name || skill.filePath,
+        message: "Missing required name or description",
+      });
+      continue;
+    }
+    // Check for missing frontmatter structure
+    try {
+      const raw = require("fs").readFileSync(skill.filePath, "utf-8");
+      const missing: string[] = [];
+      if (!raw.includes("triggers:")) missing.push("triggers");
+      if (!raw.includes("agents:")) missing.push("agents");
+      if (!raw.includes("active:")) missing.push("active");
+      if (missing.length > 0) {
+        issues.push({
+          type: "skill",
+          id: skill.name,
+          message: `Missing required frontmatter keys: ${missing.join(", ")}`,
+        });
+        continue;
+      }
+    } catch {}
+    // Check for dangling agent references
+    const invalidAgents = skill.agents.filter(id => !allAgentIds.includes(id));
+    if (invalidAgents.length > 0) {
+      issues.push({
+        type: "skill",
+        id: skill.name,
+        message: `References nonexistent agent(s): ${invalidAgents.join(", ")}`,
+      });
+    }
+  }
+
+  return issues;
+}
+
+
+--- src/codemap/cache.ts ---
+import { writeFileSync, readFileSync, existsSync, mkdirSync } from "fs";
+import { join } from "path";
+import { createHash } from "crypto";
+
+export interface CacheEntry {
+  sha256: string;
+  summary: string;
+  totalLines: number;
+  lastIndexed: number;
+}
+
+export class IndexCache {
+  private cachePath: string;
+  private data: Record<string, CacheEntry> = {};
+
+  constructor(workspaceRoot: string) {
+    this.cachePath = join(workspaceRoot, ".voidrift", "index_cache.json");
+    this.load();
+  }
+
+  private load() {
+    if (existsSync(this.cachePath)) {
+      try {
+        this.data = JSON.parse(readFileSync(this.cachePath, "utf-8"));
+      } catch {
+        this.data = {};
+      }
+    }
+  }
+
+  private save() {
+    const dir = join(this.cachePath, "..");
+    if (!existsSync(dir)) {
+      mkdirSync(dir, { recursive: true });
+    }
+    writeFileSync(this.cachePath, JSON.stringify(this.data, null, 2));
+  }
+
+  public computeHash(content: string): string {
+    return createHash("sha256").update(content).digest("hex");
+  }
+
+  public get(filePath: string, currentHash: string): CacheEntry | null {
+    const entry = this.data[filePath];
+    if (entry && entry.sha256 === currentHash) {
+      return entry;
+    }
+    return null;
+  }
+
+  public set(filePath: string, sha256: string, summary: string, totalLines: number): void {
+    this.data[filePath] = {
+      sha256,
+      summary,
+      totalLines,
+      lastIndexed: Date.now(),
+    };
+    this.save();
+  }
+}
+
+
+--- src/codemap/index.ts (truncated) ---
+import { readdirSync, statSync, readFileSync } from "fs";
+import { join, relative, extname } from "path";
+
+const IGNORED = new Set(["node_modules", ".git", ".voidrift", "dist", "build", ".next", "coverage"]);
+const MAX_DEPTH = 5;
+const CODE_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".mts", ".mjs", ".py", ".rs", ".go"]);
+const MARKDOWN_EXTENSIONS = new Set([".md", ".mdx"]);
+const DATA_EXTENSIONS = new Set([".json", ".yaml", ".yml", ".toml"]);
+
+export interface CodeMapEntry {
+  path: string;
+  type: "file" | "dir";
+  symbols?: string[];
+  lines?: number;
+}
+
+/**
+ * Workspace Code-Map Generator.
+ *
+ * Scans workspace files and extracts top-level symbols (exports, classes, functions)
+ * to compile a compressed, token-efficient structure tree excluding function bodies.
+ * Target: complete project awareness for under 1,000 tokens.
+ */
+export function generateCodeMap(workspaceRoot: string): string {
+  const entries = walk(workspaceRoot, workspaceRoot, 0);
+  return formatTree(entries);
+}
+
+export function getCodeMapEntries(workspaceRoot: string): CodeMapEntry[] {
+  return walk(workspaceRoot, workspaceRoot, 0);
+}
+
+function walk(dir: string, root: string, depth: number): CodeMapEntry[] {
+  if (depth > MAX_DEPTH) return [];
+
+  const entries: CodeMapEntry[] = [];
+  let items: string[];
+  try {
+    items = readdirSync(dir);
+  } catch {
+    return entries;
+  }
+
+  for (const item of items.sort()) {
+    if (IGNORED.has(item) || item.startsWith(".")) continue;
+
+    const fullPath = join(dir, item);
+    const relPath = relative(root, fullPath);
+    let stat;
+    try {
+      stat = statSync(fullPath);
+    } catch {
+      continue;
+    }
+
+    if (stat.isDirectory()) {
+      entries.push({ path: relPath + "/", type: "dir" });
+      entries.push(...walk(fullPath, root, depth + 1));
+    } else {
+      const ext = extname(item).toLowerCase();
+      let symbols: string[] | undefined;
+      let lines: number | undefined;
+
+      if (CODE_EXTENSIONS.has(ext)) {
+        symbols = extractSymbols(fullPath);
+      } else if (MARKDOWN_EXTENSIONS.has(ext)) {
+        const result = extractMarkdownHeadings(fullPath);
+        symbols = result.headings;
+        lines = result.lines;
+      } else if (DATA_EXTENSIONS.has(ext)) {
+        const result = extractDataKeys(fullPath, ext);
+        symbols = result.keys;
+        lines = result.lines;
+      } else {
+        lines = countLines(fullPath);
+      }
+
+      entries.push({ path: relPath, type: "file", symbols, lines });
+    }
+  }
+
+  return entries;
+}
+
+/**
+ * Extracts top-level symbols from a source file using regex-based pattern matching.
+ * Captures: exported functions, classes, interfaces, types, constants, and default exports.
+ * Does NOT parse function bodies — only signatures.
+ */
+function extractSymbols(filePath: string): string[] {
+  try {
+    const content = readFileSync(filePath, "utf-8");
+    const symbols: string[] = [];
+    const lines = content.split("\n");
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+
+      // export function/class/interface/type/const
+      const exportMatch = trimmed.match(
+        /^export\s+(?:default\s+)?(?:async\s+)?(function|class|interface|type|const|let|enum)\s+(\w+)/
+      );
+      if (exportMatch) {
+        symbols.push(`${exportMatch[1]} ${exportMatch[2]}`);
+        continue;
+      }
+
+      // export default (standalone)
+      if (trimmed.match(/^export\s+default\s+\w/)) {
+        symbols.push("default export");
+        continue;
+      }
+
+      // Non-exported top-level class/function (no indentation)
+      if (line[0] && line[0] !== " " && line[0] !== "\t") {
+        const topLevel = trimmed.match(
+          /^(?:async\s+)?(function|class|interface|type|enum)\s+(\w+)/
+        );
+        if (topLevel) {
+          symbols.push(`${topLevel[1]} ${topLevel[2]}`);
+        }
+      }
+    }
+
+    return symbols.length > 0 ? symbols : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Extracts headings from markdown files (## level and above).
+ * Gives the model a table of contents for docs, specs, and prose.
+ */
+function extractMarkdownHeadings(filePath: string): { headings: string[]; lines: number } {
+  try {
+    const content = readFileSync(filePath, "utf-8");
+    const lines = content.split("\n");
+    const headings: string[] = [];
+
+    for (const line of lines) {
+      const match = line.match(/^(#{1,3})\s+(.+)/);
+      if (match) {
+        const depth = match[1].length;
+        const title = match[2].trim();
+        if (title.length > 0 && title.length < 100) {
+          headings.push(`${"#".repeat(depth)} ${title}`);
+        }
+      }
+    }
+
+    return { headings: headings.length > 0 ? headings : [], lines: lines.length };
+  } catch {
+    return { headings: [], lines: 0 };
+  }
+}
+
+/**
+ * Extracts top-level keys from JSON/YAML files.
+ * Gives the model awareness of config structure without loading values.
+ */
+function extractDataKeys(filePath: string, ext: string): { keys: string[]; lines: number } {
+  try {
+    const content = readF
+
+--- src/codemap/summarizer.ts ---
+import { HumanMessage, SystemMessage } from "@langchain/core/messages";
+import { createTierAdapter } from "../adapters/factory.js";
+import { getModelCache } from "../adapters/cache.js";
+import type { VoidRiftConfig } from "../config/loader.js";
+import { summarizeFile } from "../codemap/index.js";
+
+const SUMMARIZE_PROMPT = `You are a file indexer. Summarize this file's structure, purpose, and key content concisely. Include:
+- What the file does (1-2 sentences)
+- Key sections with line ranges (e.g., "L10-45: Database connection setup")
+- Important exports, functions, classes, or config values
+- Any critical details a developer would need to know
+
+Keep it under 300 words. Use line references so the developer can read_file with offset to access specific sections.`;
+
+/**
+ * Summarizes a file using the Flash tier model.
+ * Falls back to regex-based structural summary if the Flash call fails.
+ */
+export async function summarizeFileWithFlash(
+  path: string,
+  content: string,
+  config: VoidRiftConfig
+): Promise<{ summary: string; totalLines: number }> {
+  const lines = content.split("\n");
+  const totalLines = lines.length;
+
+  // Small files: pin in full
+  if (totalLines <= (config.summarizeThreshold ?? 500)) {
+    return { summary: content, totalLines };
+  }
+
+  try {
+    const resolved = createTierAdapter("flash", config);
+    resolved.client.cache = getModelCache();
+    const messages = [
+      new SystemMessage(SUMMARIZE_PROMPT),
+      new HumanMessage(`File: ${path} (${totalLines} lines)\n\n${content}`),
+    ];
+    const response = await resolved.client.invoke(messages);
+    const summary = typeof response.content === "string"
+      ? response.content
+      : Array.isArray(response.content)
+        ? response.content.filter((b: any) => b.type === "text").map((b: any) => b.text).join("")
+        : "";
+
+    if (summary.length > 0) {
+      return { summary: `[${path}] ${totalLines} lines (Flash summary)\n${summary}\n  Use read_file("${path}", offset, limit) to read specific sections.`, totalLines };
+    }
+  } catch {
+    // Flash unavailable — fall back to structural summary
+  }
+
+  return summarizeFile(path, content);
+}
+
+
+--- src/commands/index.ts (truncated) ---
+import type { CoreRegistry } from "../registry/core.js";
+import type { VoidRiftConfig } from "../config/loader.js";
+import type { ContextManager } from "../session/context.js";
+import type { TokenBudgetWatcher } from "../output/budget.js";
+import type { AgentRegistry } from "../agents/registry.js";
+import type { SessionBrain } from "../session/brain.js";
+import type { MemoryRegistry } from "../session/memory.js";
+import type { StatsTracker } from "../session/stats.js";
+import type { SkillManager } from "../skills/manager.js";
+import type { TemplateService } from "../templates/service.js";
+import type { MCPEngine } from "../mcp/engine.js";
+import type { WorktreeEngine } from "../worktree/engine.js";
+import type { TaskScheduler } from "../orchestration/scheduler.js";
+import type { GitCheckpointer } from "../safeguards/checkpoint.js";
+import { compactHistory } from "../session/compactor.js";
+import { createTierAdapter } from "../adapters/factory.js";
+import { EventBus } from "../events/bus.js";
+import { execSync } from "child_process";
+import type { PolicyEngine } from "../security/policy-engine.js";
+import type { AuditLogger } from "../logging/audit.js";
+
+export interface CommandDeps {
+  config: VoidRiftConfig;
+  context: ContextManager;
+  budget: TokenBudgetWatcher;
+  agents: AgentRegistry;
+  brain: SessionBrain;
+  memory: MemoryRegistry;
+  stats: StatsTracker;
+  skills: SkillManager;
+  templates: TemplateService;
+  mcp: MCPEngine;
+  worktree: WorktreeEngine;
+  scheduler?: TaskScheduler;
+  checkpointer: GitCheckpointer;
+  bus: EventBus;
+  workspaceRoot: string;
+  sessionId: string;
+  policyEngine?: PolicyEngine;
+  logger?: AuditLogger;
+  output: (text: string) => void;
+  openPanel: (panel: string) => void;
+  switchModel: (name: string, tier?: string) => boolean;
+  exit: () => void;
+}
+
+/**
+ * Registers all 26 core slash commands.
+ */
+export function registerCommands(registry: CoreRegistry, deps: CommandDeps): void {
+  // --- Session & Navigation ---
+  registry.registerSlashCommand({ name: "help", description: "Interactive help utility panel", execute: async () => deps.openPanel("help") });
+  registry.registerSlashCommand({ name: "exit", description: "Save session and exit", execute: async () => { deps.brain.save(deps.context.context, deps.agents.active.id); deps.output("Session saved. Goodbye."); deps.exit(); } });
+  registry.registerSlashCommand({ name: "clear", description: "Reset conversation history", execute: async () => { deps.context.setMessages([]); deps.context.clearFocusedFiles(); deps.output("Session cleared."); } });
+  registry.registerSlashCommand({ name: "plan", description: "View, edit, or delete the active plan", execute: async () => deps.openPanel("plan") });
+  registry.registerSlashCommand({ name: "compact", description: "Compact conversation history", execute: async () => {
+    const msgs = deps.context.getMessages();
+    const result = compactHistory(msgs, deps.budget.state.used, deps.budget.state.limit);
+    if (result.compacted) { deps.context.setMessages(result.messages); deps.output(`Compacted: ${msgs.length} → ${result.messages.length} messages`); }
+    else deps.output("Nothing to compact.");
+  }});
+  registry.registerSlashCommand({ name: "resume", description: "Conversation browser", execute: async () => deps.openPanel("resume") });
+  registry.registerSlashCommand({ name: "rewind", description: "Rollback to previous turn", execute: async (args) => {
+    const turn = args[0] ? parseInt(args[0]) : null;
+    if (turn !== null) { const msgs = deps.context.getMessages().slice(0, turn * 2); deps.context.setMessages(msgs); deps.checkpointer.rollbackTo(turn); deps.output(`Rewound to turn ${turn}.`); }
+    else deps.openPanel("rewind");
+  }});
+
+  // --- Model & Context ---
+  registry.registerSlashCommand({ name: "model", description: "Switch or list models", execute: async (args) => {
+    if (args.length) { const ok = deps.switchModel(args[0], args[1]); deps.output(ok ? `Switched to: ${args[0]}` : `Model "${args[0]}" not found.`); }
+    else deps.openPanel("model");
+  }});
+  registry.registerSlashCommand({ name: "stats", description: "Session analytics", execute: async () => deps.openPanel("stats") });
+  registry.registerSlashCommand({ name: "context", description: "Context visualizer", execute: async () => deps.openPanel("context") });
+  registry.registerSlashCommand({ name: "tools", description: "List available tools", execute: async () => deps.openPanel("tools") });
+  registry.registerSlashCommand({ name: "diff", description: "Code diff viewer", execute: async (args) => {
+    deps.openPanel("diff");
+  }});
+
+  // --- Skills, Agents, MCP ---
+  registry.registerSlashCommand({ name: "skills", description: "Skill registry", execute: async () => deps.openPanel("skills") });
+  registry.registerSlashCommand({ name: "agents", description: "Agent manager", execute: async () => deps.openPanel("agents") });
+  registry.registerSlashCommand({ name: "mcp", description: "MCP server manager", execute: asy
+
+--- src/config/loader.ts (truncated) ---
+import { z } from "zod";
+import { readFileSync, existsSync, mkdirSync, writeFileSync } from "fs";
+import { join, dirname } from "path";
+import { homedir } from "os";
+
+const ModelSchema = z.object({
+  protocol: z.enum(["openai", "anthropic", "google"]),
+  model: z.string().min(1),
+  baseUrl: z.string().min(1),
+  apiKeyEnv: z.string().optional(),
+  contextLimit: z.number().positive(),
+  temperature: z.number().min(0).max(2).default(0.2),
+  maxOutputTokens: z.number().positive().optional(),
+  topP: z.number().min(0).max(1).optional(),
+  topK: z.number().positive().optional(),
+  additionalHeaders: z.record(z.string()).optional(),
+});
+
+const TiersSchema = z.object({
+  flash: z.string().min(1),
+  utility: z.string().min(1),
+  dense: z.string().min(1),
+});
+
+const SUPPORTED_EDITORS = ["vscode", "code", "cursor", "windsurf", "zed", "vim", "nvim", "neovim", "emacs", "nano", "subl", "kate"] as const;
+
+const EditorSchema = z.enum(SUPPORTED_EDITORS).optional();
+
+export const ConfigSchema = z.object({
+  tiers: TiersSchema,
+  models: z.record(ModelSchema),
+  editor: EditorSchema,
+  summarizeThreshold: z.number().positive().default(500),
+  maxReadLines: z.number().positive().default(1000),
+  maxConcurrentAgents: z.number().positive().default(1),
+  plugins: z.array(z.string()).default([]),
+  search: z.object({
+    provider: z.enum(["duckduckgo", "tavily", "google"]).default("duckduckgo"),
+    apiKey: z.string().optional(),
+  }).default({ provider: "duckduckgo" }),
+  tracing: z.object({
+    enabled: z.boolean().default(false),
+    apiKeyEnv: z.string().default("LANGCHAIN_API_KEY"),
+    project: z.string().default("voidrift"),
+    endpoint: z.string().optional(),
+  }).default({ enabled: false, apiKeyEnv: "LANGCHAIN_API_KEY", project: "voidrift" }),
+}).refine(
+  (cfg) => {
+    const modelNames = Object.keys(cfg.models);
+    return (
+      modelNames.includes(cfg.tiers.flash) &&
+      modelNames.includes(cfg.tiers.utility) &&
+      modelNames.includes(cfg.tiers.dense)
+    );
+  },
+  { message: "Each tier must reference a model defined in the models block" }
+);
+
+export type VoidRiftConfig = z.infer<typeof ConfigSchema>;
+export type ModelConfig = z.infer<typeof ModelSchema>;
+export type EditorType = typeof SUPPORTED_EDITORS[number];
+
+export interface LoadConfigOptions {
+  globalConfigPath?: string;
+  workspaceRoot?: string;
+}
+
+const DEFAULT_CONFIG: VoidRiftConfig = {
+  tiers: { flash: "default-local", utility: "default-local", dense: "default-local" },
+  models: {
+    "default-local": {
+      protocol: "openai",
+      model: "qwen2.5-coder-7b-instruct",
+      baseUrl: "http://localhost:11434/v1",
+      contextLimit: 32768,
+      temperature: 0.2,
+    },
+  },
+  summarizeThreshold: 500,
+  maxReadLines: 1000,
+  maxConcurrentAgents: 1,
+  plugins: [],
+  search: { provider: "duckduckgo" as const },
+  tracing: { enabled: false, apiKeyEnv: "LANGCHAIN_API_KEY", project: "voidrift" },
+};
+
+/**
+ * Loads and validates the VoidRift configuration.
+ *
+ * Resolution order:
+ * 1. Load global config from ~/.config/voidrift/config.json (or custom path)
+ * 2. If global doesn't exist on first run, create it with defaults
+ * 3. If workspaceRoot provided, load <workspace>/.voidrift/config.json
+ * 4. Deep merge local over global
+ * 5. Validate with zod schema
+ * 6. Resolve apiKeyEnv references from process.env
+ */
+export function loadConfig(opts: LoadConfigOptions = {}): VoidRiftConfig {
+  const globalPath = opts.globalConfigPath ?? join(homedir(), ".config", "voidrift", "config.json");
+
+  // First-run: create global config directory and default config
+  if (!existsSync(globalPath)) {
+    const dir = dirname(globalPath);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(globalPath, JSON.stringify(DEFAULT_CONFIG, null, 2));
+  }
+
+  const globalRaw = loadJsonFile(globalPath);
+  if (globalRaw === null) {
+    throw new Error(`Failed to read global config at: ${globalPath}`);
+  }
+
+  // Load local workspace override if workspace provided
+  let localRaw: unknown | null = null;
+  if (opts.workspaceRoot) {
+    const localPath = join(opts.workspaceRoot, ".voidrift", "config.json");
+    localRaw = loadJsonFile(localPath);
+  }
+
+  const merged = localRaw
+    ? deepMerge(globalRaw as Record<string, unknown>, localRaw as Record<string, unknown>)
+    : globalRaw;
+
+  const result = ConfigSchema.safeParse(merged);
+  if (!result.success) {
+    const issues = result.error.issues.map((i) => `  - ${i.path.join(".")}: ${i.message}`).join("\n");
+    throw new Error(`Invalid VoidRift config:\n${issues}`);
+  }
+
+  return resolveApiKeys(result.data);
+}
+
+function loadJsonFile(path: string): unknown | null {
+  if (!existsSync(path)) return null;
+  try {
+    return JSON.parse(readFileSync(path, "utf-8"));
+  } catch (err) {
+    throw new Error(`Failed to parse JSON at ${path}: ${err instanceof Error ? err.message : err}`);
+  }
+}
+
+function resolveApiKeys(config: VoidRiftConfig): VoidRiftConfig {
+  const models = { ...config.models };
+  const warnings: string[] = [];
+
+  for (const
+
+--- src/engine.ts ---
+/**
+ * Typed Engine Context — replaces the untyped god object.
+ * Each consumer receives only the slice it needs.
+ */
+import type { ContextManager } from "./session/context.js";
+import type { TokenBudgetWatcher } from "./output/budget.js";
+import type { ExceptionGuard } from "./session/guard.js";
+import type { StatsTracker } from "./session/stats.js";
+import type { MemoryRegistry } from "./session/memory.js";
+import type { SkillManager } from "./skills/manager.js";
+import type { TemplateService } from "./templates/service.js";
+import type { MCPEngine } from "./mcp/engine.js";
+import type { Container } from "./bootstrap/container.js";
+import type { AuditLogger } from "./logging/audit.js";
+import type { WorktreeEngine } from "./worktree/engine.js";
+import type { TaskScheduler } from "./orchestration/scheduler.js";
+import type { GitCheckpointer } from "./safeguards/checkpoint.js";
+import type { PlanManager } from "./session/plan.js";
+import type { AgentRegistry } from "./agents/registry.js";
+import type { PromptRegistry } from "./prompts/registry.js";
+import type { PluginRegistry } from "./plugins/registry.js";
+import type { SessionBrain } from "./session/brain.js";
+import type { PolicyEngine } from "./security/policy-engine.js";
+
+export interface EngineContext {
+  container: Container;
+  context: ContextManager;
+  budget: TokenBudgetWatcher;
+  agents: AgentRegistry;
+  prompts: PromptRegistry;
+  guard: ExceptionGuard;
+  stats: StatsTracker;
+  memory: MemoryRegistry;
+  skills: SkillManager;
+  mcp: MCPEngine;
+  templates: TemplateService;
+  logger: AuditLogger;
+  worktree: WorktreeEngine;
+  scheduler: TaskScheduler;
+  checkpointer: GitCheckpointer;
+  planManager: PlanManager;
+  brain: SessionBrain;
+  pluginRegistry: PluginRegistry;
+  policyEngine: PolicyEngine;
+  sessionId: string;
+  branch: string | null;
+  shortPath: string;
+  workspaceRoot: string;
+  startupWarnings?: string[];
+  setCmdOutput: (fn: (text: string) => void) => void;
+  setOpenPanel: (fn: (panel: string) => void) => void;
+}
+
+
+--- src/events/bus.ts ---
+import { EventEmitter } from "events";
+
+export type EventType =
+  | "FILE_CREATED"
+  | "FILE_MODIFIED"
+  | "FILE_DELETED"
+  | "RESOURCE_CHANGED"
+  | "USER_INPUT"
+  | "TOKEN_STREAM"
+  | "TOOL_CONFIRMATION_REQUEST"
+  | "TOOL_CONFIRMATION_RESPONSE"
+  | "ERROR_OCCURRED"
+  | "TURN_COMPLETE"
+  | "LOCKS_UPDATED"
+  | "SUBAGENT_SPAWNED"
+  | "SUBAGENT_COMPLETED"
+  // Extended events (Section 9.3)
+  | "SESSION_START"
+  | "SESSION_END"
+  | "MODE_CHANGED"
+  | "NODE_TRANSITION"
+  | "STREAM_CHUNK_RECEIVED"
+  | "BEFORE_TOOL_EXECUTE"
+  | "AFTER_TOOL_EXECUTE"
+  | "WORKSPACE_CHANGED"
+  | "STATE_SERIALIZED";
+
+export interface EventPayloadMap {
+  FILE_CREATED: { path: string };
+  FILE_MODIFIED: { path: string };
+  FILE_DELETED: { path: string };
+  RESOURCE_CHANGED: { path: string; type: string };
+  USER_INPUT: { text: string };
+  TOKEN_STREAM: { token: string; done: boolean };
+  TOOL_CONFIRMATION_REQUEST: { tool: string; args: Record<string, unknown>; requestId?: string; diff?: string[]; inferredPatterns?: string[] };
+  TOOL_CONFIRMATION_RESPONSE: { approved: boolean; requestId?: string; persist?: boolean; chosenPattern?: string };
+  ERROR_OCCURRED: { message: string; source?: string };
+  TURN_COMPLETE: { turnId: string };
+  LOCKS_UPDATED: { activeLocks: string[] };
+  SUBAGENT_SPAWNED: { subagentId: string; worktreePath: string };
+  SUBAGENT_COMPLETED: { subagentId: string; status: "success" | "failed" };
+  // Extended
+  SESSION_START: { workspaceRoot: string; globalConfig: Record<string, unknown> };
+  SESSION_END: { sessionDurationMs: number; exitCode: number };
+  MODE_CHANGED: { previousMode: string; newMode: string };
+  NODE_TRANSITION: { fromNode: string; toNode: string; stateSnapshot: Record<string, unknown> };
+  STREAM_CHUNK_RECEIVED: { type: "content" | "tool_call"; chunk: string | Record<string, unknown> };
+  BEFORE_TOOL_EXECUTE: { toolName: string; arguments: Record<string, unknown> };
+  AFTER_TOOL_EXECUTE: { toolName: string; arguments: Record<string, unknown>; status: "success" | "error"; output: string };
+  WORKSPACE_CHANGED: { filePaths: string[]; changeType: "create" | "update" | "delete" };
+  STATE_SERIALIZED: { filePath: string };
+}
+
+export interface VoidRiftEvent<T extends EventType> {
+  type: T;
+  payload: EventPayloadMap[T];
+  timestamp: number;
+}
+
+type Listener<T extends EventType> = (event: VoidRiftEvent<T>) => void | Promise<void>;
+
+export class EventBus {
+  private emitter = new EventEmitter();
+  private registeredEvents = new Set<string>();
+
+  constructor() {
+    this.emitter.setMaxListeners(100);
+  }
+
+  registerEvent(name: string): void {
+    this.registeredEvents.add(name);
+  }
+
+  listRegisteredEvents(): string[] {
+    return [...this.registeredEvents];
+  }
+
+  subscribe<T extends EventType>(type: T, listener: Listener<T>): () => void;
+  subscribe(type: string, listener: (event: any) => void): () => void;
+  subscribe(type: string, listener: (event: any) => void): () => void {
+    const wrapped = async (event: any) => {
+      try {
+        await listener(event);
+      } catch (err) {
+        console.error(`[EventBus] Listener for ${type} threw:`, err);
+      }
+    };
+    this.emitter.on(type, wrapped);
+    return () => this.emitter.off(type, wrapped);
+  }
+
+  publish<T extends EventType>(type: T, payload: EventPayloadMap[T]): void;
+  publish(type: string, payload: Record<string, unknown>): void;
+  publish(type: string, payload: any): void {
+    this.emitter.emit(type, { type, payload, timestamp: Date.now() });
+  }
+}
+
+
+--- src/index.ts (truncated) ---
+// Tier 1: Application Container
+export { EventBus, type EventType, type EventPayloadMap, type VoidRiftEvent } from "./events/bus.js";
+export { loadConfig, ConfigSchema, type VoidRiftConfig, type ModelConfig, type LoadConfigOptions } from "./config/loader.js";
+export { WorkspaceWatcher, type WatcherStatus } from "./watcher/index.js";
+export { CoreRegistry, type CapabilityHook, type SlashCommandHook } from "./registry/core.js";
+export { cleanupWorktrees, writeWorktreeMeta, type CleanupResult, type WorktreeMeta } from "./bootstrap/cleanup.js";
+export { bootstrap, type Container, type ContainerOptions } from "./bootstrap/container.js";
+
+// Tier 2: Model Connectivity
+export { createAdapter, createTierAdapter, type Tier, type ResolvedModel } from "./adapters/factory.js";
+export { streamModel, type OnChunk } from "./adapters/stream.js";
+export type { StreamChunk, ContentChunk, ToolCallChunk, DoneChunk, ErrorChunk, TokenUsage, ModelResponse, StreamTiming } from "./adapters/types.js";
+export { routeTier, resolveRouter, escalateTier, delegateTier, shouldEscalate, resolveEscalation, resolveDelegation, buildEscalationState, escalationNotice, type RoutingContext, type EscalationState, type EscalationCode } from "./router/index.js";
+
+// Tier 3: Capability Subsystem
+export type { ToolSchema, ToolParameter, SafetyProfile, ActionLayer } from "./tools/types.js";
+export { TOOL_SCHEMAS, getToolSchema } from "./tools/definitions.js";
+export { readFile, globFiles, writeFile, editFile, executeCommand, type ToolResult } from "./tools/executors.js";
+export { webFetch, webSearch, type WebResult } from "./tools/web.js";
+export { gitSafeguard, restoreSafeguardStash, type SafeguardResult } from "./safeguards/git.js";
+export { GitCheckpointer } from "./safeguards/checkpoint.js";
+export { computeDiff, computeEditDiff, getWorkspaceDiff } from "./safeguards/diff.js";
+export { generateCodeMap, getCodeMapEntries, summarizeFile, type CodeMapEntry } from "./codemap/index.js";
+export { summarizeFileWithFlash } from "./codemap/summarizer.js";
+export { IndexCache, type CacheEntry } from "./codemap/cache.js";
+export { SkillManager, type SkillEntry, type SkillTriggers, type AnchorContext } from "./skills/manager.js";
+export { getSkillTemplates, findRelevantTemplates } from "./skills/templates.js";
+export { WorktreeEngine, type SubagentTask, type LockEntry, type QueueEntry } from "./worktree/engine.js";
+export { TemplateService, type TemplateSlot, type ResolvedSlot, type ResolvedTemplate, type TemplateType, type SlotAction, type TemplateContext, type AgentConfig, type ValidationDiagnostic } from "./templates/service.js";
+export { MCPEngine, type MCPServer, type MCPServerConfig, type MCPToolSchema } from "./mcp/engine.js";
+export { routeMCPToolCall, isMCPTool } from "./mcp/router.js";
+
+// Tier 4: Security Subsystem
+export { PermissionGate, type PendingRequest, type GateResult } from "./security/permission-gate.js";
+export { PolicyEngine, classifyCommand, inferPattern, inferPatterns, getEquivalentMessage, type PolicyRule, type PolicyDecision, type PolicyCheckResult } from "./security/policy-engine.js";
+export { AgentRegistry, type AgentManifest, type AgentType, type ApprovalMode, type ModelTier, type ToolSettings, ALL_TOOLS, READ_TOOLS } from "./agents/registry.js";
+export { PromptRegistry, type PromptEntry, type ResolvedPrompt } from "./prompts/registry.js";
+
+// Tier 5: Operator Interface
+export { stripAnsi, truncateOutput } from "./output/truncator.js";
+export { TokenBudgetWatcher, type BudgetColor, type BudgetState } from "./output/budget.js";
+export { InputLock } from "./output/input-lock.js";
+export { AuditLogger, type LogEntry, type AuditLoggerOptions } from "./logging/audit.js";
+export { getGitBranch, shortenPath } from "./output/workspace.js";
+export { AutocompleteEngine } from "./output/autocomplete.js";
+
+// Tier 6: Agent Session
+export { ContextManager, type SessionContext, type AgentPartition, type OrbitPartition, type DriftPartition, type VoidPartition, type GovernancePartition, type WorkspacePartition, type WorkPartition, type FocusedFile, type Message, type TurnContext } from "./session/context.js";
+export { PluginRegistry, discoverPlugins, type PluginMeta, type DiscoveredPlugin } from "./plugins/registry.js";
+export { compilePrompt, type CompiledMessage } from "./session/compiler.js";
+export { compactHistory, buildCompactionPrompt, type CompactionResult } from "./session/compactor.js";
+export { TurnSerializer, type TurnStateJSON } from "./session/serializer.js";
+export { SessionBrain, type TurnSnapshot } from "./session/brain.js";
+export { ExceptionGuard } from "./session/guard.js";
+export { MemoryRegistry, type MemoryMeta, type MemoryDiscoveryContext } from "./session/memory.js";
+export { StatsTracker, type SessionStats, type ModelUsage, type ToolStats } from "./session/stats.js";
+
+export { PlanManager, type PlanItem } from "./session/plan.js";
+// Section 6: Slash Commands
+export { registerCommands, type CommandDeps } from "./commands
+
+--- src/logging/audit.ts (truncated) ---
+import { mkdirSync, appendFileSync } from "fs";
+import { join } from "path";
+import { homedir } from "os";
+import type { EventBus } from "../events/bus.js";
+
+export interface LogEntry {
+  timestamp: string;
+  level: "info" | "warn" | "error" | "debug";
+  source: string;
+  message: string;
+  data?: unknown;
+}
+
+export interface AuditLoggerOptions {
+  workspaceRoot: string;
+  sessionId: string;
+  globalLogDir?: string;
+}
+
+/**
+ * Dual-Layer Audit Logger.
+ *
+ * Workspace log (.voidrift/logs/<session-id>.log):
+ *   All project-related model actions — prompts, completions, tool calls,
+ *   tool results, file mutations, mode changes, node transitions.
+ *
+ * Global log (~/.config/voidrift/logs/<session-id>.log):
+ *   CLI-level actions — session start/end, errors, crashes, config loading.
+ */
+export class AuditLogger {
+  private localFile: string;
+  private globalFile: string;
+
+  constructor(private opts: AuditLoggerOptions) {
+    const localDir = join(opts.workspaceRoot, ".voidrift", "logs");
+    const globalDir = opts.globalLogDir ?? join(homedir(), ".config", "voidrift", "logs");
+
+    mkdirSync(localDir, { recursive: true });
+    mkdirSync(globalDir, { recursive: true });
+
+    this.localFile = join(localDir, `${opts.sessionId}.log`);
+    this.globalFile = join(globalDir, `${opts.sessionId}.log`);
+  }
+
+  attach(bus: EventBus): () => void {
+    const unsubs: Array<() => void> = [];
+
+    // --- Workspace log: model actions ---
+
+    unsubs.push(bus.subscribe("USER_INPUT", (e) => {
+      this.local("info", "user", "input", { text: e.payload.text });
+    }));
+
+    unsubs.push(bus.subscribe("STREAM_CHUNK_RECEIVED", (e) => {
+      this.local("debug", "model", "chunk", e.payload);
+    }));
+
+    unsubs.push(bus.subscribe("BEFORE_TOOL_EXECUTE", (e) => {
+      this.local("info", "tool", `call:${e.payload.toolName}`, { args: e.payload.arguments });
+    }));
+
+    unsubs.push(bus.subscribe("AFTER_TOOL_EXECUTE", (e) => {
+      this.local("info", "tool", `result:${e.payload.toolName}`, { status: e.payload.status, output: e.payload.output.slice(0, 500) });
+    }));
+
+    unsubs.push(bus.subscribe("TOOL_CONFIRMATION_REQUEST", (e) => {
+      this.local("info", "gate", `request:${e.payload.tool}`, { args: e.payload.args, requestId: e.payload.requestId });
+    }));
+
+    unsubs.push(bus.subscribe("TOOL_CONFIRMATION_RESPONSE", (e) => {
+      this.local("info", "gate", `response:${e.payload.approved ? "approved" : "denied"}`, { requestId: e.payload.requestId });
+    }));
+
+    unsubs.push(bus.subscribe("TURN_COMPLETE", (e) => {
+      this.local("info", "session", "turn_complete", { turnId: e.payload.turnId });
+    }));
+
+    unsubs.push(bus.subscribe("MODE_CHANGED", (e) => {
+      this.local("info", "mode", `${e.payload.previousMode} → ${e.payload.newMode}`);
+    }));
+
+    unsubs.push(bus.subscribe("NODE_TRANSITION", (e) => {
+      this.local("info", "graph", `${e.payload.fromNode} → ${e.payload.toNode}`);
+    }));
+
+    unsubs.push(bus.subscribe("FILE_CREATED", (e) => {
+      this.local("info", "fs", "created", { path: e.payload.path });
+    }));
+
+    unsubs.push(bus.subscribe("FILE_MODIFIED", (e) => {
+      this.local("info", "fs", "modified", { path: e.payload.path });
+    }));
+
+    unsubs.push(bus.subscribe("FILE_DELETED", (e) => {
+      this.local("info", "fs", "deleted", { path: e.payload.path });
+    }));
+
+    unsubs.push(bus.subscribe("SUBAGENT_SPAWNED", (e) => {
+      this.local("info", "worktree", "spawned", { id: e.payload.subagentId, path: e.payload.worktreePath });
+    }));
+
+    unsubs.push(bus.subscribe("SUBAGENT_COMPLETED", (e) => {
+      this.local("info", "worktree", "completed", { id: e.payload.subagentId, status: e.payload.status });
+    }));
+
+    // --- Global log: CLI-level actions ---
+
+    unsubs.push(bus.subscribe("SESSION_START", (e) => {
+      this.global("info", "cli", "session_start", { workspaceRoot: e.payload.workspaceRoot });
+    }));
+
+    unsubs.push(bus.subscribe("SESSION_END", (e) => {
+      this.global("info", "cli", "session_end", { durationMs: e.payload.sessionDurationMs, exitCode: e.payload.exitCode });
+    }));
+
+    unsubs.push(bus.subscribe("ERROR_OCCURRED", (e) => {
+      this.local("error", e.payload.source ?? "unknown", e.payload.message);
+      this.global("error", e.payload.source ?? "unknown", e.payload.message);
+    }));
+
+    return () => unsubs.forEach((u) => u());
+  }
+
+  /** Log model response (called directly from turn execution) */
+  logModelResponse(model: string, text: string, toolCalls: unknown[], usage: unknown, timing?: { requestStart: number; firstTokenAt: number | null; endAt: number }): void {
+    const prefillMs = timing?.firstTokenAt ? timing.firstTokenAt - timing.requestStart : null;
+    const totalMs = timing ? timing.endAt - timing.requestStart : null;
+    this.local("info", "model", "response", { model, text: text.slice(0, 1000), toolCalls, usage, prefillMs, totalMs });
+  }
+
+  /** Log the full prompt sent to the model */
+  logModelPrompt(model: string, messages: Array<{ role: str
+
+--- src/mcp/credentials.ts ---
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
+import { join } from "path";
+import { homedir } from "os";
+import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from "crypto";
+import type { MCPAuthConfig } from "./engine.js";
+
+const CRED_DIR = join(homedir(), ".config", "voidrift", "credentials");
+const ENCRYPTION_KEY_SOURCE = `voidrift-${homedir()}`; // Deterministic per-user key
+
+export interface StoredCredential {
+  accessToken: string;
+  refreshToken?: string;
+  expiresAt?: number; // unix ms
+  tokenType?: string;
+  scope?: string;
+}
+
+interface EncryptedFile {
+  iv: string;
+  data: string;
+}
+
+function getKey(): Buffer {
+  return scryptSync(ENCRYPTION_KEY_SOURCE, "voidrift-salt", 32);
+}
+
+function encrypt(data: string): EncryptedFile {
+  const key = getKey();
+  const iv = randomBytes(16);
+  const cipher = createCipheriv("aes-256-cbc", key, iv);
+  const encrypted = Buffer.concat([cipher.update(data, "utf-8"), cipher.final()]);
+  return { iv: iv.toString("hex"), data: encrypted.toString("hex") };
+}
+
+function decrypt(file: EncryptedFile): string {
+  const key = getKey();
+  const iv = Buffer.from(file.iv, "hex");
+  const decipher = createDecipheriv("aes-256-cbc", key, iv);
+  const decrypted = Buffer.concat([decipher.update(Buffer.from(file.data, "hex")), decipher.final()]);
+  return decrypted.toString("utf-8");
+}
+
+export function saveCredential(serverName: string, credential: StoredCredential): void {
+  mkdirSync(CRED_DIR, { recursive: true });
+  const encrypted = encrypt(JSON.stringify(credential));
+  writeFileSync(join(CRED_DIR, `${serverName}.json`), JSON.stringify(encrypted, null, 2), "utf-8");
+}
+
+export function loadCredential(serverName: string): StoredCredential | null {
+  const path = join(CRED_DIR, `${serverName}.json`);
+  if (!existsSync(path)) return null;
+  try {
+    const raw = JSON.parse(readFileSync(path, "utf-8"));
+    const decrypted = decrypt(raw);
+    return JSON.parse(decrypted);
+  } catch { return null; }
+}
+
+export function deleteCredential(serverName: string): void {
+  const path = join(CRED_DIR, `${serverName}.json`);
+  if (existsSync(path)) {
+    const { unlinkSync } = require("fs");
+    unlinkSync(path);
+  }
+}
+
+export function hasCredential(serverName: string): boolean {
+  return existsSync(join(CRED_DIR, `${serverName}.json`));
+}
+
+/** Refresh token if expired. Returns updated credential (saved to disk). */
+export async function refreshIfNeeded(cred: StoredCredential, auth: MCPAuthConfig): Promise<StoredCredential | null> {
+  if (!cred.expiresAt || Date.now() < cred.expiresAt - 60_000) {
+    return cred; // Not expired (with 60s buffer)
+  }
+  if (!cred.refreshToken) return null; // Can't refresh
+
+  const clientId = auth.clientIdEnv ? (process.env[auth.clientIdEnv] ?? auth.clientId ?? "") : (auth.clientId ?? "");
+  const clientSecret = auth.clientSecretEnv ? (process.env[auth.clientSecretEnv] ?? auth.clientSecret ?? "") : (auth.clientSecret ?? "");
+
+  try {
+    const body = new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: cred.refreshToken,
+      client_id: clientId,
+      ...(clientSecret ? { client_secret: clientSecret } : {}),
+    });
+
+    const res = await fetch(auth.tokenUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: body.toString(),
+    });
+
+    if (!res.ok) return null;
+    const data = await res.json() as any;
+    const updated: StoredCredential = {
+      accessToken: data.access_token,
+      refreshToken: data.refresh_token ?? cred.refreshToken,
+      expiresAt: data.expires_in ? Date.now() + data.expires_in * 1000 : undefined,
+      tokenType: data.token_type,
+      scope: data.scope,
+    };
+    // Persist refreshed token
+    saveCredential(auth.tokenUrl.split("/")[2] || "unknown", updated);
+    return updated;
+  } catch { return null; }
+}
+
+
+--- src/mcp/discovery.ts (truncated) ---
+/**
+ * MCP Server Auto-Discovery.
+ *
+ * Given a URL, discovers:
+ * - Transport type (HTTP+SSE)
+ * - Auth requirements (OAuth2 via RFC 9728 protected resource metadata)
+ * - Authorization server metadata (endpoints, scopes, PKCE)
+ * - Dynamic client registration if supported
+ */
+
+export interface MCPDiscoveryResult {
+  url: string;
+  transport: "http-sse";
+  requiresAuth: boolean;
+  authConfig?: {
+    authorizeUrl: string;
+    tokenUrl: string;
+    registrationUrl?: string;
+    scopes: string[];
+    codeChallengeMethod?: string;
+    tokenAuthMethod?: string;
+  };
+  clientId?: string;
+  clientSecret?: string;
+  error?: string;
+}
+
+/**
+ * Discover MCP server capabilities from a URL.
+ * Follows the MCP OAuth discovery chain:
+ *   initialize → www_authenticate → .well-known/oauth-protected-resource → .well-known/oauth-authorization-server
+ */
+export async function discoverMCPServer(url: string, onStatus?: (msg: string) => void): Promise<MCPDiscoveryResult> {
+  const result: MCPDiscoveryResult = { url, transport: "http-sse", requiresAuth: false };
+
+  try {
+    // 1. Try initialize to see if auth is needed
+    onStatus?.("Probing server...");
+    const initRes = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0", method: "initialize", id: 1,
+        params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "voidrift", version: "0.1.0" } },
+      }),
+    });
+
+    const initBody = await initRes.json() as any;
+
+    // If no error, server doesn't require auth
+    if (!initBody.error) {
+      onStatus?.("Server accessible without auth.");
+      return result;
+    }
+
+    // Check for auth requirement
+    const wwwAuth = initBody.error?.data?._meta?.["mcp/www_authenticate"];
+    if (!wwwAuth) {
+      result.error = `Server returned error: ${initBody.error?.message ?? "unknown"}`;
+      return result;
+    }
+
+    result.requiresAuth = true;
+
+    // 2. Extract resource metadata URL from www_authenticate
+    const resourceMetaUrl = extractResourceMetadataUrl(wwwAuth);
+    if (!resourceMetaUrl) {
+      result.error = "Could not parse resource metadata URL from auth challenge.";
+      return result;
+    }
+
+    onStatus?.("Fetching resource metadata...");
+    const resourceRes = await fetch(resourceMetaUrl);
+    if (!resourceRes.ok) { result.error = `Resource metadata fetch failed: ${resourceRes.status}`; return result; }
+    const resourceMeta = await resourceRes.json() as any;
+
+    const authServer = resourceMeta.authorization_servers?.[0];
+    if (!authServer) { result.error = "No authorization server found."; return result; }
+    const scopes = resourceMeta.scopes_supported ?? [];
+
+    // 3. Fetch authorization server metadata
+    onStatus?.("Fetching auth server metadata...");
+    const authMetaUrl = `${authServer}/.well-known/oauth-authorization-server`;
+    const authRes = await fetch(authMetaUrl);
+    if (!authRes.ok) { result.error = `Auth server metadata fetch failed: ${authRes.status}`; return result; }
+    const authMeta = await authRes.json() as any;
+
+    result.authConfig = {
+      authorizeUrl: authMeta.authorization_endpoint,
+      tokenUrl: authMeta.token_endpoint,
+      registrationUrl: authMeta.registration_endpoint,
+      scopes,
+      codeChallengeMethod: authMeta.code_challenge_methods_supported?.[0],
+      tokenAuthMethod: authMeta.token_endpoint_auth_methods_supported?.[0],
+    };
+
+    // 4. Dynamic client registration if supported
+    if (authMeta.registration_endpoint) {
+      onStatus?.("Registering client...");
+      const regRes = await fetch(authMeta.registration_endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          client_name: "VoidRift",
+          redirect_uris: ["http://localhost:9876/callback"],
+          grant_types: ["authorization_code", "refresh_token"],
+          response_types: ["code"],
+          token_endpoint_auth_method: "none",
+        }),
+      });
+      if (regRes.ok) {
+        const regData = await regRes.json() as any;
+        result.clientId = regData.client_id;
+        result.clientSecret = regData.client_secret;
+        onStatus?.(`Client registered: ${regData.client_id}`);
+      }
+    }
+
+    onStatus?.("Discovery complete.");
+    return result;
+  } catch (err) {
+    result.error = `Discovery failed: ${err instanceof Error ? err.message : String(err)}`;
+    return result;
+  }
+}
+
+function extractResourceMetadataUrl(wwwAuth: string): string | null {
+  // Format: Bearer resource_metadata="https://..."
+  const match = wwwAuth.match(/resource_metadata="([^"]+)"/);
+  return match?.[1] ?? null;
+}
+
+/** Generate an MCPServerConfig from discovery results */
+export function buildConfigFromDiscovery(name: string, discovery: MCPDiscoveryResult): Record<string, unknown> {
+  const config: Record<string, unknown> = {
+    transport: "http-sse",
+    url: discovery.url,
+  };
+
+  if (discovery.requiresA
+
+## Instructions
+
+Analyze the above codebase context and provide your response following the format specified in the task.

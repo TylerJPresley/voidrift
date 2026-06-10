@@ -1,0 +1,11 @@
+{
+  "timestamp": "2026-06-10T13:06:55.718Z",
+  "projectRoot": "/home/tjpresley/Projects/voidrift",
+  "structure": {
+    "hasPackageJson": true,
+    "hasTsConfig": true,
+    "hasClaudeConfig": true,
+    "hasClaudeFlow": true
+  },
+  "scannedAt": 1781096815718
+}
