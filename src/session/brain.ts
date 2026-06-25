@@ -52,7 +52,7 @@ export class SessionBrain {
 
     const turns = this.readJson("system.turns.json") || [];
     let gitSha = "";
-    try { gitSha = execSync("git rev-parse --short HEAD", { cwd: this.workspaceRoot, encoding: "utf-8" }).trim(); } catch {}
+    try { gitSha = execSync("git rev-parse --short HEAD", { cwd: this.workspaceRoot, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim(); } catch {}
     turns.push({ turn: this.turnIndex, timestamp: Date.now(), agentId, gitSha });
     this.writeJson("system.turns.json", turns);
 
