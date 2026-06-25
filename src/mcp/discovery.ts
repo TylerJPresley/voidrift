@@ -8,6 +8,8 @@
  * - Dynamic client registration if supported
  */
 
+import { VERSION } from "../version.js";
+
 export interface MCPDiscoveryResult {
   url: string;
   transport: "http-sse";
@@ -41,7 +43,7 @@ export async function discoverMCPServer(url: string, onStatus?: (msg: string) =>
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         jsonrpc: "2.0", method: "initialize", id: 1,
-        params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "voidrift", version: "0.1.0" } },
+        params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "voidrift", version: VERSION } },
       }),
     });
 

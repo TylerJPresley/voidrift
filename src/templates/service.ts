@@ -2,6 +2,7 @@ import { existsSync, readFileSync, mkdirSync, writeFileSync, unlinkSync, readdir
 import { join, dirname } from "path";
 import { homedir } from "os";
 import { execSync } from "child_process";
+import { VERSION } from "../version.js";
 
 export type TemplateType = "template" | "prompt";
 export type SlotAction = "base" | "override" | "extends";
@@ -388,7 +389,7 @@ export class TemplateService {
     } catch {}
 
     return {
-      "harness.version": "0.1.0",
+      "harness.version": VERSION,
       "harness.timestamp": new Date().toISOString(),
       "workspace.root": this.workspaceRoot,
       "workspace.basename": this.workspaceRoot.split("/").pop() || "workspace",

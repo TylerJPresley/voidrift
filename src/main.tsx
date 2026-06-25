@@ -51,6 +51,7 @@ import { validateEditor } from "./utils/editor.js";
 import { validateAssets } from "./bootstrap/validate.js";
 import { ResourceWatcher } from "./watcher/resources.js";
 import { clipboardHasImage, saveClipboardImage } from "./utils/clipboard.js";
+import { VERSION } from "./version.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -92,7 +93,7 @@ function Welcome({ model, workspace, branch }: { model: string; workspace: strin
           {logo.map((line, i) => <Text key={i} color="#6a7ec8">{line}</Text>)}
         </Box>
         <Box flexDirection="column" justifyContent="center" marginLeft={2}>
-          <Text><Text color="#4ec9b0" bold>VoidRift</Text><Text dimColor> 0.1.0</Text></Text>
+          <Text><Text color="#4ec9b0" bold>VoidRift</Text><Text dimColor> {VERSION}</Text></Text>
           <Text dimColor>{model}</Text>
           <Text dimColor>{workspace}</Text>
           {branch && <Text dimColor>{branch}</Text>}
@@ -898,7 +899,7 @@ function App({ engine }: { engine: EngineContext }) {
 
 // --version flag
 if (process.argv.includes("--version") || process.argv.includes("-v")) {
-  console.log("voidrift 0.1.0");
+  console.log(`voidrift ${VERSION}`);
   process.exit(0);
 }
 
