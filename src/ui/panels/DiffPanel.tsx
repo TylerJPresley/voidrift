@@ -6,7 +6,7 @@ import { execSync } from "child_process";
 export function DiffPanel({ workspaceRoot, onClose }: { workspaceRoot: string; onClose: () => void }) {
   const rawLines = React.useMemo(() => {
     try {
-      const raw = execSync("git diff --no-color", { cwd: workspaceRoot, encoding: "utf-8" });
+      const raw = execSync("git diff --no-color", { cwd: workspaceRoot, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] });
       return raw ? raw.split("\n") : [];
     } catch { return []; }
   }, []);

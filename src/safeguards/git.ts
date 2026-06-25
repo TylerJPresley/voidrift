@@ -66,7 +66,7 @@ function isGitRepo(cwd: string): boolean {
 
 function isDirty(cwd: string): boolean {
   try {
-    const status = execSync("git status --porcelain", { cwd, encoding: "utf-8" });
+    const status = execSync("git status --porcelain", { cwd, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] });
     return status.trim().length > 0;
   } catch {
     return false;
