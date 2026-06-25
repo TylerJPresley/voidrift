@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Box, Text, useInput } from "ink";
 import type { CoreRegistry } from "../../registry/core.js";
+import { VERSION } from "../../version.js";
 
 export function HelpPanel({ registry, sessionId, workspace, onClose }: { registry: CoreRegistry; sessionId: string; workspace: string; onClose: () => void }) {
   const [page, setPage] = useState(0);
@@ -22,7 +23,7 @@ export function HelpPanel({ registry, sessionId, workspace, onClose }: { registr
         <Text>VoidRift — AI Engineering Harness</Text>
         <Text dimColor>Codebase understanding, permissioned edits, terminal execution.</Text>
         <Text> </Text>
-        <Text><Text color="#61afef">Version:      </Text>0.1.0</Text>
+        <Text><Text color="#61afef">Version:      </Text>{VERSION}</Text>
         <Text><Text color="#61afef">Workspace:    </Text>{workspace}</Text>
         <Text><Text color="#61afef">Session:      </Text>{sessionId}</Text>
         <Text> </Text>

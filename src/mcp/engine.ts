@@ -7,6 +7,7 @@ import { join, basename } from "path";
 import { homedir } from "os";
 import type { EventBus } from "../events/bus.js";
 import { loadCredential, refreshIfNeeded, type StoredCredential } from "./credentials.js";
+import { VERSION } from "../version.js";
 
 export interface MCPAuthConfig {
   type: "oauth2";
@@ -149,7 +150,7 @@ export class MCPEngine {
       const workspaceRootRef = this.workspaceRoot;
       const samplingRef = this.samplingHandler;
       const elicitationRef = this.elicitationHandler;
-      const client = new Client({ name: "voidrift", version: "0.1.0" }, {
+      const client = new Client({ name: "voidrift", version: VERSION }, {
         capabilities: {
           roots: { listChanged: true },
           ...(this.samplingHandler ? { sampling: {} } : {}),

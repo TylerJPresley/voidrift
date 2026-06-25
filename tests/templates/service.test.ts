@@ -70,7 +70,7 @@ describe("TemplateService", () => {
   it("buildContext includes standard enrichment fields", () => {
     const svc = new TemplateService(TMP);
     const ctx = svc.buildContext("sess-1", "gpt-4o");
-    expect(ctx["harness.version"]).toBe("0.1.0");
+    expect(ctx["harness.version"]).toMatch(/^\d+\.\d+\.\d+$/);
     expect(ctx["session.uuid"]).toBe("sess-1");
     expect(ctx["session.model"]).toBe("gpt-4o");
     expect(ctx["workspace.root"]).toBe(TMP);
