@@ -1,3 +1,5 @@
+import { createRequire } from "module";
+const require = createRequire(import.meta.url);
 import type { CoreRegistry } from "../registry/core.js";
 import type { EventBus } from "../events/bus.js";
 import type { WorktreeEngine } from "../worktree/engine.js";

@@ -1,3 +1,5 @@
+import { createRequire } from "module";
+const require = createRequire(import.meta.url);
 /**
  * CLI Bootstrap — initializes all subsystems and returns the EngineContext.
  * Separated from UI rendering per SRP.

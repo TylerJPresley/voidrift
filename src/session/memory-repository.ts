@@ -1,3 +1,5 @@
+import { createRequire } from "module";
+const require = createRequire(import.meta.url);
 /**
  * Memory Repository — persistence interface for memory entries.
  *

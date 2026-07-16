@@ -1,3 +1,5 @@
+import { createRequire } from "module";
+const require = createRequire(import.meta.url);
 /**
  * Policy Engine — rule-based permission decisions for tool execution.
  *

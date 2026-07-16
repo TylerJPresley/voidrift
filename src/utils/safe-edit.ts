@@ -1,3 +1,5 @@
+import { createRequire } from "module";
+const require = createRequire(import.meta.url);
 /**
  * Safe File Editor — edit a temp copy, validate on close, apply only if valid.
  *
