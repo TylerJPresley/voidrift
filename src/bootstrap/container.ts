@@ -30,6 +30,14 @@ export async function bootstrap(opts: ContainerOptions): Promise<Container> {
   const bus = new EventBus();
   const registry = new CoreRegistry();
 
+  // 0. Ensure .voidrift directory structure exists
+  const { mkdirSync } = await import("fs");
+  const { join } = await import("path");
+  const dirs = ["cache", "logs", "sessions", "plan", "routines", "memory", "skills", "agents", "templates", "prompts", "tasks", "worktrees"];
+  for (const dir of dirs) {
+    mkdirSync(join(opts.workspaceRoot, ".voidrift", dir), { recursive: true });
+  }
+
   // 1. Load configuration (global + local workspace override)
   const config = loadConfig({
     globalConfigPath: opts.globalConfigPath,
