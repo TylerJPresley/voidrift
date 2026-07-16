@@ -1,0 +1,70 @@
+{
+  "plugins": [],
+  "policies": [
+    {
+      "tool": "edit_file",
+      "pattern": "ideas.md",
+      "decision": "allow",
+      "source": "workspace",
+      "priority": 200
+    },
+    {
+      "tool": "edit_file",
+      "pattern": ".voidrift/cache/**",
+      "decision": "allow",
+      "source": "workspace",
+      "priority": 200
+    },
+    {
+      "tool": "execute_command",
+      "pattern": "npx *",
+      "decision": "allow",
+      "source": "workspace",
+      "priority": 200
+    },
+    {
+      "tool": "execute_command",
+      "pattern": "bun *",
+      "decision": "allow",
+      "source": "workspace",
+      "priority": 200
+    },
+    {
+      "tool": "write_file",
+      "pattern": ".voidrift/cache/**",
+      "decision": "allow",
+      "source": "workspace",
+      "priority": 200
+    },
+    {
+      "tool": "execute_command",
+      "pattern": "node *",
+      "decision": "allow",
+      "source": "workspace",
+      "priority": 200
+    },
+    {
+      "tool": "execute_command",
+      "pattern": "bun *",
+      "decision": "allow",
+      "source": "workspace",
+      "priority": 200
+    },
+    {
+      "tool": "execute_command",
+      "pattern": "cat *",
+      "decision": "allow",
+      "source": "workspace",
+      "priority": 200
+    },
+    {
+      "tool": "execute_command",
+      "pattern": "cd *",
+      "decision": "allow",
+      "source": "workspace",
+      "priority": 200
+    }
+  ],
+  "modelSelected": "auto",
+  "turnsMaxToolRounds": 0
+}
