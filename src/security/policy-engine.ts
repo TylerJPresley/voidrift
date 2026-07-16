@@ -1,5 +1,4 @@
-import { createRequire } from "module";
-const require = createRequire(import.meta.url);
+import { safeConfigWrite } from "../config/writer.js";
 /**
  * Policy Engine — rule-based permission decisions for tool execution.
  *
@@ -300,7 +299,6 @@ export class PolicyEngine {
     const isWorkspace = configPath === this.workspaceConfigPath;
     const newRule: PolicyRule = { ...rule, source: isWorkspace ? "workspace" : "user", priority: isWorkspace ? 200 : 100 };
     // Safe write: validate before applying
-    const { safeConfigWrite } = require("../config/writer.js");
     const result = safeConfigWrite(configPath, (config: Record<string, any>) => {
       if (!Array.isArray(config.policies)) config.policies = [];
       config.policies.push(newRule);

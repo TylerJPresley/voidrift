@@ -1,5 +1,3 @@
-import { createRequire } from "module";
-const require = createRequire(import.meta.url);
 /**
  * Memory Repository — persistence interface for memory entries.
  *
@@ -7,7 +5,7 @@ const require = createRequire(import.meta.url);
  * Default implementation scans filesystem directories for markdown files.
  * Alternative implementations can use databases or in-memory stores (testing).
  */
-import { existsSync, readdirSync, readFileSync } from "fs";
+import { existsSync, readdirSync, readFileSync, mkdirSync, writeFileSync } from "fs";
 import { join, extname, basename } from "path";
 import type { MemoryMeta, MemoryType } from "./memory.js";
 
@@ -92,7 +90,7 @@ export class FileSystemMemoryRepository implements MemoryRepository {
   }
 
   save(dir: string, meta: MemoryMeta, body: string): string {
-    const { mkdirSync, writeFileSync } = require("fs");
+    
     mkdirSync(dir, { recursive: true });
     const filePath = join(dir, `${meta.id}.md`);
     const keywords = meta.context.keywords || [];

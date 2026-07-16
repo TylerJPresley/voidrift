@@ -1,5 +1,3 @@
-import { createRequire } from "module";
-const require = createRequire(import.meta.url);
 import type { CoreRegistry } from "../registry/core.js";
 import type { EventBus } from "../events/bus.js";
 import type { WorktreeEngine } from "../worktree/engine.js";
@@ -13,9 +11,13 @@ import { executeCommand } from "../tools/executors.js";
 import { TOOL_SCHEMAS } from "../tools/definitions.js";
 import { activateAgent } from "../use-cases/activate-agent.js";
 import { fsResourceLoader } from "../infrastructure/resource-loader.js";
-import { readFileSync, existsSync } from "fs";
-import { join } from "path";
+import { readFileSync, existsSync, mkdirSync, writeFileSync, unlinkSync, renameSync, readdirSync, statSync } from "fs";
+import { join, dirname } from "path";
 import { homedir } from "os";
+import { safeConfigWrite } from "../config/writer.js";
+import { openInEditor } from "../utils/editor.js";
+import { editWithValidation, validateJSON, validateFrontmatter, validateSkillFile, validatePromptFile } from "../utils/safe-edit.js";
+import { execSync } from "child_process";
 import type {
   AgentDTO, AgentListResult, AgentGetResult,
   PlanItemDTO, PlanListResult, PlanGetResult,
@@ -198,8 +200,6 @@ export class CoreAPI {
       list: () => this.engine.brain.listSessions(),
       /** Load messages from a specific session without resuming it */
       loadMessages: (sessionId: string): Array<{ role: string; content: string }> => {
-        const { existsSync, readFileSync } = require("fs");
-        const { join } = require("path");
         const msgsPath = join(this.workspaceRoot, ".voidrift", "sessions", sessionId, "work.messages.json");
         if (!existsSync(msgsPath)) return [];
         try { return JSON.parse(readFileSync(msgsPath, "utf-8")); } catch { return []; }
@@ -233,8 +233,6 @@ export class CoreAPI {
       switch: (params: ModelSwitchParams) => {
         if (params.name === "auto") {
           this.engine.container.config.modelSelected = "auto";
-          const { safeConfigWrite } = require("../config/writer.js");
-          const { join } = require("path");
           safeConfigWrite(join(this.workspaceRoot, ".voidrift", "config.json"), (raw: any) => { raw.modelSelected = "auto"; });
           return;
         }
@@ -243,16 +241,12 @@ export class CoreAPI {
         if (params.tier) { if (params.tier === "flash") config.modelTierFlash = params.name; else if (params.tier === "utility") config.modelTierUtility = params.name; else config.modelTierDense = params.name; }
         else {
           config.modelSelected = params.name;
-          const { safeConfigWrite } = require("../config/writer.js");
-          const { join } = require("path");
           safeConfigWrite(join(this.workspaceRoot, ".voidrift", "config.json"), (raw: any) => { raw.modelSelected = params.name; });
         }
         this.engine.budget.setLimit(config.models[params.name].contextLimit);
       },
       /** Persist current tier assignments to workspace config */
       persistTiers: () => {
-        const { safeConfigWrite } = require("../config/writer.js");
-        const { join } = require("path");
         const wsPath = join(this.workspaceRoot, ".voidrift", "config.json");
         const config = this.engine.container.config;
         safeConfigWrite(wsPath, (raw: any) => {
@@ -319,7 +313,6 @@ export class CoreAPI {
   get agents() {
     return {
       list: (): AgentListResult => {
-        const { existsSync } = require("fs");
         const all = [...this.engine.agents.listInteractive(), ...this.engine.agents.listTask()];
         const activeId = this.engine.agents.active.id;
         return { agents: all.map((a): AgentDTO => {
@@ -353,7 +346,6 @@ export class CoreAPI {
       reindex: () => { this.engine.agents.discover(this.workspaceRoot); },
       /** Get the full override cascade for an agent (config + prompt at each level) */
       getOverrideCascade: (id: string): Array<{ section: string; level: string; active: boolean; path?: string; editable: boolean; target?: string }> => {
-        const { existsSync } = require("fs");
         const agent = this.engine.agents.get(id);
         if (!agent) return [];
         const globalDir = join(homedir(), ".config", "voidrift", "agents", id);
@@ -387,8 +379,6 @@ export class CoreAPI {
       },
       /** Scaffold an override file with default content. Returns path. */
       scaffoldOverride: (id: string, target: string): string => {
-        const { mkdirSync, writeFileSync, existsSync } = require("fs");
-        const { dirname } = require("path");
         mkdirSync(dirname(target), { recursive: true });
         if (!existsSync(target)) {
           const agent = this.engine.agents.get(id);
@@ -406,13 +396,11 @@ export class CoreAPI {
       },
       /** Delete a specific override file */
       deleteFile: (path: string): boolean => {
-        const { existsSync, unlinkSync } = require("fs");
         if (existsSync(path)) { unlinkSync(path); return true; }
         return false;
       },
       /** Reset an override file to default content */
       resetOverride: (id: string, target: string): void => {
-        const { writeFileSync } = require("fs");
         if (target.endsWith(".json")) {
           const defaultConfig = { id, name: id, description: "", type: "interactive", role: "auto", tools: [] as string[], approvalMode: "prompt" as const, allowedTools: [] as string[], active: false };
           writeFileSync(target, JSON.stringify(defaultConfig, null, 2), "utf-8");
@@ -422,8 +410,6 @@ export class CoreAPI {
       },
       /** Rename a custom agent directory */
       renameAgent: (oldId: string, newId: string): { success: boolean; error?: string } => {
-        const { existsSync, renameSync } = require("fs");
-        const { dirname } = require("path");
         const agent = this.engine.agents.get(oldId);
         const oldDir = agent?.overridePath ? dirname(agent.overridePath) : join(this.workspaceRoot, ".voidrift", "agents", oldId);
         const parentDir = dirname(oldDir);
@@ -436,7 +422,6 @@ export class CoreAPI {
       },
       /** Get the location of a custom agent (workspace or global) */
       getLocation: (id: string): "workspace" | "global" => {
-        const { existsSync } = require("fs");
         return existsSync(join(this.workspaceRoot, ".voidrift", "agents", id)) ? "workspace" : "global";
       },
     };
@@ -521,7 +506,6 @@ export class CoreAPI {
   get skills() {
     return {
       list: (): SkillListResult => {
-        const { existsSync } = require("fs");
         return { skills: this.engine.skills.indexedSkills.map((s): SkillDTO => {
           const isBuiltin = s.filePath === "(builtin)";
           let overrideLevel: string | undefined;
@@ -538,7 +522,6 @@ export class CoreAPI {
         return this.skills.list();
       },
       create: (name: string, scope: "workspace" | "global"): string => {
-        const { mkdirSync, writeFileSync, existsSync } = require("fs");
         const dir = scope === "workspace"
           ? join(this.workspaceRoot, ".voidrift", "skills")
           : join(homedir(), ".config", "voidrift", "skills");
@@ -550,7 +533,6 @@ export class CoreAPI {
         return filePath;
       },
       rename: (oldName: string, newName: string): { success: boolean; error?: string } => {
-        const { existsSync, renameSync } = require("fs");
         const dirs = [join(this.workspaceRoot, ".voidrift", "skills"), join(homedir(), ".config", "voidrift", "skills")];
         for (const dir of dirs) {
           const oldPath = join(dir, `${oldName}.md`);
@@ -564,7 +546,6 @@ export class CoreAPI {
         return { success: false, error: `Skill "${oldName}" not found` };
       },
       delete: (name: string): { success: boolean } => {
-        const { existsSync, unlinkSync } = require("fs");
         const dirs = [join(this.workspaceRoot, ".voidrift", "skills"), join(homedir(), ".config", "voidrift", "skills")];
         for (const dir of dirs) {
           const filePath = join(dir, `${name}.md`);
@@ -574,7 +555,6 @@ export class CoreAPI {
       },
       /** Create an override file for a builtin skill. Copies builtin content to the override location. Returns path. */
       createOverride: (name: string, scope: "workspace" | "global"): string => {
-        const { mkdirSync, writeFileSync, existsSync } = require("fs");
         const dir = scope === "workspace"
           ? join(this.workspaceRoot, ".voidrift", "skills")
           : join(homedir(), ".config", "voidrift", "skills");
@@ -659,7 +639,6 @@ export class CoreAPI {
       deleteOverride: (key: string, scope: "workspace" | "global") => this.engine.templates.deleteOverride(key, scope),
       /** Create a custom template file */
       create: (name: string, scope: "workspace" | "global"): string => {
-        const { mkdirSync, writeFileSync, existsSync } = require("fs");
         const dir = scope === "workspace"
           ? join(this.workspaceRoot, ".voidrift", "templates")
           : join(homedir(), ".config", "voidrift", "templates");
@@ -672,7 +651,6 @@ export class CoreAPI {
       },
       /** Rename a custom template */
       rename: (oldName: string, newName: string): { success: boolean; error?: string } => {
-        const { existsSync, renameSync } = require("fs");
         const dirs = [join(this.workspaceRoot, ".voidrift", "templates"), join(homedir(), ".config", "voidrift", "templates")];
         for (const dir of dirs) {
           const oldPath = join(dir, `${oldName}.md`);
@@ -687,7 +665,6 @@ export class CoreAPI {
       },
       /** Delete a custom template */
       delete: (name: string): { success: boolean } => {
-        const { existsSync, unlinkSync } = require("fs");
         const dirs = [join(this.workspaceRoot, ".voidrift", "templates"), join(homedir(), ".config", "voidrift", "templates")];
         for (const dir of dirs) {
           const filePath = join(dir, `${name}.md`);
@@ -756,15 +733,12 @@ export class CoreAPI {
       },
       diff: (): string[] => {
         try {
-          const { execSync } = require("child_process");
           const raw = execSync("git diff --no-color", { cwd: this.workspaceRoot, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] });
           return raw ? raw.split("\n") : [];
         } catch { return []; }
       },
       /** List workspace files for autocomplete (relative paths, depth-limited) */
       listFiles: (maxDepth = 3): string[] => {
-        const { readdirSync, statSync } = require("fs");
-        const { join } = require("path");
         const IGNORED = new Set(["node_modules", ".git", ".voidrift", "dist", "build", ".next", "coverage"]);
         const walk = (dir: string, root: string, depth: number): string[] => {
           if (depth > maxDepth) return [];
@@ -793,9 +767,6 @@ export class CoreAPI {
       list: () => this.engine.pluginRegistry.list(),
       /** Get which config scope a plugin is enabled in */
       getScope: (id: string): "global" | "workspace" | "available" => {
-        const { existsSync, readFileSync } = require("fs");
-        const { join } = require("path");
-        const { homedir } = require("os");
         const globalPath = join(homedir(), ".config", "voidrift", "config.json");
         const wsPath = join(this.workspaceRoot, ".voidrift", "config.json");
         let inGlobal = false, inWorkspace = false;
@@ -807,9 +778,6 @@ export class CoreAPI {
       },
       /** Enable a plugin in workspace config */
       enable: (id: string, scope: "global" | "workspace" = "workspace") => {
-        const { safeConfigWrite } = require("../config/writer.js");
-        const { join } = require("path");
-        const { homedir } = require("os");
         const path = scope === "global"
           ? join(homedir(), ".config", "voidrift", "config.json")
           : join(this.workspaceRoot, ".voidrift", "config.json");
@@ -820,9 +788,6 @@ export class CoreAPI {
       },
       /** Disable a plugin (remove from workspace config) */
       disable: (id: string) => {
-        const { safeConfigWrite } = require("../config/writer.js");
-        const { existsSync } = require("fs");
-        const { join } = require("path");
         const wsPath = join(this.workspaceRoot, ".voidrift", "config.json");
         if (!existsSync(wsPath)) return;
         safeConfigWrite(wsPath, (config: any) => {
@@ -839,14 +804,12 @@ export class CoreAPI {
       open: (filePath: string): { success: boolean; error?: string } => {
         const config = this.engine.container.config;
         if (!config.editor) return { success: false, error: "No editor configured" };
-        const { openInEditor } = require("../utils/editor.js");
         return openInEditor(filePath, config.editor);
       },
       /** Edit a file with validation. Temp copy → validate → apply. */
       editValidated: (filePath: string, type: "json" | "frontmatter" | "skill" | "prompt"): { success: boolean; changed: boolean; error?: string } => {
         const config = this.engine.container.config;
         if (!config.editor) return { success: false, changed: false, error: "No editor configured" };
-        const { editWithValidation, validateJSON, validateFrontmatter, validateSkillFile, validatePromptFile } = require("../utils/safe-edit.js");
         const validators: Record<string, any> = { json: validateJSON, frontmatter: validateFrontmatter, skill: validateSkillFile, prompt: validatePromptFile };
         return editWithValidation(filePath, config.editor, validators[type]);
       },
@@ -854,13 +817,10 @@ export class CoreAPI {
       viewReadonly: (content: string, filename: string): { success: boolean; error?: string } => {
         const config = this.engine.container.config;
         if (!config.editor) return { success: false, error: "No editor configured" };
-        const { mkdirSync, writeFileSync } = require("fs");
-        const { join } = require("path");
         const tmpDir = join(this.workspaceRoot, ".voidrift", "cache", "view");
         mkdirSync(tmpDir, { recursive: true });
         const tmpPath = join(tmpDir, filename);
         writeFileSync(tmpPath, content, "utf-8");
-        const { openInEditor } = require("../utils/editor.js");
         return openInEditor(tmpPath, config.editor);
       },
       /** Check if an editor is configured */

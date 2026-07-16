@@ -1,10 +1,9 @@
-import { createRequire } from "module";
-const require = createRequire(import.meta.url);
 /**
  * CLI Bootstrap — initializes all subsystems and returns the EngineContext.
  * Separated from UI rendering per SRP.
  */
 import { randomUUID } from "crypto";
+import { validateResourceFile } from "../utils/safe-edit.js";
 import { join } from "path";
 import { homedir } from "os";
 import {
@@ -482,7 +481,6 @@ export async function createEngine(): Promise<EngineContext> {
 
     // Validate changed files — reject invalid edits
     if (changedPath && existsSync(changedPath) && !changedPath.includes("/cache/")) {
-      const { validateResourceFile } = require("../utils/safe-edit.js");
       const validation = validateResourceFile(changedPath, type);
       if (validation && !validation.valid) {
         // Move bad file to cache with unique name

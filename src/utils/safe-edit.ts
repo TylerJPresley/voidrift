@@ -1,5 +1,3 @@
-import { createRequire } from "module";
-const require = createRequire(import.meta.url);
 /**
  * Safe File Editor — edit a temp copy, validate on close, apply only if valid.
  *
@@ -169,7 +167,7 @@ export const validatePromptFile: FileValidator = (content) => {
  * Returns null if the file type doesn't require validation (e.g., config — handled separately).
  */
 export function validateResourceFile(filePath: string, type: string): ValidationResult | null {
-  const { readFileSync } = require("fs");
+  
   let content: string;
   try { content = readFileSync(filePath, "utf-8"); } catch { return null; }
 

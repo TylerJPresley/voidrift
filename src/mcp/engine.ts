@@ -1,5 +1,4 @@
-import { createRequire } from "module";
-const require = createRequire(import.meta.url);
+import { safeConfigWrite } from "../config/writer.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -109,7 +108,6 @@ export class MCPEngine {
   }
 
   saveConfig(config: MCPServerConfig): void {
-    const { safeConfigWrite } = require("../config/writer.js");
     const configPath = join(this.workspaceRoot, ".voidrift", "config.json");
     const { name, ...rest } = config;
     safeConfigWrite(configPath, (cfg: Record<string, any>) => {
@@ -119,7 +117,6 @@ export class MCPEngine {
   }
 
   removeConfig(name: string): boolean {
-    const { safeConfigWrite } = require("../config/writer.js");
     const configPath = join(this.workspaceRoot, ".voidrift", "config.json");
     if (!existsSync(configPath)) return false;
     try {
