@@ -174,6 +174,10 @@ export function loadConfig(opts: LoadConfigOptions = {}): VoidRiftConfig {
   if (!existsSync(globalPath)) {
     const dir = dirname(globalPath);
     mkdirSync(dir, { recursive: true });
+    // Create global subdirectories
+    for (const sub of ["agents", "skills", "memory", "templates", "prompts", "logs"]) {
+      mkdirSync(join(dir, sub), { recursive: true });
+    }
     writeFileSync(globalPath, JSON.stringify(DEFAULT_CONFIG, null, 2));
   }
 
