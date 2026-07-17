@@ -1,0 +1,146 @@
+{
+  "models": {
+    "spark-dense": {
+      "protocol": "openai",
+      "model": "qwen36-35b",
+      "baseUrl": "http://192.168.50.100:8000/v1",
+      "apiKeyEnv": "SPARK_API_KEY",
+      "contextLimit": 262144,
+      "maxOutputTokens": 32768,
+      "temperature": 0.6,
+      "topP": 0.95,
+      "top_k": 20,
+      "timeout": 300000,
+      "modelKwargs": {
+        "chat_template_kwargs": {
+          "enable_thinking": true,
+          "preserve_thinking": true
+        }
+      }
+    },
+    "spark-utility": {
+      "protocol": "openai",
+      "model": "qwen36-35b",
+      "baseUrl": "http://192.168.50.100:8000/v1",
+      "apiKeyEnv": "SPARK_API_KEY",
+      "contextLimit": 262144,
+      "maxOutputTokens": 4096,
+      "temperature": 0,
+      "topP": 0.95,
+      "top_k": 20,
+      "timeout": 300000,
+      "modelKwargs": {
+        "chat_template_kwargs": {
+          "enable_thinking": false,
+          "preserve_thinking": false
+        }
+      }
+    },
+    "spark-flash": {
+      "protocol": "openai",
+      "model": "qwen36-35b",
+      "baseUrl": "http://192.168.50.100:8000/v1",
+      "apiKeyEnv": "SPARK_API_KEY",
+      "contextLimit": 131072,
+      "maxOutputTokens": 16384,
+      "temperature": 0.5,
+      "topP": 0.95,
+      "top_k": 20,
+      "timeout": 300000,
+      "modelKwargs": {
+        "chat_template_kwargs": {
+          "enable_thinking": true,
+          "preserve_thinking": true
+        }
+      }
+    },
+    "qwen3.6-flash": {
+      "protocol": "openai",
+      "model": "qwen3.6-flash",
+      "baseUrl": "https://dashscope-us.aliyuncs.com/compatible-mode/v1",
+      "apiKeyEnv": "DASHSCOPE_API_KEY",
+      "contextLimit": 262144,
+      "temperature": 0.7,
+      "maxOutputTokens": 16384,
+      "topP": 0.95,
+      "topK": 40
+    },
+    "qwen3.7-plus": {
+      "protocol": "openai",
+      "model": "qwen3.7-plus",
+      "baseUrl": "https://dashscope-us.aliyuncs.com/compatible-mode/v1",
+      "apiKeyEnv": "DASHSCOPE_API_KEY",
+      "contextLimit": 262144,
+      "temperature": 0.2,
+      "maxOutputTokens": 16384,
+      "topP": 0.95,
+      "topK": 40
+    },
+    "qwen3.7-max": {
+      "protocol": "openai",
+      "model": "qwen3.7-max",
+      "baseUrl": "https://dashscope-us.aliyuncs.com/compatible-mode/v1",
+      "apiKeyEnv": "DASHSCOPE_API_KEY",
+      "contextLimit": 262144,
+      "temperature": 0.2,
+      "maxOutputTokens": 32768,
+      "topP": 0.95,
+      "topK": 40
+    },
+    "kiro-sonnet": {
+      "protocol": "openai",
+      "model": "claude-sonnet-4-6",
+      "baseUrl": "http://localhost:8000/v1",
+      "contextLimit": 1048576,
+      "maxOutputTokens": 32768,
+      "temperature": 1,
+      "apiKeyEnv": "KIRO_API_KEY"
+    },
+    "kiro-opus": {
+      "protocol": "openai",
+      "model": "claude-opus-4-6",
+      "baseUrl": "http://localhost:8000/v1",
+      "contextLimit": 1048576,
+      "maxOutputTokens": 32768,
+      "temperature": 1,
+      "apiKeyEnv": "KIRO_API_KEY"
+    },
+    "kiro-haiku": {
+      "protocol": "openai",
+      "model": "claude-haiku-4-5",
+      "baseUrl": "http://localhost:8000/v1",
+      "contextLimit": 200000,
+      "maxOutputTokens": 32768,
+      "temperature": 1,
+      "apiKeyEnv": "KIRO_API_KEY"
+    },
+    "kiro": {
+      "protocol": "openai",
+      "model": "auto",
+      "baseUrl": "http://localhost:8000/v1",
+      "contextLimit": 200000,
+      "maxOutputTokens": 32768,
+      "temperature": 1,
+      "apiKeyEnv": "KIRO_API_KEY"
+    },
+    "claude": {
+      "protocol": "anthropic",
+      "model": "claude-sonnet-4-6",
+      "baseUrl": "https://api.anthropic.com/",
+      "contextLimit": 1000000,
+      "maxOutputTokens": 128000,
+      "temperature": 1,
+      "apiKeyEnv": "ANTHROPIC_API_KEY"
+    }
+  },
+  "editor": "nano",
+  "plugins": [],
+  "approvalTimeout": 600,
+  "contextLookbackTurns": 3,
+  "maxConcurrentAgents": 3,
+  "toolLoopReminderInterval": 0,
+  "modelTierFlash": "spark-flash",
+  "modelTierUtility": "spark-utility",
+  "modelTierDense": "spark-dense",
+  "modelSelected": "auto"
+}

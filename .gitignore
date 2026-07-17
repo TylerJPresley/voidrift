@@ -1,0 +1,8 @@
+node_modules/
+dist/
+_internal/
+*.DS_Store
+.kiro/
+.claude-flow/
+.voidrift/
+coverage/

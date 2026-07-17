@@ -1,0 +1,71 @@
+{
+  "name": "voidrift",
+  "version": "0.2.3",
+  "description": "A local-first, model-agnostic AI harness for your terminal",
+  "license": "Apache-2.0",
+  "author": "Tyler Presley",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TylerJPresley/voidrift.git"
+  },
+  "homepage": "https://github.com/TylerJPresley/voidrift",
+  "bugs": "https://github.com/TylerJPresley/voidrift/issues",
+  "keywords": [
+    "ai",
+    "cli",
+    "terminal",
+    "tui",
+    "mcp",
+    "llm",
+    "agent",
+    "harness",
+    "model-context-protocol",
+    "ollama",
+    "langchain"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "voidrift": "./dist/main.js"
+  },
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "start": "bun src/main.tsx",
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build && npm test"
+  },
+  "dependencies": {
+    "@langchain/anthropic": "^1.5.0",
+    "@langchain/core": "^1.2.0",
+    "@langchain/google-genai": "^2.2.0",
+    "@langchain/openai": "^1.5.1",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "chokidar": "^4.0.0",
+    "ink": "^7.1.0",
+    "ink-text-input": "^6.0.0",
+    "liqe": "^3.8.7",
+    "react": "^19.2.7",
+    "zod": "^3.23.0",
+    "zod-to-json-schema": "^3.25.2"
+  },
+  "devDependencies": {
+    "@testing-library/react": "^16.3.2",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.2.15",
+    "@vitest/coverage-v8": "3",
+    "ink-testing-library": "4.0.0",
+    "typescript": "^5.5.0",
+    "vitest": "^3.0.0"
+  }
+}
