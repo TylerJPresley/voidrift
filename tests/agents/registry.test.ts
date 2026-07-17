@@ -93,6 +93,8 @@ describe("AgentRegistry Source Tracking", () => {
   it("can create and delete workspace overrides", () => {
     const registry = new AgentRegistry(undefined, new FileSystemAgentRepository());
     const tempDir = join(tmpdir(), "voidrift-agents-lifecycle-test-" + Date.now());
+    const origHome = process.env.HOME;
+    process.env.HOME = join(tmpdir(), "voidrift-fake-home-" + Date.now());
     
     // Create override
     const path = registry.createOverride("chat", "workspace", tempDir);
@@ -112,5 +114,7 @@ describe("AgentRegistry Source Tracking", () => {
     registry.discover(tempDir);
     const reverted = registry.get("chat");
     expect(reverted?.overrideStatus).toBe("default");
+
+    process.env.HOME = origHome;
   });
 });
