@@ -713,6 +713,20 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
     const textResponse = await streamModel(input.client, mergeMessageRuns(currentMessages) as BaseMessage[], input.onChunk, finalAbort.signal);
     clearTimeout(finalTimer);
     finalResponse = textResponse;
+
+    // If the final call was aborted (timeout), nudge to check completion
+    if (finalAbort.signal.aborted && !input.signal?.aborted) {
+      input.onChunk({ type: "status", message: "Response timed out — checking completion..." });
+      currentMessages.push(new HumanMessage("Your response was cut short by a timeout. Briefly: did you finish the task? If yes, summarize in 1-2 sentences. If not, state what remains."));
+      const nudgeAbort = new AbortController();
+      const nudgeTimer = setTimeout(() => nudgeAbort.abort(), input.config?.networkModelRetryTimeoutMs ?? 30_000);
+      const nudgeResponse = await streamModel(input.client, mergeMessageRuns(currentMessages) as BaseMessage[], input.onChunk, nudgeAbort.signal);
+      clearTimeout(nudgeTimer);
+      if (nudgeResponse.text.trim()) {
+        // Append the nudge response to whatever we got from the timed-out call
+        finalResponse = { ...finalResponse, text: (finalResponse.text + "\n\n" + nudgeResponse.text).trim() };
+      }
+    }
   }
 
   // Guard: if the model produced nothing usable (empty text, no tool calls), retry once with a nudge
