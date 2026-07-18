@@ -707,7 +707,7 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
   if (finalResponse && finalResponse.toolCalls.length > 0 && !finalResponse.text.trim()) {
     // Add a nudge to get the model to respond with text instead of more tool calls
     currentMessages.push(new HumanMessage("Based on the tool results above, provide your response to the user. Do not call any more tools."));
-    const finalTimeoutMs = input.config?.networkModelTimeoutMs ?? 120_000;
+    const finalTimeoutMs = input.config?.networkModelFinalTimeoutMs ?? 60_000;
     const finalAbort = new AbortController();
     const finalTimer = setTimeout(() => finalAbort.abort(), finalTimeoutMs);
     const textResponse = await streamModel(input.client, mergeMessageRuns(currentMessages) as BaseMessage[], input.onChunk, finalAbort.signal);
@@ -719,7 +719,7 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
   if (finalResponse && !finalResponse.text.trim() && finalResponse.toolCalls.length === 0 && !input.signal?.aborted) {
     input.onChunk({ type: "status", message: "Retrying..." });
     currentMessages.push(new HumanMessage("You did not produce a response. Summarize what you accomplished in 1-2 sentences."));
-    const retryTimeoutMs = Math.floor((input.config?.networkModelTimeoutMs ?? 120_000) / 2);
+    const retryTimeoutMs = input.config?.networkModelRetryTimeoutMs ?? 30_000;
     const retryAbort = new AbortController();
     const retryTimer = setTimeout(() => retryAbort.abort(), retryTimeoutMs);
     const retryResponse = await streamModel(client, mergeMessageRuns(currentMessages) as BaseMessage[], input.onChunk, retryAbort.signal);

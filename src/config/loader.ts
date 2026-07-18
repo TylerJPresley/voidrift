@@ -98,6 +98,8 @@ export const ConfigSchema = z.object({
   // ─── network* — connectivity ──────────────────────────────────────────────
   networkModelRetries: z.number().min(0).default(3).describe("Retries on model API failures."),
   networkModelTimeoutMs: z.number().min(5000).default(120000).describe("Model API call timeout in ms."),
+  networkModelFinalTimeoutMs: z.number().min(5000).default(60000).describe("Timeout for final text response after tool execution completes."),
+  networkModelRetryTimeoutMs: z.number().min(5000).default(30000).describe("Timeout for retry call when model returns empty response."),
   networkCommandTimeoutMs: z.number().min(1000).default(30000).describe("Shell command timeout in ms."),
   networkFetchTimeoutMs: z.number().min(1000).default(10000).describe("Web fetch timeout in ms."),
   networkOauthCallbackPort: z.number().min(1024).default(9876).describe("OAuth callback localhost port."),
