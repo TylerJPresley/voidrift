@@ -47,6 +47,16 @@ export function MemoryPanel({ core, onClose }: { core: CoreAPI; onClose: () => v
           core.memory.unload(item._id);
         },
       },
+      {
+        key: "delete",
+        label: "Delete",
+        handler: async (item, page, ctx) => {
+          if (!item || !ctx) return;
+          const answer = await ctx.prompt(`Delete "${item.title}"? Type "y" to confirm`);
+          if (answer === "y") { core.memory.delete(item._id); ctx.refresh(); }
+          else ctx.setMessage("Cancelled.");
+        },
+      },
     ],
   };
 

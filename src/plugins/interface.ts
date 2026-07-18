@@ -499,6 +499,16 @@ export class CoreAPI {
         const idx = this.engine.context.context.orbit.activeMemory.indexOf(body);
         if (idx !== -1) { this.engine.context.unloadMemory(idx); this.bus.publish("MEMORY_UNLOADED", { id } as any); }
       },
+      /** Delete a memory permanently by ID */
+      delete: (id: string): boolean => {
+        const meta = this.engine.memory.all.find(m => m.id === id);
+        if (!meta?.filePath) return false;
+        if (existsSync(meta.filePath)) {
+          unlinkSync(meta.filePath);
+          return true;
+        }
+        return false;
+      },
     };
   }
 
