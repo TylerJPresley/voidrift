@@ -128,6 +128,70 @@ describe("webFetch — content handling", async () => {
     expect(result.output).not.toContain("<");
   });
 
+  it("preserves SVG content raw", async () => {
+    const svgContent = '<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><circle cx="50" cy="50" r="40"/></svg>';
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      headers: new Map([["content-type", "image/svg+xml"]]),
+      text: () => Promise.resolve(svgContent),
+    });
+    global.fetch = fetchMock;
+
+    const result = await webFetch("https://example.com/icon.svg");
+    expect(result.output).toBe(svgContent);
+    expect(result.error).toBeUndefined();
+  });
+
+  it("preserves XML content raw", async () => {
+    const xmlContent = '<?xml version="1.0"?><root><item id="1">value</item></root>';
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      headers: new Map([["content-type", "text/xml"]]),
+      text: () => Promise.resolve(xmlContent),
+    });
+    global.fetch = fetchMock;
+
+    const result = await webFetch("https://example.com/data.xml");
+    expect(result.output).toBe(xmlContent);
+    expect(result.error).toBeUndefined();
+  });
+
+  it("preserves application/xml content raw", async () => {
+    const xmlContent = '<rss version="2.0"><channel><title>Feed</title></channel></rss>';
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      headers: new Map([["content-type", "application/xml"]]),
+      text: () => Promise.resolve(xmlContent),
+    });
+    global.fetch = fetchMock;
+
+    const result = await webFetch("https://example.com/feed.xml");
+    expect(result.output).toBe(xmlContent);
+    expect(result.error).toBeUndefined();
+  });
+
+  it("preserves JSON content raw", async () => {
+    const jsonContent = '{"key": "value", "nested": {"foo": "bar"}}';
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      headers: new Map([["content-type", "application/json"]]),
+      text: () => Promise.resolve(jsonContent),
+    });
+    global.fetch = fetchMock;
+
+    const result = await webFetch("https://example.com/api/data.json");
+    expect(result.output).toBe(jsonContent);
+    expect(result.error).toBeUndefined();
+  });
+
   it("returns small content inline (under threshold)", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

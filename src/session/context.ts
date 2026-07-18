@@ -6,6 +6,7 @@ import { TOOL_SCHEMAS } from "../tools/definitions.js";
 export interface AgentPartition {
   activePersona: string;
   activeTools: string[];
+  blockedTools: string[];         // Tools the agent manifest excludes (for prompt injection)
   boundSkills: string[];          // Agent-manifest-declared skill bodies (static)
   skillDiscoveryIndex: string[];  // Lightweight name+trigger summaries of all available skills (static)
   activeMemoryIndex: MemoryMeta[];
@@ -98,6 +99,7 @@ export class ContextManager {
   // ─── Agent Layer ─────────────────────────────────────────────────────────
   setPersona(persona: string): void { this.ctx.agent.activePersona = persona; }
   setTools(tools: string[]): void { this.ctx.agent.activeTools = tools; }
+  setBlockedTools(tools: string[]): void { this.ctx.agent.blockedTools = tools; }
   setBoundSkills(skills: string[]): void { this.ctx.agent.boundSkills = skills; }
   setSkillDiscoveryIndex(index: string[]): void { this.ctx.agent.skillDiscoveryIndex = index; }
   setMemoryIndex(index: MemoryMeta[]): void { this.ctx.agent.activeMemoryIndex = index; }

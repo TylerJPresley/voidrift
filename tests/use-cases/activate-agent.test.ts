@@ -5,9 +5,11 @@ describe("activateAgent", () => {
   const makeContext = () => ({
     persona: "",
     tools: [] as string[],
+    blockedTools: [] as string[],
     boundSkills: [] as string[],
     setPersona(p: string) { this.persona = p; },
     setTools(t: string[]) { this.tools = t; },
+    setBlockedTools(t: string[]) { this.blockedTools = t; },
     setBoundSkills(s: string[]) { this.boundSkills = s; },
     focusFile: vi.fn(),
   });

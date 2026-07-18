@@ -10,7 +10,8 @@
  *
  * Pure orchestration — no direct filesystem access.
  */
-import type { AgentRegistry, AgentManifest } from "../agents/registry.js";
+import { ALL_TOOLS } from "../agents/registry.js";
+import type { AgentManifest } from "../agents/registry.js";
 import type { PromptRegistry } from "../prompts/registry.js";
 import type { ContextManager } from "../session/context.js";
 import type { SkillManager } from "../skills/manager.js";
@@ -43,8 +44,10 @@ export function activateAgent(id: string, deps: ActivateAgentDeps): AgentManifes
   const persona = agent.prompt ? `${agent.prompt}\n\n${basePrompt}` : basePrompt;
   context.setPersona(persona);
 
-  // 3. Set tool allowlist
+  // 3. Set tool allowlist and blocked tools
   context.setTools(agent.tools);
+  const blockedTools = ALL_TOOLS.filter(t => !agent.tools.includes(t));
+  context.setBlockedTools(blockedTools);
 
   // 4. Load agent-bound skills
   const boundSkills: string[] = [];

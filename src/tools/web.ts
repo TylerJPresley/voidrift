@@ -46,7 +46,7 @@ export async function webFetch(url: string, workspaceRoot?: string, opts?: { tim
       signal: controller.signal,
       headers: {
         "User-Agent": "VoidRift/0.1",
-        "Accept": "text/markdown, text/plain, text/html;q=0.9, */*;q=0.1",
+        "Accept": "text/markdown, text/plain, text/html;q=0.9, application/json;q=0.9, text/xml;q=0.9, */*;q=0.1",
       },
     });
     clearTimeout(timeout);
@@ -60,6 +60,9 @@ export async function webFetch(url: string, workspaceRoot?: string, opts?: { tim
 
     let text: string;
     if (contentType.includes("text/markdown") || contentType.includes("text/plain")) {
+      text = raw;
+    } else if (contentType.includes("image/svg+xml") || contentType.includes("text/xml") || contentType.includes("application/xml") || contentType.includes("application/json")) {
+      // Preserve structured content — stripHtml destroys SVG/XML/JSON structure
       text = raw;
     } else {
       text = stripHtml(raw);

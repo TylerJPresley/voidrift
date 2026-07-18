@@ -104,6 +104,11 @@ function buildAgentLayer(ctx: SessionContext, opts?: CompileOptions): string {
     sections.push("# Agent Skills\n" + ctx.agent.boundSkills.join("\n\n"));
   }
 
+  // § Blocked tools — tools the agent manifest excludes
+  if (ctx.agent.blockedTools.length) {
+    sections.push(`# Blocked Tools\n\nThe following tools are **unavailable** in your current mode. Do not attempt to call them — they are intentionally disabled:\n\n` + ctx.agent.blockedTools.map(t => `- \`${t}\``).join("\n"));
+  }
+
   // § On-demand tool discovery index (shows model what tools exist beyond the bound set)
   if (ctx.agent.onDemandToolTOC) {
     sections.push(ctx.agent.onDemandToolTOC);

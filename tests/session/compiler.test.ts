@@ -4,7 +4,7 @@ import type { SessionContext } from "../../src/session/context.js";
 
 function makeCtx(overrides?: Partial<SessionContext>): SessionContext {
   return {
-    agent: { activePersona: "You are helpful.", activeTools: [], boundSkills: [], skillDiscoveryIndex: [], activeMemoryIndex: [] },
+    agent: { activePersona: "You are helpful.", activeTools: [], boundSkills: [], skillDiscoveryIndex: [], activeMemoryIndex: [], blockedTools: [] },
     orbit: { activePlan: null, activeSkills: [], workspaceCodeMap: "", activeMemory: [] },
     drift: { focusedFiles: [], gitStatus: null },
     void: { messages: [], diagnostics: null, turnContext: [] },
