@@ -126,9 +126,10 @@ function App({ restoredHistory }: { restoredHistory?: Array<{ role: string; cont
     }
   }, []);
 
-  let nextId = history.length + 1;
-  const id = () => String(nextId++);
+  let nextId = 0;
+  const id = () => `msg-${Date.now().toString(36)}-${(nextId++).toString(36)}`;
   const abortRef = React.useRef<AbortController | null>(null);
+  const busyRef = React.useRef(false);
 
   const showAutocomplete = !busy && !panel && ((input === "" && autocompleteOpen) || (input.startsWith("/") && !input.includes(" ")));
   const autocompleteCommands = showAutocomplete
@@ -252,6 +253,9 @@ function App({ restoredHistory }: { restoredHistory?: Array<{ role: string; cont
 
   const handleSubmit = useCallback(async (text: string) => {
     if (!text.trim() || busy) return;
+    // Synchronous guard — prevents double-submission before React re-renders
+    if (busyRef.current) return;
+    busyRef.current = true;
     inputHistoryRef.current.push(text);
     setHistIdx(-1);
 
@@ -273,6 +277,7 @@ function App({ restoredHistory }: { restoredHistory?: Array<{ role: string; cont
         core.session.setCmdOutput(() => {});
         core.session.setOpenPanel(() => {});
         setBusy(false);
+        busyRef.current = false;
         setThinking(null);
         if (cmd === "clear") { process.stdout.write("\x1b[2J\x1b[H"); setHistory([]); setClearKey(k => k + 1); return; }
       } else {
@@ -387,6 +392,7 @@ function App({ restoredHistory }: { restoredHistory?: Array<{ role: string; cont
     }
 
     setStreaming(null); setThinking(null); setBusy(false);
+    busyRef.current = false;
     setPendingTools(null); setPendingTurn([]);
   }, [busy, clipboardImage]);
 
