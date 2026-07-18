@@ -109,6 +109,11 @@ export async function streamModel(
       const message = err instanceof Error ? err.message : String(err);
       onChunk({ type: "error", message, retryable: isRetryable(message) });
       return { text, toolCalls: extractToolCalls(accumulated), usage, timing: { requestStart, firstTokenAt, endAt: Date.now() } };
+    } finally {
+      // Explicitly close the async iterator to tear down the HTTP connection
+      if (signal?.aborted && typeof (stream as any).return === "function") {
+        try { await (stream as any).return(); } catch {}
+      }
     }
   } catch (err: unknown) {
     // Pre-stream error (failed to initiate)
