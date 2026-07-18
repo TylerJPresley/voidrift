@@ -533,6 +533,8 @@ The `apiKeyEnv` field in model config tells VoidRift which env var to read.
 |-------|---------|-------------|
 | `networkModelRetries` | 3 | Retries on model API failures |
 | `networkModelTimeoutMs` | 120000 | Model API call timeout in ms |
+| `networkModelFinalTimeoutMs` | 60000 | Timeout for final text response after tool execution completes |
+| `networkModelRetryTimeoutMs` | 30000 | Timeout for nudge/retry when model returns empty or times out |
 | `networkCommandTimeoutMs` | 30000 | Default shell command timeout in ms |
 | `networkFetchTimeoutMs` | 10000 | Web fetch timeout in ms |
 | `networkOauthCallbackPort` | 9876 | Localhost port for OAuth callback server |
