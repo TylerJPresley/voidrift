@@ -112,7 +112,9 @@ export class SessionBrain {
     const messages = this.repo.readJson(sessionId, "work.messages.json") || [];
     const plan = this.repo.readText(sessionId, "workspace.plan.md") || null;
     const diag = this.repo.readText(sessionId, "work.diagnostics.md") || null;
-    context.setMessages(messages);
+    // Only user + assistant messages go to the model prompt (tool messages are invalid without their paired tool_calls)
+    const promptMessages = messages.filter((m: any) => m.role === "user" || m.role === "assistant");
+    context.setMessages(promptMessages);
     if (context.setFullHistory) context.setFullHistory(messages);
     context.setPlan(plan);
     context.setDiagnostics(diag);
