@@ -324,9 +324,9 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
     if (input.signal?.aborted) break;
 
     if (response.toolCalls.length === 0) {
-      // If model was actively using tools (round > 0) but stopped without completing,
-      // give it one more chance by adding its text and asking it to continue
-      if (round > 1 && response.text.trim().length < 200) {
+      // Only nudge if the model was cut off by length limit, not on natural completion
+      const wasInterrupted = response.responseMetadata?.finish_reason === "length";
+      if (round > 1 && wasInterrupted && response.text.trim().length < 200) {
         // Don't nudge if model is repeating itself (stuck)
         if (response.text.trim() === lastContinuationText) break;
         lastContinuationText = response.text.trim();
@@ -427,6 +427,16 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
           bus?.publish("AFTER_TOOL_EXECUTE", { toolName: tc.name, arguments: args, status: "error", output: errMsg });
           input.onChunk({ type: "tool_call", id: tc.id, name: tc.name, args: tc.args, status: "error" });
           currentMessages.push(new ToolMessage({ content: errMsg, tool_call_id: tc.id }));
+
+          // Record error in loop detector before continuing
+          loopState.consecutiveErrors++;
+          loopState.toolFailures.set(tc.name, (loopState.toolFailures.get(tc.name) || 0) + 1);
+          if (loopState.consecutiveErrors >= loopState.maxConsecutiveErrors) {
+            input.onChunk({ type: "tool_call", id: tc.id, name: tc.name, args: tc.args, status: "error" });
+            currentMessages.push(new ToolMessage({ content: errMsg, tool_call_id: tc.id }));
+            currentMessages.push(new HumanMessage("⚠️ LOOP DETECTED: 3 consecutive tool failures. STOP calling tools. Restate what you're trying to accomplish and try a fundamentally different approach. Do NOT retry the same operation."));
+            break;
+          }
           continue;
         }
       }
@@ -442,6 +452,16 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
         bus?.publish("AFTER_TOOL_EXECUTE", { toolName: tc.name, arguments: args, status: "error", output: blockMsg });
         input.onChunk({ type: "tool_call", id: tc.id, name: tc.name, args: tc.args, status: "error", result: blockMsg });
         currentMessages.push(new ToolMessage({ content: blockMsg, tool_call_id: tc.id }));
+
+        // Record error in loop detector before continuing
+        loopState.consecutiveErrors++;
+        loopState.toolFailures.set(tc.name, (loopState.toolFailures.get(tc.name) || 0) + 1);
+        if (loopState.consecutiveErrors >= loopState.maxConsecutiveErrors) {
+          input.onChunk({ type: "tool_call", id: tc.id, name: tc.name, args: tc.args, status: "error" });
+          currentMessages.push(new ToolMessage({ content: blockMsg, tool_call_id: tc.id }));
+          currentMessages.push(new HumanMessage("⚠️ LOOP DETECTED: 3 consecutive tool failures. STOP calling tools. Restate what you're trying to accomplish and try a fundamentally different approach. Do NOT retry the same operation."));
+          break;
+        }
         continue;
       }
 
@@ -607,7 +627,8 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
       }
 
       // Loop detection — track failures and break on repeated errors
-      if (result.startsWith("Error:")) {
+      const isFailure = result.startsWith("Error:") || result.startsWith("⚠️") || result.includes("denied") || result.includes("timed out");
+      if (isFailure) {
         loopState.consecutiveErrors++;
         loopState.toolFailures.set(tc.name, (loopState.toolFailures.get(tc.name) || 0) + 1);
       } else {
