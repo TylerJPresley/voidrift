@@ -40,6 +40,14 @@ CoreAPI is the SDK. Every client — TUI, VS Code extension, headless mode, Elec
 
 ## Versioning & Release
 
+Semver: `MAJOR.MINOR.PATCH`
+
+- **PATCH** (0.2.3 → 0.2.4): bug fixes, small improvements, no breaking changes
+- **MINOR** (0.2.4 → 0.3.0): new features, new commands, new config fields
+- **MAJOR** (0.3.0 → 1.0.0): breaking changes to CoreAPI, config format, or CLI interface
+
+**Before releasing, always ask the user:** "Is this a patch, minor, or major release?" Then increment the correct number.
+
 To publish a new version to npm:
 
 1. Update `"version"` in `package.json` (e.g. `"0.2.4"`)
