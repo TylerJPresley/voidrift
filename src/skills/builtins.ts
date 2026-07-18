@@ -75,6 +75,16 @@ export function registerBuiltinSkills(skills: SkillManager): void {
     sourcePlugin: "builtin",
     content: SKILL_MODEL_ESCALATION,
   });
+
+  skills.register({
+    name: "routines",
+    description: "How to create and manage repeatable routines",
+    triggers: { keywords: ["routine", "routines", "repeatable", "recipe", "runbook"] },
+    agents: [],
+    active: true,
+    sourcePlugin: "builtin",
+    content: SKILL_ROUTINES,
+  });
 }
 
 const SKILL_PLANNING = `# Planning
@@ -456,3 +466,50 @@ Call \`deescalate\` when:
 - Use escalation sparingly — it's a tool, not a default
 - After deescalating, you're back on flash with your previous context`;
 
+
+const SKILL_ROUTINES = `# Routines
+
+Routines are repeatable instructions that persist permanently. They never get consumed or marked complete — they're standing recipes you execute on demand.
+
+## When to Create a Routine
+- The user asks you to create a routine, recipe, or runbook
+- A task pattern is repeating and the user wants to save it
+- The user says "save this as a routine" or "make this repeatable"
+
+Do NOT create routines for: one-off tasks, plans (use add_plan), or model-internal batch work (use register_task).
+
+## How to Create
+
+Write a markdown file to \`.voidrift/routines/<name>.md\` with this structure:
+
+\`\`\`markdown
+---
+description: Short description of what this routine does
+---
+
+## Steps
+- [ ] Step 1
+- [ ] Step 2
+- [ ] Step 3
+
+## Done When
+Clear verification criteria
+\`\`\`
+
+Use write_file to create the file. The name should be lowercase with hyphens (e.g. \`deploy-staging.md\`).
+
+## Key Rules
+- Routines live in \`.voidrift/routines/\` — always write there
+- The frontmatter MUST have \`description:\`
+- Steps should be concrete and verifiable
+- "Done When" tells the executor how to verify success
+- The user manages routines via \`/routines\` panel or \`/run routine <name>\`
+
+## Execution
+When a routine is executed (via \`/run routine <name>\`), the harness reads the file and passes the body to an autonomous execution loop. The steps are followed in order and verified at the end.
+
+## What NOT to Do
+- Don't use npm/npx/bun commands to "create" routines — just write the file
+- Don't create shell scripts — routines are markdown instructions for the AI
+- Don't put routines in \`.voidrift/plan/\` — that's for workflow plans
+- Don't put routines in \`.voidrift/tasks/\` — that's for model batch templates`;
