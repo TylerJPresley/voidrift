@@ -215,7 +215,7 @@ export class CoreAPI {
         return { output };
       },
       listCommands: () => this.registry.listSlashCommandHooks().map(h => ({ name: h.name, description: h.description, source: h.source })),
-      shutdown: async () => { this.engine.scheduler?.killAll(); this.bus.publish("SESSION_END", { sessionDurationMs: Date.now(), exitCode: 0 }); await this.engine.container.shutdown(); },
+      shutdown: async () => { this.abortController?.abort(); this.engine.scheduler?.killAll(); await this.engine.mcp.shutdownAll(); this.bus.publish("SESSION_END", { sessionDurationMs: Date.now(), exitCode: 0 }); await this.engine.container.shutdown(); },
       messages: () => this.engine.context.getMessages(),
       setCmdOutput: (fn: (text: string) => void) => { this.engine.setCmdOutput(fn); },
       setOpenPanel: (fn: (panel: string) => void) => { this.engine.setOpenPanel(fn); },
