@@ -92,7 +92,7 @@ export class SessionBrain {
     return {
       turns,
       context: {
-        agent: { activePersona: persona, activeTools: tools, boundSkills: [], skillDiscoveryIndex: [], activeMemoryIndex: [] },
+        agent: { activePersona: persona, activeTools: tools, blockedTools: [], boundSkills: [], skillDiscoveryIndex: [], activeMemoryIndex: [] },
         orbit: { activePlan: plan, workspaceCodeMap: "", activeMemory: [], activeSkills: [] },
         drift: { focusedFiles: focused, gitStatus: null },
         void: { messages, fullHistory: messages, diagnostics: diagnostics || null, turnContext: [] },

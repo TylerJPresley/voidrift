@@ -6,7 +6,7 @@ import { TOOL_SCHEMAS } from "../tools/definitions.js";
 export interface AgentPartition {
   activePersona: string;
   activeTools: string[];
-  blockedTools: string[];         // Tools the agent manifest excludes (for prompt injection)
+  blockedTools?: string[];        // Tools the agent manifest excludes (for prompt injection)
   boundSkills: string[];          // Agent-manifest-declared skill bodies (static)
   skillDiscoveryIndex: string[];  // Lightweight name+trigger summaries of all available skills (static)
   activeMemoryIndex: MemoryMeta[];
@@ -85,7 +85,7 @@ export class ContextManager {
   constructor(persona: string, codeMap: string, bus?: import("../events/bus.js").EventBus) {
     this.bus = bus;
     this.ctx = {
-      agent: { activePersona: persona, activeTools: [], boundSkills: [], skillDiscoveryIndex: [], activeMemoryIndex: [] },
+      agent: { activePersona: persona, activeTools: [], blockedTools: [], boundSkills: [], skillDiscoveryIndex: [], activeMemoryIndex: [] },
       orbit: { workspaceCodeMap: codeMap, activePlan: null, activeMemory: [], activeSkills: [] },
       drift: { focusedFiles: [], gitStatus: null },
       void: { messages: [], fullHistory: [], diagnostics: null, turnContext: [] },

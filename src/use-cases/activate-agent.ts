@@ -11,7 +11,7 @@
  * Pure orchestration — no direct filesystem access.
  */
 import { ALL_TOOLS } from "../agents/registry.js";
-import type { AgentManifest } from "../agents/registry.js";
+import type { AgentManifest, AgentRegistry } from "../agents/registry.js";
 import type { PromptRegistry } from "../prompts/registry.js";
 import type { ContextManager } from "../session/context.js";
 import type { SkillManager } from "../skills/manager.js";

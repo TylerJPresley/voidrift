@@ -105,7 +105,7 @@ function buildAgentLayer(ctx: SessionContext, opts?: CompileOptions): string {
   }
 
   // § Blocked tools — tools the agent manifest excludes
-  if (ctx.agent.blockedTools.length) {
+  if (ctx.agent.blockedTools?.length) {
     sections.push(`# Blocked Tools\n\nThe following tools are **unavailable** in your current mode. Do not attempt to call them — they are intentionally disabled:\n\n` + ctx.agent.blockedTools.map(t => `- \`${t}\``).join("\n"));
   }
 
