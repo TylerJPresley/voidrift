@@ -217,8 +217,13 @@ describe("Slash Commands (all 27)", () => {
 
   it("/run with instruction starts execution", async () => {
     const { registry, output, panels } = makeDeps();
+    // Mock the ralphLoop import to return immediately
+    vi.doMock("../../src/orchestration/run.js", () => ({
+      ralphLoop: async () => ({ success: true, turns: 1, terminationReason: "complete" }),
+    }));
     await registry.getSlashCommand("run")!.execute(["build", "auth", "system"]);
     expect(output[0]).toContain("Running");
+    vi.doUnmock("../../src/orchestration/run.js");
   });
 
   it("/schedule requires args", async () => {
