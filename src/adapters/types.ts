@@ -54,4 +54,5 @@ export interface ModelResponse {
   toolCalls: ToolCallChunk[];
   usage: TokenUsage;
   timing?: StreamTiming;
+  responseMetadata?: Record<string, unknown>;
 }

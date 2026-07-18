@@ -129,7 +129,12 @@ export async function streamModel(
   }
 
   onChunk({ type: "done", usage });
-  return { text, toolCalls, usage, timing: { requestStart, firstTokenAt, endAt: Date.now() } };
+  
+  // Capture finish_reason from the final chunk
+  const finishReason = (accumulated as any)?.finish_reason;
+  const responseMetadata = finishReason ? { finish_reason: finishReason } : undefined;
+
+  return { text, toolCalls, usage, timing: { requestStart, firstTokenAt, endAt: Date.now() }, responseMetadata };
 }
 
 /**
