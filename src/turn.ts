@@ -107,13 +107,21 @@ export async function executeTurn(engine: EngineContext, userMessage: string, ca
   engine.logger.logModelPrompt(resolved.name, compiled);
 
   // ─── Invoke model ──────────────────────────────────────────────────────
+  let reasoningBuffer = "";
+  const wrappedOnChunk = (chunk: StreamChunk) => {
+    if (chunk.type === "reasoning") {
+      reasoningBuffer += chunk.text;
+    }
+    callbacks.onChunk(chunk);
+  };
+
   const result = await engine.guard.run(async () => {
     return runTurn({
       userMessage: cleanedMessage,
       client: resolved.client,
       systemPrompt,
       history,
-      onChunk: callbacks.onChunk,
+      onChunk: wrappedOnChunk,
       signal: callbacks.signal,
       context: engine.context,
       config: engine.container.config,
@@ -125,6 +133,11 @@ export async function executeTurn(engine: EngineContext, userMessage: string, ca
       scheduler: engine.scheduler,
     }, engine.container.bus);
   });
+
+  // Log accumulated reasoning/thinking if any was produced
+  if (reasoningBuffer) {
+    engine.logger.local("info", "model", "reasoning", { text: reasoningBuffer.slice(0, 2000) });
+  }
 
   // ─── Handle failures ───────────────────────────────────────────────────
   if (!result && contentBlocks.length) {
@@ -143,6 +156,7 @@ export async function executeTurn(engine: EngineContext, userMessage: string, ca
   if (result) {
     engine.context.addMessage({ role: "assistant", content: result.response.text, toolCalls: result.response.toolCalls.map(tc => tc.name) });
     engine.budget.set(result.response.usage.promptTokens || engine.context.getTokenCount());
+    engine.logger.logModelResponse(resolved.name, result.response.text, result.response.toolCalls, result.response.usage, result.response.timing);
   }
 
   // ─── TURN_AFTER: subscribers react to result ────────────────────────────
