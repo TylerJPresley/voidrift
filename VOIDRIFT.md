@@ -37,3 +37,26 @@ CoreAPI is the SDK. Every client — TUI, VS Code extension, headless mode, Elec
 - New API methods go on CoreAPI namespaces. Not standalone exports.
 - Tests use InMemory repositories. No filesystem in unit tests.
 - The TUI is a client. It imports nothing except React, Ink, and CoreAPI types.
+
+## Versioning & Release
+
+To publish a new version to npm:
+
+1. Update `"version"` in `package.json` (e.g. `"0.2.4"`)
+2. Update `"version"` in `package-lock.json` (line 3, the root version)
+3. Commit: `git add -A && git commit -m "v0.2.4"`
+4. Tag: `git tag v0.2.4 -m "v0.2.4"`
+5. Push: `git push origin main && git push origin v0.2.4`
+
+The tag push triggers the GitHub Actions publish workflow which:
+- Installs deps (bun)
+- Typechecks (tsc --noEmit)
+- Runs tests (bun run test)
+- Builds (npm run build)
+- Publishes to npm with provenance
+
+**Rules:**
+- The tag MUST match the version in package.json (e.g. tag `v0.2.4` → version `"0.2.4"`)
+- npm rejects duplicate versions — you cannot re-publish an existing version
+- If a publish fails, bump to the next patch version and re-tag
+- Never push a tag without explicit permission from the user
