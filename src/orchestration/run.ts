@@ -110,6 +110,8 @@ export async function ralphLoop(
   maxTurns = DEFAULT_MAX_RUN_TURNS,
 ): Promise<RunResult> {
   let turns = 0;
+  let turnsWithoutToolCalls = 0;
+  const MAX_TURNS_WITHOUT_TOOLS = 2;
   const state: RunState = {
     filesModified: [],
     filesCreated: [],
