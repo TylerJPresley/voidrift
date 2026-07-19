@@ -389,25 +389,45 @@ export function registerCommands(registry: CoreRegistry, deps: CommandDeps): voi
       return;
     }
 
-    // Ad-hoc instruction
+    // Ad-hoc instruction — generate a plan, then execute it
     const instruction = args.join(" ");
     deps.output(`Running: ${instruction}`);
     const runHandle = deps.scheduler!.registerRun(instruction);
-    ralphLoop(instruction, flash.client, deps.bus, (chunk) => {
-      if (chunk.type === "status") {
-        const task = deps.scheduler!.getTask(runHandle.id);
-        if (task) task.output = (task.output ? task.output + "\n" : "") + chunk.message;
+
+    // Phase 1: Generate plan from instruction using flash
+    const planPrompt = `Break this task into concrete steps. Output a numbered checklist. Be specific about files and commands.\n\nTask: ${instruction}`;
+    const appendOutput = (msg: string) => {
+      const task = deps.scheduler!.getTask(runHandle.id);
+      if (task) task.output = (task.output ? task.output + "\n" : "") + msg;
+    };
+
+    import("@langchain/core/messages").then(async ({ HumanMessage: HM, SystemMessage: SM }) => {
+      try {
+        appendOutput("Planning...");
+        const planResponse = await flash.client.invoke([
+          new SM("You are a planning model. Break the task into a numbered checklist of concrete steps. Be specific about file paths and commands. Keep it under 15 steps."),
+          new HM(instruction),
+        ], { max_tokens: 1000, temperature: 0 } as any);
+        const plan = typeof planResponse.content === "string" ? planResponse.content : "";
+        if (!plan.trim()) {
+          appendOutput("Failed to generate plan. Running raw instruction.");
+        }
+        const planInstruction = plan.trim()
+          ? `## Plan\n${plan}\n\n## Original Request\n${instruction}\n\nFollow the plan above. Execute each step in order. Verify at the end.`
+          : instruction;
+
+        appendOutput("Executing...");
+        const result = await ralphLoop(planInstruction, flash.client, deps.bus, (chunk) => {
+          if (chunk.type === "status") appendOutput(chunk.message);
+        }, runHandle.signal, deps.config.tasksMaxRunTurns, deps.workspaceRoot);
+        deps.config.modelSelected = previousModel;
+        deps.scheduler!.completeRun(runHandle.id, result.success);
+        appendOutput(`Done: ${result.success ? "success" : "failed"} (${result.turns} turns, ${result.terminationReason})`);
+      } catch (err: any) {
+        deps.config.modelSelected = previousModel;
+        deps.scheduler!.completeRun(runHandle.id, false);
+        appendOutput(`Error: ${err.message}`);
       }
-    }, runHandle.signal, deps.config.tasksMaxRunTurns, deps.workspaceRoot).then(result => {
-      deps.config.modelSelected = previousModel;
-      deps.scheduler!.completeRun(runHandle.id, result.success);
-      const task = deps.scheduler!.getTask(runHandle.id);
-      if (task) task.output = (task.output ? task.output + "\n" : "") + `Done: ${result.success ? "success" : "failed"} (${result.turns} turns, ${result.terminationReason})`;
-    }).catch(err => {
-      deps.config.modelSelected = previousModel;
-      deps.scheduler!.completeRun(runHandle.id, false);
-      const task = deps.scheduler!.getTask(runHandle.id);
-      if (task) task.output = (task.output ? task.output + "\n" : "") + `Error: ${err.message}`;
     });
   }});
 
