@@ -46,13 +46,13 @@ export function PlanPanel({ core, onClose }: { core: CoreAPI; onClose: () => voi
         { key: "x", label: "next", handler: (item) => { if (item) core.plan.updatePriority({ filename: item._filename, priority: "next" }); } },
         { key: "l", label: "later", handler: (item) => { if (item) core.plan.updatePriority({ filename: item._filename, priority: "later" }); } },
         { key: "e", label: "Edit", handler: (item) => { if (item) core.editor.open(`${planDir}/${item._filename}`); } },
+        { key: "r", label: "Run", handler: async (item, page, ctx) => { if (item) { ctx?.close(); core.events.emit("USER_INPUT", { text: `/run plan ${item._filename.replace(".md", "")}` }); } } },
       ],
     },
     actions: [
       { key: "n", label: "now", handler: (item) => { if (item) core.plan.updatePriority({ filename: item._filename, priority: "now" }); } },
       { key: "x", label: "next", handler: (item) => { if (item) core.plan.updatePriority({ filename: item._filename, priority: "next" }); } },
       { key: "l", label: "later", handler: (item) => { if (item) core.plan.updatePriority({ filename: item._filename, priority: "later" }); } },
-      { key: "r", label: "Run", handler: async (item) => { if (item) await core.session.command("run", ["plan", item._filename.replace(".md", "")]); } },
       { key: "delete", label: "Remove", handler: async (item, page, ctx) => { if (item && ctx) { const answer = await ctx.prompt(`Delete "${item._filename.replace(".md", "")}"? Type "y" to confirm`); if (answer === "y") core.plan.remove(item._filename); else ctx.setMessage("Cancelled."); } } },
     ],
     locations: [

@@ -7,6 +7,7 @@ import { join } from "path";
  * Used by the inline approval gate to show what will change before writing.
  */
 export function computeDiff(workspaceRoot: string, filePath: string, newContent: string): string[] {
+  if (!filePath) return [];
   const fullPath = join(workspaceRoot, filePath);
   if (!existsSync(fullPath)) {
     // New file — show all lines as additions

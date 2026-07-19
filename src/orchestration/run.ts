@@ -38,6 +38,7 @@ Rules:
 - Execute tools freely without waiting for user input.
 - If a command fails, read the error, fix the issue, and retry.
 - Do NOT stop to ask for clarification — make reasonable decisions and continue.
+- Do NOT create git branches — work directly on the current branch. No checkout, no branch creation.
 - When you believe you are done, verify your work: confirm files exist, tests pass, and requirements are met.
 - Only when you have verified completion with evidence, output exactly: <!-- GOAL_COMPLETE -->
 - Do NOT output <!-- GOAL_COMPLETE --> until you have real evidence of success.
@@ -108,6 +109,7 @@ export async function ralphLoop(
   onChunk: OnChunk,
   signal?: { interrupted: boolean },
   maxTurns = DEFAULT_MAX_RUN_TURNS,
+  workspaceRoot?: string,
 ): Promise<RunResult> {
   let turns = 0;
   let turnsWithoutToolCalls = 0;
@@ -119,6 +121,32 @@ export async function ralphLoop(
     errors: [],
     progress: [],
   };
+
+  // Create a scoped plan manager for this run — isolates from user plans
+  const { PlanManager } = await import("../session/plan.js");
+  const { FileSystemPlanRepository } = await import("../session/plan-repository.js");
+  const { mkdirSync, rmSync } = await import("fs");
+  const { join } = await import("path");
+  const runId = `run-${Date.now().toString(36)}`;
+  const runPlanDir = workspaceRoot ? join(workspaceRoot, ".voidrift", "cache", runId, "plan") : undefined;
+  let scopedPlanManager: any = undefined;
+  if (runPlanDir) {
+    mkdirSync(runPlanDir, { recursive: true });
+    scopedPlanManager = new PlanManager(new FileSystemPlanRepository(join(workspaceRoot!, ".voidrift", "cache", runId)));
+  }
+
+  // Ephemeral branch — run works on a temp branch, merges to original on success
+  const { execSync } = await import("child_process");
+  let originalBranch: string | null = null;
+  const runBranch = `voidrift-run-${runId}`;
+  if (workspaceRoot) {
+    try {
+      originalBranch = execSync("git rev-parse --abbrev-ref HEAD", { cwd: workspaceRoot, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim();
+      execSync(`git checkout -b ${runBranch}`, { cwd: workspaceRoot, stdio: "ignore" });
+    } catch {
+      originalBranch = null; // not a git repo or checkout failed — skip branching
+    }
+  }
 
   // Subscribe to tool events to track state
   const unsubs: Array<() => void> = [];
@@ -147,6 +175,7 @@ export async function ralphLoop(
       systemPrompt: RUN_SYSTEM_PROMPT,
       history: [], // Fresh context each turn — Ralph Loop
       onChunk,
+      planManager: scopedPlanManager,
     };
 
     onChunk({ type: "status", message: `Run turn ${turns + 1}...` });
@@ -159,6 +188,17 @@ export async function ralphLoop(
       // Check for completion
       if (text.includes(COMPLETION_TOKEN)) {
         unsubs.forEach(u => u());
+        if (runPlanDir) {
+          try { rmSync(join(workspaceRoot!, ".voidrift", "cache", runId), { recursive: true, force: true }); } catch {}
+        }
+        // Merge run branch back to original on success
+        if (originalBranch && workspaceRoot) {
+          try {
+            execSync(`git checkout ${originalBranch}`, { cwd: workspaceRoot, stdio: "ignore" });
+            execSync(`git merge ${runBranch} --no-edit`, { cwd: workspaceRoot, stdio: "ignore" });
+            execSync(`git branch -D ${runBranch}`, { cwd: workspaceRoot, stdio: "ignore" });
+          } catch {}
+        }
         return { success: true, turns, terminationReason: "complete" };
       }
       // Save a one-line progress note from the response
@@ -168,6 +208,19 @@ export async function ralphLoop(
   }
 
   unsubs.forEach(u => u());
+
+  // Clean up run-scoped artifacts
+  if (runPlanDir) {
+    try { rmSync(join(workspaceRoot!, ".voidrift", "cache", runId), { recursive: true, force: true }); } catch {}
+  }
+
+  // Abandon run branch on failure — restore original, delete temp branch
+  if (originalBranch && workspaceRoot) {
+    try {
+      execSync(`git checkout ${originalBranch}`, { cwd: workspaceRoot, stdio: "ignore" });
+      execSync(`git branch -D ${runBranch}`, { cwd: workspaceRoot, stdio: "ignore" });
+    } catch {}
+  }
 
   if (signal?.interrupted) {
     return { success: false, turns, terminationReason: "interrupted" };

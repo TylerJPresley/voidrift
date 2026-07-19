@@ -172,5 +172,8 @@ export async function executeTurn(engine: EngineContext, userMessage: string, ca
     });
   }
 
+  // ─── TURN_COMPLETE: fire-and-forget persistence ─────────────────────────
+  engine.container.bus.publish("TURN_COMPLETE", { turnId: `turn-${Date.now()}` });
+
   return result;
 }

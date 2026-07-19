@@ -138,6 +138,7 @@ registerToolExecutor({
   name: "write_file",
   async execute(args, ctx) {
     const path = args.path ?? "";
+    if (!path) return "Error: No file path provided.";
     const content = args.content ?? "";
     const { computeDiff } = await import("../safeguards/diff.js");
     const diff = computeDiff(ctx.workspaceRoot, path, content);

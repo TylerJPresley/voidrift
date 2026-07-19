@@ -51,7 +51,7 @@ export const langchainTools = [
     name: "write_file",
     description: "Create a new file or completely overwrite an existing one. Use this for NEW files. For modifying existing files, use edit_file instead — it's safer (surgical replacement vs full overwrite). You must provide the COMPLETE file content — never use placeholders like '// rest of code' or '...' — the file will contain exactly what you provide and nothing else. Parent directories are created automatically.",
     schema: z.object({
-      path: z.string().describe("Relative file path. Parent directories are auto-created."),
+      path: z.string().describe("Relative file path from workspace root (e.g. 'src/utils/auth.ts', 'docs/guide.md', 'config.yaml'). Parent directories are auto-created."),
       content: z.string().describe("The complete file content. Must be the full file — no placeholders or abbreviations."),
     }),
   }),

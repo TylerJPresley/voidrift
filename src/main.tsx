@@ -591,9 +591,9 @@ if (resumeIdx !== -1) {
   const sessionArg = process.argv[resumeIdx + 1];
   const sessions = core.session.list();
   if (sessionArg && !sessionArg.startsWith("--")) {
-    core.session.resume(sessionArg) && (restoredHistory = core.session.messages()) && true;
+    core.session.resume(sessionArg) && (restoredHistory = core.session.loadMessages(sessionArg)) && true;
   } else if (sessions.length > 0) {
-    core.session.resume(sessions[0].id) && (restoredHistory = core.session.messages()) && true;
+    core.session.resume(sessions[0].id) && (restoredHistory = core.session.loadMessages(sessions[0].id)) && true;
   }
 }
 

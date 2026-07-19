@@ -561,7 +561,7 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
           if (mode === "iterativeLoop") {
             // Ralph Loop — iterative execution until complete
             const { ralphLoop } = await import("./run.js");
-            const subResult = await ralphLoop(task, adapter.client, bus!, () => {}, { interrupted: false });
+            const subResult = await ralphLoop(task, adapter.client, bus!, () => {}, { interrupted: false }, undefined, workspaceRoot);
             return subResult.success ? "success" : "failed";
           }
 
@@ -775,7 +775,6 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
  */
 export async function runTurn(input: OrchestrationInput, bus: EventBus): Promise<OrchestrationResult> {
   const result = await directChat(input, bus);
-  bus.publish("TURN_COMPLETE", { turnId: `turn-${Date.now()}` });
   return result;
 }
 

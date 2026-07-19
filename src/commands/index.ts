@@ -306,6 +306,17 @@ export function registerCommands(registry: CoreRegistry, deps: CommandDeps): voi
   registry.registerSlashCommand({ name: "run", description: "Autonomous execution", execute: async (args) => {
     if (!args.length) { deps.output("Usage: /run <instruction> | /run routine <name> | /run plan <name>"); return; }
     const subcommand = args[0];
+
+    // Guard: prevent duplicate runs of the same plan/routine/instruction
+    if (deps.scheduler) {
+      const running = deps.scheduler.all.filter(t => t.status === "running");
+      const dedupKey = args.join(" ");
+      if (running.some(t => t.instruction.includes(dedupKey))) {
+        deps.output(`Already running: ${dedupKey}`);
+        return;
+      }
+    }
+
     const previousModel = deps.config.modelSelected;
     const flash = createTierAdapter("flash", deps.config);
     const { ralphLoop } = await import("../orchestration/run.js");
@@ -328,7 +339,7 @@ export function registerCommands(registry: CoreRegistry, deps: CommandDeps): voi
       try {
         const result = await ralphLoop(routineInstruction, flash.client, deps.bus, (chunk) => {
           if (chunk.type === "status") deps.output(`[Routine] ${chunk.message}`);
-        }, runHandle.signal, deps.config.tasksMaxRunTurns);
+        }, runHandle.signal, deps.config.tasksMaxRunTurns, deps.workspaceRoot);
         deps.config.modelSelected = previousModel;
         deps.scheduler!.completeRun(runHandle.id, result.success);
         deps.output(`Routine finished! Success: ${result.success}. Turns: ${result.turns}. Reason: ${result.terminationReason}`);
@@ -358,7 +369,7 @@ export function registerCommands(registry: CoreRegistry, deps: CommandDeps): voi
       try {
         const result = await ralphLoop(planInstruction, flash.client, deps.bus, (chunk) => {
           if (chunk.type === "status") deps.output(`[Plan] ${chunk.message}`);
-        }, runHandle.signal, deps.config.tasksMaxRunTurns);
+        }, runHandle.signal, deps.config.tasksMaxRunTurns, deps.workspaceRoot);
         deps.config.modelSelected = previousModel;
         deps.scheduler!.completeRun(runHandle.id, result.success);
         deps.output(`Plan finished! Success: ${result.success}. Turns: ${result.turns}. Reason: ${result.terminationReason}`);
@@ -377,7 +388,7 @@ export function registerCommands(registry: CoreRegistry, deps: CommandDeps): voi
     try {
       const result = await ralphLoop(instruction, flash.client, deps.bus, (chunk) => {
         if (chunk.type === "status") deps.output(`[Run] ${chunk.message}`);
-      }, runHandle.signal, deps.config.tasksMaxRunTurns);
+      }, runHandle.signal, deps.config.tasksMaxRunTurns, deps.workspaceRoot);
       deps.config.modelSelected = previousModel;
       deps.scheduler!.completeRun(runHandle.id, result.success);
       deps.output(`Finished! Success: ${result.success}. Turns: ${result.turns}. Reason: ${result.terminationReason}`);
