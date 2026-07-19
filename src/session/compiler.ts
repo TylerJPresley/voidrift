@@ -19,6 +19,7 @@ export interface CompileOptions {
   contextLimit?: number;
   maxOutputTokens?: number;
   prompts?: PromptRegistry;
+  tier?: string;
 }
 
 /**
@@ -91,6 +92,12 @@ function buildAgentLayer(ctx: SessionContext, opts?: CompileOptions): string {
 
   // § Rules — behavioral constraints
   if (r) sections.push(r.resolve("core.rules")?.body ?? "");
+
+  // § Model routing — only in auto mode (tier is set)
+  if (r && opts?.tier) {
+    const routing = r.resolve("core.routing-auto")?.body;
+    if (routing) sections.push(routing.replaceAll("{{tier}}", opts.tier));
+  }
 
   // § Environment — working dir, git, platform, model
   if (opts) sections.push(sectionEnvironment(opts));
