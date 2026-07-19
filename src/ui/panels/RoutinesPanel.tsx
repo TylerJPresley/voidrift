@@ -39,8 +39,8 @@ export function RoutinesPanel({ core, onClose }: { core: CoreAPI; onClose: () =>
       actions: [
         { key: "r", label: "Run", handler: async (item, page, ctx) => {
           if (item) {
-            await core.session.command("run", ["routine", item.name]);
             ctx?.close();
+            core.events.emit("USER_INPUT", { text: `/run routine ${item.name}` });
           }
         }},
         { key: "e", label: "Edit", handler: (item) => {
@@ -58,8 +58,8 @@ export function RoutinesPanel({ core, onClose }: { core: CoreAPI; onClose: () =>
     actions: [
       { key: "r", label: "Run", handler: async (item, page, ctx) => {
         if (item) {
-          await core.session.command("run", ["routine", item.name]);
           ctx?.close();
+          core.events.emit("USER_INPUT", { text: `/run routine ${item.name}` });
         }
       }},
       { key: "c", label: "Create", handler: async (item, page, ctx) => {
