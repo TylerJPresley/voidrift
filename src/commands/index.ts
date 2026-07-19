@@ -336,18 +336,22 @@ export function registerCommands(registry: CoreRegistry, deps: CommandDeps): voi
       deps.output(`Routine started: ${routineName}`);
       const routineInstruction = `## Routine: ${routineName}\n${description}\n\n${routineBody}\n\nExecute this routine. Work through each step in order. Verify at the end.`;
       const runHandle = deps.scheduler!.registerRun(routineInstruction);
-      try {
-        const result = await ralphLoop(routineInstruction, flash.client, deps.bus, (chunk) => {
-          if (chunk.type === "status") deps.output(`[Routine] ${chunk.message}`);
-        }, runHandle.signal, deps.config.tasksMaxRunTurns, deps.workspaceRoot);
+      ralphLoop(routineInstruction, flash.client, deps.bus, (chunk) => {
+        if (chunk.type === "status") {
+          const task = deps.scheduler!.getTask(runHandle.id);
+          if (task) task.output = (task.output ? task.output + "\n" : "") + chunk.message;
+        }
+      }, runHandle.signal, deps.config.tasksMaxRunTurns, deps.workspaceRoot).then(result => {
         deps.config.modelSelected = previousModel;
         deps.scheduler!.completeRun(runHandle.id, result.success);
-        deps.output(`Routine finished! Success: ${result.success}. Turns: ${result.turns}. Reason: ${result.terminationReason}`);
-      } catch (err: any) {
+        const task = deps.scheduler!.getTask(runHandle.id);
+        if (task) task.output = (task.output ? task.output + "\n" : "") + `Done: ${result.success ? "success" : "failed"} (${result.turns} turns, ${result.terminationReason})`;
+      }).catch(err => {
         deps.config.modelSelected = previousModel;
         deps.scheduler!.completeRun(runHandle.id, false);
-        deps.output(`Routine failed: ${err.message}`);
-      }
+        const task = deps.scheduler!.getTask(runHandle.id);
+        if (task) task.output = (task.output ? task.output + "\n" : "") + `Error: ${err.message}`;
+      });
       return;
     }
 
@@ -366,18 +370,22 @@ export function registerCommands(registry: CoreRegistry, deps: CommandDeps): voi
       deps.output(`Running plan: ${planName}`);
       const planInstruction = `## Plan: ${planName}\n${description}\n\n${planBody}\n\nExecute this plan. Work through each step in order. Verify at the end.`;
       const runHandle = deps.scheduler!.registerRun(planInstruction);
-      try {
-        const result = await ralphLoop(planInstruction, flash.client, deps.bus, (chunk) => {
-          if (chunk.type === "status") deps.output(`[Plan] ${chunk.message}`);
-        }, runHandle.signal, deps.config.tasksMaxRunTurns, deps.workspaceRoot);
+      ralphLoop(planInstruction, flash.client, deps.bus, (chunk) => {
+        if (chunk.type === "status") {
+          const task = deps.scheduler!.getTask(runHandle.id);
+          if (task) task.output = (task.output ? task.output + "\n" : "") + chunk.message;
+        }
+      }, runHandle.signal, deps.config.tasksMaxRunTurns, deps.workspaceRoot).then(result => {
         deps.config.modelSelected = previousModel;
         deps.scheduler!.completeRun(runHandle.id, result.success);
-        deps.output(`Plan finished! Success: ${result.success}. Turns: ${result.turns}. Reason: ${result.terminationReason}`);
-      } catch (err: any) {
+        const task = deps.scheduler!.getTask(runHandle.id);
+        if (task) task.output = (task.output ? task.output + "\n" : "") + `Done: ${result.success ? "success" : "failed"} (${result.turns} turns, ${result.terminationReason})`;
+      }).catch(err => {
         deps.config.modelSelected = previousModel;
         deps.scheduler!.completeRun(runHandle.id, false);
-        deps.output(`Plan failed: ${err.message}`);
-      }
+        const task = deps.scheduler!.getTask(runHandle.id);
+        if (task) task.output = (task.output ? task.output + "\n" : "") + `Error: ${err.message}`;
+      });
       return;
     }
 
@@ -385,18 +393,22 @@ export function registerCommands(registry: CoreRegistry, deps: CommandDeps): voi
     const instruction = args.join(" ");
     deps.output(`Running: ${instruction}`);
     const runHandle = deps.scheduler!.registerRun(instruction);
-    try {
-      const result = await ralphLoop(instruction, flash.client, deps.bus, (chunk) => {
-        if (chunk.type === "status") deps.output(`[Run] ${chunk.message}`);
-      }, runHandle.signal, deps.config.tasksMaxRunTurns, deps.workspaceRoot);
+    ralphLoop(instruction, flash.client, deps.bus, (chunk) => {
+      if (chunk.type === "status") {
+        const task = deps.scheduler!.getTask(runHandle.id);
+        if (task) task.output = (task.output ? task.output + "\n" : "") + chunk.message;
+      }
+    }, runHandle.signal, deps.config.tasksMaxRunTurns, deps.workspaceRoot).then(result => {
       deps.config.modelSelected = previousModel;
       deps.scheduler!.completeRun(runHandle.id, result.success);
-      deps.output(`Finished! Success: ${result.success}. Turns: ${result.turns}. Reason: ${result.terminationReason}`);
-    } catch (err: any) {
+      const task = deps.scheduler!.getTask(runHandle.id);
+      if (task) task.output = (task.output ? task.output + "\n" : "") + `Done: ${result.success ? "success" : "failed"} (${result.turns} turns, ${result.terminationReason})`;
+    }).catch(err => {
       deps.config.modelSelected = previousModel;
       deps.scheduler!.completeRun(runHandle.id, false);
-      deps.output(`Failed: ${err.message}`);
-    }
+      const task = deps.scheduler!.getTask(runHandle.id);
+      if (task) task.output = (task.output ? task.output + "\n" : "") + `Error: ${err.message}`;
+    });
   }});
 
   registry.registerSlashCommand({ name: "schedule", description: "Background timer & cron", execute: async (args) => {
