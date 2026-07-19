@@ -52,6 +52,10 @@ export class AuditLogger {
     }));
 
 
+    unsubs.push(bus.subscribe("TOOL_BOUND", (e) => {
+      this.local("info", "preflight", `tools:${(e.payload as any).source}`, { tools: (e.payload as any).tools, query: (e.payload as any).query, durationMs: (e.payload as any).durationMs });
+    }));
+
     unsubs.push(bus.subscribe("BEFORE_TOOL_EXECUTE", (e) => {
       this.local("info", "tool", `call:${e.payload.toolName}`, { args: e.payload.arguments });
     }));

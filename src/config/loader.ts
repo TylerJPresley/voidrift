@@ -10,6 +10,7 @@ const ModelSchema = z.object({
   apiKeyEnv: z.string().optional(),
   contextLimit: z.number().positive(),
   maxOutputTokens: z.number().positive().optional(),
+  preflight: z.boolean().optional().describe("Run preflight tool classifier before each turn. Default true. Set false for capable models to skip the utility call."),
   additionalHeaders: z.record(z.string()).optional(),
   // All other fields (temperature, maxOutputTokens, topP, topK, max_completion_tokens, etc.)
   // are preserved via .passthrough() and forwarded directly to the model client.
@@ -68,6 +69,7 @@ export const ConfigSchema = z.object({
   modelEscalationFailureCount: z.number().min(1).default(2).describe("Consecutive failures that trigger auto-escalation."),
   // ─── turns* — per-turn behavior ───────────────────────────────────────────
   turnsMaxToolRounds: z.number().min(0).default(10).describe("Max tool execution rounds per turn. 0 = unlimited."),
+  turnsPreflight: z.boolean().optional().describe("Override preflight per workspace. true = always run, false = never run, unset = use model config."),
   turnsTrimThresholdLines: z.number().min(10).default(80).describe("Tool output lines above which output is trimmed."),
   turnsTrimHead: z.number().min(5).default(30).describe("Lines kept from start of trimmed output."),
   turnsTrimTail: z.number().min(5).default(20).describe("Lines kept from end of trimmed output."),

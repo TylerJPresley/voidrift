@@ -49,7 +49,46 @@ VoidRift uses a three-tier model system: **Flash** (your main model — all user
 
 **Flash is the default.** When set to "auto", every user turn goes to the Flash model. It handles chat, tool execution, and subagent work.
 
+**Flash is the default.** When set to "auto", every user turn goes to the Flash model. It handles chat, tool execution, and subagent work.
+
 **Utility is the internal engine.** It runs preflight classifiers (tool selection, tier routing, file focus), file summarization, indexing, and harness-internal processing. It never talks to the user directly. The user never selects utility — it's always running in the background.
+
+**Preflight runs every turn.** Before each user message reaches the main model, utility makes a fast classifier call to select which tools to bind. This adds latency — choose the fastest available model for utility. If your utility tier points to a slow or unresponsive endpoint, every turn will be delayed.
+
+**Utility must be fast, not smart.** The utility model should be:
+- The lowest-latency endpoint you have (local > cloud)
+- Configured with `temperature: 0` (deterministic classification)
+- A model that does NOT use thinking/reasoning tokens (no chain-of-thought overhead)
+- Small and fast — a 7B model on a local GPU is ideal
+
+Do not point utility at a cloud reasoning model. A utility call that takes 10+ seconds blocks every turn before your conversation model even sees the message.
+
+**Disable preflight per model.** If your main model is capable enough to handle all tool schemas (most cloud models, 70B+ local models), set `"preflight": false` in the model config. This skips the utility classifier call entirely and binds all tools — saving one round-trip per turn:
+
+```json
+{
+  "models": {
+    "claude-sonnet": {
+      "protocol": "anthropic",
+      "model": "claude-sonnet-4-20250514",
+      "baseUrl": "https://api.anthropic.com",
+      "apiKeyEnv": "ANTHROPIC_API_KEY",
+      "contextLimit": 200000,
+      "preflight": false
+    }
+  }
+}
+```
+
+**When to keep preflight enabled:**
+- Small local models (7B-13B) that get confused by too many tool schemas
+- Mid-tier models (14B-32B) where reducing the prompt by ~2-4k tokens improves accuracy
+- Any model where you observe hallucinated tool calls or incorrect tool selection
+
+**When to disable preflight:**
+- Cloud models (Claude, GPT, Gemini) — they handle large tool schemas natively
+- Large local models (70B+) — they have the capacity
+- Any setup where your utility tier is slower than your flash tier (defeats the purpose)
 
 **Dense is escalation.** When the Flash model is stuck, overwhelmed, or facing a task that needs architectural reasoning, it can request escalation to the Dense model. The model calls `escalate` (which requires your approval) and a more capable model takes over. When the complex part is done, it calls `deescalate` to return to Flash.
 
@@ -518,6 +557,7 @@ The `apiKeyEnv` field in model config tells VoidRift which env var to read.
 | Field | Default | Description |
 |-------|---------|-------------|
 | `turnsMaxToolRounds` | 10 | Max tool execution rounds per turn. 0 = unlimited |
+| `turnsPreflight` | unset | Override preflight classifier. `true` = always run, `false` = never run, unset = use per-model `preflight` setting |
 | `tasksMaxRunTurns` | 50 | Max turns in a `/run` autonomous loop |
 | `turnsTrimThresholdLines` | 80 | Tool output lines above which output is trimmed to head/tail |
 | `turnsTrimHead` | 30 | Lines kept from start of trimmed output |

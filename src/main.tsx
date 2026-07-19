@@ -362,6 +362,13 @@ function App({ restoredHistory }: { restoredHistory?: Array<{ role: string; cont
     });
 
     if (result) {
+      // Skip if the turn was cancelled while we were awaiting
+      if (abortController.signal.aborted) {
+        setStreaming(null); setThinking(null); setBusy(false);
+        busyRef.current = false;
+        setPendingTools(null); setPendingTurn([]);
+        return;
+      }
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
       const tokPerSec = tokenCount > 0 ? (tokenCount / +elapsed).toFixed(1) : "0";
       const cacheInfo = result.response.usage.cacheReadTokens ? ` » ${result.response.usage.cacheReadTokens}` : "";

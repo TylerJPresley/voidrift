@@ -83,8 +83,6 @@ const TOOL_EQUIVALENT_PREFIXES: Array<{ prefix: string; message: string }> = [
   { prefix: "wget", message: "Use web_fetch tool instead of curl/wget" },
   { prefix: "nc", message: "Use web_fetch tool instead of nc" },
   { prefix: "ncat", message: "Use web_fetch tool instead of ncat" },
-  { prefix: "ssh", message: "Use web_fetch tool instead of ssh" },
-  { prefix: "scp", message: "Use web_fetch tool instead of scp" },
 ];
 
 export function getEquivalentMessage(command: string): string | undefined {
@@ -159,8 +157,13 @@ function ruleMatchesTool(rule: PolicyRule, tool: string, args: Record<string, un
   if (rule.pattern) {
     const matchValue = getMatchValue(tool, args);
     if (!matchValue) return false;
-    // Commands use simple wildcard (cat * matches cat /any/path), file tools use path-aware glob
-    if (tool === "execute_command") return matchCommandPattern(matchValue, rule.pattern);
+    // Commands: check full string first, then each segment of compound commands
+    if (tool === "execute_command") {
+      if (matchCommandPattern(matchValue, rule.pattern)) return true;
+      // Split on &&, ||, ; and check each segment
+      const segments = matchValue.split(/\s*(?:&&|\|\||;)\s*/).map(s => s.trim());
+      return segments.some(seg => matchCommandPattern(seg, rule.pattern!));
+    }
     return matchGlob(matchValue, rule.pattern);
   }
 
@@ -254,16 +257,16 @@ export class PolicyEngine {
       return { decision: "deny" };
     }
 
-    // Workspace boundary enforcement — anything outside workspace requires approval
-    if (this.workspaceRoot && this.isOutsideWorkspace(tool, args)) {
-      return { decision: "ask", inferredPattern: inferPattern(tool, args) };
-    }
-
     // Prompt mode: check rules, shell classification, then ask
     // Check explicit user/session rules first — they override default classification
     const match = this.findHighestPriorityMatch(tool, args);
     if (match) {
       return { decision: match.decision, rule: match, inferredPattern: inferPattern(tool, args) };
+    }
+
+    // Workspace boundary enforcement — anything outside workspace requires approval
+    if (this.workspaceRoot && this.isOutsideWorkspace(tool, args)) {
+      return { decision: "ask", inferredPattern: inferPattern(tool, args) };
     }
 
     // Shell classification for execute_command
@@ -342,6 +345,15 @@ export class PolicyEngine {
 
   /** Heuristic: does a shell command reference absolute paths outside workspace? */
   private commandTargetsOutsideWorkspace(command: string, root: string): boolean {
+    // Network commands operate on remote systems — local workspace boundary doesn't apply
+    const trimmed = command.trim();
+    const networkPrefixes = ["ssh ", "scp ", "rsync ", "sftp "];
+    if (networkPrefixes.some(p => trimmed.startsWith(p))) return false;
+    // Also skip if it's a compound command where the primary action is network
+    const segments = trimmed.split(/\s*(?:&&|\|\||;)\s*/);
+    const lastSegment = segments[segments.length - 1]?.trim() || "";
+    if (networkPrefixes.some(p => lastSegment.startsWith(p))) return false;
+
     // Extract absolute paths and ~ paths from the command
     const pathMatches = command.match(/(?:^|\s)(\/[^\s;|&>]+|~[^\s;|&>]*)/g);
     if (!pathMatches) return false;

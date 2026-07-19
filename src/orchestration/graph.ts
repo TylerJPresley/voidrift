@@ -146,9 +146,16 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
 
     // LLM-guided selection: flash model picks specific tools from the TOC
     const { createTierAdapter } = await import("../adapters/factory.js");
-    let selected = input.config
+    const preflightStart = Date.now();
+    const activeModelKey = input.tier ? getTierModel(input.config!, input.tier as any) : (input.config?.modelSelected !== "auto" ? input.config?.modelSelected : null);
+    const skipPreflight = input.config?.turnsPreflight !== undefined
+      ? !input.config.turnsPreflight
+      : (activeModelKey && input.config?.models[activeModelKey]?.preflight === false);
+    let selected = (!skipPreflight && input.config)
       ? await selectTools(createTierAdapter("utility", input.config).client, contextualQuery, toolTOC)
       : [...TOOL_CATEGORIES.write, ...TOOL_CATEGORIES.plan];
+    const preflightMs = Date.now() - preflightStart;
+    bus?.publish("TOOL_BOUND", { tools: selected, source: "preflight", query: contextualQuery.slice(0, 200), durationMs: preflightMs } as any);
     // If classifier returned nothing useful but we have conversational context, apply failsafe
     // "Nothing useful" = no write/execute tools when context implies action
     if (selected.length === 0 && recentSummaries) {
@@ -202,7 +209,7 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
     // Save the active toolbelt back to context so it persists to the next turn
     if (input.context) {
       input.context.setTools(activeToolNames);
-      bus?.publish("TOOL_BOUND", { tools: activeToolNames, source: "preflight" } as any);
+      bus?.publish("TOOL_BOUND", { tools: activeToolNames, source: "merged" } as any);
     }
   }
 
@@ -755,7 +762,11 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
     }
   }
 
-  return { response: finalResponse!, path: "direct" };
+  if (!finalResponse) {
+    return { response: { text: "", toolCalls: [], usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 }, timing: { requestStart: Date.now(), firstTokenAt: null, endAt: Date.now() } }, path: "direct" };
+  }
+
+  return { response: finalResponse, path: "direct" };
 }
 
 /**
