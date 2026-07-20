@@ -62,6 +62,7 @@ export const ConfigSchema = z.object({
   editor: EditorSchema,
   // ─── model* — model selection and routing ──────────────────────────────────
   modelSelected: z.string().default("auto").describe("Active model for user turns. 'auto' = router picks flash/dense. Or a model name."),
+  modelBackground: z.string().default("auto").describe("Model for background tasks (/run, routines, subagents). 'auto' = tier routing. Or a model name."),
   modelTierFlash: z.string().min(1).describe("Model assigned to the flash role."),
   modelTierUtility: z.string().min(1).describe("Model assigned to the utility role."),
   modelTierDense: z.string().min(1).describe("Model assigned to the dense role."),
@@ -150,6 +151,7 @@ const DEFAULT_CONFIG = {
     },
   },
   modelSelected: "auto",
+  modelBackground: "auto",
   modelTierFlash: "default-local",
   modelTierUtility: "default-local",
   modelTierDense: "default-local",

@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-console.error("DEBUG CWD:", process.cwd());
 import React, { useState, useEffect, useCallback } from "react";
 import { render, Box, Text, Static, useInput, useApp } from "ink";
 import TextInput from "ink-text-input";

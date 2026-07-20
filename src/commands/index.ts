@@ -13,7 +13,7 @@ import type { WorktreeEngine } from "../worktree/engine.js";
 import type { TaskScheduler } from "../orchestration/scheduler.js";
 import type { GitCheckpointer } from "../safeguards/checkpoint.js";
 import { compactHistory } from "../session/compactor.js";
-import { createTierAdapter } from "../adapters/factory.js";
+import { createTierAdapter, createAdapter } from "../adapters/factory.js";
 import { EventBus } from "../events/bus.js";
 import { execSync } from "child_process";
 import type { PolicyEngine } from "../security/policy-engine.js";
@@ -318,7 +318,10 @@ export function registerCommands(registry: CoreRegistry, deps: CommandDeps): voi
     }
 
     const previousModel = deps.config.modelSelected;
-    const flash = createTierAdapter("flash", deps.config);
+    const backgroundModel = deps.config.modelBackground || "auto";
+    const runAdapter = backgroundModel === "auto"
+      ? createTierAdapter("flash", deps.config)
+      : createAdapter(backgroundModel, deps.config);
     const { ralphLoop } = await import("../orchestration/run.js");
 
     if (subcommand === "routine") {
@@ -336,7 +339,7 @@ export function registerCommands(registry: CoreRegistry, deps: CommandDeps): voi
       deps.output(`Routine started: ${routineName}`);
       const routineInstruction = `## Routine: ${routineName}\n${description}\n\n${routineBody}\n\nExecute this routine. Work through each step in order. Verify at the end.`;
       const runHandle = deps.scheduler!.registerRun(routineInstruction);
-      ralphLoop(routineInstruction, flash.client, deps.bus, (chunk) => {
+      ralphLoop(routineInstruction, runAdapter.client, deps.bus, (chunk) => {
         if (chunk.type === "status") {
           const task = deps.scheduler!.getTask(runHandle.id);
           if (task) task.output = (task.output ? task.output + "\n" : "") + chunk.message;
@@ -370,7 +373,7 @@ export function registerCommands(registry: CoreRegistry, deps: CommandDeps): voi
       deps.output(`Running plan: ${planName}`);
       const planInstruction = `## Plan: ${planName}\n${description}\n\n${planBody}\n\nExecute this plan. Work through each step in order. Verify at the end.`;
       const runHandle = deps.scheduler!.registerRun(planInstruction);
-      ralphLoop(planInstruction, flash.client, deps.bus, (chunk) => {
+      ralphLoop(planInstruction, runAdapter.client, deps.bus, (chunk) => {
         if (chunk.type === "status") {
           const task = deps.scheduler!.getTask(runHandle.id);
           if (task) task.output = (task.output ? task.output + "\n" : "") + chunk.message;
@@ -404,7 +407,7 @@ export function registerCommands(registry: CoreRegistry, deps: CommandDeps): voi
     import("@langchain/core/messages").then(async ({ HumanMessage: HM, SystemMessage: SM }) => {
       try {
         appendOutput("Planning...");
-        const planResponse = await flash.client.invoke([
+        const planResponse = await runAdapter.client.invoke([
           new SM("You are a planning model. Break the task into a numbered checklist of concrete steps. Be specific about file paths and commands. Keep it under 15 steps."),
           new HM(instruction),
         ], { max_tokens: 1000, temperature: 0 } as any);
@@ -417,7 +420,7 @@ export function registerCommands(registry: CoreRegistry, deps: CommandDeps): voi
           : instruction;
 
         appendOutput("Executing...");
-        const result = await ralphLoop(planInstruction, flash.client, deps.bus, (chunk) => {
+        const result = await ralphLoop(planInstruction, runAdapter.client, deps.bus, (chunk) => {
           if (chunk.type === "status") appendOutput(chunk.message);
         }, runHandle.signal, deps.config.tasksMaxRunTurns, deps.workspaceRoot);
         deps.config.modelSelected = previousModel;

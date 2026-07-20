@@ -253,6 +253,13 @@ export class CoreAPI {
           raw.modelTierFlash = config.modelTierFlash; raw.modelTierUtility = config.modelTierUtility; raw.modelTierDense = config.modelTierDense;
         });
       },
+      /** Switch the background model (for /run, routines, subagents) */
+      switchBackground: (name: string) => {
+        const config = this.engine.container.config;
+        if (name !== "auto" && !config.models[name]) throw new Error(`Model "${name}" not found`);
+        config.modelBackground = name;
+        safeConfigWrite(join(this.workspaceRoot, ".voidrift", "config.json"), (raw: any) => { raw.modelBackground = name; });
+      },
       stats: (): StatsResult => {
         const s = this.engine.stats.current;
         const perTool: Record<string, number> = {};
