@@ -658,6 +658,17 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
       } else {
         loopState.consecutiveErrors = 0;
       }
+      // Auto-escalation: 2 consecutive failures on flash → swap to dense
+      const escalationThreshold = input.config?.modelEscalationFailureCount ?? 2;
+      if (loopState.consecutiveErrors >= escalationThreshold && guardrailCtx.tier === "flash" && input.config && input.tier) {
+        const denseAdapter = createTierAdapter("dense", input.config);
+        client = lcTools.length > 0 && denseAdapter.client.bindTools
+          ? denseAdapter.client.bindTools(lcTools) as unknown as BaseChatModel
+          : denseAdapter.client;
+        guardrailCtx.tier = "dense";
+        input.onChunk({ type: "status", message: `model:${denseAdapter.name}` });
+        loopState.consecutiveErrors = 0; // Reset — give dense a fresh start
+      }
       // Hard termination: 3 consecutive errors or same tool failing 4+ times
       if (loopState.consecutiveErrors >= loopState.maxConsecutiveErrors) {
         input.onChunk({ type: "tool_call", id: tc.id, name: tc.name, args: tc.args, status: "error", result });
