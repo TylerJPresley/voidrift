@@ -281,7 +281,7 @@ export class PolicyEngine {
     }
 
     // Default: ask for write tools, MCP tools, and network tools. Allow read tools.
-    const gatedTools = ["write_file", "edit_file", "execute_command", "web_search", "web_fetch", "escalate"];
+    const gatedTools = ["write_file", "edit_file", "execute_command", "web_search", "web_fetch"];
     if (gatedTools.includes(tool) || tool.startsWith("mcp_")) {
       return { decision: "ask", inferredPattern: inferPattern(tool, args) };
     }
