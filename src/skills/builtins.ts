@@ -436,35 +436,40 @@ Results are written to the output file (append or overwrite based on append flag
 
 const SKILL_MODEL_ESCALATION = `# Model Escalation
 
-You run on the flash-tier model. VoidRift has three tiers — flash (you, chat + subagents), utility (preflight classifiers + internal ops), and dense (escalation). Use escalation when flash isn't enough.
+VoidRift has three tiers — flash (primary, chat + execution), utility (internal classifiers), and dense (architecture + reasoning). Escalation switches between flash and dense mid-turn.
+
+## How It Works
+
+- Call \`escalate\` → the harness swaps to the dense model immediately (same turn, no approval needed)
+- Call \`deescalate\` → swaps back to flash for execution
+- The model switch happens mid-turn — you keep the same context and tool results
+
+## Mechanical Enforcement
+
+The harness enforces escalation in specific cases:
+- **Plan creation on flash is blocked.** If you call \`add_plan\` while on flash in auto mode, the harness rejects it and tells you to escalate. Dense creates plans, flash executes them.
+- **2 consecutive failures may trigger auto-escalation.** The harness can swap to dense when the flash model is stuck.
 
 ## When to Escalate
 
 Call \`escalate\` when:
-- **Complex reasoning** — multi-layered analysis, architectural decisions, tradeoff evaluation
-- **Large-scope changes** — refactors touching many files, broad API changes
-- **Heavy analysis** — deep codebase investigation, cross-module impact assessment
-- **Hard problems** — you've tried 2+ approaches and hit a wall
-
-Do NOT escalate for:
-- Simple questions or factual lookups
-- Single-file edits or small fixes
-- Tasks you can complete efficiently on flash
-- Anything that doesn't benefit from deeper reasoning
+- Designing systems, structures, or workflows from scratch
+- Complex analysis spanning multiple interconnected components
+- Novel problem solving requiring exploration of multiple approaches
+- You've failed the same approach twice — hand it off, don't retry
 
 ## When to Deescalate
 
 Call \`deescalate\` when:
-- The complex part is done
-- You're back to routine work (editing, writing, testing)
-- You want to return to flash for efficiency
+- Plan is created and execution begins
+- Design decision made — remaining work is mechanical
+- Analysis complete — findings documented, action items clear
 
 ## Key Constraints
-- Escalation is a one-way switch — you become the dense model
-- Deescalation returns you to flash
-- Each tier has different capabilities and costs
-- Use escalation sparingly — it's a tool, not a default
-- After deescalating, you're back on flash with your previous context`;
+- Only available in auto mode (when flash ≠ dense)
+- Escalation auto-approves — no user confirmation needed
+- Dense should deescalate once reasoning is done — don't stay on dense for routine edits
+- After deescalating, flash picks up with the full context from the dense phase`;
 
 
 const SKILL_ROUTINES = `# Routines
