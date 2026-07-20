@@ -126,7 +126,7 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
   const { getLangchainTools, getAnthropicNativeTools } = await import("../tools/langchain-tools.js");
   
   const allAgentTools = input.agent
-    ? input.agent.tools
+    ? input.agent.tools.filter(t => input.tier || (t !== "escalate" && t !== "deescalate"))
     : TOOL_SCHEMAS.map(t => t.name);
 
   // Dynamic tool binding: resolve which tools are relevant for this turn
