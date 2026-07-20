@@ -180,6 +180,6 @@ register((tool, args, ctx) => {
 
   return {
     block: true,
-    preWarning: `⚠️ BLOCKED: Plan creation requires the dense model. You are on flash — you cannot architect plans correctly. Call \`escalate\` with the reason, and the dense model will create the plan. Do not retry add_plan on flash.`,
+    preWarning: `⚠️ BLOCKED: Plan creation requires the dense model. You are on flash — you cannot architect plans correctly. Call \`escalate\` with the reason, and the dense model will create the plan. Do not retry add_plan on flash. Do not proceed with implementation without a plan — call escalate FIRST.`,
   };
 });
