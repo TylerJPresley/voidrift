@@ -35,6 +35,8 @@ interface GuardrailContext {
   callHistory: Array<{ name: string; args: Record<string, unknown> }>;
   /** Current tool loop round */
   round: number;
+  /** Current tier (flash/dense/utility) — undefined if pinned */
+  tier?: string;
 }
 
 type Guardrail = (tool: string, args: Record<string, unknown>, ctx: GuardrailContext) => GuardrailResult | null;
@@ -70,8 +72,8 @@ export function checkGuardrails(tool: string, args: Record<string, unknown>, ctx
   return merged;
 }
 
-export function createGuardrailContext(workspaceRoot: string, sessionId: string): GuardrailContext {
-  return { workspaceRoot, sessionId, filesRead: new Set(), callHistory: [], round: 0 };
+export function createGuardrailContext(workspaceRoot: string, sessionId: string, tier?: string): GuardrailContext {
+  return { workspaceRoot, sessionId, filesRead: new Set(), callHistory: [], round: 0, tier };
 }
 
 // ─── BLOCKING: Edit without read (Golden Principle #1) ───────────────────────
@@ -167,5 +169,17 @@ register((tool, args, ctx) => {
 
   return {
     postWarning: `⚠️ GUARDRAIL: Repetitive pattern detected — "${tool}" called ${sameToolCalls + 1} times this turn. Consider using register_task + invoke_task, background_exec with a script, or spawn_subagent to batch this work.`,
+  };
+});
+
+// ─── BLOCKING: Plan creation on flash (auto mode only) ───────────────────────
+
+register((tool, args, ctx) => {
+  if (tool !== "add_plan") return null;
+  if (!ctx.tier || ctx.tier !== "flash") return null;
+
+  return {
+    block: true,
+    preWarning: `⚠️ BLOCKED: Plan creation requires the dense model. You are on flash — you cannot architect plans correctly. Call \`escalate\` with the reason, and the dense model will create the plan. Do not retry add_plan on flash.`,
   };
 });

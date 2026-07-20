@@ -279,7 +279,7 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
 
   // Guardrail context — tracks patterns across the tool loop
   const { checkGuardrails, createGuardrailContext } = await import("./guardrails.js");
-  const guardrailCtx = createGuardrailContext(workspaceRoot, input.context?.context.void.messages.length?.toString() ?? "0");
+  const guardrailCtx = createGuardrailContext(workspaceRoot, input.context?.context.void.messages.length?.toString() ?? "0", input.tier as string | undefined);
 
   // Loop detection — tracks consecutive failures and repeated patterns
   const { createLoopDetection, recordAndCheck } = await import("./loop-detection.js");
