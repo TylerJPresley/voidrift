@@ -49,9 +49,9 @@ export function Welcome({ workspace, branch, sessionId }: { workspace: string; b
         </Box>
         <Box flexDirection="column" justifyContent="center" marginLeft={2}>
           <Text><Text color="#4ec9b0" bold>VoidRift</Text><Text dimColor> {VERSION}</Text></Text>
-          <Text dimColor>{workspace}</Text>
-          {branch && <Text dimColor>{branch}</Text>}
-          {sessionId && <Text dimColor>{sessionId}</Text>}
+          <Text dimColor>Directory: {workspace}</Text>
+          {branch && <Text dimColor>Branch: {branch}</Text>}
+          {sessionId && <Text dimColor>Session: {sessionId}</Text>}
         </Box>
       </Box>
       <Text> </Text>
