@@ -86,7 +86,7 @@ export async function executeTurn(engine: EngineContext, userMessage: string, ca
     contextLimit: resolved.config.contextLimit,
     maxOutputTokens: resolved.config.maxOutputTokens,
     prompts: engine.prompts,
-    tier: isTierKey ? tier as string : undefined,
+    tier: isTierKey && engine.container.config.modelTierFlash !== engine.container.config.modelTierDense ? tier as string : undefined,
   });
 
   const systemParts = compiled.filter(m => m.role === "system").map(m => m.content);
