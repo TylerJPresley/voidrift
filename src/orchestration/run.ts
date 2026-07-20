@@ -110,6 +110,8 @@ export async function ralphLoop(
   signal?: { interrupted: boolean },
   maxTurns = DEFAULT_MAX_RUN_TURNS,
   workspaceRoot?: string,
+  config?: import("../config/loader.js").VoidRiftConfig,
+  tier?: string,
 ): Promise<RunResult> {
   let turns = 0;
   let turnsWithoutToolCalls = 0;
@@ -176,6 +178,9 @@ export async function ralphLoop(
       history: [], // Fresh context each turn — Ralph Loop
       onChunk,
       planManager: scopedPlanManager,
+      config,
+      tier: tier as any,
+      workspaceRoot,
     };
 
     onChunk({ type: "status", message: `Run turn ${turns + 1}...` });

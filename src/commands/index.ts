@@ -344,7 +344,7 @@ export function registerCommands(registry: CoreRegistry, deps: CommandDeps): voi
           const task = deps.scheduler!.getTask(runHandle.id);
           if (task) task.output = (task.output ? task.output + "\n" : "") + chunk.message;
         }
-      }, runHandle.signal, deps.config.tasksMaxRunTurns, deps.workspaceRoot).then(result => {
+      }, runHandle.signal, deps.config.tasksMaxRunTurns, deps.workspaceRoot, deps.config, backgroundModel === "auto" ? "flash" : undefined).then(result => {
         deps.config.modelSelected = previousModel;
         deps.scheduler!.completeRun(runHandle.id, result.success);
         const task = deps.scheduler!.getTask(runHandle.id);
@@ -378,7 +378,7 @@ export function registerCommands(registry: CoreRegistry, deps: CommandDeps): voi
           const task = deps.scheduler!.getTask(runHandle.id);
           if (task) task.output = (task.output ? task.output + "\n" : "") + chunk.message;
         }
-      }, runHandle.signal, deps.config.tasksMaxRunTurns, deps.workspaceRoot).then(result => {
+      }, runHandle.signal, deps.config.tasksMaxRunTurns, deps.workspaceRoot, deps.config, backgroundModel === "auto" ? "flash" : undefined).then(result => {
         deps.config.modelSelected = previousModel;
         deps.scheduler!.completeRun(runHandle.id, result.success);
         const task = deps.scheduler!.getTask(runHandle.id);
@@ -422,7 +422,7 @@ export function registerCommands(registry: CoreRegistry, deps: CommandDeps): voi
         appendOutput("Executing...");
         const result = await ralphLoop(planInstruction, runAdapter.client, deps.bus, (chunk) => {
           if (chunk.type === "status") appendOutput(chunk.message);
-        }, runHandle.signal, deps.config.tasksMaxRunTurns, deps.workspaceRoot);
+        }, runHandle.signal, deps.config.tasksMaxRunTurns, deps.workspaceRoot, deps.config, backgroundModel === "auto" ? "flash" : undefined);
         deps.config.modelSelected = previousModel;
         deps.scheduler!.completeRun(runHandle.id, result.success);
         appendOutput(`Done: ${result.success ? "success" : "failed"} (${result.turns} turns, ${result.terminationReason})`);
