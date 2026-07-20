@@ -169,6 +169,13 @@ export async function ralphLoop(
   while (turns < DEFAULT_MAX_RUN_TURNS) {
     if (signal?.interrupted) break;
 
+    // Create per-turn abort controller — aborted if signal.interrupted is set externally
+    const turnAbort = new AbortController();
+    let interruptCheck: ReturnType<typeof setInterval> | null = null;
+    if (signal) {
+      interruptCheck = setInterval(() => { if (signal.interrupted) turnAbort.abort(); }, 500);
+    }
+
     const userMessage = compileStateMessage(instruction, state, turns);
 
     const input: OrchestrationInput = {
@@ -177,6 +184,7 @@ export async function ralphLoop(
       systemPrompt: RUN_SYSTEM_PROMPT,
       history: [], // Fresh context each turn — Ralph Loop
       onChunk,
+      signal: turnAbort.signal,
       planManager: scopedPlanManager,
       config,
       tier: tier as any,
@@ -185,6 +193,7 @@ export async function ralphLoop(
 
     onChunk({ type: "status", message: `Run turn ${turns + 1}...` });
     const result = await directChat(input, bus);
+    if (interruptCheck) clearInterval(interruptCheck);
     turns++;
 
     // Extract progress notes from the model's response
