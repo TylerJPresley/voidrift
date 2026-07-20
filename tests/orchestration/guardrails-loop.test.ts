@@ -40,12 +40,12 @@ describe("guardrails", () => {
     expect(result.preWarning).toContain("full rewrite");
   });
 
-  it("warns on write_file with > 50 lines inline content", () => {
+  it("does not warn on write_file with > 50 lines (generator guidance removed)", () => {
     const ctx = createGuardrailContext("/test", "0");
     const bigContent = Array(60).fill("line").join("\n");
     const result = checkGuardrails("write_file", { path: "file.ts", content: bigContent }, ctx);
     expect(result.block).toBeFalsy();
-    expect(result.preWarning).toContain("60 lines");
+    expect(result.preWarning).toBeUndefined();
   });
 
   it("warns on /tmp in execute_command", () => {

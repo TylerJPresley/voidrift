@@ -126,21 +126,6 @@ register((tool, args, ctx) => {
   return null;
 });
 
-// ─── ADVISORY: Large inline content ──────────────────────────────────────────
-
-register((tool, args) => {
-  if (tool !== "write_file") return null;
-  const content = args.content as string | undefined;
-  if (!content) return null;
-  const lines = content.split("\n").length;
-  if (lines > 50) {
-    return {
-      preWarning: `⚠️ GUARDRAIL: write_file with ${lines} lines of inline content. For large content, write a generator script to .voidrift/cache/ and execute it instead — saves output tokens and is resumable.`,
-    };
-  }
-  return null;
-});
-
 // ─── ADVISORY: /tmp in commands ──────────────────────────────────────────────
 
 register((tool, args, ctx) => {

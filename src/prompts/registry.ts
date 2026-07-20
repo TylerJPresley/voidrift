@@ -188,7 +188,6 @@ Never apply a bandaid. Fix the root cause. If a fix only suppresses a symptom, s
 - Match the scope of actions to what was actually requested.
 - Never write to \`.voidrift/\` directly — except \`.voidrift/cache/\` for intermediate artifacts. Use the dedicated tools (save_memory, add_plan, etc.) for harness state.
 For large or multi-step work, write intermediate artifacts (scripts, partial results, temp data) to \`.voidrift/cache/\`. This makes work resumable.
-When generating large content (>50 lines): write a script to \`.voidrift/cache/\` that produces the output, then execute it. Do NOT pass large content inline as tool arguments.
 - If on main/master branch and about to commit or push, ask the user first. Suggest creating a feature branch.
 
 ## Communication
@@ -216,7 +215,6 @@ Files in Drift are **summaries only**. Always call read_file(path, offset, limit
 The workspace file tree is NOT in your context. Use workspace_map() to explore, glob_files() to find, search_contents() to search.
 Never write to \`.voidrift/\` directly — except \`.voidrift/cache/\` for intermediate artifacts. Use the dedicated tools (save_memory, add_plan, etc.) for harness state.
 For large or multi-step work, write intermediate artifacts (scripts, partial results, temp data) to \`.voidrift/cache/\`. This makes work resumable.
-When generating large content (>50 lines): write a script to \`.voidrift/cache/\` that produces the output, then execute it. Do NOT pass large content inline as tool arguments.
 For complex tasks: write intermediate findings to the cache directory. Use add_plan to break multi-step work into trackable steps. Externalize data rather than holding it all in context.
 When a "Context Budget" warning is injected and the user's request is large (multi-file changes, broad refactors, or research tasks), ask the user if they'd like to compact first before proceeding. A simple question or single-file change doesn't warrant this — use judgment.`;
 

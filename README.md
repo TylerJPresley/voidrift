@@ -592,6 +592,83 @@ The `apiKeyEnv` field in model config tells VoidRift which env var to read.
 | `contextCompactionKeepRecent` | 10 | Messages to keep verbatim during in-turn compaction |
 | `contextReflectionBatchSize` | 3 | Sessions processed per batch during /reflection |
 
+## Tuning Guide
+
+VoidRift ships with conservative defaults that work for any setup. If you know your model and environment, tuning these values can significantly improve responsiveness and quality.
+
+### Single Cloud Model (Claude, GPT, Gemini, Qwen-Max)
+
+You have one capable model doing everything. Optimize for minimal latency:
+
+```json
+{
+  "models": { "cloud": { "protocol": "...", "model": "...", "contextLimit": 200000 } },
+  "modelTierFlash": "cloud",
+  "modelTierUtility": "cloud",
+  "modelTierDense": "cloud"
+}
+```
+
+No additional tuning needed. When all tiers point to the same model:
+- Preflight is skipped (no classifier call before each turn)
+- Routing prompt is not injected (no escalation/deescalation)
+- The model handles everything directly
+
+### Single Local Model (Ollama, vLLM — 7B-32B)
+
+Small models benefit from reduced tool schemas and guardrails:
+
+```json
+{
+  "models": { "local": { "protocol": "openai", "model": "qwen2.5-coder:7b", "baseUrl": "http://localhost:11434/v1", "contextLimit": 32768, "preflight": true } },
+  "modelTierFlash": "local",
+  "modelTierUtility": "local",
+  "modelTierDense": "local",
+  "turnsMaxToolRounds": 5,
+  "turnsReminderInterval": 10
+}
+```
+
+Key settings:
+- `preflight: true` on the model — enables the tool classifier so the model sees fewer schemas per turn (reduces confusion on small models)
+- `turnsMaxToolRounds: 5` — prevents runaway tool loops that burn context
+- `turnsReminderInterval: 10` — more frequent behavioral reminders (small models drift faster)
+
+### Multi-Tier (Local Flash + Cloud Dense)
+
+The full auto-routing setup. Local handles 90% of work cheaply, cloud fires for complex reasoning:
+
+```json
+{
+  "models": {
+    "local": { "protocol": "openai", "model": "qwen2.5-coder:14b", "baseUrl": "http://localhost:11434/v1", "contextLimit": 32768, "preflight": true },
+    "cloud": { "protocol": "anthropic", "model": "claude-sonnet-4-20250514", "apiKeyEnv": "ANTHROPIC_API_KEY", "contextLimit": 200000 }
+  },
+  "modelTierFlash": "local",
+  "modelTierUtility": "local",
+  "modelTierDense": "cloud",
+  "modelEscalationFailureCount": 2
+}
+```
+
+How it works:
+- Flash (local) handles chat, tool execution, and routine work
+- When flash tries to create a plan, the harness blocks it and forces escalation to dense (cloud)
+- When flash fails 2 consecutive tool calls, the harness auto-escalates to dense
+- Dense creates the plan or resolves the complex issue, then deescalates back to flash
+- `modelBackground` controls what `/run` and subagents use (defaults to `"auto"` which follows the same routing)
+
+### Key Tuning Parameters
+
+| Parameter | What it does | When to increase | When to decrease |
+|-----------|-------------|-----------------|-----------------|
+| `turnsMaxToolRounds` | Tool calls per turn before forced stop | Capable models on complex tasks | Small models that loop |
+| `turnsReminderInterval` | Behavioral nudge frequency (0=disabled) | Never (confuses some models) | Small models that drift |
+| `modelEscalationFailureCount` | Failures before auto-escalation to dense | Models that recover quickly | Models that spin on errors |
+| `turnsContextBudgetStopPct` | Context % that halts tool execution | Large context models | Small context models |
+| `contextDecayAfterTurns` | Auto-compact after N turns | Long sessions | Short sessions |
+| `networkModelTimeoutMs` | Model API timeout | Slow endpoints | Fast local models |
+
 ## Troubleshooting
 
 ### VoidRift won't start

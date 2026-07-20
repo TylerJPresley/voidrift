@@ -61,13 +61,12 @@ describe("Guardrails", () => {
   });
 
   describe("Advisory: large inline content", () => {
-    it("warns on write_file with more than 50 lines", () => {
+    it("does not warn on write_file (generator script guidance removed)", () => {
       const ctx = createGuardrailContext("/workspace", "session-1");
       const bigContent = Array(80).fill("line").join("\n");
       const result = checkGuardrails("write_file", { path: "src/gen.ts", content: bigContent }, ctx);
       expect(result.block).toBeFalsy();
-      expect(result.preWarning).toContain("GUARDRAIL");
-      expect(result.preWarning).toContain("80 lines");
+      expect(result.preWarning).toBeUndefined();
     });
   });
 
