@@ -633,6 +633,23 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
         executedCalls.clear();
       }
 
+      // Mid-turn escalation: swap client when escalate/deescalate is called
+      if (tc.name === "escalate" && !result.startsWith("Error:") && input.config && input.tier) {
+        const denseAdapter = createTierAdapter("dense", input.config);
+        client = lcTools.length > 0 && denseAdapter.client.bindTools
+          ? denseAdapter.client.bindTools(lcTools) as unknown as BaseChatModel
+          : denseAdapter.client;
+        guardrailCtx.tier = "dense";
+        input.onChunk({ type: "status", message: `model:${denseAdapter.name}` });
+      } else if (tc.name === "deescalate" && !result.startsWith("Error:") && input.config && input.tier) {
+        const flashAdapter = createTierAdapter("flash", input.config);
+        client = lcTools.length > 0 && flashAdapter.client.bindTools
+          ? flashAdapter.client.bindTools(lcTools) as unknown as BaseChatModel
+          : flashAdapter.client;
+        guardrailCtx.tier = "flash";
+        input.onChunk({ type: "status", message: `model:${flashAdapter.name}` });
+      }
+
       // Loop detection — track failures and break on repeated errors
       const isFailure = result.startsWith("Error:") || result.startsWith("⚠️") || result.includes("denied") || result.includes("timed out");
       if (isFailure) {
