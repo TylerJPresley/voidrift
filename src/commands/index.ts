@@ -344,7 +344,7 @@ export function registerCommands(registry: CoreRegistry, deps: CommandDeps): voi
         if (!task) return;
         const append = (msg: string) => { task.output = (task.output ? task.output + "\n" : "") + msg; };
         if (chunk.type === "status") append(chunk.message);
-        else if (chunk.type === "content") append(chunk.text);
+        else if (chunk.type === "content") { task.output = (task.output || "") + chunk.text; }
         else if (chunk.type === "tool_call" && chunk.status === "complete") append(`✓ ${chunk.name}`);
         else if (chunk.type === "tool_call" && chunk.status === "error") append(`✗ ${chunk.name}: ${(chunk as any).result?.slice(0, 100) || "failed"}`);
       }, runHandle.signal, deps.config.tasksMaxRunTurns, deps.workspaceRoot, deps.config, backgroundModel === "auto" ? "flash" : undefined).then(result => {
@@ -381,7 +381,7 @@ export function registerCommands(registry: CoreRegistry, deps: CommandDeps): voi
         if (!task) return;
         const append = (msg: string) => { task.output = (task.output ? task.output + "\n" : "") + msg; };
         if (chunk.type === "status") append(chunk.message);
-        else if (chunk.type === "content") append(chunk.text);
+        else if (chunk.type === "content") { task.output = (task.output || "") + chunk.text; }
         else if (chunk.type === "tool_call" && chunk.status === "complete") append(`✓ ${chunk.name}`);
         else if (chunk.type === "tool_call" && chunk.status === "error") append(`✗ ${chunk.name}: ${(chunk as any).result?.slice(0, 100) || "failed"}`);
       }, runHandle.signal, deps.config.tasksMaxRunTurns, deps.workspaceRoot, deps.config, backgroundModel === "auto" ? "flash" : undefined).then(result => {
@@ -428,7 +428,7 @@ export function registerCommands(registry: CoreRegistry, deps: CommandDeps): voi
         appendOutput("Executing...");
         const result = await ralphLoop(planInstruction, runAdapter.client, deps.bus, (chunk) => {
           if (chunk.type === "status") appendOutput(chunk.message);
-          else if (chunk.type === "content") appendOutput(chunk.text);
+          else if (chunk.type === "content") { const task = deps.scheduler!.getTask(runHandle.id); if (task) task.output = (task.output || "") + chunk.text; }
           else if (chunk.type === "tool_call" && chunk.status === "complete") appendOutput(`✓ ${chunk.name}`);
           else if (chunk.type === "tool_call" && chunk.status === "error") appendOutput(`✗ ${chunk.name}: ${(chunk as any).result?.slice(0, 100) || "failed"}`);
         }, runHandle.signal, deps.config.tasksMaxRunTurns, deps.workspaceRoot, deps.config, backgroundModel === "auto" ? "flash" : undefined);
