@@ -276,6 +276,8 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
   const executedCalls = new Set<string>();
   let lastContinuationText = "";
   let toolsExecutedThisTurn = 0;
+  // Per-turn read cache — prevents duplicate file reads within a single turn
+  const readCache = new Map<string, string>();
 
   // Guardrail context — tracks patterns across the tool loop
   const { checkGuardrails, createGuardrailContext } = await import("./guardrails.js");
@@ -476,7 +478,13 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
 
       // Focus file in background (summary for drift awareness) but return actual content
       if (tc.name === "read_file" && input.context && input.config) {
-        result = await executeToolCall(tc.name, tc.args, workspaceRoot, input.context, input.config, input.planManager, input.scheduler);
+        const readCacheKey = `${args.path}:${args.offset ?? ""}:${args.limit ?? ""}`;
+        if (readCache.has(readCacheKey)) {
+          result = readCache.get(readCacheKey)!;
+        } else {
+          result = await executeToolCall(tc.name, tc.args, workspaceRoot, input.context, input.config, input.planManager, input.scheduler);
+          readCache.set(readCacheKey, result);
+        }
         const filePath = args.path;
         if (filePath) {
           try {
@@ -631,6 +639,12 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
       // Clear dedup cache after mutations — allows re-reads for verification
       if (["write_file", "edit_file", "execute_command", "background_exec"].includes(tc.name) && !result.startsWith("Error:")) {
         executedCalls.clear();
+        // Invalidate read cache for mutated file paths
+        if ((tc.name === "write_file" || tc.name === "edit_file") && args.path) {
+          for (const key of readCache.keys()) {
+            if (key.startsWith(`${args.path}:`)) readCache.delete(key);
+          }
+        }
       }
 
       // Mid-turn escalation: swap client when escalate/deescalate is called
