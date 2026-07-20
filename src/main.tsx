@@ -430,7 +430,7 @@ function App({ restoredHistory }: { restoredHistory?: Array<{ role: string; cont
       {!fullPanel && <>
       <Static key={clearKey} items={[{ id: "welcome", type: "welcome" } as any, ...history]}>
         {(item: any, idx: number) => {
-          if (item.type === "welcome") return <Welcome key="welcome" workspace={core.workspace.shortPath()} branch={core.workspace.branch()} />;
+          if (item.type === "welcome") return <Welcome key="welcome" workspace={core.workspace.shortPath()} branch={core.workspace.branch()} sessionId={core.session.id} />;
           const isFirst = idx === 1; // idx 0 is welcome
           const allItems = [{ type: "welcome" }, ...history];
           const prev = allItems[idx - 1]?.type ?? "welcome";

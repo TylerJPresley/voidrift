@@ -31,7 +31,7 @@ export interface ToolCall {
   elapsed?: string;
 }
 
-export function Welcome({ workspace, branch }: { workspace: string; branch: string | null }) {
+export function Welcome({ workspace, branch, sessionId }: { workspace: string; branch: string | null; sessionId?: string }) {
   const logo = [
     "██╗   ██╗ ██████╗ ██╗██████╗ ██████╗ ██╗███████╗████████╗",
     "██║   ██║██╔═══██╗██║██╔══██╗██╔══██╗██║██╔════╝╚══██╔══╝",
@@ -51,6 +51,7 @@ export function Welcome({ workspace, branch }: { workspace: string; branch: stri
           <Text><Text color="#4ec9b0" bold>VoidRift</Text><Text dimColor> {VERSION}</Text></Text>
           <Text dimColor>{workspace}</Text>
           {branch && <Text dimColor>{branch}</Text>}
+          {sessionId && <Text dimColor>{sessionId}</Text>}
         </Box>
       </Box>
       <Text> </Text>
