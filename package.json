@@ -1,6 +1,6 @@
 {
   "name": "voidrift",
-  "version": "0.2.10",
+  "version": "0.2.11",
   "description": "A local-first, model-agnostic AI harness for your terminal",
   "license": "Apache-2.0",
   "author": "Tyler Presley",
