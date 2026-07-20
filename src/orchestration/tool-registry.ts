@@ -69,7 +69,7 @@ registerToolExecutor({
       const lines = content.split("\n");
       const estimatedTokens = Math.ceil(content.length / 4);
 
-      if (estimatedTokens < 100000) return `[${filePath}] ${lines.length} lines\n` + content;
+      if (estimatedTokens < 100000) return `[READ] [${filePath}] ${lines.length} lines\n` + content;
 
       const rf = readFile(ctx.workspaceRoot, filePath, 0, maxLines);
       return (rf.output || rf.error || "") +

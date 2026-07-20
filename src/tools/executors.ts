@@ -29,7 +29,7 @@ export function readFile(workspaceRoot: string, path: string, offset = 0, limit 
     const totalLines = allLines.length;
     const sliced = allLines.slice(offset, offset + limit);
     const hasMore = offset + limit < totalLines;
-    const header = `[${path}] Lines ${offset + 1}-${offset + sliced.length} of ${totalLines}${hasMore ? " (use offset to read more)" : ""}`;
+    const header = `[READ] [${path}] Lines ${offset + 1}-${offset + sliced.length} of ${totalLines}${hasMore ? " (use offset to read more)" : ""}`;
     return { success: true, output: header + "\n" + sliced.join("\n") };
   } catch (err) {
     return { success: false, output: "", error: `Failed to read ${path}: ${errMsg(err)}` };

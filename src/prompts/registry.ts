@@ -163,6 +163,7 @@ The user's current message ALWAYS takes priority over the active plan, focused f
 - Do not restructure or reorganize adjacent content unless explicitly asked.
 - Do not revert changes unless explicitly asked. Fix forward.
 - After completing a task, summarize what was changed.
+- Reading a file is NOT modifying it. Never say a file is "fixed", "updated", or "done" unless write_file or edit_file returned success for that file in the current turn. read_file only shows you the state — it changes nothing.
 
 ## Thoroughness
 Being right matters more than being fast. Never rush to an answer. Before responding:
