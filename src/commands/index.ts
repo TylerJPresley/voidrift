@@ -340,10 +340,13 @@ export function registerCommands(registry: CoreRegistry, deps: CommandDeps): voi
       const routineInstruction = `## Routine: ${routineName}\n${description}\n\n${routineBody}\n\nExecute this routine. Work through each step in order. Verify at the end.`;
       const runHandle = deps.scheduler!.registerRun(routineInstruction);
       ralphLoop(routineInstruction, runAdapter.client, deps.bus, (chunk) => {
-        if (chunk.type === "status") {
-          const task = deps.scheduler!.getTask(runHandle.id);
-          if (task) task.output = (task.output ? task.output + "\n" : "") + chunk.message;
-        }
+        const task = deps.scheduler!.getTask(runHandle.id);
+        if (!task) return;
+        const append = (msg: string) => { task.output = (task.output ? task.output + "\n" : "") + msg; };
+        if (chunk.type === "status") append(chunk.message);
+        else if (chunk.type === "content") append(chunk.text);
+        else if (chunk.type === "tool_call" && chunk.status === "complete") append(`✓ ${chunk.name}`);
+        else if (chunk.type === "tool_call" && chunk.status === "error") append(`✗ ${chunk.name}: ${(chunk as any).result?.slice(0, 100) || "failed"}`);
       }, runHandle.signal, deps.config.tasksMaxRunTurns, deps.workspaceRoot, deps.config, backgroundModel === "auto" ? "flash" : undefined).then(result => {
         deps.config.modelSelected = previousModel;
         deps.scheduler!.completeRun(runHandle.id, result.success);
@@ -374,10 +377,13 @@ export function registerCommands(registry: CoreRegistry, deps: CommandDeps): voi
       const planInstruction = `## Plan: ${planName}\n${description}\n\n${planBody}\n\nExecute this plan. Work through each step in order. Verify at the end.`;
       const runHandle = deps.scheduler!.registerRun(planInstruction);
       ralphLoop(planInstruction, runAdapter.client, deps.bus, (chunk) => {
-        if (chunk.type === "status") {
-          const task = deps.scheduler!.getTask(runHandle.id);
-          if (task) task.output = (task.output ? task.output + "\n" : "") + chunk.message;
-        }
+        const task = deps.scheduler!.getTask(runHandle.id);
+        if (!task) return;
+        const append = (msg: string) => { task.output = (task.output ? task.output + "\n" : "") + msg; };
+        if (chunk.type === "status") append(chunk.message);
+        else if (chunk.type === "content") append(chunk.text);
+        else if (chunk.type === "tool_call" && chunk.status === "complete") append(`✓ ${chunk.name}`);
+        else if (chunk.type === "tool_call" && chunk.status === "error") append(`✗ ${chunk.name}: ${(chunk as any).result?.slice(0, 100) || "failed"}`);
       }, runHandle.signal, deps.config.tasksMaxRunTurns, deps.workspaceRoot, deps.config, backgroundModel === "auto" ? "flash" : undefined).then(result => {
         deps.config.modelSelected = previousModel;
         deps.scheduler!.completeRun(runHandle.id, result.success);
@@ -422,6 +428,9 @@ export function registerCommands(registry: CoreRegistry, deps: CommandDeps): voi
         appendOutput("Executing...");
         const result = await ralphLoop(planInstruction, runAdapter.client, deps.bus, (chunk) => {
           if (chunk.type === "status") appendOutput(chunk.message);
+          else if (chunk.type === "content") appendOutput(chunk.text);
+          else if (chunk.type === "tool_call" && chunk.status === "complete") appendOutput(`✓ ${chunk.name}`);
+          else if (chunk.type === "tool_call" && chunk.status === "error") appendOutput(`✗ ${chunk.name}: ${(chunk as any).result?.slice(0, 100) || "failed"}`);
         }, runHandle.signal, deps.config.tasksMaxRunTurns, deps.workspaceRoot, deps.config, backgroundModel === "auto" ? "flash" : undefined);
         deps.config.modelSelected = previousModel;
         deps.scheduler!.completeRun(runHandle.id, result.success);
