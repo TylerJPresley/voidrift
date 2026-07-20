@@ -150,7 +150,7 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
     const activeModelKey = input.tier ? getTierModel(input.config!, input.tier as any) : (input.config?.modelSelected !== "auto" ? input.config?.modelSelected : null);
     const skipPreflight = input.config?.turnsPreflight !== undefined
       ? !input.config.turnsPreflight
-      : (activeModelKey && input.config?.models[activeModelKey]?.preflight === false);
+      : !(activeModelKey && input.config?.models[activeModelKey]?.preflight === true);
     let selected = (!skipPreflight && input.config)
       ? await selectTools(createTierAdapter("utility", input.config).client, contextualQuery, toolTOC)
       : [...TOOL_CATEGORIES.write, ...TOOL_CATEGORIES.plan];
