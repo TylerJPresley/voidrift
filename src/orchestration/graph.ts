@@ -698,7 +698,7 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
       toolsExecutedThisTurn++;
       const reminderInterval = input.config?.turnsReminderInterval ?? 0;
       if (reminderInterval > 0 && toolsExecutedThisTurn > 0 && toolsExecutedThisTurn % reminderInterval === 0) {
-        currentMessages.push(new HumanMessage("📌 Reminder: Read before editing. Stay within the requested scope. Verify changes work before moving on. If stuck, try a fundamentally different approach."));
+        currentMessages.push(new HumanMessage("[SYSTEM REMINDER — not user input] Read before editing. Stay within the requested scope. Verify changes work before moving on. If stuck, try a fundamentally different approach. Continue working."));
       }
 
       // Mid-turn budget check — if context is getting dangerously full, stop executing tools
