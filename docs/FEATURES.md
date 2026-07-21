@@ -386,11 +386,11 @@ The panel shows which level is currently "active" for each template.
 5. Press `enter` to select a model for your conversations
 6. Press `f` to assign the selected model to the **flash** role
 7. Press `u` to assign to the **utility** role
-8. Press `d` to assign to the **dense** role
+8. Press `e` to assign to the **escalation** role
 
-**Auto mode:** Select "auto" to let the router pick. When on auto, the Flash model handles all user turns. Dense activates via escalation — either the model requests it (calls `escalate` tool) or context exceeds 85%. Utility runs internal operations (preflight, summarization) and is never used for user turns.
+**Escalation:** If you assign an escalation model, the harness can switch to it when stuck. The primary model handles all user turns. Escalation activates mechanically — plan creation is blocked on the primary model, 2 consecutive failures trigger auto-escalation, or context exceeds 85%. Utility runs internal operations (preflight, summarization) and is never used for user turns.
 
-**Persistence:** Your model selection persists to `.voidrift/config.json` (per-project). Tier assignments also persist to the workspace config.
+**Persistence:** Your model selection persists to `.voidrift/config.json` (per-project). Role assignments also persist to the workspace config.
 
 ---
 
@@ -985,11 +985,6 @@ The workspace root is the security boundary. Any file read, write, or shell comm
 
 ```json
 {
-  "tiers": {
-    "flash": "model-name",
-    "utility": "model-name",
-    "dense": "model-name"
-  },
   "models": {
     "model-name": {
       "protocol": "openai | anthropic | google",
@@ -1004,6 +999,10 @@ The workspace root is the security boundary. Any file read, write, or shell comm
       "additionalHeaders": {}
     }
   },
+  "modelSelected": "model-name",
+  "modelEscalation": "optional-model-name",
+  "modelUtility": "optional-model-name",
+  "modelBackground": "optional-model-name",
   "editor": "vscode | vim | nvim | emacs | cursor | zed | nano",
   "summarizeThreshold": 500,
   "maxReadLines": 1000,
@@ -1037,26 +1036,26 @@ The workspace root is the security boundary. Any file read, write, or shell comm
 | `topK` | number | No | Top-K sampling (anthropic/google only) |
 | `additionalHeaders` | object | No | Extra HTTP headers (anthropic only) |
 
-### Model Selection & Tier Router
+### Model Selection
 
-You select a model for your conversations via `/model` or set `selectedModel` in config. The default is `"auto"`.
+You select a model for your conversations via `/model` or set `modelSelected` in config.
 
-- **`selectedModel: "auto"`** — the router picks Flash for normal turns, Dense for escalation
-- **`selectedModel: "claude-sonnet"`** — that model is used for all your turns directly
+- **`modelSelected`** — your primary model. Required. Must reference a model in the models block.
+- **`modelEscalation`** — optional. If set, the harness can escalate to this model when stuck.
+- **`modelUtility`** — optional. Runs internal operations (preflight, summarization). Never used for user turns.
+- **`modelBackground`** — optional. Used for `/run`, routines, subagents. Defaults to modelSelected.
 
-The three tiers are roles assigned to models:
+**Auto-escalation:** If context usage exceeds 85% of the current model's limit, the system escalates automatically (when modelEscalation is configured).
 
-- **Flash** — Your main model. All user conversations when on "auto".
-- **Utility** — Internal operations only (preflight, summarization, indexing). Never used for user turns.
-- **Dense** — Escalation. Complex reasoning when Flash can't handle it.
+**Plan creation:** When escalation is configured, plan creation is blocked on the primary model. The model must escalate to the escalation model to create plans.
 
-**Auto-escalation:** If context usage exceeds 85% of the current model's limit, the system escalates to Dense automatically.
+**Failure escalation:** 2 consecutive tool failures automatically swap to the escalation model.
 
-**Model-requested escalation:** The model can call `escalate` when a task exceeds its reasoning capacity. This requires user approval. The model calls `deescalate` to return to Flash when done.
+**Model-requested escalation:** The model can call `escalate` when a task exceeds its capacity. This auto-approves (no user confirmation). The escalation model calls `deescalate` to return to the primary when done.
 
-**De-escalation:** If the model was escalated to Dense and context drops below 50%, reverts to auto routing.
+**De-escalation:** If the model was auto-escalated and context drops below 50%, the harness reverts.
 
-**Task agents:** Background agents (indexer, summarizer) declare a role (typically utility). They don't use your selected model.
+**Passive agents:** Background agents (indexer, summarizer) declare a role (typically utility). They don't use your selected model.
 
 ---
 

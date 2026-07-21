@@ -139,6 +139,25 @@ register((tool, args, ctx) => {
   return null;
 });
 
+// ─── ADVISORY: Generator script pattern ──────────────────────────────────────
+
+register((tool, args, ctx) => {
+  if (tool !== "execute_command") return null;
+  const cmd = args.command as string | undefined;
+  if (!cmd) return null;
+  // Detect: executing a script that was written to .voidrift/cache/ this turn
+  const cacheScriptPattern = /\.voidrift\/cache\/[^\s]+\.(py|sh|js|ts)\b/;
+  const match = cmd.match(cacheScriptPattern);
+  if (!match) return null;
+  const scriptPath = match[0];
+  // Check if this script was written in the same turn
+  const wasWrittenThisTurn = ctx.callHistory.some(c => c.name === "write_file" && (c.args.path as string)?.includes(scriptPath));
+  if (!wasWrittenThisTurn) return null;
+  return {
+    postWarning: `⚠️ GUARDRAIL: You wrote and executed a generator script. If it fails due to string escaping issues, use write_file directly instead of embedding content in scripts.`,
+  };
+});
+
 // ─── ADVISORY: Repetitive tool pattern ───────────────────────────────────────
 
 register((tool, args, ctx) => {

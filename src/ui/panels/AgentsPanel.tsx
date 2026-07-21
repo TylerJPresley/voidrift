@@ -24,7 +24,7 @@ export function AgentsPanel({
   const [renaming, setRenaming] = useState(false);
   const [renameName, setRenameName] = useState("");
   const [, refresh] = useState(0);
-  const pages = ["core interactive", "core task", "custom interactive", "custom task"];
+  const pages = ["core interactive", "core passive", "custom interactive", "custom passive"];
 
   useEffect(() => {
     return core.events.subscribe("RESOURCE_CHANGED" as any, (e: any) => {
@@ -36,9 +36,9 @@ export function AgentsPanel({
     const all = core.agents.list().agents;
     switch (page) {
       case 0: return all.filter(a => a.type === "interactive" && a.source !== "custom");
-      case 1: return all.filter(a => a.type === "task" && a.source !== "custom");
+      case 1: return all.filter(a => a.type === "passive" && a.source !== "custom");
       case 2: return all.filter(a => a.type === "interactive" && a.source === "custom");
-      case 3: return all.filter(a => a.type === "task" && a.source === "custom");
+      case 3: return all.filter(a => a.type === "passive" && a.source === "custom");
       default: return [];
     }
   };
@@ -78,7 +78,7 @@ export function AgentsPanel({
         if (input === "w") { setCreateState({ step: "name", scope: "workspace" }); setMessage("Enter agent id (lower-case, hyphens only):"); }
       } else if (createState.step === "name") {
         if (key.return && createName.length > 0) {
-          const type = page === 2 ? "interactive" : "task";
+          const type = page === 2 ? "interactive" : "passive";
           const path = core.agents.create(createName, type as any, createState.scope as any);
           core.agents.reindex();
           setCreateState(null);

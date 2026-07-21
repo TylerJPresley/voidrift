@@ -79,6 +79,7 @@ export const ConfigSchema = z.object({
   turnsSuggestionThreshold: z.number().min(1).default(3).describe("Pattern repeats before trace analyzer suggests."),
   turnsShowThinking: z.boolean().default(false).describe("Show thinking chunks in conversation."),
   turnsShowReasoning: z.boolean().default(false).describe("Show reasoning chunks in conversation."),
+  turnsStallRecovery: z.boolean().optional().describe("Detect when model states intent without acting and nudge it to continue. Default true. Set false to disable."),
   // ─── tasks* — background execution ────────────────────────────────────────
   tasksMaxRunTurns: z.number().min(1).default(50).describe("Max turns in a /run autonomous loop."),
   tasksMaxConcurrent: z.number().min(1).default(1).describe("Max simultaneous background subagents."),

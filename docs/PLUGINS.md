@@ -418,8 +418,8 @@ interface AgentManifest {
   id: string;
   name: string;
   description: string;
-  type: "interactive" | "task";
-  role: "flash" | "utility" | "dense" | "auto" | string;
+  type: "interactive" | "passive";
+  role: "utility" | "escalation" | string;
   prompt: string;
   tools: string[];
   approvalMode: "prompt" | "deny" | "autonomous";
@@ -433,8 +433,8 @@ interface AgentManifest {
 
 | Field | Description |
 |-------|-------------|
-| `type` | `interactive` = user-facing mode, `task` = background delegation |
-| `role` | Which model to use (`auto` = router decides) |
+| `type` | `interactive` = user-facing mode, `passive` = background worker |
+| `role` | Model override: `utility`, `escalation`, or empty (uses modelSelected) |
 | `prompt` | Identity/persona prompt (WHO the agent is, not HOW it behaves) |
 | `tools` | Tools available to this agent |
 | `approvalMode` | `prompt` = ask for gated tools, `deny` = no writes, `autonomous` = no confirmation |

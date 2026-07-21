@@ -293,7 +293,7 @@ describe("AgentsPanel — data rendering", () => {
         list: () => ({ agents: [
           { id: "chat", name: "Chat", description: "General", type: "interactive", active: true, source: "core" },
           { id: "plan", name: "Plan", description: "Planning", type: "interactive", active: true, source: "core" },
-          { id: "indexer", name: "Indexer", description: "Index", type: "task", active: true, source: "core" },
+          { id: "indexer", name: "Indexer", description: "Index", type: "passive", active: true, source: "core" },
           { id: "custom-bot", name: "Custom Bot", description: "My bot", type: "interactive", active: true, source: "custom" },
         ] }),
       },
@@ -312,7 +312,7 @@ describe("AgentsPanel — data rendering", () => {
         ...createMockCore().agents,
         list: () => ({ agents: [
           { id: "chat", name: "Chat", type: "interactive", active: true, source: "core" },
-          { id: "my-task", name: "My Task", description: "Custom task", type: "task", active: false, source: "custom" },
+          { id: "my-task", name: "My Task", description: "Custom task", type: "passive", active: false, source: "custom" },
         ] }),
       },
     });

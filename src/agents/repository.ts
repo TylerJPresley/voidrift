@@ -148,7 +148,7 @@ export class FileSystemAgentRepository implements AgentRepository {
         id: raw.id || "",
         name: raw.name || raw.id || "",
         description: raw.description || "",
-        type: raw.type === "task" ? "task" : "interactive",
+        type: (raw.type === "passive" || raw.type === "task") ? "passive" : "interactive",
         role,
         prompt,
         tools: raw.tools || [],

@@ -792,26 +792,50 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
     }
   }
 
-  // Struggle signal: detect when model expresses intent to act but didn't call a tool
-  // Nudge the model to actually execute the tool instead of just announcing it.
-  if (finalResponse && finalResponse.toolCalls.length === 0 && finalResponse.text.trim()) {
-    const intentPatterns = /\b(let me (update|write|edit|create|fix|modify|change|add|remove|delete)|i('ll| will) (update|write|edit|create|fix|modify|change|add|remove|delete))\b/i;
-    if (intentPatterns.test(finalResponse.text)) {
-      bus?.publish("STRUGGLE_DETECTED", {
-        text: finalResponse.text.slice(0, 200),
-        expectedAction: "tool_call",
-      });
-      // Nudge: tell the model it must call the tool, not just say it will
-      currentMessages.push(new HumanMessage("You said you would take action, but no tool was called. Actually call the tool to do it — don't just describe what you'll do."));
-      const nudgeAbort = new AbortController();
-      const nudgeTimeoutMs = input.config?.networkModelRetryTimeoutMs ?? 30_000;
-      const nudgeTimer = setTimeout(() => nudgeAbort.abort(), nudgeTimeoutMs);
-      const nudgeResponse = await streamModel(input.client, mergeMessageRuns(currentMessages) as BaseMessage[], input.onChunk, nudgeAbort.signal);
-      clearTimeout(nudgeTimer);
-      // If the nudge produced tool calls, use that response instead
-      if (nudgeResponse.toolCalls.length > 0) {
-        finalResponse = nudgeResponse;
-      }
+  // Stall recovery: detect when model expresses intent to act but didn't call a tool
+  // Uses utility classifier instead of regex patterns for reliable detection.
+  if (finalResponse && finalResponse.toolCalls.length === 0 && finalResponse.text.trim() && input.config) {
+    const stallRecoveryEnabled = input.config.turnsStallRecovery !== false;
+    const responseText = finalResponse.text.trim();
+    // Only check short responses (< 500 chars) — long responses are likely real answers
+    if (stallRecoveryEnabled && responseText.length < 500 && !responseText.endsWith("?")) {
+      try {
+        const { createRoleAdapter: cra } = await import("../adapters/factory.js");
+        const { HumanMessage: HM, SystemMessage: SM } = await import("@langchain/core/messages");
+        const utilityClient = cra("utility", input.config).client;
+        const classifyResponse = await utilityClient.invoke([
+          new SM("Classify this assistant response. Did the assistant COMPLETE an action (answered a question, provided information, or executed tools), or did it only STATE INTENT to act without doing anything? Respond with exactly one word: COMPLETED or STALLED"),
+          new HM(`User: "${input.userMessage.slice(0, 100)}"\nAssistant: "${responseText.slice(0, 300)}"\nTools called: ${finalResponse.toolCalls.length}`),
+        ], { max_tokens: 5, temperature: 0 } as any);
+        const classification = typeof classifyResponse.content === "string" ? classifyResponse.content.trim().toUpperCase() : "";
+        if (classification.includes("STALLED")) {
+          bus?.publish("STRUGGLE_DETECTED", {
+            text: responseText.slice(0, 200),
+            expectedAction: "tool_call",
+          });
+          // Nudge: just tell it to act — don't mention escalation yet
+          const nudgeText = "[SYSTEM — not user input] Check your work — did you complete what you intended? If not, continue and finish. If you need to use a tool, call it now.";
+          currentMessages.push(new HumanMessage(nudgeText));
+          const nudgeAbort = new AbortController();
+          const nudgeTimeoutMs = input.config?.networkModelRetryTimeoutMs ?? 30_000;
+          const nudgeTimer = setTimeout(() => nudgeAbort.abort(), nudgeTimeoutMs);
+          const nudgeResponse = await streamModel(client, mergeMessageRuns(currentMessages) as BaseMessage[], input.onChunk, nudgeAbort.signal);
+          clearTimeout(nudgeTimer);
+          if (nudgeResponse.toolCalls.length > 0 || nudgeResponse.text.trim().length > responseText.length) {
+            finalResponse = nudgeResponse;
+          } else if (input.config.modelEscalation) {
+            // Nudge failed — model still didn't act. Now suggest escalation.
+            currentMessages.push(new HumanMessage("[SYSTEM — not user input] You still haven't taken action. If this task exceeds your capacity, call escalate. Otherwise, call the tool now."));
+            const escAbort = new AbortController();
+            const escTimer = setTimeout(() => escAbort.abort(), nudgeTimeoutMs);
+            const escResponse = await streamModel(client, mergeMessageRuns(currentMessages) as BaseMessage[], input.onChunk, escAbort.signal);
+            clearTimeout(escTimer);
+            if (escResponse.toolCalls.length > 0 || escResponse.text.trim().length > responseText.length) {
+              finalResponse = escResponse;
+            }
+          }
+        }
+      } catch {}
     }
   }
 

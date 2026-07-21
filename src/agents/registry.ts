@@ -11,7 +11,7 @@
 import { join, dirname } from "path";
 import type { AgentRepository } from "./repository.js";
 
-export type AgentType = "interactive" | "task";
+export type AgentType = "interactive" | "passive";
 export type ApprovalMode = "prompt" | "deny" | "autonomous";
 // Re-export for external consumers
 export type { ApprovalMode as AgentApprovalMode };
@@ -173,7 +173,7 @@ const CORE_AGENTS: AgentManifest[] = [
     id: "indexer",
     name: "Indexer",
     description: "Codebase indexer and search model",
-    type: "task",
+    type: "passive",
     role: "utility",
     prompt: PROMPT_INDEXER,
     tools: READ_TOOLS,
@@ -186,7 +186,7 @@ const CORE_AGENTS: AgentManifest[] = [
     id: "summarizer",
     name: "Summarizer",
     description: "Summarizes content — web pages, files, or any text block",
-    type: "task",
+    type: "passive",
     role: "utility",
     prompt: PROMPT_SUMMARIZER,
     tools: READ_TOOLS,
@@ -267,15 +267,15 @@ export class AgentRegistry {
   }
 
   /** List task agents. Alphabetical. */
-  listTask(): AgentManifest[] {
+  listPassive(): AgentManifest[] {
     return Array.from(this.agents.values())
-      .filter(a => a.type === "task")
+      .filter(a => a.type === "passive")
       .sort((a, b) => a.name.localeCompare(b.name));
   }
 
   /** List active task agents (available as tools). */
-  listActiveTask(): AgentManifest[] {
-    return this.listTask().filter(a => a.active !== false);
+  listActivePassive(): AgentManifest[] {
+    return this.listPassive().filter(a => a.active !== false);
   }
 
   /** Get the active interactive agent. */

@@ -11,7 +11,7 @@ describe("AgentRegistry (in-memory)", () => {
   it("starts with core agents", () => {
     const reg = create();
     expect(reg.listInteractive().length).toBeGreaterThanOrEqual(3); // chat, plan, vibe
-    expect(reg.listTask().length).toBeGreaterThanOrEqual(2); // indexer, summarizer
+    expect(reg.listPassive().length).toBeGreaterThanOrEqual(2); // indexer, summarizer
   });
 
   it("chat is the default active agent", () => {
@@ -78,7 +78,7 @@ describe("AgentRegistry (in-memory)", () => {
       id: "discovered",
       name: "Discovered",
       description: "From disk",
-      type: "task",
+      type: "passive",
       role: "utility",
       prompt: "Do tasks.",
       tools: ["read_file", "write_file"],

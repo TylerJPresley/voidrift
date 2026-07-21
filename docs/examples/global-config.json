@@ -139,8 +139,8 @@
   "contextLookbackTurns": 3,
   "maxConcurrentAgents": 3,
   "toolLoopReminderInterval": 0,
-  "modelTierFlash": "spark-flash",
-  "modelTierUtility": "spark-utility",
-  "modelTierDense": "spark-dense",
-  "modelSelected": "auto"
+  "modelSelected": "spark-flash",
+  "modelUtility": "spark-utility",
+  "modelEscalation": "spark-dense",
+  
 }

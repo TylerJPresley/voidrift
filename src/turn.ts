@@ -37,7 +37,7 @@ export async function executeTurn(engine: EngineContext, userMessage: string, ca
 
   // ─── Inline: Model resolution ─────────────────────────────────────────
   let tier: ModelRole | string;
-  if (engine.agents.active.type === "task") {
+  if (engine.agents.active.type === "passive") {
     // Task agents: role overrides model selection
     const role = engine.agents.active.role;
     if (role === "utility") tier = "utility";

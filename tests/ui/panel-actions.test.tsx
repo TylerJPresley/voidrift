@@ -352,7 +352,7 @@ describe("AgentsPanel — actions per agent", () => {
     expect(createFn).toHaveBeenCalledWith("new-agent", "interactive", "workspace");
 
     createFn.mockClear();
-    core.agents.create("new-task", "task", "global");
-    expect(createFn).toHaveBeenCalledWith("new-task", "task", "global");
+    core.agents.create("new-task", "passive", "global");
+    expect(createFn).toHaveBeenCalledWith("new-task", "passive", "global");
   });
 });

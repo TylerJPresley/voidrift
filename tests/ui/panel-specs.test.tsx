@@ -481,7 +481,7 @@ describe("HelpPanel spec", () => {
 
 // ─── AgentsPanel Spec ────────────────────────────────────────────────────────
 // Intent: Browse and manage agents across 4 categories.
-// - 4 pages: core interactive, core task, custom interactive, custom task
+// - 4 pages: core interactive, core passive, custom interactive, custom passive
 // - Core pages: show built-in agents, enter opens detail with override cascade
 // - Custom pages: show user agents, c=create, r=rename, del=delete, a=toggle active
 // - Detail for core: shows Default/Global/Workspace override levels for config + prompt
@@ -494,9 +494,9 @@ describe("AgentsPanel spec", () => {
     const { lastFrame } = render(<AgentsPanel core={core as any} onClose={() => {}} />);
     const frame = lastFrame()!;
     expect(frame).toContain("core interactive");
-    expect(frame).toContain("core task");
+    expect(frame).toContain("core passive");
     expect(frame).toContain("custom interactive");
-    expect(frame).toContain("custom task");
+    expect(frame).toContain("custom passive");
   });
 
   it("core page shows only core agents", async () => {
@@ -522,7 +522,7 @@ describe("AgentsPanel spec", () => {
     const { AgentsPanel } = await import("../../src/ui/panels/AgentsPanel.js");
     const core = createMockCore();
     const { lastFrame, stdin } = render(<AgentsPanel core={core as any} onClose={() => {}} />);
-    stdin.write("\x1B[C"); await delay(); // core task
+    stdin.write("\x1B[C"); await delay(); // core passive
     stdin.write("\x1B[C"); await delay(); // custom interactive
     const frame = lastFrame()!;
     expect(frame).toContain("create");

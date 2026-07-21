@@ -107,7 +107,7 @@ export interface AgentDTO {
   id: string;
   name: string;
   description: string;
-  type: "interactive" | "task";
+  type: "interactive" | "passive";
   role: string;
   tools: string[];
   approvalMode: "prompt" | "deny" | "autonomous";
@@ -132,7 +132,7 @@ export const CreateAgentInputSchema = z.object({
   id: z.string().min(1).regex(/^[a-z0-9-]+$/),
   name: z.string().min(1),
   description: z.string(),
-  type: z.enum(["interactive", "task"]),
+  type: z.enum(["interactive", "passive"]),
   role: z.string().default("auto"),
   prompt: z.string(),
   tools: z.array(z.string()),

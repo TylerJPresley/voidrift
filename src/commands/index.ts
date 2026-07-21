@@ -197,7 +197,7 @@ export function registerCommands(registry: CoreRegistry, deps: CommandDeps): voi
 
     if (args[0] === "create" && args[1]) {
       const id = args[1];
-      const type = args[2] === "task" ? "task" : "interactive";
+      const type = args[2] === "passive" ? "passive" : "interactive";
       const scope = args[3] === "global" ? "global" : "workspace";
       const path = deps.agents.createAgent(id, type as any, deps.workspaceRoot, scope as any);
       deps.agents.discover(deps.workspaceRoot);
@@ -224,7 +224,7 @@ export function registerCommands(registry: CoreRegistry, deps: CommandDeps): voi
       deps.output(`Agent "${oldId}" not found.`);
       return;
     }
-    deps.output("Usage: /agents | /agents create <id> [task] [global] | /agents rename <old> <new>");
+    deps.output("Usage: /agents | /agents create <id> [passive] [global] | /agents rename <old> <new>");
   }});
   registry.registerSlashCommand({ name: "mcp", description: "MCP server manager", execute: async () => deps.openPanel("mcp") });
 

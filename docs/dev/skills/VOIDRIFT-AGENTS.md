@@ -24,7 +24,7 @@ Each agent is defined by `agent.json` with these fields:
 | `id` | Unique identifier | Resolves agent references across the system |
 | `name` | Display name | Shown in UI panels and agent selection |
 | `description` | One-line summary | Used in discovery and agent panel tooltips |
-| `type` | `interactive` or `task` | Determines model tier, approval mode, and invocation method |
+| `type` | `interactive` or `passive` | Determines approval mode and invocation method |
 | `role` | `flash`, `utility`, or `dense` | Controls cost vs capability tradeoff |
 | `tools` | List of tool names | What the agent can call (auto-approved) |
 | `allowedTools` | List of auto-approved tools | Tools that bypass the permission gate |
@@ -65,6 +65,6 @@ This allows users to customize any core agent without modifying source code.
 - Custom agents live in `<scope>/agents/<id>/agent.json` + `prompt.md`.
 - `ALL_TOOLS` is the master list. Every tool the system knows about is here.
 - `READ_TOOLS` defines the auto-approved subset for read-only agents (plan mode).
-- `role: "auto"` means the router decides. Interactive → flash, task → utility.
+- `role: ""` (empty) uses modelSelected. `role: "utility"` uses modelUtility. `role: "escalation"` uses modelEscalation.
 - `approvalMode`: `prompt` = ask user, `deny` = only explicit allow rules, `autonomous` = no gate.
 - `allowedTools` on an agent = auto-approved through the permission gate without asking.

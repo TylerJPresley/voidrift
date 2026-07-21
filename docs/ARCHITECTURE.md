@@ -161,7 +161,7 @@ This prevents token waste from circular failure patterns (edit_file cycling, rep
 - **Custom agents:** Discovered from `.voidrift/agents/` with JSON manifest + prompt.md
 - **Resolution cascade:** workspace override → global override → plugin → core default
 
-**Model tiers:** flash (user-facing chat + subagent execution), utility (internal preflight classifiers, summarization, harness operations), dense (escalation for complex reasoning). Agents declare their tier or use "auto" for router decisions.
+**Model roles:** selected (user-facing chat), utility (internal preflight classifiers, summarization, harness operations), escalation (complex reasoning when the primary model is stuck). Agents declare a role override or default to the selected model.
 
 ---
 
@@ -214,7 +214,7 @@ This prevents token waste from circular failure patterns (edit_file cycling, rep
 **How:**
 - **Factory** (`factory.ts`): Creates `BaseChatModel` instances from config. Supports OpenAI, Anthropic, Google protocols.
 - **Streaming** (`stream.ts`): Universal `.stream()` method with chunk accumulation for tool call assembly.
-- **Three tiers:** flash (chat + subagents), utility (preflight + internal ops), dense (escalation). Fallback chain: if primary fails, try next tier automatically.
+- **Three model roles:** selected (chat + subagents), utility (preflight + internal ops), escalation (complex reasoning). Fallback chain: if primary fails 2x, auto-escalate.
 
 ---
 

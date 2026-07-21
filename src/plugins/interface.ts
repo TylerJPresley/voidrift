@@ -315,7 +315,7 @@ export class CoreAPI {
   get agents() {
     return {
       list: (): AgentListResult => {
-        const all = [...this.engine.agents.listInteractive(), ...this.engine.agents.listTask()];
+        const all = [...this.engine.agents.listInteractive(), ...this.engine.agents.listPassive()];
         const activeId = this.engine.agents.active.id;
         return { agents: all.map((a): AgentDTO => {
           const globalDir = join(homedir(), ".config", "voidrift", "agents", a.id);
@@ -342,7 +342,7 @@ export class CoreAPI {
         });
       },
       cycle: (): AgentGetResult => { this.engine.agents.cycle(); return this.agents.get(this.engine.agents.active.id); },
-      create: (id: string, type: "interactive" | "task", scope: "workspace" | "global" = "workspace") => this.engine.agents.createAgent(id, type, this.workspaceRoot, scope),
+      create: (id: string, type: "interactive" | "passive", scope: "workspace" | "global" = "workspace") => this.engine.agents.createAgent(id, type, this.workspaceRoot, scope),
       deactivate: (id: string) => { this.engine.agents.deactivate(id, this.workspaceRoot); },
       deleteOverride: (id: string, scope: "workspace" | "global") => { this.engine.agents.deleteOverride(id, scope, this.workspaceRoot); },
       reindex: () => { this.engine.agents.discover(this.workspaceRoot); },

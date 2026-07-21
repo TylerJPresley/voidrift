@@ -23,7 +23,7 @@ export function validateAssets(agents: AgentRegistry, skills: SkillManager): Val
   // Get all known agent ids
   const allAgentIds = [
     ...agents.listInteractive().map(a => a.id),
-    ...agents.listTask().map(a => a.id),
+    ...agents.listPassive().map(a => a.id),
   ];
 
   // Validate skills
@@ -66,7 +66,7 @@ export function validateAssets(agents: AgentRegistry, skills: SkillManager): Val
 
   // Validate agent resource references
   const allSkillNames = skills.indexedSkills.map(s => s.name);
-  for (const agent of [...agents.listInteractive(), ...agents.listTask()]) {
+  for (const agent of [...agents.listInteractive(), ...agents.listPassive()]) {
     if (agent.skills?.length) {
       for (const skillName of agent.skills) {
         if (!allSkillNames.includes(skillName)) {

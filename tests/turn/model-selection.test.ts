@@ -13,7 +13,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // Minimal mock for turn resolution logic (mirrors turn.ts logic)
 function resolveTurnModel(agent: { type: string; role: string; autoEscalated?: boolean }, config: { modelSelected: string; modelEscalation?: string; modelUtility?: string }) {
   let tier: string;
-  if (agent.type === "task") {
+  if (agent.type === "passive") {
     if (agent.role === "utility") tier = "utility";
     else if (agent.role === "escalation") tier = "escalation";
     else tier = (config as any).modelBackground || config.modelSelected;
@@ -44,25 +44,25 @@ describe("Model Selection — Turn Resolution", () => {
   });
 
   it("task agent with utility role resolves to utility", () => {
-    const agent = { type: "task", role: "utility" };
+    const agent = { type: "passive", role: "utility" };
     const config = { modelSelected: "claude-sonnet" };
     expect(resolveTurnModel(agent, config)).toBe("utility");
   });
 
   it("task agent with empty role uses modelSelected", () => {
-    const agent = { type: "task", role: "" };
+    const agent = { type: "passive", role: "" };
     const config = { modelSelected: "claude-sonnet" };
     expect(resolveTurnModel(agent, config)).toBe("claude-sonnet");
   });
 
   it("task agent with no role uses modelSelected", () => {
-    const agent = { type: "task", role: "" };
+    const agent = { type: "passive", role: "" };
     const config = { modelSelected: "local" };
     expect(resolveTurnModel(agent, config)).toBe("local");
   });
 
   it("task agent ignores config.modelSelected", () => {
-    const agent = { type: "task", role: "utility" };
+    const agent = { type: "passive", role: "utility" };
     const config = { modelSelected: "claude-opus" };
     expect(resolveTurnModel(agent, config)).toBe("utility");
   });
