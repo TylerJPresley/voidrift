@@ -793,7 +793,7 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
   }
 
   // Struggle signal: detect when model expresses intent to act but didn't call a tool
-  // This indicates a missing tool, wrong binding, or model self-censoring — a harness bug.
+  // Nudge the model to actually execute the tool instead of just announcing it.
   if (finalResponse && finalResponse.toolCalls.length === 0 && finalResponse.text.trim()) {
     const intentPatterns = /\b(let me (update|write|edit|create|fix|modify|change|add|remove|delete)|i('ll| will) (update|write|edit|create|fix|modify|change|add|remove|delete))\b/i;
     if (intentPatterns.test(finalResponse.text)) {
@@ -801,6 +801,17 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
         text: finalResponse.text.slice(0, 200),
         expectedAction: "tool_call",
       });
+      // Nudge: tell the model it must call the tool, not just say it will
+      currentMessages.push(new HumanMessage("You said you would take action, but no tool was called. Actually call the tool to do it — don't just describe what you'll do."));
+      const nudgeAbort = new AbortController();
+      const nudgeTimeoutMs = input.config?.networkModelRetryTimeoutMs ?? 30_000;
+      const nudgeTimer = setTimeout(() => nudgeAbort.abort(), nudgeTimeoutMs);
+      const nudgeResponse = await streamModel(input.client, mergeMessageRuns(currentMessages) as BaseMessage[], input.onChunk, nudgeAbort.signal);
+      clearTimeout(nudgeTimer);
+      // If the nudge produced tool calls, use that response instead
+      if (nudgeResponse.toolCalls.length > 0) {
+        finalResponse = nudgeResponse;
+      }
     }
   }
 
