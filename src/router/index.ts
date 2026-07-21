@@ -1,5 +1,5 @@
-import type { ResolvedModel, Tier } from "../adapters/factory.js";
-import { createTierAdapter } from "../adapters/factory.js";
+import type { ResolvedModel, ModelRole } from "../adapters/factory.js";
+import { createRoleAdapter } from "../adapters/factory.js";
 import type { VoidRiftConfig } from "../config/loader.js";
 
 export type EscalationCode = "CONTEXT_OVERFLOW" | "REPEATED_AUDIT_FAILURE" | "API_EXCEPTION" | "MANUAL_ESCALATION";
@@ -7,8 +7,8 @@ export type EscalationCode = "CONTEXT_OVERFLOW" | "REPEATED_AUDIT_FAILURE" | "AP
 export interface EscalationState {
   escalationId: string;
   timestamp: number;
-  sourceTier: Tier;
-  targetTier: Tier;
+  sourceRole: ModelRole;
+  targetRole: ModelRole;
   triggerReason: {
     code: EscalationCode;
     message: string;
@@ -26,15 +26,15 @@ export interface EscalationState {
   };
 }
 
-const TIER_ORDER: Tier[] = ["flash", "utility", "dense"];
+const ROLE_ORDER: ModelRole[] = ["selected", "utility", "escalation"];
 const CONTEXT_THRESHOLD = 0.85;
 const MAX_CONSECUTIVE_FAILURES = 2;
 
 /** Escalation: promotes to the next higher tier. */
-export function escalateTier(currentTier: Tier): Tier | null {
-  const idx = TIER_ORDER.indexOf(currentTier);
-  if (idx >= TIER_ORDER.length - 1) return null;
-  return TIER_ORDER[idx + 1];
+export function escalateRole(currentRole: ModelRole): ModelRole | null {
+  const idx = ROLE_ORDER.indexOf(currentRole);
+  if (idx >= ROLE_ORDER.length - 1) return null;
+  return ROLE_ORDER[idx + 1];
 }
 
 /** Pre-turn analysis: determines if escalation should trigger. */
@@ -46,8 +46,8 @@ export function shouldEscalate(tokenCount: number, contextLimit: number, consecu
 
 /** Builds the full EscalationState snapshot for tier transition. */
 export function buildEscalationState(
-  sourceTier: Tier,
-  targetTier: Tier,
+  sourceRole: ModelRole,
+  targetRole: ModelRole,
   code: EscalationCode,
   message: string,
   originalNode: string,
@@ -57,8 +57,8 @@ export function buildEscalationState(
   return {
     escalationId: `esc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     timestamp: Date.now(),
-    sourceTier,
-    targetTier,
+    sourceRole,
+    targetRole,
     triggerReason: { code, message, metrics },
     originalNode,
     sessionState,
@@ -67,11 +67,11 @@ export function buildEscalationState(
 
 /** Generates the system instruction injected on escalation. */
 export function escalationNotice(state: EscalationState): string {
-  return `[SYSTEM ESCALATION NOTICE]: Execution transitioned from ${state.sourceTier} to ${state.targetTier} due to ${state.triggerReason.code}. Please resume work smoothly.`;
+  return `[SYSTEM ESCALATION NOTICE]: Execution transitioned from ${state.sourceRole} to ${state.targetRole} due to ${state.triggerReason.code}. Please resume work smoothly.`;
 }
 
-export function resolveEscalation(currentTier: Tier, config: VoidRiftConfig): ResolvedModel | null {
-  const next = escalateTier(currentTier);
+export function resolveEscalation(currentRole: ModelRole, config: VoidRiftConfig): ResolvedModel | null {
+  const next = escalateRole(currentRole);
   if (!next) return null;
-  return createTierAdapter(next, config);
+  return createRoleAdapter(next, config);
 }

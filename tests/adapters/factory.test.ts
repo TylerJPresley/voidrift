@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { createAdapter, createTierAdapter } from "../../src/adapters/factory.js";
+import { createAdapter, createRoleAdapter } from "../../src/adapters/factory.js";
 import type { VoidRiftConfig } from "../../src/config/loader.js";
 
 const TEST_CONFIG: VoidRiftConfig = {
-  modelTierFlash: "local-qwen", modelTierUtility: "claude-sonnet", modelTierDense: "claude-opus",
+  modelSelected: "local-qwen", modelUtility: "claude-sonnet", modelEscalation: "claude-opus",
   models: {
     "local-qwen": {
       protocol: "openai",
@@ -122,21 +122,21 @@ describe("Adapter Factory", () => {
     });
   });
 
-  describe("Tier resolution", () => {
+  describe("ModelRole resolution", () => {
     it("flash tier resolves to local-qwen", () => {
-      const resolved = createTierAdapter("flash", TEST_CONFIG);
+      const resolved = createRoleAdapter("selected", TEST_CONFIG);
       expect(resolved.name).toBe("local-qwen");
       expect(resolved.config.protocol).toBe("openai");
     });
 
     it("utility tier resolves to claude-sonnet", () => {
-      const resolved = createTierAdapter("utility", TEST_CONFIG);
+      const resolved = createRoleAdapter("utility", TEST_CONFIG);
       expect(resolved.name).toBe("claude-sonnet");
       expect(resolved.config.protocol).toBe("anthropic");
     });
 
     it("dense tier resolves to claude-opus", () => {
-      const resolved = createTierAdapter("dense", TEST_CONFIG);
+      const resolved = createRoleAdapter("escalation", TEST_CONFIG);
       expect(resolved.name).toBe("claude-opus");
       expect(resolved.config.protocol).toBe("anthropic");
     });

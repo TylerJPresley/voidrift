@@ -301,29 +301,11 @@ describe("PlanPanel spec", () => {
 // - Active model/tier shown with ✓
 
 describe("ModelPanel spec", () => {
-  it("shows auto option", async () => {
-    const { ModelPanel } = await import("../../src/ui/panels/ModelPanel.js");
-    const core = createMockCore();
-    const { lastFrame } = render(<ModelPanel core={core as any} onClose={() => {}} />);
-    expect(lastFrame()!).toContain("auto");
-  });
-
   it("shows configured models", async () => {
     const { ModelPanel } = await import("../../src/ui/panels/ModelPanel.js");
     const core = createMockCore();
     const { lastFrame } = render(<ModelPanel core={core as any} onClose={() => {}} />);
     expect(lastFrame()!).toContain("local");
-  });
-
-  it("enter on auto switches to auto and closes", async () => {
-    const { ModelPanel } = await import("../../src/ui/panels/ModelPanel.js");
-    const switchFn = vi.fn();
-    const onClose = vi.fn();
-    const core = createMockCore({ models: { ...createMockCore().models, switch: switchFn } });
-    const { stdin } = render(<ModelPanel core={core as any} onClose={onClose} />);
-    stdin.write("\r"); await delay();
-    expect(switchFn).toHaveBeenCalledWith({ name: "auto", tier: undefined });
-    expect(onClose).toHaveBeenCalled();
   });
 
   it("enter on a model selects it and closes", async () => {
@@ -332,19 +314,18 @@ describe("ModelPanel spec", () => {
     const onClose = vi.fn();
     const core = createMockCore({ models: { ...createMockCore().models, switch: switchFn } });
     const { stdin } = render(<ModelPanel core={core as any} onClose={onClose} />);
-    stdin.write("\x1B[B"); await delay(); // down to "local"
     stdin.write("\r"); await delay();
     expect(switchFn).toHaveBeenCalledWith({ name: "local", tier: undefined });
+    expect(onClose).toHaveBeenCalled();
   });
 
-  it("footer shows tier assignment keys (f/u/d)", async () => {
+  it("footer shows role assignment keys (e/u)", async () => {
     const { ModelPanel } = await import("../../src/ui/panels/ModelPanel.js");
     const core = createMockCore();
     const { lastFrame } = render(<ModelPanel core={core as any} onClose={() => {}} />);
     const frame = lastFrame()!;
-    expect(frame).toContain("Flash");
+    expect(frame).toContain("Escalation");
     expect(frame).toContain("Utility");
-    expect(frame).toContain("Dense");
   });
 });
 

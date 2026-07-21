@@ -36,25 +36,12 @@ export function safeConfigWrite(
   const copy = JSON.parse(JSON.stringify(config));
   mutate(copy);
 
-  // Validate — always check tier-model references if tiers exist
-  if (copy.modelTierFlash && copy.models) {
+  // Validate — check model references if models block exists
+  if (copy.modelSelected && copy.models) {
     const validation = ConfigSchema.safeParse(copy);
     if (!validation.success) {
       const issues = validation.error.issues.map(i => `${i.path.join(".")}: ${i.message}`).join("; ");
       return { success: false, error: `Validation failed: ${issues}` };
-    }
-  } else if (copy.modelTierFlash) {
-    // Partial config with tiers but no models — load global to check references
-    const globalPath = join(homedir(), ".config", "voidrift", "config.json");
-    let globalModels: Record<string, unknown> = {};
-    if (existsSync(globalPath)) {
-      try { globalModels = JSON.parse(readFileSync(globalPath, "utf-8")).models || {}; } catch {}
-    }
-    const models = { ...globalModels, ...(copy.models || {}) };
-    for (const [tier, modelName] of Object.entries({ flash: copy.modelTierFlash, utility: copy.modelTierUtility, dense: copy.modelTierDense })) {
-      if (typeof modelName === "string" && !models[modelName]) {
-        return { success: false, error: `Tier "${tier}" references model "${modelName}" which doesn't exist` };
-      }
     }
   }
 

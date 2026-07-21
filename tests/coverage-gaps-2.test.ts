@@ -96,17 +96,17 @@ describe("config/writer — safeConfigWrite", () => {
     const dir = join(tmpdir(), `voidrift-writer-test-${Date.now()}`);
     (mkdirSync as any)(dir, { recursive: true });
     const path = join(dir, "config.json");
-    const validConfig = { modelTierFlash: "local", modelTierUtility: "local", modelTierDense: "local", models: { local: { protocol: "openai", model: "test", baseUrl: "http://localhost", contextLimit: 32768 } } };
+    const validConfig = { modelSelected: "local", modelUtility: "local", modelEscalation: "local", models: { local: { protocol: "openai", model: "test", baseUrl: "http://localhost", contextLimit: 32768 } } };
     (writeFileSync as any)(path, JSON.stringify(validConfig, null, 2));
 
     // Try to set a tier to a nonexistent model
-    const result = safeConfigWrite(path, (cfg: any) => { cfg.modelTierFlash = "nonexistent"; });
+    const result = safeConfigWrite(path, (cfg: any) => { cfg.modelSelected = "nonexistent"; });
     expect(result.success).toBe(false);
-    expect(result.error).toContain("tier");
+    expect(result.error).toContain("Model fields");
 
     // Config should be unchanged
     const content = JSON.parse((readFileSync as any)(path, "utf-8"));
-    expect(content.modelTierFlash).toBe("local");
+    expect(content.modelSelected).toBe("local");
 
     // Cleanup
     const { rmSync } = await import("fs");

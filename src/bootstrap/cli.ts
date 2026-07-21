@@ -83,9 +83,9 @@ export async function createEngine(): Promise<EngineContext> {
 
   // Wire MCP sampling handler
   mcp.setSamplingHandler(async (messages: Array<{ role: string; content: string }>, options?: { maxTokens?: number; temperature?: number }) => {
-    const { createTierAdapter } = await import("../adapters/factory.js");
+    const { createRoleAdapter } = await import("../adapters/factory.js");
     const { HumanMessage: HM, SystemMessage: SM, AIMessage: AM } = await import("@langchain/core/messages");
-    const adapter = createTierAdapter("utility", container.config);
+    const adapter = createRoleAdapter("utility", container.config);
     const lcMessages = messages.map((m: { role: string; content: string }) => {
       if (m.role === "system") return new SM(m.content);
       if (m.role === "assistant") return new AM(m.content);
@@ -167,7 +167,7 @@ export async function createEngine(): Promise<EngineContext> {
   const { compileOnDemandTOC } = await import("../orchestration/tool-binding.js");
   const mcpToolSummary = mcp.connected.map(s => ({ name: s.name, tools: s.tools.map(t => ({ name: t.name, description: t.description })) }));
   context.context.agent.onDemandToolTOC = compileOnDemandTOC(activeAgent.tools, mcpToolSummary.length ? mcpToolSummary : undefined);
-  const flashModel = container.config.models[container.config.modelTierFlash];
+  const flashModel = container.config.models[container.config.modelSelected];
   const inputBudget = (flashModel?.contextLimit ?? 128000) - (flashModel?.maxOutputTokens ?? 4096);
   const budget = new TokenBudgetWatcher(inputBudget);
   const brain = new SessionBrain(workspaceRoot, sessionId, container.bus, new (await import("../session/session-repository.js")).FileSystemSessionRepository(workspaceRoot));
@@ -307,29 +307,22 @@ export async function createEngine(): Promise<EngineContext> {
   // 2. Escalation check — handle model-requested and automatic escalation
   container.bus.subscribe("TURN_AFTER", async (event) => {
     const toolNames = event.payload.toolsUsed;
-    if (toolNames.includes("escalate") && container.config.modelSelected !== "dense") {
-      const from = container.config.modelSelected;
-      container.config.modelSelected = "dense";
+    if (toolNames.includes("escalate") && container.config.modelEscalation) {
+      // Mid-turn escalation already swapped the client in graph.ts.
+      // Just emit the event for UI/logging.
       agents.active.autoEscalated = false;
-      container.bus.publish("MODEL_ESCALATED", { from, to: "dense", reason: "model-requested", auto: false });
+      container.bus.publish("MODEL_ESCALATED", { from: container.config.modelSelected, to: container.config.modelEscalation, reason: "model-requested", auto: false });
     } else if (toolNames.includes("deescalate")) {
-      const from = container.config.modelSelected;
-      container.config.modelSelected = "auto";
       agents.active.autoEscalated = false;
-      container.bus.publish("MODEL_DEESCALATED", { from, to: "auto" });
-    } else if (container.config.modelSelected === "auto") {
-      // Automatic escalation: context overflow (only when on auto)
-      const tier = agents.active.type === "task" ? "utility" : "flash";
-      const modelConfig = container.config.models[tier === "flash" ? container.config.modelTierFlash : tier === "utility" ? container.config.modelTierUtility : container.config.modelTierDense];
+      container.bus.publish("MODEL_DEESCALATED", { from: container.config.modelEscalation || container.config.modelSelected, to: container.config.modelSelected });
+    } else if (container.config.modelEscalation) {
+      // Automatic escalation: context overflow (only when escalation is configured)
+      const modelConfig = container.config.models[container.config.modelSelected];
       const contextLimit = modelConfig?.contextLimit ?? 32768;
-      const { shouldEscalate, escalateTier } = await import("../router/index.js");
+      const { shouldEscalate, escalateRole } = await import("../router/index.js");
       if (shouldEscalate(budget.state.used, contextLimit, 0)) {
-        const next = escalateTier(tier as any);
-        if (next) {
-          container.config.modelSelected = next;
-          agents.active.autoEscalated = true;
-          container.bus.publish("MODEL_ESCALATED", { from: tier, to: next, reason: "context-overflow", auto: true });
-        }
+        agents.active.autoEscalated = true;
+        container.bus.publish("MODEL_ESCALATED", { from: container.config.modelSelected, to: container.config.modelEscalation, reason: "context-overflow", auto: true });
       }
     }
   }, { priority: "high" });
@@ -349,7 +342,7 @@ export async function createEngine(): Promise<EngineContext> {
 
   // 4. Context summary — fire-and-forget, generates one-sentence recap for next turn's preflight
   container.bus.subscribe("TURN_AFTER", async (event) => {
-    const { createTierAdapter: cta } = await import("../adapters/factory.js");
+    const { createRoleAdapter: cta } = await import("../adapters/factory.js");
     const summaryClient = cta("utility", container.config).client;
     const userSlice = event.payload.userMessage.slice(0, 150);
     const assistantSlice = event.payload.responseText.slice(0, 300);
@@ -388,7 +381,7 @@ export async function createEngine(): Promise<EngineContext> {
       if (planFeedbackLevel === 1 && sessionErrors === 0) return;
       // Synthesize a learning from the completed plan
       try {
-        const { createTierAdapter: cta } = await import("../adapters/factory.js");
+        const { createRoleAdapter: cta } = await import("../adapters/factory.js");
         const client = cta("utility", container.config).client;
         const planName = (e.payload as any).name || "unknown";
         const errorCount = sessionErrors;

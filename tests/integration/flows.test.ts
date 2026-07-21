@@ -7,7 +7,7 @@ import { directChat } from "../../src/orchestration/graph.js";
 import { ralphLoop } from "../../src/orchestration/run.js";
 import { GitCheckpointer } from "../../src/safeguards/checkpoint.js";
 import { routeMCPToolCall, isMCPTool } from "../../src/mcp/router.js";
-import { buildEscalationState, shouldEscalate, escalateTier } from "../../src/router/index.js";
+import { buildEscalationState, shouldEscalate, escalateRole } from "../../src/router/index.js";
 import { CoreAPI } from "../../src/plugins/interface.js";
 import { CoreRegistry } from "../../src/registry/core.js";
 import { WorktreeEngine } from "../../src/worktree/engine.js";
@@ -83,11 +83,11 @@ describe("Integration: Escalation", () => {
   });
 
   it("builds EscalationState with full schema", () => {
-    const state = buildEscalationState("flash", "utility", "CONTEXT_OVERFLOW", "Exceeded 85%", "engineer", { activePlan: "Step 1", focusedFiles: ["a.ts"], messagesSnapshot: [] }, { tokenCount: 28000, limit: 32768 });
-    expect(state.sourceTier).toBe("flash");
-    expect(state.targetTier).toBe("utility");
+    const state = buildEscalationState("selected", "utility", "CONTEXT_OVERFLOW", "Exceeded 85%", "engineer", { activePlan: "Step 1", focusedFiles: ["a.ts"], messagesSnapshot: [] }, { tokenCount: 28000, limit: 32768 });
+    expect(state.sourceRole).toBe("selected");
+    expect(state.targetRole).toBe("utility");
     expect(state.triggerReason.code).toBe("CONTEXT_OVERFLOW");
-    expect(escalateTier("flash")).toBe("utility");
+    expect(escalateRole("selected")).toBe("utility");
   });
 });
 

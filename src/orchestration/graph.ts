@@ -15,9 +15,9 @@ import { summarizeFileWithFlash } from "../codemap/summarizer.js";
 import { IndexCache } from "../codemap/cache.js";
 import type { ContextManager } from "../session/context.js";
 import type { VoidRiftConfig } from "../config/loader.js";
-import type { Tier } from "../adapters/factory.js";
+import type { ModelRole } from "../adapters/factory.js";
 import { mergeMessageRuns } from "@langchain/core/messages";
-import { createTierAdapter } from "../adapters/factory.js";
+import { createRoleAdapter } from "../adapters/factory.js";
 import { getTierModel } from "../config/loader.js";
 
 // Module-level state — set by the harness on bootstrap
@@ -90,7 +90,7 @@ export interface OrchestrationInput {
   signal?: AbortSignal;
   context?: ContextManager;
   config?: VoidRiftConfig;
-  tier?: Tier;
+  tier?: ModelRole;
   agent?: AgentManifest;
   mcp?: import("../mcp/engine.js").MCPEngine;
   workspaceRoot?: string;
@@ -145,14 +145,14 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
     const toolTOC = compileToolTOC(allAgentTools, mcpServers);
 
     // LLM-guided selection: flash model picks specific tools from the TOC
-    const { createTierAdapter } = await import("../adapters/factory.js");
+    const { createRoleAdapter } = await import("../adapters/factory.js");
     const preflightStart = Date.now();
     const activeModelKey = input.tier ? getTierModel(input.config!, input.tier as any) : (input.config?.modelSelected !== "auto" ? input.config?.modelSelected : null);
     const skipPreflight = input.config?.turnsPreflight !== undefined
       ? !input.config.turnsPreflight
       : !(activeModelKey && input.config?.models[activeModelKey]?.preflight === true);
     let selected = (!skipPreflight && input.config)
-      ? await selectTools(createTierAdapter("utility", input.config).client, contextualQuery, toolTOC)
+      ? await selectTools(createRoleAdapter("utility", input.config).client, contextualQuery, toolTOC)
       : [...TOOL_CATEGORIES.write, ...TOOL_CATEGORIES.plan];
     const preflightMs = Date.now() - preflightStart;
     bus?.publish("TOOL_BOUND", { tools: selected, source: "preflight", query: contextualQuery.slice(0, 200), durationMs: preflightMs } as any);
@@ -251,14 +251,14 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
   // Add fallback chain: if the primary model fails, escalate to next tier
   // Only if tiers resolve to different models (avoid wasteful duplication)
   if (input.config && input.tier) {
-    const TIER_ORDER: Array<"flash" | "utility" | "dense"> = ["flash", "utility", "dense"];
-    const idx = TIER_ORDER.indexOf(input.tier as any);
-    if (idx >= 0 && idx < TIER_ORDER.length - 1) {
+    const ROLE_ORDER: Array<"selected" | "utility" | "escalation"> = ["selected", "utility", "escalation"];
+    const idx = ROLE_ORDER.indexOf(input.tier as any);
+    if (idx >= 0 && idx < ROLE_ORDER.length - 1) {
       const primaryModel = getTierModel(input.config, input.tier as any);
-      const fallbacks = TIER_ORDER.slice(idx + 1)
+      const fallbacks = ROLE_ORDER.slice(idx + 1)
         .filter(t => getTierModel(input.config!, t as any) !== primaryModel)
         .map(t => {
-          const fb = createTierAdapter(t, input.config!).client;
+          const fb = createRoleAdapter(t, input.config!).client;
           return lcTools.length > 0 && fb.bindTools ? fb.bindTools(lcTools) as unknown as BaseChatModel : fb;
         });
       if (fallbacks.length > 0) {
@@ -507,7 +507,7 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
         const agentId = taskArgs.agentId || taskArgs.agent_id || "";
         const instruction = taskArgs.instruction || taskArgs.prompt || "";
         const { AgentRegistry } = await import("../agents/registry.js");
-        const { createTierAdapter } = await import("../adapters/factory.js");
+        const { createRoleAdapter } = await import("../adapters/factory.js");
         
         // Look up task agent from registry
         const { FileSystemAgentRepository } = await import("../agents/repository.js");
@@ -515,8 +515,8 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
         registry.discover(workspaceRoot);
         const taskAgent = registry.get(agentId);
         const taskPrompt = taskAgent?.prompt || `You are task agent "${agentId}". Complete the following task.`;
-        const tier = taskAgent?.role === "auto" || !taskAgent?.role ? "flash" : taskAgent.role;
-        const adapter = createTierAdapter(tier as any, input.config);
+        const tier = taskAgent?.role === "utility" ? "utility" : taskAgent?.role === "escalation" ? "escalation" : "selected";
+        const adapter = createRoleAdapter(tier as any, input.config);
         const runAsync = taskAgent?.async && (input.config.tasksMaxConcurrent ?? 1) > 1;
 
         const executeTask = async () => {
@@ -560,11 +560,11 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
         const task = subArgs.task || "";
         const mode = subArgs.mode || "singlePass";
         const { WorktreeEngine } = await import("../worktree/engine.js");
-        const { createTierAdapter } = await import("../adapters/factory.js");
+        const { createRoleAdapter } = await import("../adapters/factory.js");
 
         const worktree = new WorktreeEngine(workspaceRoot, bus!);
         const subTask = await worktree.schedule(files, async (wtPath) => {
-          const adapter = createTierAdapter("utility", input.config!);
+          const adapter = createRoleAdapter("utility", input.config!);
 
           if (mode === "iterativeLoop") {
             // Ralph Loop — iterative execution until complete
@@ -649,18 +649,18 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
 
       // Mid-turn escalation: swap client when escalate/deescalate is called
       if (tc.name === "escalate" && !result.startsWith("Error:") && input.config && input.tier) {
-        const denseAdapter = createTierAdapter("dense", input.config);
+        const denseAdapter = createRoleAdapter("escalation", input.config);
         client = lcTools.length > 0 && denseAdapter.client.bindTools
           ? denseAdapter.client.bindTools(lcTools) as unknown as BaseChatModel
           : denseAdapter.client;
-        guardrailCtx.tier = "dense";
+        guardrailCtx.tier = "escalation";
         input.onChunk({ type: "status", message: `model:${denseAdapter.name}` });
       } else if (tc.name === "deescalate" && !result.startsWith("Error:") && input.config && input.tier) {
-        const flashAdapter = createTierAdapter("flash", input.config);
+        const flashAdapter = createRoleAdapter("selected", input.config);
         client = lcTools.length > 0 && flashAdapter.client.bindTools
           ? flashAdapter.client.bindTools(lcTools) as unknown as BaseChatModel
           : flashAdapter.client;
-        guardrailCtx.tier = "flash";
+        guardrailCtx.tier = "selected";
         input.onChunk({ type: "status", message: `model:${flashAdapter.name}` });
       }
 
@@ -674,12 +674,12 @@ export async function directChat(input: OrchestrationInput, bus?: EventBus): Pro
       }
       // Auto-escalation: 2 consecutive failures on flash → swap to dense
       const escalationThreshold = input.config?.modelEscalationFailureCount ?? 2;
-      if (loopState.consecutiveErrors >= escalationThreshold && guardrailCtx.tier === "flash" && input.config && input.tier) {
-        const denseAdapter = createTierAdapter("dense", input.config);
+      if (loopState.consecutiveErrors >= escalationThreshold && guardrailCtx.tier === "selected" && input.config && input.tier) {
+        const denseAdapter = createRoleAdapter("escalation", input.config);
         client = lcTools.length > 0 && denseAdapter.client.bindTools
           ? denseAdapter.client.bindTools(lcTools) as unknown as BaseChatModel
           : denseAdapter.client;
-        guardrailCtx.tier = "dense";
+        guardrailCtx.tier = "escalation";
         input.onChunk({ type: "status", message: `model:${denseAdapter.name}` });
         loopState.consecutiveErrors = 0; // Reset — give dense a fresh start
       }

@@ -133,9 +133,9 @@ export class FileSystemAgentRepository implements AgentRepository {
         ? raw.approvalMode
         : "prompt";
 
-      const role = ["flash", "utility", "dense", "auto"].includes(raw.role)
+      const role = ["utility", "escalation"].includes(raw.role)
         ? raw.role
-        : "auto";
+        : "";
 
       const source = namespace || "custom";
       const overrideStatus = scope;

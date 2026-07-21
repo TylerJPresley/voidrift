@@ -32,7 +32,7 @@ function makeDeps(): { registry: CoreRegistry; deps: CommandDeps; output: string
   execSync("git init && git config user.email t@t.com && git config user.name T && touch f && git add . && git commit -m init", { cwd: TMP, stdio: "ignore" });
 
   const deps: CommandDeps = {
-    config: { modelTierFlash: "local", modelTierUtility: "local", modelTierDense: "local", models: { local: { protocol: "openai", model: "test", baseUrl: "http://localhost", contextLimit: 32768, temperature: 0.2 } }, modelSelected: "auto", tasksMaxRunTurns: 50, retentionMaxCacheAgeDays: 14, retentionMaxSessionCount: 20, retentionMaxLogAgeDays: 14 } as any,
+    config: { modelSelected: "local", modelUtility: "local", modelEscalation: "local", models: { local: { protocol: "openai", model: "test", baseUrl: "http://localhost", contextLimit: 32768, temperature: 0.2 } }, tasksMaxRunTurns: 50, retentionMaxCacheAgeDays: 14, retentionMaxSessionCount: 20, retentionMaxLogAgeDays: 14 } as any,
     context: new ContextManager("persona", ""),
     budget: new TokenBudgetWatcher(32768),
     agents: new AgentRegistry(undefined, new InMemoryAgentRepository()),

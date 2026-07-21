@@ -6,10 +6,11 @@ import type { CoreAPI } from "../../plugins/interface.js";
 export function ModelPanel({ core, onClose }: { core: CoreAPI; onClose: () => void }) {
   const config = core.workspace.config();
   const models = Object.keys(config.models);
-  const items = ["auto", ...models];
   const modelData = core.models.list();
-  const interactiveSelected = modelData.modelSelected;
-  const backgroundSelected = config.modelBackground || "auto";
+  const selected = modelData.modelSelected;
+  const escalation = config.modelEscalation || "(none)";
+  const utility = config.modelUtility || "(none)";
+  const background = config.modelBackground || "(default: selected)";
 
   const schema: PanelSchema = {
     id: "model",
@@ -19,19 +20,19 @@ export function ModelPanel({ core, onClose }: { core: CoreAPI; onClose: () => vo
       type: "list",
       columns: [
         { key: "name", label: "Model", width: 22 },
-        { key: "tiers", label: "Tiers", width: 10 },
+        { key: "roles", label: "Roles", width: 10 },
         { key: "detail", label: "Provider / Model" },
       ],
       getItems: (page) => {
-        const selected = page === "background" ? backgroundSelected : interactiveSelected;
-        return items.map(name => {
-          if (name === "auto") {
-            return { name: selected === "auto" ? "✓ auto" : "auto", tiers: "", detail: page === "background" ? "tier routing for background tasks" : "model router decides per turn", _raw: "auto" };
-          }
+        const currentSelected = page === "background" ? (config.modelBackground || selected) : selected;
+        return models.map(name => {
           const cfg = config.models[name];
-          const tierTags = Object.entries({ flash: config.modelTierFlash, utility: config.modelTierUtility, dense: config.modelTierDense }).filter(([, v]) => v === name).map(([k]) => k[0]).join(",");
-          const label = name === selected ? `✓ ${name}` : name;
-          return { name: label, tiers: tierTags ? `[${tierTags}]` : "", detail: `${cfg.protocol}/${cfg.model}`, _raw: name };
+          const roles: string[] = [];
+          if (name === config.modelEscalation) roles.push("e");
+          if (name === config.modelUtility) roles.push("u");
+          if (name === config.modelBackground) roles.push("b");
+          const label = name === currentSelected ? `✓ ${name}` : name;
+          return { name: label, roles: roles.length ? roles.join(",") : "", detail: `${cfg.protocol}/${cfg.model}`, _raw: name };
         });
       },
       cursor: true,
@@ -47,25 +48,27 @@ export function ModelPanel({ core, onClose }: { core: CoreAPI; onClose: () => vo
           ctx!.close();
         }
       }},
-      { key: "f", label: "Flash", handler: (item, page, ctx) => {
-        if (!item || item._raw === "auto") return;
-        config.modelTierFlash = item._raw;
+      { key: "e", label: "Escalation", handler: (item, page, ctx) => {
+        if (!item) return;
+        config.modelEscalation = item._raw;
         core.models.persistTiers();
-        ctx!.setMessage(`${item._raw} → flash`);
+        ctx!.setMessage(`${item._raw} → escalation`);
       }},
       { key: "u", label: "Utility", handler: (item, page, ctx) => {
-        if (!item || item._raw === "auto") return;
-        config.modelTierUtility = item._raw;
+        if (!item) return;
+        config.modelUtility = item._raw;
         core.models.persistTiers();
         ctx!.setMessage(`${item._raw} → utility`);
       }},
-      { key: "d", label: "Dense", handler: (item, page, ctx) => {
-        if (!item || item._raw === "auto") return;
-        config.modelTierDense = item._raw;
+      { key: "x", label: "Clear", handler: (item, page, ctx) => {
+        if (!item) return;
+        if (config.modelEscalation === item._raw) { config.modelEscalation = undefined as any; ctx!.setMessage(`Cleared escalation`); }
+        else if (config.modelUtility === item._raw) { config.modelUtility = undefined as any; ctx!.setMessage(`Cleared utility`); }
+        else if (config.modelBackground === item._raw) { config.modelBackground = undefined as any; ctx!.setMessage(`Cleared background`); }
         core.models.persistTiers();
-        ctx!.setMessage(`${item._raw} → dense`);
       }},
     ],
+    footer: `↑↓ navigate  esc Close  │  enter Select  e Escalation  u Utility  x Clear`,
   };
 
   return <DeclarativePanel schema={schema} onClose={onClose} />;

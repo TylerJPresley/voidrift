@@ -4,7 +4,7 @@ import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import type { ModelConfig, VoidRiftConfig } from "../config/loader.js";
 
-export type Tier = "flash" | "utility" | "dense";
+export type ModelRole = "selected" | "utility" | "escalation";
 
 export interface ResolvedModel {
   name: string;
@@ -79,7 +79,7 @@ export function createAdapter(modelName: string, appConfig: VoidRiftConfig): Res
   return { name: modelName, config, client: createClient(config, appConfig.tasksMaxConcurrent, { retries: appConfig.networkModelRetries, timeoutMs: appConfig.networkModelTimeoutMs }) };
 }
 
-export function createTierAdapter(tier: Tier, appConfig: VoidRiftConfig): ResolvedModel {
-  const modelName = tier === "flash" ? appConfig.modelTierFlash : tier === "utility" ? appConfig.modelTierUtility : appConfig.modelTierDense;
+export function createRoleAdapter(tier: ModelRole, appConfig: VoidRiftConfig): ResolvedModel {
+  const modelName = tier === "selected" ? appConfig.modelSelected : tier === "utility" ? (appConfig.modelUtility || appConfig.modelSelected) : (appConfig.modelEscalation || appConfig.modelSelected);
   return createAdapter(modelName, appConfig);
 }

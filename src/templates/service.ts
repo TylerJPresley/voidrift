@@ -40,7 +40,7 @@ export interface ResolvedTemplate {
 }
 
 export interface AgentConfig {
-  tier?: "flash" | "utility" | "dense";
+  tier?: "selected" | "utility" | "escalation";
   temperature?: number;
   allowed_tools?: string[];
 }
@@ -256,8 +256,8 @@ export class TemplateService {
     const type = keySlots[0].type;
 
     if (type === "prompt") {
-      if (frontmatter.tier && !["flash", "utility", "dense"].includes(frontmatter.tier as string)) {
-        diagnostics.push({ phase: "schema", key, message: `Invalid tier "${frontmatter.tier}". Must be flash|utility|dense.` });
+      if (frontmatter.tier && !["selected", "utility", "escalation"].includes(frontmatter.tier as string)) {
+        diagnostics.push({ phase: "schema", key, message: `Invalid tier "${frontmatter.tier}". Must be selected|utility|escalation.` });
       }
       if (frontmatter.temperature !== undefined) {
         const t = Number(frontmatter.temperature);

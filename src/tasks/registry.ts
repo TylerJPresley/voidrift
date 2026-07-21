@@ -15,7 +15,7 @@ export interface TaskDefinition {
   output?: string;
   append?: boolean;
   persistent?: boolean;
-  role?: "flash" | "utility" | "dense";
+  role?: "selected" | "utility" | "escalation";
   tools?: string[];
   timeout?: number;
 }

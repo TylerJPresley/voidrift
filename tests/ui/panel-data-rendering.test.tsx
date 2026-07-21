@@ -120,11 +120,11 @@ describe("ModelPanel — data rendering", () => {
         ...createMockCore().models,
         list: () => ({
           models: [
-            { name: "claude-sonnet", protocol: "anthropic", model: "claude-sonnet-4", contextLimit: 200000, tiers: ["flash"] },
+            { name: "claude-sonnet", protocol: "anthropic", model: "claude-sonnet-4", contextLimit: 200000, tiers: ["selected"] },
             { name: "qwen-local", protocol: "openai", model: "qwen2.5:7b", contextLimit: 32768, tiers: ["utility"] },
-            { name: "claude-opus", protocol: "anthropic", model: "claude-opus-4", contextLimit: 200000, tiers: ["dense"] },
+            { name: "claude-opus", protocol: "anthropic", model: "claude-opus-4", contextLimit: 200000, tiers: ["escalation"] },
           ],
-          modelSelected: "auto",
+          modelSelected: "local",
         }),
       },
       workspace: { ...createMockCore().workspace, config: () => ({ ...createMockCore().workspace.config(), tiers: { flash: "claude-sonnet", utility: "qwen-local", dense: "claude-opus" }, models: { "claude-sonnet": { protocol: "anthropic", model: "claude-sonnet-4", baseUrl: "https://api.anthropic.com", contextLimit: 200000 }, "qwen-local": { protocol: "openai", model: "qwen2.5:7b", baseUrl: "http://localhost:11434/v1", contextLimit: 32768 }, "claude-opus": { protocol: "anthropic", model: "claude-opus-4", baseUrl: "https://api.anthropic.com", contextLimit: 200000 } } }) },
@@ -133,7 +133,6 @@ describe("ModelPanel — data rendering", () => {
     expect(frame).toContain("claude-sonnet");
     expect(frame).toContain("qwen-local");
     expect(frame).toContain("claude-opus");
-    expect(frame).toContain("auto");
   });
 });
 

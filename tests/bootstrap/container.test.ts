@@ -10,7 +10,7 @@ const GLOBAL_PATH = join(TMP, "global", "config.json");
 const WORKSPACE = join(TMP, "workspace");
 
 const VALID_CONFIG = {
-  modelTierFlash: "local", modelTierUtility: "local", modelTierDense: "local",
+  modelSelected: "local", modelUtility: "local", modelEscalation: "local",
   models: {
     local: { protocol: "openai", model: "test-model", baseUrl: "http://localhost:11434/v1", contextLimit: 32768 },
   },
@@ -33,7 +33,7 @@ describe("Bootstrap Container", () => {
     });
 
     expect(container.bus).toBeDefined();
-    expect(container.config.modelTierFlash).toBe("local");
+    expect(container.config.modelSelected).toBe("local");
     expect(container.registry).toBeDefined();
     expect(container.watcher.status).toBe("ready");
     expect(container.cleanup.clearedLocks).toBe(true);
@@ -54,7 +54,7 @@ describe("Bootstrap Container", () => {
     });
 
     expect(existsSync(freshGlobal)).toBe(true);
-    expect(container.config.modelTierFlash).toBe("default-local");
+    expect(container.config.modelSelected).toBe("default-local");
     await container.shutdown();
   });
 

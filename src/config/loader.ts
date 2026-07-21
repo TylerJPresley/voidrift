@@ -16,8 +16,6 @@ const ModelSchema = z.object({
   // are preserved via .passthrough() and forwarded directly to the model client.
 }).passthrough();
 
-// Tiers are now flat fields: modelTierFlash, modelTierUtility, modelTierDense
-
 const SUPPORTED_EDITORS = ["vscode", "code", "cursor", "windsurf", "zed", "vim", "nvim", "neovim", "emacs", "nano", "subl", "kate"] as const;
 
 const EditorSchema = z.enum(SUPPORTED_EDITORS).optional();
@@ -61,11 +59,10 @@ export const ConfigSchema = z.object({
   // ─── Top-level ─────────────────────────────────────────────────────────────
   editor: EditorSchema,
   // ─── model* — model selection and routing ──────────────────────────────────
-  modelSelected: z.string().default("auto").describe("Active model for user turns. 'auto' = router picks flash/dense. Or a model name."),
-  modelBackground: z.string().default("auto").describe("Model for background tasks (/run, routines, subagents). 'auto' = tier routing. Or a model name."),
-  modelTierFlash: z.string().min(1).describe("Model assigned to the flash role."),
-  modelTierUtility: z.string().min(1).describe("Model assigned to the utility role."),
-  modelTierDense: z.string().min(1).describe("Model assigned to the dense role."),
+  modelSelected: z.string().min(1).describe("Active model for user turns. Must reference a model in the models block."),
+  modelEscalation: z.string().optional().describe("Model for complex reasoning. If set, harness can escalate from selected to this model. If unset, no escalation."),
+  modelUtility: z.string().optional().describe("Model for internal harness ops (preflight, summarization). If unset, those features use the selected model or are skipped."),
+  modelBackground: z.string().optional().describe("Model for background tasks (/run, routines, subagents). Defaults to modelSelected."),
   modelEscalationThreshold: z.number().min(0.5).max(0.99).default(0.85).describe("Context usage % that triggers auto-escalation to dense."),
   modelEscalationFailureCount: z.number().min(1).default(2).describe("Consecutive failures that trigger auto-escalation."),
   // ─── turns* — per-turn behavior ───────────────────────────────────────────
@@ -115,13 +112,13 @@ export const ConfigSchema = z.object({
 }).refine(
   (cfg) => {
     const modelNames = Object.keys(cfg.models);
-    return (
-      modelNames.includes(cfg.modelTierFlash) &&
-      modelNames.includes(cfg.modelTierUtility) &&
-      modelNames.includes(cfg.modelTierDense)
-    );
+    if (!modelNames.includes(cfg.modelSelected)) return false;
+    if (cfg.modelEscalation && !modelNames.includes(cfg.modelEscalation)) return false;
+    if (cfg.modelUtility && !modelNames.includes(cfg.modelUtility)) return false;
+    if (cfg.modelBackground && !modelNames.includes(cfg.modelBackground)) return false;
+    return true;
   },
-  { message: "Each tier must reference a model defined in the models block" }
+  { message: "Model fields must reference a model defined in the models block" }
 );
 
 export type VoidRiftConfig = z.infer<typeof ConfigSchema>;
@@ -129,10 +126,10 @@ export type ModelConfig = z.infer<typeof ModelSchema>;
 export type EditorType = typeof SUPPORTED_EDITORS[number];
 
 /** Helper: look up which model is assigned to a tier role */
-export function getTierModel(config: VoidRiftConfig, tier: "flash" | "utility" | "dense"): string {
-  if (tier === "flash") return config.modelTierFlash;
-  if (tier === "utility") return config.modelTierUtility;
-  return config.modelTierDense;
+export function getTierModel(config: VoidRiftConfig, tier: "selected" | "utility" | "escalation"): string {
+  if (tier === "selected") return config.modelSelected;
+  if (tier === "utility") return config.modelUtility || config.modelSelected;
+  return config.modelEscalation || config.modelSelected;
 }
 
 export interface LoadConfigOptions {
@@ -150,11 +147,7 @@ const DEFAULT_CONFIG = {
       temperature: 0.2,
     },
   },
-  modelSelected: "auto",
-  modelBackground: "auto",
-  modelTierFlash: "default-local",
-  modelTierUtility: "default-local",
-  modelTierDense: "default-local",
+  modelSelected: "default-local",
   plugins: [],
   hooks: {},
   mcp: {},
@@ -204,6 +197,14 @@ export function loadConfig(opts: LoadConfigOptions = {}): VoidRiftConfig {
   const merged = localRaw
     ? deepMerge(globalRaw as Record<string, unknown>, localRaw as Record<string, unknown>)
     : globalRaw;
+
+  // Migration: map old tier fields to new schema
+  const m = merged as Record<string, unknown>;
+  if (m.modelTierFlash && !m.modelSelected) m.modelSelected = m.modelTierFlash;
+  if (m.modelTierDense && !m.modelEscalation && m.modelTierDense !== m.modelTierFlash) m.modelEscalation = m.modelTierDense;
+  if (m.modelTierUtility && !m.modelUtility && m.modelTierUtility !== m.modelTierFlash) m.modelUtility = m.modelTierUtility;
+  if (m.modelSelected === "auto" && m.modelTierFlash) m.modelSelected = m.modelTierFlash as string;
+  delete m.modelTierFlash; delete m.modelTierUtility; delete m.modelTierDense;
 
   const result = ConfigSchema.safeParse(merged);
   if (!result.success) {

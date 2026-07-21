@@ -156,6 +156,7 @@ registerToolExecutor({
     const { computeEditDiff } = await import("../safeguards/diff.js");
     const diff = computeEditDiff(ctx.workspaceRoot, path, search, replace);
     const result = editFile(ctx.workspaceRoot, path, search, replace);
+    if (!result.success) return result.error || "Error: Edit failed.";
     return result.output + "\n---DIFF---\n" + diff.join("\n");
   },
 });
@@ -424,11 +425,11 @@ registerToolExecutor({
   name: "search_tools",
   async execute(args, ctx) {
     const { compileToolTOC, selectTools } = await import("./tool-binding.js");
-    const { createTierAdapter } = await import("../adapters/factory.js");
+    const { createRoleAdapter } = await import("../adapters/factory.js");
     const { ALL_TOOLS } = await import("../agents/registry.js");
 
     const toolTOC = compileToolTOC(ALL_TOOLS, undefined);
-    const flashClient = createTierAdapter("utility", ctx.config!).client;
+    const flashClient = createRoleAdapter("utility", ctx.config!).client;
     const selected = await selectTools(flashClient, args.query, toolTOC);
     if (selected.length === 0) return "No matching tools found for that query.";
     // Activate the tools in the context so the harness can re-bind them

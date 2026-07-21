@@ -97,7 +97,7 @@ describe("validatePromptFile", () => {
   });
 
   it("passes with valid frontmatter tier", () => {
-    expect(validatePromptFile("---\ntier: flash\n---\nContent").valid).toBe(true);
+    expect(validatePromptFile("---\ntier: selected\n---\nContent").valid).toBe(true);
   });
 
   it("fails with invalid tier", () => {

@@ -227,18 +227,13 @@ export class CoreAPI {
     return {
       list: (): ModelListResult => {
         const config = this.engine.container.config;
-        const models: ModelInfo[] = Object.entries(config.models).map(([name, cfg]) => ({ name, protocol: cfg.protocol, model: cfg.model, contextLimit: cfg.contextLimit, tiers: Object.entries({ flash: config.modelTierFlash, utility: config.modelTierUtility, dense: config.modelTierDense }).filter(([, v]) => v === name).map(([k]) => k) }));
-        return { models, modelSelected: this.engine.container.config.modelSelected || "auto" };
+        const models: ModelInfo[] = Object.entries(config.models).map(([name, cfg]) => ({ name, protocol: cfg.protocol, model: cfg.model, contextLimit: cfg.contextLimit, tiers: Object.entries({ selected: config.modelSelected, utility: config.modelUtility, escalation: config.modelEscalation }).filter(([, v]) => v === name).map(([k]) => k) }));
+        return { models, modelSelected: this.engine.container.config.modelSelected };
       },
       switch: (params: ModelSwitchParams) => {
-        if (params.name === "auto") {
-          this.engine.container.config.modelSelected = "auto";
-          safeConfigWrite(join(this.workspaceRoot, ".voidrift", "config.json"), (raw: any) => { raw.modelSelected = "auto"; });
-          return;
-        }
         const config = this.engine.container.config;
         if (!config.models[params.name]) throw new Error(`Model "${params.name}" not found`);
-        if (params.tier) { if (params.tier === "flash") config.modelTierFlash = params.name; else if (params.tier === "utility") config.modelTierUtility = params.name; else config.modelTierDense = params.name; }
+        if (params.tier) { if (params.tier === "selected") config.modelSelected = params.name; else if (params.tier === "utility") config.modelUtility = params.name; else config.modelEscalation = params.name; }
         else {
           config.modelSelected = params.name;
           safeConfigWrite(join(this.workspaceRoot, ".voidrift", "config.json"), (raw: any) => { raw.modelSelected = params.name; });
@@ -250,13 +245,13 @@ export class CoreAPI {
         const wsPath = join(this.workspaceRoot, ".voidrift", "config.json");
         const config = this.engine.container.config;
         safeConfigWrite(wsPath, (raw: any) => {
-          raw.modelTierFlash = config.modelTierFlash; raw.modelTierUtility = config.modelTierUtility; raw.modelTierDense = config.modelTierDense;
+          raw.modelSelected = config.modelSelected; raw.modelEscalation = config.modelEscalation; raw.modelUtility = config.modelUtility;
         });
       },
       /** Switch the background model (for /run, routines, subagents) */
       switchBackground: (name: string) => {
         const config = this.engine.container.config;
-        if (name !== "auto" && !config.models[name]) throw new Error(`Model "${name}" not found`);
+        if (!config.models[name]) throw new Error(`Model "${name}" not found`);
         config.modelBackground = name;
         safeConfigWrite(join(this.workspaceRoot, ".voidrift", "config.json"), (raw: any) => { raw.modelBackground = name; });
       },

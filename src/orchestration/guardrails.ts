@@ -35,7 +35,7 @@ interface GuardrailContext {
   callHistory: Array<{ name: string; args: Record<string, unknown> }>;
   /** Current tool loop round */
   round: number;
-  /** Current tier (flash/dense/utility) — undefined if pinned */
+  /** Current tier (flash/dense/utility) — undefined if escalation not configured */
   tier?: string;
 }
 
@@ -85,7 +85,7 @@ register((tool, args, ctx) => {
   if (!ctx.filesRead.has(path)) {
     return {
       block: true,
-      preWarning: `⚠️ BLOCKED: Cannot edit "${path}" without reading it first. Call read_file("${path}") to verify your search block exists and is unique, then retry the edit.`,
+      preWarning: `Error: Read "${path}" first. Call read_file("${path}") to verify your search block exists and is unique, then retry the edit.`,
     };
   }
   return null;
@@ -99,7 +99,7 @@ register((tool, args, ctx) => {
   if (path && (path.startsWith("/tmp") || path.startsWith("/var/tmp"))) {
     return {
       block: true,
-      preWarning: `⚠️ BLOCKED: Do not write to /tmp. Use .voidrift/cache/${ctx.sessionId}/ for temporary files.`,
+      preWarning: `Error: Do not write to /tmp. Use .voidrift/cache/${ctx.sessionId}/ for temporary files.`,
     };
   }
   return null;
@@ -120,7 +120,7 @@ register((tool, args, ctx) => {
   if (searchLines > 50) {
     return {
       block: true,
-      preWarning: `⚠️ BLOCKED: edit_file with a ${searchLines}-line search block is a full rewrite, not a surgical edit. Use write_file for full replacements, or break into smaller targeted edits.`,
+      preWarning: `Error: edit_file with a ${searchLines}-line search block is a full rewrite, not a surgical edit. Use write_file for full replacements, or break into smaller targeted edits.`,
     };
   }
   return null;
@@ -157,14 +157,14 @@ register((tool, args, ctx) => {
   };
 });
 
-// ─── BLOCKING: Plan creation on flash (auto mode only) ───────────────────────
+// ─── BLOCKING: Plan creation on primary (escalation configured) ──────────────
 
 register((tool, args, ctx) => {
   if (tool !== "add_plan") return null;
-  if (!ctx.tier || ctx.tier !== "flash") return null;
+  if (!ctx.tier || ctx.tier !== "selected") return null;
 
   return {
     block: true,
-    preWarning: `⚠️ BLOCKED: Plan creation requires the dense model. You are on flash — you cannot architect plans correctly. Call \`escalate\` with the reason, and the dense model will create the plan. Do not retry add_plan on flash. Do not proceed with implementation without a plan — call escalate FIRST.`,
+    preWarning: `Error: Plan creation requires the escalation model. Call \`escalate\` with the reason — that's the architect's job. Do not retry add_plan. Do not proceed with implementation without a plan — call escalate first.`,
   };
 });

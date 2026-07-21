@@ -13,7 +13,7 @@ import type { WorktreeEngine } from "../worktree/engine.js";
 import type { TaskScheduler } from "../orchestration/scheduler.js";
 import type { GitCheckpointer } from "../safeguards/checkpoint.js";
 import { compactHistory } from "../session/compactor.js";
-import { createTierAdapter, createAdapter } from "../adapters/factory.js";
+import { createRoleAdapter, createAdapter } from "../adapters/factory.js";
 import { EventBus } from "../events/bus.js";
 import { execSync } from "child_process";
 import type { PolicyEngine } from "../security/policy-engine.js";
@@ -123,7 +123,7 @@ export function registerCommands(registry: CoreRegistry, deps: CommandDeps): voi
       Object.assign(deps.config, reloaded);
 
       // Update budget limit if model changed
-      const flashModel = reloaded.models[reloaded.modelTierFlash];
+      const flashModel = reloaded.models[reloaded.modelSelected];
       if (flashModel) {
         deps.budget.setLimit(flashModel.contextLimit - (flashModel.maxOutputTokens ?? 4096));
       }
@@ -239,14 +239,10 @@ export function registerCommands(registry: CoreRegistry, deps: CommandDeps): voi
     const reflector = new ReflectionEngine(deps.brain, memoryDir, memoryRepo, deps.bus, deps.config.contextReflectionBatchSize);
 
     // Use the active model tier
-    const tier = deps.agents.active.role;
-    const modelKey = tier === "auto"
-      ? (deps.agents.active.type === "task" ? "utility" : "flash")
-      : tier;
-    const isTierKey = modelKey === "flash" || modelKey === "utility" || modelKey === "dense";
-    const adapter = isTierKey
-      ? createTierAdapter(modelKey as any, deps.config)
-      : { client: createTierAdapter("flash", deps.config).client }; // fallback
+    // Use utility model for reflection if available, otherwise selected
+    const adapter = deps.config.modelUtility
+      ? createRoleAdapter("utility", deps.config)
+      : createRoleAdapter("selected", deps.config);
 
     deps.output("Starting reflection...");
     const unsub = deps.bus.subscribe("WARNING_EMITTED", (e) => {
@@ -320,7 +316,7 @@ export function registerCommands(registry: CoreRegistry, deps: CommandDeps): voi
     const previousModel = deps.config.modelSelected;
     const backgroundModel = deps.config.modelBackground || "auto";
     const runAdapter = backgroundModel === "auto"
-      ? createTierAdapter("flash", deps.config)
+      ? createRoleAdapter("selected", deps.config)
       : createAdapter(backgroundModel, deps.config);
     const { ralphLoop } = await import("../orchestration/run.js");
 
@@ -347,7 +343,7 @@ export function registerCommands(registry: CoreRegistry, deps: CommandDeps): voi
         else if (chunk.type === "content") { task.output = (task.output || "") + chunk.text; }
         else if (chunk.type === "tool_call" && chunk.status === "complete") append(`✓ ${chunk.name}`);
         else if (chunk.type === "tool_call" && chunk.status === "error") append(`✗ ${chunk.name}: ${(chunk as any).result?.slice(0, 100) || "failed"}`);
-      }, runHandle.signal, deps.config.tasksMaxRunTurns, deps.workspaceRoot, deps.config, backgroundModel === "auto" ? "flash" : undefined).then(result => {
+      }, runHandle.signal, deps.config.tasksMaxRunTurns, deps.workspaceRoot, deps.config, backgroundModel === "auto" ? "selected" : undefined).then(result => {
         deps.config.modelSelected = previousModel;
         deps.scheduler!.completeRun(runHandle.id, result.success);
         const task = deps.scheduler!.getTask(runHandle.id);
@@ -384,7 +380,7 @@ export function registerCommands(registry: CoreRegistry, deps: CommandDeps): voi
         else if (chunk.type === "content") { task.output = (task.output || "") + chunk.text; }
         else if (chunk.type === "tool_call" && chunk.status === "complete") append(`✓ ${chunk.name}`);
         else if (chunk.type === "tool_call" && chunk.status === "error") append(`✗ ${chunk.name}: ${(chunk as any).result?.slice(0, 100) || "failed"}`);
-      }, runHandle.signal, deps.config.tasksMaxRunTurns, deps.workspaceRoot, deps.config, backgroundModel === "auto" ? "flash" : undefined).then(result => {
+      }, runHandle.signal, deps.config.tasksMaxRunTurns, deps.workspaceRoot, deps.config, backgroundModel === "auto" ? "selected" : undefined).then(result => {
         deps.config.modelSelected = previousModel;
         deps.scheduler!.completeRun(runHandle.id, result.success);
         const task = deps.scheduler!.getTask(runHandle.id);
@@ -431,7 +427,7 @@ export function registerCommands(registry: CoreRegistry, deps: CommandDeps): voi
           else if (chunk.type === "content") { const task = deps.scheduler!.getTask(runHandle.id); if (task) task.output = (task.output || "") + chunk.text; }
           else if (chunk.type === "tool_call" && chunk.status === "complete") appendOutput(`✓ ${chunk.name}`);
           else if (chunk.type === "tool_call" && chunk.status === "error") appendOutput(`✗ ${chunk.name}: ${(chunk as any).result?.slice(0, 100) || "failed"}`);
-        }, runHandle.signal, deps.config.tasksMaxRunTurns, deps.workspaceRoot, deps.config, backgroundModel === "auto" ? "flash" : undefined);
+        }, runHandle.signal, deps.config.tasksMaxRunTurns, deps.workspaceRoot, deps.config, backgroundModel === "auto" ? "selected" : undefined);
         deps.config.modelSelected = previousModel;
         deps.scheduler!.completeRun(runHandle.id, result.success);
         appendOutput(`Done: ${result.success ? "success" : "failed"} (${result.turns} turns, ${result.terminationReason})`);

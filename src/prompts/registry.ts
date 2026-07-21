@@ -39,7 +39,7 @@ export class PromptRegistry {
     this.register("chat", BUILTIN_CHAT, "core", "Chat", "Base system prompt for all interactive sessions");
     this.register("compact", BUILTIN_COMPACT, "core", "Compact", "History compaction instruction for the episodic summarizer");
     this.register("core.rules", BUILTIN_RULES, "core", "Rules", "Behavioral constraints: directive/inquiry, standards, retry protocol, safety, communication");
-    this.register("core.routing-auto", BUILTIN_ROUTING_AUTO, "core", "Routing (Auto)", "Tier identity and escalation/deescalation rules for auto model routing");
+    this.register("core.escalation-rules", BUILTIN_ROUTING_AUTO, "core", "Escalation Rules", "Escalation and deescalation behavioral rules when an escalation model is configured");
   }
 
   /** Register a prompt. */
@@ -205,7 +205,7 @@ For large or multi-step work, write intermediate artifacts (scripts, partial res
 - **Planning:** Persistent task tracking. Use add_plan(), read_plan(), update_plan(), remove_plan(), prioritize_plan().
 - **Scheduling:** Delayed or recurring tasks via schedule(). One-shot delays ("5m", "1h") or cron patterns.
 - **Background Execution:** Run long commands without blocking via background_exec(). Returns a task ID immediately. Use check_task(id) to poll for results. Use schedule() to auto-check after a delay.
-- **Subagents:** Delegate work to isolated background agents. run_task_agent(agentId, instruction) runs a registered task agent. spawn_subagent(task, files) creates a new agent in a git worktree locked to specific files. Both run on the utility tier and merge results back on completion.
+- **Subagents:** Delegate work to isolated background agents. run_task_agent(agentId, instruction) runs a registered task agent. spawn_subagent(task, files) creates a new agent in a git worktree locked to specific files. Both run on the utility model and merge results back on completion.
 - **Tasks:** Reusable definitions with register_task(), invoke_task().
 - **When to delegate:** If a task involves processing many items repetitively (fetching N URLs, transforming N files, running N checks), spawn a subagent or use background_exec with a script. Don't burn your own context on repetitive loops — offload them.
 
@@ -218,54 +218,35 @@ For large or multi-step work, write intermediate artifacts (scripts, partial res
 For complex tasks: write intermediate findings to the cache directory. Use add_plan to break multi-step work into trackable steps. Externalize data rather than holding it all in context.
 When a "Context Budget" warning is injected and the user's request is large (multi-file changes, broad refactors, or research tasks), ask the user if they'd like to compact first before proceeding. A simple question or single-file change doesn't warrant this — use judgment.`;
 
-const BUILTIN_ROUTING_AUTO = `## Model Routing (Auto)
+const BUILTIN_ROUTING_AUTO = `## Escalation
 
-You are running as the **{{tier}}** tier in an auto-routed system. Three tiers exist:
+A more capable model is available. You are the primary model — you handle all work directly. When you're stuck or the task exceeds your capacity, you can ask for help.
 
-- **Utility** — No thinking, no reasoning. Deterministic classification. Fast mechanical operations.
-- **Flash** — Can think through problems, cannot deep reason. Executes tasks, uses tools, makes moderate decisions.
-- **Dense** — Full thinking and reasoning. Design, complex analysis, novel problem solving.
+### How It Works
 
-### If you are Flash
+- Call \`escalate(reason)\` — the harness swaps to the escalation model immediately. It takes over in the same turn with full context.
+- The escalation model calls \`deescalate()\` when the hard part is done — control returns to you for execution.
 
-You are the primary model. You handle most work:
-- Conversation, questions, research
-- Tool execution (read, write, edit, search, commands)
-- Following plans step by step
-- Moderate decisions with clear precedent
-- Straightforward multi-step tasks
+### When to Escalate
 
-Call \`escalate\` when the task requires deep analysis or reasoning:
+Call \`escalate\` when:
 - Designing systems, structures, or workflows from scratch
 - Complex analysis spanning multiple interconnected components
 - Novel problem solving requiring exploration of multiple approaches
-- Planning work that touches 5+ areas or has significant unknowns
+- You've failed the same approach twice — hand it off, don't retry a third time
 
-The dense model handles analysis and reasoning, then returns control to you for execution.
+### Stay on Primary When
 
-**Escalate on struggle:**
-If you have failed the same approach twice, or cannot determine the correct path forward, call \`escalate\`. Do not retry a third time — hand it off.
-
-**Stay on flash when:**
 - Following an existing plan step by step
 - Single-item edits, writes, commands
 - Answering questions about content already reviewed
 - Tool execution sequences
 - Moderate decisions with clear precedent
 
-### If you are Dense
+### When Escalated (for the escalation model)
 
-**Deescalate when:**
-- Plan is created — reasoning done, execution begins
-- Design decision made — implementation is straightforward
+Call \`deescalate\` when:
+- Plan is created and execution begins
+- Design decision made — remaining work is mechanical
 - Analysis complete — findings documented, action items clear
-- Remaining work is sequential execution
-- Doing something flash can handle
-
-**Stay on dense when:**
-- Still exploring approaches or tradeoffs
-- Debugging complex interactions between components
-- Execution reveals new design questions
-- Problem keeps branching into new unknowns
-
-Call \`deescalate\` when the complex part is done. Return to flash for execution.`;
+- The complex reasoning is done and only straightforward execution remains`;

@@ -62,7 +62,7 @@ describe("AgentRegistry (in-memory)", () => {
       name: "Custom",
       description: "A test agent",
       type: "interactive",
-      role: "flash",
+      role: "",
       prompt: "You are custom.",
       tools: ["read_file"],
       approvalMode: "prompt",

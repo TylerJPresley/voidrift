@@ -93,10 +93,10 @@ function buildAgentLayer(ctx: SessionContext, opts?: CompileOptions): string {
   // § Rules — behavioral constraints
   if (r) sections.push(r.resolve("core.rules")?.body ?? "");
 
-  // § Model routing — only in auto mode (tier is set)
+  // § Escalation rules — only when escalation is configured (tier is set)
   if (r && opts?.tier) {
-    const routing = r.resolve("core.routing-auto")?.body;
-    if (routing) sections.push(routing.replaceAll("{{tier}}", opts.tier));
+    const routing = r.resolve("core.escalation-rules")?.body;
+    if (routing) sections.push(routing);
   }
 
   // § Environment — working dir, git, platform, model

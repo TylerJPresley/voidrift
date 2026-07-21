@@ -10,7 +10,7 @@ export function createMockCore(overrides: Record<string, any> = {}) {
       root: () => "/test/workspace",
       config: () => ({
         editor: "nvim",
-        modelTierFlash: "local", modelTierUtility: "local", modelTierDense: "local",
+        modelSelected: "local", modelUtility: "local", modelEscalation: "local",
         models: { local: { protocol: "openai", model: "test", baseUrl: "http://localhost:11434/v1", contextLimit: 32768 } },
         retentionMaxCacheAgeDays: 14, retentionMaxSessionCount: 20, retentionMaxLogAgeDays: 14,
         plugins: [],
@@ -39,8 +39,8 @@ export function createMockCore(overrides: Record<string, any> = {}) {
     },
     models: {
       list: () => ({
-        models: [{ name: "local", protocol: "openai", model: "test", contextLimit: 32768, tiers: ["flash", "utility", "dense"] }],
-        modelSelected: "auto",
+        models: [{ name: "local", protocol: "openai", model: "test", contextLimit: 32768, tiers: ["selected", "utility", "escalation"] }],
+        modelSelected: "local",
       }),
       stats: () => ({
         sessionId: "test-session",

@@ -9,7 +9,7 @@ const GLOBAL_PATH = join(TMP, "global", "config.json");
 const WORKSPACE = join(TMP, "workspace");
 
 const VALID_CONFIG = {
-  modelTierFlash: "local-qwen", modelTierUtility: "claude-sonnet", modelTierDense: "claude-opus",
+  modelSelected: "local-qwen", modelUtility: "claude-sonnet", modelEscalation: "claude-opus",
   models: {
     "local-qwen": { protocol: "openai", model: "qwen2.5-coder-7b", baseUrl: "http://localhost:11434/v1", contextLimit: 32768 },
     "claude-sonnet": { protocol: "anthropic", model: "claude-3-5-sonnet-latest", baseUrl: "https://api.anthropic.com", apiKeyEnv: "ANTHROPIC_API_KEY", contextLimit: 200000, temperature: 0 },
@@ -30,7 +30,7 @@ describe("Config Loader", () => {
   it("loads a valid global config", () => {
     writeFileSync(GLOBAL_PATH, JSON.stringify(VALID_CONFIG));
     const config = loadConfig({ globalConfigPath: GLOBAL_PATH });
-    expect(config.modelTierFlash).toBe("local-qwen");
+    expect(config.modelSelected).toBe("local-qwen");
     expect(config.models["local-qwen"].protocol).toBe("openai");
   });
 
@@ -39,18 +39,18 @@ describe("Config Loader", () => {
     expect(existsSync(freshPath)).toBe(false);
     const config = loadConfig({ globalConfigPath: freshPath });
     expect(existsSync(freshPath)).toBe(true);
-    expect(config.modelTierFlash).toBe("default-local");
+    expect(config.modelSelected).toBe("default-local");
   });
 
   it("merges local workspace config over global", () => {
     writeFileSync(GLOBAL_PATH, JSON.stringify(VALID_CONFIG));
     writeFileSync(
       join(WORKSPACE, ".voidrift", "config.json"),
-      JSON.stringify({ modelTierFlash: "claude-sonnet" })
+      JSON.stringify({ modelSelected: "claude-sonnet" })
     );
     const config = loadConfig({ globalConfigPath: GLOBAL_PATH, workspaceRoot: WORKSPACE });
-    expect(config.modelTierFlash).toBe("claude-sonnet"); // overridden
-    expect(config.modelTierUtility).toBe("claude-sonnet"); // preserved from global
+    expect(config.modelSelected).toBe("claude-sonnet"); // overridden
+    expect(config.modelUtility).toBe("claude-sonnet"); // preserved from global
   });
 
   it("deep merges model overrides", () => {
@@ -70,13 +70,13 @@ describe("Config Loader", () => {
   });
 
   it("throws when tier references nonexistent model", () => {
-    const bad = { ...VALID_CONFIG, modelTierFlash: "nonexistent", modelTierUtility: "claude-sonnet", modelTierDense: "claude-opus" };
+    const bad = { ...VALID_CONFIG, modelSelected: "nonexistent", modelUtility: "claude-sonnet", modelEscalation: "claude-opus" };
     writeFileSync(GLOBAL_PATH, JSON.stringify(bad));
-    expect(() => loadConfig({ globalConfigPath: GLOBAL_PATH })).toThrow(/tier must reference a model/);
+    expect(() => loadConfig({ globalConfigPath: GLOBAL_PATH })).toThrow(/Model fields must reference/);
   });
 
   it("throws on invalid protocol enum", () => {
-    const bad = { modelTierFlash: "x", modelTierUtility: "x", modelTierDense: "x", models: { x: { protocol: "invalid", model: "m", baseUrl: "http://x", contextLimit: 1000 } } };
+    const bad = { modelSelected: "x", modelUtility: "x", modelEscalation: "x", models: { x: { protocol: "invalid", model: "m", baseUrl: "http://x", contextLimit: 1000 } } };
     writeFileSync(GLOBAL_PATH, JSON.stringify(bad));
     expect(() => loadConfig({ globalConfigPath: GLOBAL_PATH })).toThrow(/Invalid VoidRift config/);
   });
@@ -94,6 +94,6 @@ describe("Config Loader", () => {
     const emptyWorkspace = join(TMP, "empty-ws");
     mkdirSync(emptyWorkspace, { recursive: true });
     const config = loadConfig({ globalConfigPath: GLOBAL_PATH, workspaceRoot: emptyWorkspace });
-    expect(config.modelTierFlash).toBe("local-qwen");
+    expect(config.modelSelected).toBe("local-qwen");
   });
 });

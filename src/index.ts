@@ -1,4 +1,4 @@
-// Tier 1: Application Container
+// ModelRole 1: Application Container
 export { EventBus, type EventType, type EventPayloadMap, type VoidRiftEvent, type EventPriority, type SubscribeOptions } from "./events/bus.js";
 export { loadConfig, ConfigSchema, type VoidRiftConfig, type ModelConfig, type LoadConfigOptions } from "./config/loader.js";
 export { WorkspaceWatcher, type WatcherStatus } from "./watcher/index.js";
@@ -6,13 +6,13 @@ export { CoreRegistry, type CapabilityHook, type SlashCommandHook } from "./regi
 export { cleanupWorktrees, writeWorktreeMeta, type CleanupResult, type WorktreeMeta } from "./bootstrap/cleanup.js";
 export { bootstrap, type Container, type ContainerOptions } from "./bootstrap/container.js";
 
-// Tier 2: Model Connectivity
-export { createAdapter, createTierAdapter, type Tier, type ResolvedModel } from "./adapters/factory.js";
+// ModelRole 2: Model Connectivity
+export { createAdapter, createRoleAdapter, type ModelRole, type ResolvedModel } from "./adapters/factory.js";
 export { streamModel, type OnChunk } from "./adapters/stream.js";
 export type { StreamChunk, ContentChunk, ReasoningChunk, ToolCallChunk, DoneChunk, ErrorChunk, TokenUsage, ModelResponse, StreamTiming } from "./adapters/types.js";
-export { escalateTier, shouldEscalate, resolveEscalation, buildEscalationState, escalationNotice, type EscalationState, type EscalationCode } from "./router/index.js";
+export { escalateRole, shouldEscalate, resolveEscalation, buildEscalationState, escalationNotice, type EscalationState, type EscalationCode } from "./router/index.js";
 
-// Tier 3: Capability Subsystem
+// ModelRole 3: Capability Subsystem
 export type { ToolSchema, ToolParameter, SafetyProfile, ActionLayer } from "./tools/types.js";
 export { TOOL_SCHEMAS, getToolSchema } from "./tools/definitions.js";
 export { readFile, globFiles, writeFile, editFile, executeCommand, type ToolResult } from "./tools/executors.js";
@@ -32,14 +32,14 @@ export { TemplateService, type TemplateSlot, type ResolvedSlot, type ResolvedTem
 export { MCPEngine, type MCPServer, type MCPServerConfig, type MCPToolSchema } from "./mcp/engine.js";
 export { routeMCPToolCall, isMCPTool } from "./mcp/router.js";
 
-// Tier 4: Security Subsystem
+// ModelRole 4: Security Subsystem
 export { PermissionGate, type PendingRequest, type GateResult } from "./security/permission-gate.js";
 export { PolicyEngine, classifyCommand, inferPattern, inferPatterns, matchGlob, getEquivalentMessage, type PolicyRule, type PolicyDecision, type PolicyCheckResult } from "./security/policy-engine.js";
 export { AgentRegistry, type AgentManifest, type AgentType, type ApprovalMode, type AgentRole, type ToolSettings, ALL_TOOLS, READ_TOOLS } from "./agents/registry.js";
 export { FileSystemAgentRepository, InMemoryAgentRepository, type AgentRepository, type DiscoveredAgent } from "./agents/repository.js";
 export { PromptRegistry, type PromptEntry, type ResolvedPrompt } from "./prompts/registry.js";
 
-// Tier 5: Operator Interface
+// ModelRole 5: Operator Interface
 export { stripAnsi, truncateOutput } from "./output/truncator.js";
 export { TokenBudgetWatcher, type BudgetColor, type BudgetState } from "./output/budget.js";
 export { InputLock } from "./output/input-lock.js";
@@ -47,7 +47,7 @@ export { AuditLogger, queryLogs, type LogEntry, type AuditLoggerOptions, type Qu
 export { getGitBranch, shortenPath } from "./output/workspace.js";
 export { AutocompleteEngine } from "./ui/autocomplete.js";
 
-// Tier 6: Agent Session
+// ModelRole 6: Agent Session
 export { ContextManager, type SessionContext, type AgentPartition, type OrbitPartition, type DriftPartition, type VoidPartition, type FocusedFile, type Message, type TurnContext, type ContentBlock } from "./session/context.js";
 export { PluginRegistry, discoverPlugins, type PluginMeta, type DiscoveredPlugin } from "./plugins/registry.js";
 export { compilePrompt, type CompiledMessage } from "./session/compiler.js";

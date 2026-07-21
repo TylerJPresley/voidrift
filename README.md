@@ -43,17 +43,15 @@ VoidRift doesn't care which model you use. It connects to anything.
 
 Every major AI tool is married to a single provider. That means you inherit their pricing, their rate limits, their availability, and their context window sizes. When a better model launches from a competitor, you're stuck.
 
-VoidRift uses a three-tier model system: **Flash** (your main model — all user conversations), **Utility** (fast/cheap for internal operations like summarization and indexing), and **Dense** (maximum capability for complex reasoning). Assign any model to any tier.
+VoidRift connects to any model through a simple config block. Run a 7B model on your GPU for fast iteration, point it at your company's Bedrock endpoint for compliance, escalate to Claude or GPT when the task demands it. The harness doesn't care where the model lives.
 
-**You select a model.** In the `/model` panel, pick which model to use for your conversations. Choose "auto" to let the router decide (Flash for normal, Dense for escalation), or pin a specific model by name. Your choice is persisted per-project.
+**You select a model.** In the `/model` panel, pick which model to use for your conversations. Your choice is persisted per-project.
 
-**Flash is the default.** When set to "auto", every user turn goes to the Flash model. It handles chat, tool execution, and subagent work.
+**Escalation is optional.** If you assign an escalation model (`modelEscalation`), the harness can switch to a more capable model when your primary model is stuck. The model calls `escalate` and a more capable model takes over. When the complex part is done, it calls `deescalate` to return to your primary. If you don't configure escalation, none of this exists — just one model doing everything.
 
-**Flash is the default.** When set to "auto", every user turn goes to the Flash model. It handles chat, tool execution, and subagent work.
+**Automatic escalation** also fires when the primary model fails 2 consecutive tool calls, or when context usage exceeds 85% of the current model's window.
 
-**Utility is the internal engine.** It runs preflight classifiers (tool selection, tier routing, file focus), file summarization, indexing, and harness-internal processing. It never talks to the user directly. The user never selects utility — it's always running in the background.
-
-**Preflight runs every turn.** Before each user message reaches the main model, utility makes a fast classifier call to select which tools to bind. This adds latency — choose the fastest available model for utility. If your utility tier points to a slow or unresponsive endpoint, every turn will be delayed.
+**Utility is the internal engine (optional).** If you assign a utility model (`modelUtility`), it runs preflight classifiers (tool selection), file summarization, and harness-internal processing. It never talks to the user directly. If you don't configure utility, these features use your selected model or are skipped.
 
 **Utility must be fast, not smart.** The utility model should be:
 - The lowest-latency endpoint you have (local > cloud)
@@ -61,40 +59,11 @@ VoidRift uses a three-tier model system: **Flash** (your main model — all user
 - A model that does NOT use thinking/reasoning tokens (no chain-of-thought overhead)
 - Small and fast — a 7B model on a local GPU is ideal
 
-Do not point utility at a cloud reasoning model. A utility call that takes 10+ seconds blocks every turn before your conversation model even sees the message.
+**Preflight is off by default.** Most models handle full tool schemas fine. Enable preflight (`"preflight": true` on a model) only if your model gets confused by too many tools — typically small local models (7B-13B).
 
-**Disable preflight per model.** If your main model is capable enough to handle all tool schemas (most cloud models, 70B+ local models), set `"preflight": false` in the model config. This skips the utility classifier call entirely and binds all tools — saving one round-trip per turn:
+**Background model.** You can assign a separate model for `/run`, routines, and subagents (`modelBackground`). This lets you use a different model for autonomous work than for interactive chat. Defaults to your selected model if not set.
 
-```json
-{
-  "models": {
-    "claude-sonnet": {
-      "protocol": "anthropic",
-      "model": "claude-sonnet-4-20250514",
-      "baseUrl": "https://api.anthropic.com",
-      "apiKeyEnv": "ANTHROPIC_API_KEY",
-      "contextLimit": 200000,
-      "preflight": false
-    }
-  }
-}
-```
-
-**When to keep preflight enabled:**
-- Small local models (7B-13B) that get confused by too many tool schemas
-- Mid-tier models (14B-32B) where reducing the prompt by ~2-4k tokens improves accuracy
-- Any model where you observe hallucinated tool calls or incorrect tool selection
-
-**When to disable preflight:**
-- Cloud models (Claude, GPT, Gemini) — they handle large tool schemas natively
-- Large local models (70B+) — they have the capacity
-- Any setup where your utility tier is slower than your flash tier (defeats the purpose)
-
-**Dense is escalation.** When the Flash model is stuck, overwhelmed, or facing a task that needs architectural reasoning, it can request escalation to the Dense model. The model calls `escalate` (which requires your approval) and a more capable model takes over. When the complex part is done, it calls `deescalate` to return to Flash.
-
-**Automatic escalation** also fires when context usage exceeds 85% of the current model's window — the system upgrades to a model with a larger context limit automatically.
-
-**Task agents use roles.** Background agents (indexer, summarizer, custom task agents) declare which tier they run on — typically utility. They don't use your selected model. Their role is fixed in their agent config.
+**Task agents use roles.** Background agents (indexer, summarizer, custom task agents) declare which model role they run on — typically utility. They don't use your selected model. Their role is fixed in their agent config.
 
 **Supported providers:**
 - Any OpenAI-compatible API (Ollama, vLLM, Groq, DeepSeek, Together, Anyscale, LM Studio)
@@ -274,7 +243,7 @@ VoidRift is designed to be extended. Plugins add commands, agents, tools, panels
 
 **CoreAPI surface:**
 - Register slash commands with custom handlers
-- Register agents with custom personas, tool sets, and model tiers
+- Register agents with custom personas, tool sets, and model roles
 - Register prompts and templates (or override built-in ones)
 - Register panels with custom data views
 - Subscribe to events (file changes, tool execution, session lifecycle)
@@ -381,7 +350,7 @@ VoidRift needs at least one model configured to function. Configuration lives in
 | `~/.config/voidrift/config.json` | Global | Your default models and preferences |
 | `.voidrift/config.json` | Project | Per-project overrides |
 
-Project config is merged on top of global — you can override tiers, add models, or change settings per workspace.
+Project config is merged on top of global — you can override model assignments, add models, or change settings per workspace.
 
 ### Minimal Configuration (Local Model)
 
@@ -395,11 +364,6 @@ ollama pull qwen2.5-coder:7b-instruct
 mkdir -p ~/.config/voidrift
 cat > ~/.config/voidrift/config.json << 'EOF'
 {
-  "tiers": {
-    "flash": "local",
-    "utility": "local",
-    "dense": "local"
-  },
   "models": {
     "local": {
       "protocol": "openai",
@@ -408,7 +372,8 @@ cat > ~/.config/voidrift/config.json << 'EOF'
       "contextLimit": 32768,
       "temperature": 0.2
     }
-  }
+  },
+  "modelSelected": "local"
 }
 EOF
 ```
@@ -419,11 +384,6 @@ Use cheap local models for simple tasks, cloud models for heavy reasoning:
 
 ```json
 {
-  "tiers": {
-    "flash": "qwen-local",
-    "utility": "claude-sonnet",
-    "dense": "claude-opus"
-  },
   "models": {
     "qwen-local": {
       "protocol": "openai",
@@ -450,7 +410,10 @@ Use cheap local models for simple tasks, cloud models for heavy reasoning:
       "temperature": 0.2,
       "maxOutputTokens": 16384
     }
-  }
+  },
+  "modelSelected": "qwen-local",
+  "modelEscalation": "claude-opus",
+  "modelUtility": "claude-sonnet"
 }
 ```
 
@@ -458,11 +421,6 @@ Use cheap local models for simple tasks, cloud models for heavy reasoning:
 
 ```json
 {
-  "tiers": {
-    "flash": "gemini-flash",
-    "utility": "gemini-pro",
-    "dense": "gemini-pro"
-  },
   "models": {
     "gemini-flash": {
       "protocol": "google",
@@ -481,7 +439,10 @@ Use cheap local models for simple tasks, cloud models for heavy reasoning:
       "temperature": 0.2,
       "maxOutputTokens": 65536
     }
-  }
+  },
+  "modelSelected": "gemini-flash",
+  "modelEscalation": "gemini-pro",
+  "modelUtility": "gemini-flash"
 }
 ```
 
@@ -536,7 +497,7 @@ The `apiKeyEnv` field in model config tells VoidRift which env var to read.
 | Field | Default | Description |
 |-------|---------|-------------|
 | `editor` | none | Editor for opening skill/prompt/agent files from panels |
-| `selectedModel` | `"auto"` | Active model for user turns. `"auto"` = router picks Flash/Dense. Or a model name to pin. |
+| `selectedModel` | `"auto"` | Active model for user turns. Must reference a model in the models block. |
 | `summarizeThreshold` | 500 | Lines above which files get Flash-summarized instead of full-loaded |
 | `maxReadLines` | 1000 | Default max lines returned by read_file |
 | `maxConcurrentAgents` | 1 | How many background subagents can run simultaneously |
@@ -603,15 +564,13 @@ You have one capable model doing everything. Optimize for minimal latency:
 ```json
 {
   "models": { "cloud": { "protocol": "...", "model": "...", "contextLimit": 200000 } },
-  "modelTierFlash": "cloud",
-  "modelTierUtility": "cloud",
-  "modelTierDense": "cloud"
+  "modelSelected": "cloud"
 }
 ```
 
-No additional tuning needed. When all tiers point to the same model:
+No additional tuning needed. When only one model is configured:
 - Preflight is skipped (no classifier call before each turn)
-- Routing prompt is not injected (no escalation/deescalation)
+- Escalation prompt is not injected (no escalation model configured)
 - The model handles everything directly
 
 ### Single Local Model (Ollama, vLLM — 7B-32B)
@@ -621,9 +580,7 @@ Small models benefit from reduced tool schemas and guardrails:
 ```json
 {
   "models": { "local": { "protocol": "openai", "model": "qwen2.5-coder:7b", "baseUrl": "http://localhost:11434/v1", "contextLimit": 32768, "preflight": true } },
-  "modelTierFlash": "local",
-  "modelTierUtility": "local",
-  "modelTierDense": "local",
+  "modelSelected": "local",
   "turnsMaxToolRounds": 5,
   "turnsReminderInterval": 10
 }
@@ -634,9 +591,9 @@ Key settings:
 - `turnsMaxToolRounds: 5` — prevents runaway tool loops that burn context
 - `turnsReminderInterval: 10` — more frequent behavioral reminders (small models drift faster)
 
-### Multi-Tier (Local Flash + Cloud Dense)
+### Multi-Model (Local Primary + Cloud Escalation)
 
-The full auto-routing setup. Local handles 90% of work cheaply, cloud fires for complex reasoning:
+Local handles routine work cheaply, cloud fires for complex reasoning when needed:
 
 ```json
 {
@@ -644,19 +601,19 @@ The full auto-routing setup. Local handles 90% of work cheaply, cloud fires for 
     "local": { "protocol": "openai", "model": "qwen2.5-coder:14b", "baseUrl": "http://localhost:11434/v1", "contextLimit": 32768, "preflight": true },
     "cloud": { "protocol": "anthropic", "model": "claude-sonnet-4-20250514", "apiKeyEnv": "ANTHROPIC_API_KEY", "contextLimit": 200000 }
   },
-  "modelTierFlash": "local",
-  "modelTierUtility": "local",
-  "modelTierDense": "cloud",
+  "modelSelected": "local",
+  "modelEscalation": "cloud",
+  "modelUtility": "local",
   "modelEscalationFailureCount": 2
 }
 ```
 
 How it works:
-- Flash (local) handles chat, tool execution, and routine work
-- When flash tries to create a plan, the harness blocks it and forces escalation to dense (cloud)
-- When flash fails 2 consecutive tool calls, the harness auto-escalates to dense
-- Dense creates the plan or resolves the complex issue, then deescalates back to flash
-- `modelBackground` controls what `/run` and subagents use (defaults to `"auto"` which follows the same routing)
+- Your primary model (local) handles chat, tool execution, and routine work
+- When it tries to create a plan, the harness blocks it and forces escalation to cloud
+- When it fails 2 consecutive tool calls, the harness auto-escalates to cloud
+- Cloud creates the plan or resolves the complex issue, then deescalates back to your primary
+- `modelBackground` controls what `/run` and subagents use (defaults to your selected model)
 
 ### Key Tuning Parameters
 
@@ -667,6 +624,7 @@ How it works:
 | `modelEscalationFailureCount` | Failures before auto-escalation to dense | Models that recover quickly | Models that spin on errors |
 | `turnsContextBudgetStopPct` | Context % that halts tool execution | Large context models | Small context models |
 | `contextDecayAfterTurns` | Auto-compact after N turns | Long sessions | Short sessions |
+| `networkModelTimeoutMs` | Model API timeout | Slow endpoints | Fast local models |
 | `networkModelTimeoutMs` | Model API timeout | Slow endpoints | Fast local models |
 
 ## Troubleshooting

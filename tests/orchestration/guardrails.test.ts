@@ -7,7 +7,7 @@ describe("Guardrails", () => {
       const ctx = createGuardrailContext("/workspace", "session-1");
       const result = checkGuardrails("edit_file", { path: "src/main.ts", search: "old", replace: "new" }, ctx);
       expect(result.block).toBe(true);
-      expect(result.preWarning).toContain("BLOCKED");
+      expect(result.preWarning).toContain("Error:");
       expect(result.preWarning).toContain("read_file");
     });
 
@@ -24,7 +24,7 @@ describe("Guardrails", () => {
       const ctx = createGuardrailContext("/workspace", "session-1");
       const result = checkGuardrails("write_file", { path: "/tmp/hack.sh", content: "rm -rf /" }, ctx);
       expect(result.block).toBe(true);
-      expect(result.preWarning).toContain("BLOCKED");
+      expect(result.preWarning).toContain("Error:");
       expect(result.preWarning).toContain(".voidrift/cache");
     });
 

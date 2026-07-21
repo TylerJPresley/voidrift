@@ -3,7 +3,7 @@
  *
  * The turn flow:
  * 1. Image extraction + user message (inline — produces local vars)
- * 2. Tier resolution + de-escalation (inline — determines model)
+ * 2. ModelRole resolution + de-escalation (inline — determines model)
  * 3. await bus.publishAndWait("TURN_BEFORE") — subscribers enrich context
  * 4. Compile prompt + invoke model
  * 5. Record result (inline — updates context chain)
@@ -14,9 +14,9 @@
  */
 import { HumanMessage, AIMessage } from "@langchain/core/messages";
 import { runTurn } from "./orchestration/graph.js";
-import { createTierAdapter, createAdapter } from "./adapters/factory.js";
-import type { Tier } from "./adapters/factory.js";
-import { shouldEscalate, escalateTier } from "./router/index.js";
+import { createRoleAdapter, createAdapter } from "./adapters/factory.js";
+import type { ModelRole } from "./adapters/factory.js";
+import { shouldEscalate, escalateRole } from "./router/index.js";
 import { compilePrompt } from "./session/compiler.js";
 import { extractImages } from "./infrastructure/image-extraction.js";
 import type { EngineContext } from "./engine.js";
@@ -36,33 +36,28 @@ export async function executeTurn(engine: EngineContext, userMessage: string, ca
   engine.context.addMessage({ role: "user", content: cleanedMessage, contentBlocks: contentBlocks.length ? contentBlocks : undefined });
 
   // ─── Inline: Model resolution ─────────────────────────────────────────
-  let tier: Tier | string;
+  let tier: ModelRole | string;
   if (engine.agents.active.type === "task") {
-    // Task agents use their declared role (utility/flash/dense/auto)
-    tier = engine.agents.active.role || "utility";
-    if (tier === "auto") tier = "utility";
+    // Task agents: role overrides model selection
+    const role = engine.agents.active.role;
+    if (role === "utility") tier = "utility";
+    else if (role === "escalation") tier = "escalation";
+    else tier = engine.container.config.modelBackground || engine.container.config.modelSelected;
   } else {
     // Interactive agents use the session's modelSelected
-    const modelSelected = engine.container.config.modelSelected || "auto";
-    if (modelSelected === "auto") {
-      tier = "flash";
-    } else {
-      tier = modelSelected; // specific model name
-    }
+    tier = engine.container.config.modelSelected;
   }
-  // De-escalation: if was escalated to dense but context usage has dropped, revert
-  if (engine.agents.active.autoEscalated && tier === "dense") {
-    const modelKey = engine.container.config.modelTierDense;
-    const modelConfig = modelKey ? engine.container.config.models[modelKey] : undefined;
+  // De-escalation: if was auto-escalated but context usage has dropped, revert
+  if (engine.agents.active.autoEscalated && engine.container.config.modelEscalation) {
+    const modelConfig = engine.container.config.models[engine.container.config.modelEscalation];
     const contextLimit = modelConfig?.contextLimit ?? 32768;
     if (engine.budget.state.used < contextLimit * 0.5) {
       engine.agents.active.autoEscalated = false;
-      tier = engine.agents.active.type === "task" ? "utility" : "flash";
     }
   }
-  const isTierKey = tier === "flash" || tier === "utility" || tier === "dense";
+  const isTierKey = tier === "selected" || tier === "utility" || tier === "escalation";
   const resolved = isTierKey
-    ? createTierAdapter(tier as Tier, engine.container.config)
+    ? createRoleAdapter(tier as ModelRole, engine.container.config)
     : createAdapter(tier, engine.container.config);
 
   // Emit resolved model name so the UI can display it
@@ -86,7 +81,7 @@ export async function executeTurn(engine: EngineContext, userMessage: string, ca
     contextLimit: resolved.config.contextLimit,
     maxOutputTokens: resolved.config.maxOutputTokens,
     prompts: engine.prompts,
-    tier: isTierKey && engine.container.config.modelTierFlash !== engine.container.config.modelTierDense ? tier as string : undefined,
+    tier: engine.container.config.modelEscalation && engine.container.config.modelEscalation !== engine.container.config.modelSelected ? "selected" : undefined,
   });
 
   const systemParts = compiled.filter(m => m.role === "system").map(m => m.content);
@@ -126,7 +121,7 @@ export async function executeTurn(engine: EngineContext, userMessage: string, ca
       signal: callbacks.signal,
       context: engine.context,
       config: engine.container.config,
-      tier: isTierKey ? tier as Tier : undefined,
+      tier: (engine.container.config.modelEscalation && engine.container.config.modelEscalation !== engine.container.config.modelSelected ? "selected" : undefined) as ModelRole | undefined,
       agent: engine.agents.active,
       mcp: engine.mcp,
       workspaceRoot: engine.workspaceRoot,

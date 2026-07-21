@@ -300,7 +300,7 @@ function App({ restoredHistory }: { restoredHistory?: Array<{ role: string; cont
     let tokenCount = 0;
     let fullText = "";
     let hasIntermediateCommits = false;
-    let resolvedModel = (() => { const selected = core.models.list().modelSelected; if (selected === "auto") return "auto"; const cfg = core.workspace.config(); return cfg.models[selected]?.model ?? selected; })();
+    let resolvedModel = (() => { const selected = core.models.list().modelSelected; const cfg = core.workspace.config(); return cfg.models[selected]?.model ?? selected; })();
 
     const result = await core.session.execute(messageText, {
       signal: abortController.signal,
@@ -351,7 +351,7 @@ function App({ restoredHistory }: { restoredHistory?: Array<{ role: string; cont
         if (chunk.type === "status") {
           if (chunk.message.startsWith("model:")) {
             const name = chunk.message.slice(6);
-            const displayModel = core.models.list().modelSelected === "auto" ? `auto[${name}]` : name;
+            const displayModel = core.models.list().modelSelected === name ? name : `${name} (escalated)`;
             resolvedModel = displayModel;
             setActiveModel(displayModel);
           }

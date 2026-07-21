@@ -39,7 +39,7 @@ export interface ModelListResult {
 
 export const ModelSwitchParamsSchema = z.object({
   name: z.string().min(1),
-  tier: z.enum(["flash", "utility", "dense"]).optional(),
+  tier: z.enum(["selected", "utility", "escalation"]).optional(),
 });
 export type ModelSwitchParams = z.infer<typeof ModelSwitchParamsSchema>;
 

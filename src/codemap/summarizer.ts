@@ -1,5 +1,5 @@
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
-import { createTierAdapter } from "../adapters/factory.js";
+import { createRoleAdapter } from "../adapters/factory.js";
 import { getModelCache } from "../adapters/cache.js";
 import type { VoidRiftConfig } from "../config/loader.js";
 import { summarizeFile } from "../codemap/index.js";
@@ -30,7 +30,7 @@ export async function summarizeFileWithFlash(
   }
 
   try {
-    const resolved = createTierAdapter("utility", config);
+    const resolved = createRoleAdapter("utility", config);
     resolved.client.cache = getModelCache();
     const messages = [
       new SystemMessage(SUMMARIZE_PROMPT),

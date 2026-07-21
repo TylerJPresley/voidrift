@@ -138,29 +138,29 @@ describe("ModelPanel — action per item", () => {
     expect(switchFn).toHaveBeenCalledWith({ name: "local", tier: undefined });
   });
 
-  it("f key assigns model to flash tier", async () => {
+  it("enter assigns model as selected", async () => {
     const { safeConfigWrite } = await import("../../src/config/writer.js");
     (safeConfigWrite as any).mockClear();
     const core = createMockCore();
     const config = core.workspace.config();
 
-    // Simulate what f action does
-    config.modelTierFlash = "local";
-    expect(config.modelTierFlash).toBe("local");
+    // Simulate what enter action does
+    config.modelSelected = "local";
+    expect(config.modelSelected).toBe("local");
   });
 
-  it("u key assigns model to utility tier", () => {
+  it("e key assigns model to escalation", () => {
     const core = createMockCore();
     const config = core.workspace.config();
-    config.modelTierUtility = "local";
-    expect(config.modelTierUtility).toBe("local");
+    config.modelEscalation = "local";
+    expect(config.modelEscalation).toBe("local");
   });
 
-  it("d key assigns model to dense tier", () => {
+  it("u key assigns model to utility", () => {
     const core = createMockCore();
     const config = core.workspace.config();
-    config.modelTierDense = "local";
-    expect(config.modelTierDense).toBe("local");
+    config.modelUtility = "local";
+    expect(config.modelUtility).toBe("local");
   });
 });
 

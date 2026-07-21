@@ -140,16 +140,16 @@ describe("TURN_AFTER Subscribers", () => {
       const agent = { role: "auto", autoEscalated: false, type: "interactive" } as any;
       const toolsUsed = ["read_file", "escalate"];
 
-      if (toolsUsed.includes("escalate") && agent.role !== "dense") {
-        agent.role = "dense";
+      if (toolsUsed.includes("escalate") && agent.role !== "escalation") {
+        agent.role = "escalation";
         agent.autoEscalated = false;
       }
 
-      expect(agent.role).toBe("dense");
+      expect(agent.role).toBe("escalation");
     });
 
     it("deescalates when model calls deescalate tool", () => {
-      const agent = { role: "dense", autoEscalated: false } as any;
+      const agent = { role: "escalation", autoEscalated: false } as any;
       const toolsUsed = ["write_file", "deescalate"];
 
       if (toolsUsed.includes("deescalate")) {
@@ -161,12 +161,12 @@ describe("TURN_AFTER Subscribers", () => {
     });
 
     it("auto-escalates on context overflow", async () => {
-      const { shouldEscalate, escalateTier } = await import("../../src/router/index.js");
+      const { shouldEscalate, escalateRole } = await import("../../src/router/index.js");
       const used = 28000;
       const contextLimit = 32768;
 
       expect(shouldEscalate(used, contextLimit, 0)).toBe(true);
-      expect(escalateTier("flash")).toBe("utility");
+      expect(escalateRole("selected")).toBe("utility");
     });
 
     it("does not auto-escalate below threshold", async () => {

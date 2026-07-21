@@ -152,8 +152,8 @@ export const validatePromptFile: FileValidator = (content) => {
     const header = match[1];
     if (header.includes("tier:")) {
       const tier = header.match(/tier:\s*(.+)/)?.[1]?.trim();
-      if (tier && !["flash", "utility", "dense"].includes(tier)) {
-        return { valid: false, errors: [`Invalid tier "${tier}". Must be flash|utility|dense.`] };
+      if (tier && !["selected", "utility", "escalation"].includes(tier)) {
+        return { valid: false, errors: [`Invalid tier "${tier}". Must be selected|utility|escalation.`] };
       }
     }
   }

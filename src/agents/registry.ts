@@ -15,7 +15,7 @@ export type AgentType = "interactive" | "task";
 export type ApprovalMode = "prompt" | "deny" | "autonomous";
 // Re-export for external consumers
 export type { ApprovalMode as AgentApprovalMode };
-export type AgentRole = "flash" | "utility" | "dense" | "auto" | (string & {});
+export type AgentRole = "utility" | "escalation" | (string & {});
 
 export interface ToolSettings {
   allowedPaths?: string[];
@@ -135,7 +135,7 @@ const CORE_AGENTS: AgentManifest[] = [
     name: "Chat",
     description: "General-purpose assistant with full tool access",
     type: "interactive",
-    role: "auto",
+    role: "",
     prompt: PROMPT_CHAT,
     tools: ALL_TOOLS,
     approvalMode: "prompt",
@@ -148,7 +148,7 @@ const CORE_AGENTS: AgentManifest[] = [
     name: "Plan",
     description: "Read-only planning and architecture mode",
     type: "interactive",
-    role: "auto",
+    role: "",
     prompt: PROMPT_PLAN,
     tools: [...READ_TOOLS, "read_plan", "add_plan", "remove_plan", "prioritize_plan", "update_plan"],
     approvalMode: "deny",
@@ -161,7 +161,7 @@ const CORE_AGENTS: AgentManifest[] = [
     name: "Vibe",
     description: "Autonomous execution with no approval gates",
     type: "interactive",
-    role: "auto",
+    role: "",
     prompt: PROMPT_VIBE,
     tools: ALL_TOOLS,
     approvalMode: "autonomous",
@@ -337,7 +337,7 @@ export class AgentRegistry {
     const configPath = join(base, "agent.json");
     const promptPath = join(base, "prompt.md");
     if (!this.repo.exists(configPath)) {
-      const config = { id, name: id, description: "", type, role: "auto", tools: [] as string[], approvalMode: "prompt" as const, allowedTools: [] as string[], active: false };
+      const config = { id, name: id, description: "", type, role: "", tools: [] as string[], approvalMode: "prompt" as const, allowedTools: [] as string[], active: false };
       this.repo.writeManifest(configPath, config);
     }
     if (!this.repo.exists(promptPath)) {

@@ -68,8 +68,8 @@ export function registerBuiltinSkills(skills: SkillManager): void {
 
   skills.register({
     name: "model-escalation",
-    description: "How to use model tier escalation for complex tasks",
-    triggers: { keywords: ["escalate", "deescalate", "model", "tier", "dense", "flash", "reasoning"] },
+    description: "How to use model escalation for complex tasks",
+    triggers: { keywords: ["escalate", "deescalate", "model", "escalation", "help", "stuck", "reasoning"] },
     agents: [],
     active: true,
     sourcePlugin: "builtin",
@@ -436,19 +436,19 @@ Results are written to the output file (append or overwrite based on append flag
 
 const SKILL_MODEL_ESCALATION = `# Model Escalation
 
-VoidRift has three tiers — flash (primary, chat + execution), utility (internal classifiers), and dense (architecture + reasoning). Escalation switches between flash and dense mid-turn.
+A more capable model is available as a lifeline. You are the primary model — you handle all work. When stuck or facing something beyond your capacity, you can escalate.
 
 ## How It Works
 
-- Call \`escalate\` → the harness swaps to the dense model immediately (same turn, no approval needed)
-- Call \`deescalate\` → swaps back to flash for execution
-- The model switch happens mid-turn — you keep the same context and tool results
+- Call \`escalate(reason)\` → the harness swaps to the escalation model immediately (same turn, no approval needed)
+- The escalation model calls \`deescalate()\` when done → control returns to you
+- The model switch happens mid-turn — full context and tool results carry over
 
 ## Mechanical Enforcement
 
 The harness enforces escalation in specific cases:
-- **Plan creation on flash is blocked.** If you call \`add_plan\` while on flash in auto mode, the harness rejects it and tells you to escalate. Dense creates plans, flash executes them.
-- **2 consecutive failures may trigger auto-escalation.** The harness can swap to dense when the flash model is stuck.
+- **Plan creation is blocked on the primary model.** If you call \`add_plan\` while escalation is configured, the harness rejects it and tells you to escalate. The escalation model creates plans, you execute them.
+- **2 consecutive failures trigger auto-escalation.** The harness swaps to the escalation model when you're stuck.
 
 ## When to Escalate
 
@@ -466,10 +466,10 @@ Call \`deescalate\` when:
 - Analysis complete — findings documented, action items clear
 
 ## Key Constraints
-- Only available in auto mode (when flash ≠ dense)
+- Only available when an escalation model is configured
 - Escalation auto-approves — no user confirmation needed
-- Dense should deescalate once reasoning is done — don't stay on dense for routine edits
-- After deescalating, flash picks up with the full context from the dense phase`;
+- The escalation model should deescalate once reasoning is done — don't stay escalated for routine work
+- After deescalating, you pick up with the full context from the escalated phase`;
 
 
 const SKILL_ROUTINES = `# Routines
