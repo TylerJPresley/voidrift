@@ -1,0 +1,47 @@
+{
+  "name": "voidrift",
+  "version": "0.4.0",
+  "description": "VoidRift CLI — the terminal agent harness on the VoidRift core SDK.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "voidrift": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest --run",
+    "coverage": "vitest --run --coverage"
+  },
+  "dependencies": {
+    "@voidrift/core": "^0.1.0",
+    "chalk": "6.0.1",
+    "ink": "8.0.0",
+    "react": "19.3.0",
+    "react-devtools-core": "8.0.0"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "@types/node": "26.6.5",
+    "@types/react": "19.3.0",
+    "@vitest/coverage-v8": "5.0.3",
+    "ink-testing-library": "4.0.0",
+    "typescript": "5.9.3",
+    "vitest": "5.0.3",
+    "zod": "4.6.5"
+  },
+  "voidrift": {
+    "kind": "product"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TylerJPresley/voidrift.git"
+  }
+}
