@@ -53,6 +53,17 @@ def main() -> int:
     deadline = time.time() + spec.get("timeoutMs", 45000) / 1000.0
 
     env = dict(os.environ)
+    # Scrub CI detection variables: Ink detects CI environments (GitHub Actions,
+    # CircleCI, GitLab CI, etc.) and renders only the final frame to reduce spam.
+    # For e2e tests, we need full frame delivery to verify the TUI's interactive
+    # sequences, so strip all CI environment markers before passing to the child.
+    ci_vars = [
+        "CI", "CONTINUOUS_INTEGRATION", "BUILD_NUMBER", "RUN_ID", "GITHUB_ACTIONS",
+        "GITLAB_CI", "CIRCLECI", "TRAVIS", "APPVEYOR", "BUILDKITE", "DRONE",
+        "GITHUB_RUNNER_DEBUG"
+    ]
+    for var in ci_vars:
+        env.pop(var, None)
     env.update(extra_env)
     # A sane interactive terminal: colour off (NO_COLOR), UTF-8, 100x40 to start.
     env["NO_COLOR"] = "1"
@@ -110,8 +121,7 @@ def main() -> int:
     ok = True
     try:
         # 1. the TUI booted — the input placeholder is shown.
-        # Allow up to 25s to account for slower startup in CI without module hoisting.
-        ok = ok and wait_for(b"ask a question", 25)
+        ok = ok and wait_for(b"ask a question", 15)
         # 2. type the prompt, let it register, THEN press Enter as its own key
         #    event (Ink processes keystrokes one at a time; a prompt+CR in one
         #    write can race the renderer and drop the submit), and wait for the
