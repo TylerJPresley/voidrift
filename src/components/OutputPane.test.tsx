@@ -33,6 +33,7 @@ function BottomRegion({ state, cols, turnActive }: { state: ViewState; cols: num
     autocompleteOpen: false,
     candidates: [],
     candidateCursor: 0,
+    columns: cols,
     theme,
     placeholder: "ask a question or describe a task",
     onKey: () => {},
@@ -57,6 +58,7 @@ describe("§5.2 one blank row separates the output region from the input region"
       s = reduce(s, {
         type: "token",
         token: "• Agents/modes — switch between chat (full tools), research",
+        done: false,
       });
       const r = render(<BottomRegion state={s} cols={cols} turnActive />);
       const lines = r.lastFrame()!.split("\n");
@@ -117,7 +119,7 @@ describe("§5.2 one blank row separates the output region from the input region"
       const glyphs = resolveGlyphs(caps(cols));
       const ib: InputBarProps = {
         value: "", cursor: 0, active: true, turnActive: false, pendingCtrlC: false,
-        autocompleteOpen: false, candidates: [], candidateCursor: 0, theme,
+        autocompleteOpen: false, candidates: [], candidateCursor: 0, columns: cols, theme,
         placeholder: "ask", onKey: () => {},
       };
       const r = render(

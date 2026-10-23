@@ -11,7 +11,6 @@
  * It renders a corpus through the REAL components (OutputPane → Markdown,
  * ToolGroup, the user echo, notices, the footer line) at widths 30..140.
  */
-import React from "react";
 import { describe, it, expect } from "vitest";
 import { render } from "ink-testing-library";
 import { Markdown } from "./Markdown.js";

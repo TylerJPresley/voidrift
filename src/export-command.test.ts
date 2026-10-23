@@ -52,7 +52,7 @@ async function bootWithSession(input: string): Promise<{ boot: (o: { workspaceRo
       workspaceRoot: ws,
       configOverrides: SEED,
       sessionRepository: sharedRepo,
-      chatModelFactory: () => fakeModel({ responses: [new AIMessage("done")] }),
+      chatModelFactory: () => fakeModel().respond(new AIMessage("done")),
       installSignalHandlers: false,
     });
     tracked.push(r);

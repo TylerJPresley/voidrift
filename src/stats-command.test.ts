@@ -85,7 +85,7 @@ describe("§10.14 — voidrift stats", () => {
 
   it("renderStatsTable leaves the money column empty when no price is configured and marks estimated figures", () => {
     const r = report({
-      totals: { turns: 1, toolCalls: 0, toolErrors: 0, tokensIn: 100, tokensOut: 40, tokensCacheRead: 0, tokensTotal: 140, wallMs: 1000, estimatedTurns: 1 },
+      totals: { turns: 1, toolCalls: 0, toolErrors: 0, tokensIn: 100, tokensOut: 40, tokensCacheRead: 0, tokensTotal: 140, wallMs: 1000, genMs: 0, estimatedTurns: 1 },
       byModel: {},
       byAgent: {},
       byDay: {},
@@ -109,7 +109,7 @@ describe("§10.14 — voidrift stats", () => {
   it("marks a bucket's token cell with ~ only when it has estimated turns (both cases)", () => {
     // Unestimated: no mark.
     const unest = report({
-      totals: { turns: 2, toolCalls: 0, toolErrors: 0, tokensIn: 100, tokensOut: 40, tokensCacheRead: 0, tokensTotal: 140, wallMs: 1000, estimatedTurns: 0 },
+      totals: { turns: 2, toolCalls: 0, toolErrors: 0, tokensIn: 100, tokensOut: 40, tokensCacheRead: 0, tokensTotal: 140, wallMs: 1000, genMs: 0, estimatedTurns: 0 },
       byModel: {}, byAgent: {}, byDay: {},
     });
     const unmarked = renderStatsTable(unest);
@@ -117,7 +117,7 @@ describe("§10.14 — voidrift stats", () => {
     expect(unmarked).not.toContain("~140");
     // Estimated: marked.
     const est = report({
-      totals: { turns: 2, toolCalls: 0, toolErrors: 0, tokensIn: 100, tokensOut: 40, tokensCacheRead: 0, tokensTotal: 140, wallMs: 1000, estimatedTurns: 1 },
+      totals: { turns: 2, toolCalls: 0, toolErrors: 0, tokensIn: 100, tokensOut: 40, tokensCacheRead: 0, tokensTotal: 140, wallMs: 1000, genMs: 0, estimatedTurns: 1 },
       byModel: {}, byAgent: {}, byDay: {},
     });
     expect(renderStatsTable(est)).toContain("~140");
@@ -125,7 +125,7 @@ describe("§10.14 — voidrift stats", () => {
 
   it("statsPanelRows shows (no price configured) and an est turn count when unpriced/estimated", () => {
     const rows = statsPanelRows(report({
-      totals: { turns: 1, toolCalls: 0, toolErrors: 0, tokensIn: 100, tokensOut: 40, tokensCacheRead: 0, tokensTotal: 140, wallMs: 1000, estimatedTurns: 1 },
+      totals: { turns: 1, toolCalls: 0, toolErrors: 0, tokensIn: 100, tokensOut: 40, tokensCacheRead: 0, tokensTotal: 140, wallMs: 1000, genMs: 0, estimatedTurns: 1 },
       byModel: {},
       byAgent: {},
     }));

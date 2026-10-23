@@ -341,6 +341,7 @@ describe("§4.4 fan-out orchestration rows", () => {
     s = reduce(s, { type: "worker_status", workerId: "f1-w1", status: "succeeded", agent: "researcher" });
     s = reduce(s, { type: "tool_finished", id: "w1", name: "task", status: "success", durationMs: 100, summary: "ok" });
     const last = s.blocks[s.blocks.length - 1];
+    if (!last) throw new Error("expected a block in state");
     expect(last.kind).toBe("toolgroup");
     expect((last as Extract<Block, { kind: "toolgroup" }>).calls).toHaveLength(1);
   });

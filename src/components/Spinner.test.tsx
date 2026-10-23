@@ -3,7 +3,6 @@
  * flickers while a turn runs (buffered rendering, §1.4, §4.2). Proven with fake
  * timers: the frame advances only when ≥ the interval elapses.
  */
-import React from "react";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render } from "ink-testing-library";
 import { Spinner } from "./Spinner.js";

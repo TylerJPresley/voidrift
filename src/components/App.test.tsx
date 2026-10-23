@@ -9,7 +9,7 @@ import React from "react";
 import { basename } from "node:path";
 import { describe, it, expect, vi } from "vitest";
 import { render } from "ink-testing-library";
-import type { PendingApproval, ApprovalResponse } from "@voidrift/core";
+import type { PendingApproval, ApprovalResponse, TurnResult, CoreAPI } from "@voidrift/core";
 import { App } from "./App.js";
 import { StatusBar } from "./Footer.js";
 import { makeHarness, type Harness } from "../test-harness.js";
@@ -21,6 +21,19 @@ import type { BoundPanelRegistry } from "../panels/types.js";
 import type { Row } from "../panels/rows.js";
 
 const WS = hermeticTmp("app");
+
+/** Stub turn result for test mocks that don't run real model calls. */
+const stubTurnResult = (): Promise<{ ok: true; value: TurnResult }> =>
+  Promise.resolve({
+    ok: true as const,
+    value: {
+      status: "completed",
+      text: "",
+      toolsUsed: [],
+      model: "test",
+      usage: { promptTokens: 0, completionTokens: 0, totalMs: 0 },
+    },
+  });
 
 /**
  * Local test builders for the CLI's `BoundPanel` registry (§7.1). Production
@@ -652,10 +665,11 @@ describe("§3.9 input, history, cancel", () => {
     const harness = await makeHarness();
     const sid = await newSession(harness);
     const files = Array.from({ length: 12 }, (_, i) => `src/file${i}.ts`);
-    const api = {
-      ...harness.ready.api,
-      workspace: { ...harness.ready.api.workspace, files: async () => ({ ok: true as const, value: files }) },
-    };
+    const api: CoreAPI = Object.assign({}, harness.ready.api, {
+      workspace: Object.assign({}, harness.ready.api.workspace, {
+        files: async () => ({ ok: true as const, value: files }),
+      }),
+    });
     const app = await mountApp(harness, sid, { api });
     app.stdin.write("edit src/file");
     await waitForFrame(app, (f) => f.includes("src/file"), { timeoutMs: 4000, intervalMs: 20 });
@@ -713,10 +727,11 @@ describe("§3.9 input, history, cancel", () => {
     const sid = await newSession(harness);
     // Stub send so seeding several history entries does not exhaust the fake
     // model (one queued reply per instance); history.push runs on submit either way.
-    const api = {
-      ...harness.ready.api,
-      session: { ...harness.ready.api.session, send: async () => ({ ok: true as const, value: undefined }) },
-    };
+    const api: CoreAPI = Object.assign({}, harness.ready.api, {
+      session: Object.assign({}, harness.ready.api.session, {
+        send: async () => stubTurnResult(),
+      }),
+    });
     const app = await mountApp(harness, sid, { api });
     // Seed one history entry via a submit; the stubbed send emits no event, so
     // drive TURN_COMPLETE to return the prompt (turnActive → false).
@@ -749,16 +764,14 @@ describe("§3.9 input, history, cancel", () => {
     const harness = await makeHarness({ reply: "ok" });
     const sid = await newSession(harness);
     const sent: string[] = [];
-    const api = {
-      ...harness.ready.api,
-      session: {
-        ...harness.ready.api.session,
+    const api: CoreAPI = Object.assign({}, harness.ready.api, {
+      session: Object.assign({}, harness.ready.api.session, {
         send: async (_sid: string, req: { input: string }) => {
           sent.push(req.input);
-          return { ok: true as const, value: undefined };
+          return stubTurnResult();
         },
-      },
-    };
+      }),
+    });
     const app = await mountApp(harness, sid, { api });
     // Seed two entries: oldest then newest (stubbed send + TURN_COMPLETE).
     for (const msg of ["older", "newer"]) {
@@ -1957,10 +1970,11 @@ describe("§3.1/§3.2/§3.4 multi-line Up/Down visual navigation", () => {
     sid: string,
     extra: Partial<React.ComponentProps<typeof App>> = {},
   ) {
-    const api = {
-      ...harness.ready.api,
-      session: { ...harness.ready.api.session, send: async () => ({ ok: true as const, value: undefined }) },
-    };
+    const api: CoreAPI = Object.assign({}, harness.ready.api, {
+      session: Object.assign({}, harness.ready.api.session, {
+        send: stubTurnResult,
+      }),
+    });
     return mountApp(harness, sid, { api, ...extra });
   }
 

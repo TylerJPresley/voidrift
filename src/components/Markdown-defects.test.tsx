@@ -6,7 +6,6 @@
  * that the progressively-committed reply renders identically to the same reply
  * rendered whole.
  */
-import React from "react";
 import { describe, it, expect } from "vitest";
 import { render } from "ink-testing-library";
 import { Markdown } from "./Markdown.js";

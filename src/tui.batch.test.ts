@@ -27,7 +27,8 @@ describe("§6.2 isWorkerBatchable", () => {
   });
 
   it("a non-worker (orchestrator) ask is NEVER batchable", () => {
-    expect(isWorkerBatchable(ask({ workerId: undefined }))).toBe(false);
+    // Construct with workerId as empty string (falsy), which represents no worker
+    expect(isWorkerBatchable(ask({ workerId: "" }))).toBe(false);
   });
 
   it("a worker FORCE-ASK is never batchable, for every forceAskKind", () => {

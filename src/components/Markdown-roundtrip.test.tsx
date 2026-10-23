@@ -8,7 +8,6 @@
  * Rendered through the REAL Ink components (Markdown), the single source of
  * truth for layout (§4.1).
  */
-import React from "react";
 import { describe, it, expect } from "vitest";
 import { render } from "ink-testing-library";
 import { Markdown } from "./Markdown.js";
