@@ -56,10 +56,12 @@ describe("real-binary hostile (e2e)", () => {
 
   afterAll(async () => {
     await fake.close();
-    // Scoped to this suite's own `h*` fixtures so a parallel sibling e2e file is
-    // not seen as a leak (see run-binary.ts listE2eTmp).
-    const leftover = await listE2eTmp("h");
-    expect(leftover).toEqual([]);
+    // Scoped to this suite's own `h<digit>*` fixtures (h1–h8, h7-500, h7-401)
+    // so a parallel sibling e2e file (e.g. headless-no-ingest) is not seen as
+    // a leak (see run-binary.ts listE2eTmp).
+    const all = await listE2eTmp("h");
+    const hostile = all.filter((d) => /\/e2e-h\d/.test(d));
+    expect(hostile).toEqual([]);
   });
 
   it("H1 INVALID ARGS: read_file with no path returns a structured error ToolMessage; loop continues (core §8.1, §9.1)", async () => {

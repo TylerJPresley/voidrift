@@ -110,7 +110,8 @@ def main() -> int:
     ok = True
     try:
         # 1. the TUI booted — the input placeholder is shown.
-        ok = ok and wait_for(b"ask a question", 15)
+        # Allow up to 25s to account for slower startup in CI without module hoisting.
+        ok = ok and wait_for(b"ask a question", 25)
         # 2. type the prompt, let it register, THEN press Enter as its own key
         #    event (Ink processes keystrokes one at a time; a prompt+CR in one
         #    write can race the renderer and drop the submit), and wait for the
