@@ -1153,6 +1153,7 @@ describe("fan-out liveness heartbeats stamp the matching row so it shimmers (§4
     // The old gate flipped this SILENT past ~1.5s; now a running row always
     // waves, no matter how stale its lastEventAt (a slow single tool call).
     expect(fanoutRowGenerating({ ...row, lastEventAt: row.lastEventAt! - 3000 })).toBe(true);
-    expect(fanoutRowGenerating({ ...row, lastEventAt: undefined })).toBe(true);
+    const { lastEventAt: _unused, ...rowNoEvent } = row;
+    expect(fanoutRowGenerating(rowNoEvent)).toBe(true);
   });
 });

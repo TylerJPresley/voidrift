@@ -107,7 +107,7 @@ describe("§4.2 gradient-wave brightness ramp", () => {
 
   it("floor brightness (WAVE_FLOOR_RATIO) keeps base color readable", () => {
     const [r, g, b] = [100, 150, 200];
-    const _frame = gradientWaveFrame([r, g, b], 5, 0.9); // peak far from most chars
+    gradientWaveFrame([r, g, b], 5, 0.9); // peak far from most chars
     // all chars at or near floor; at least one should be at floor level
     const floorMultiplied = [
       Math.round(r * WAVE_FLOOR_RATIO),
@@ -154,8 +154,6 @@ describe("§4.2 frame advance at ~8fps cadence", () => {
   it("peak position cycles 0->1 over a full wave cycle", () => {
     // wave cycles every ~1000ms at 8fps, so 8 frames per cycle
     const fps = 8;
-    const cycleMs = 1000;
-    const _frameMs = cycleMs / fps;
     // at frame N, peak is at N/fps % 1
     for (let n = 0; n < fps; n++) {
       const peak = (n / fps) % 1;
