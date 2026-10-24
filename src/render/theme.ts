@@ -156,6 +156,152 @@ export function resolveTheme(caps: Capabilities, _name = "default"): ThemeTokens
 export const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 export const SPINNER_INTERVAL = 120;
 
+/** §4.2 — spinner group selection. BRAILLE for Thinking/Responding main model
+ * verbs; ARC for tool-use (Reading/Searching/Fetching/Editing/Saving/Running);
+ * HALF-CIRCLE for fan-out/worker activity; BOUNCE for catch-all (compaction,
+ * other live status). All ~8 frames/sec (125ms per frame). */
+export const SPINNER_BRAILLE = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+export const SPINNER_ARC = ["◜", "◠", "◝", "◞", "◡", "◟"];
+export const SPINNER_HALF_CIRCLE = ["◐", "◓", "◑", "◒"];
+export const SPINNER_BOUNCE = ["⠁", "⠂", "⠄", "⠂"];
+
+/** §4.2 — select spinner frames by action verb (case-sensitive). */
+export function selectSpinnerFrames(verb: string): string[] {
+  if (verb === "Thinking" || verb === "Responding") return SPINNER_BRAILLE;
+  if (verb === "Reading" || verb === "Searching" || verb === "Fetching" || verb === "Editing" || verb === "Saving" || verb === "Running") return SPINNER_ARC;
+  if (verb === "Orchestrating") return SPINNER_HALF_CIRCLE;
+  return SPINNER_BOUNCE;
+}
+
+/** §4.2 (gradient-wave) — dim floor ratio: base brightness so the wave never
+ * fades to black, keeping the text readable as it brightens and dims. Internal
+ * CLI constant (not in limits registry). */
+export const WAVE_FLOOR_RATIO = 0.6;
+
+/** §4.2 (gradient-wave) — the wave animation cadence: ~8 frames/sec. */
+export const WAVE_FPS = 8;
+export const WAVE_INTERVAL = Math.round(1000 / WAVE_FPS);
+
+/** §4.2 (gradient-wave) — brightness ramp for a single frame of the gradient
+ * wave. Given a base RGB color, the number of characters (width), a peak
+ * position (0-1), returns an array of [r,g,b] triplets, one per character,
+ * using a raised-cosine brightness curve so the peak is bright and the floor
+ * is readable (WAVE_FLOOR_RATIO). Wraps continuously at boundaries. Pure, so
+ * tests can assert frame content and motion. */
+export function gradientWaveFrame(
+  baseRGB: readonly [number, number, number],
+  width: number,
+  peakPos: number
+): ReadonlyArray<readonly [number, number, number]> {
+  const [br, bg, bb] = baseRGB;
+  const result: Array<[number, number, number]> = [];
+
+  for (let i = 0; i < width; i++) {
+    const pos = width <= 1 ? 0 : i / (width - 1);
+    // Distance from peak, wrapping for continuity
+    let d = Math.abs(pos - peakPos);
+    d = Math.min(d, 1 - d);
+    // Raised cosine: peak brightness (t=1) at center, floor brightness (t≈0.6)
+    // at edges (normalized distance 1.0 away from peak).
+    const t = 0.5 * (1 + Math.cos(Math.PI * d));
+    // Blend from floor to bright: brightness = floor + (bright-floor)*t
+    const k = WAVE_FLOOR_RATIO + (1 - WAVE_FLOOR_RATIO) * t;
+    // Multiply RGB by brightness, clamped to [0,255]
+    const r = Math.max(0, Math.min(255, Math.round(br * k)));
+    const g = Math.max(0, Math.min(255, Math.round(bg * k)));
+    const b = Math.max(0, Math.min(255, Math.round(bb * k)));
+    result.push([r, g, b]);
+  }
+
+  return result;
+}
+
+/** §4.2 (gradient-wave) — the frame index from the clock, so the peak position
+ * is a pure function of nowMs and deterministic in tests. Frame N has peak at
+ * position (N / WAVE_FPS) % 1. */
+export function waveFrame(nowMs: number): number {
+  return Math.floor(nowMs / WAVE_INTERVAL);
+}
+
+/** Parse a `#rrggbb` (or `#rgb`) hex string to an `[r,g,b]` triplet, or null
+ * when the value is not a hex colour (a named 16-colour token or `undefined`
+ * carries no per-channel brightness to ramp). */
+export function hexToRGB(hex: string | undefined): [number, number, number] | null {
+  if (!hex || hex[0] !== "#") return null;
+  const h = hex.slice(1);
+  const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
+  if (full.length !== 6 || /[^0-9a-f]/i.test(full)) return null;
+  return [parseInt(full.slice(0, 2), 16), parseInt(full.slice(2, 4), 16), parseInt(full.slice(4, 6), 16)];
+}
+
+/** Format an `[r,g,b]` triplet as a `#rrggbb` hex string (truecolor span). */
+export function rgbToHex([r, g, b]: readonly [number, number, number]): string {
+  const h = (n: number): string => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, "0");
+  return `#${h(r)}${h(g)}${h(b)}`;
+}
+
+/** Map an `[r,g,b]` triplet to the nearest xterm 256-colour index as an
+ * `ansi256` Ink/chalk colour string (`"ansi256(123)"`), used when the terminal
+ * is 8-bit rather than truecolor (§4.9 degrade). Uses the 6×6×6 colour cube. */
+export function rgbToAnsi256([r, g, b]: readonly [number, number, number]): string {
+  const q = (v: number): number => (v < 48 ? 0 : v < 115 ? 1 : Math.round((v - 35) / 40));
+  const idx = 16 + 36 * q(r) + 6 * q(g) + q(b);
+  return `ansi256(${idx})`;
+}
+
+/** §4.2/§4.4 — a single rendered character of the gradient wave: its glyph and
+ * its per-character colour (undefined when colour is suppressed). `bold` marks
+ * the static two-weight fallback's "active" weight (generating). */
+export interface WaveSpan {
+  char: string;
+  color: string | undefined;
+  bold: boolean;
+}
+
+/**
+ * §4.2 (verb wave) / §4.4 (row liveness) — turn `text` into per-character spans
+ * carrying the gradient-wave colour for one frame, so a component renders a row
+ * of `<Text color={span.color}>` cells (one per character). Reuses
+ * `gradientWaveFrame` for the brightness ramp — the maths lives in ONE place.
+ *
+ * `peakPos` (0..1) is the bright peak's position this frame (from `waveFrame`).
+ * `depth` degrades the colour: `truecolor` emits `#rrggbb`, `ansi256` the
+ * nearest cube index, `ansi16`/`none` carry no per-character colour. The
+ * fallbacks (spec §4.2/§4.4):
+ *  - `reduceMotion` or `NO_COLOR` (depth `none`): NO per-character colour and NO
+ *    wave — a static two-weight result (`active` → bold, else normal), so the
+ *    text stays readable with no animation.
+ *  - otherwise the raised-cosine ramp with floor `WAVE_FLOOR_RATIO`, so the dim
+ *    floor never fades to near-black and the base colour is always readable.
+ *
+ * `active` is the generating/working weight for the static fallback (bold) and
+ * is ignored when a colour wave is drawn. When `baseRGB` is null (a named
+ * 16-colour or monochrome token) the function returns the static two-weight
+ * form regardless of depth, since there is no channel brightness to ramp.
+ */
+export function gradientWaveSpans(
+  text: string,
+  baseRGB: readonly [number, number, number] | null,
+  peakPos: number,
+  opts: { depth: ColorDepth; reduceMotion?: boolean; active?: boolean },
+): WaveSpan[] {
+  const chars = [...text];
+  const active = opts.active ?? true;
+  const staticTwoWeight = (): WaveSpan[] =>
+    chars.map((char) => ({ char, color: undefined, bold: active }));
+  // No animation / no per-character colour: reduceMotion, monochrome, no base
+  // RGB, or a 16-colour terminal with no per-channel ramp.
+  if (opts.reduceMotion || opts.depth === "none" || opts.depth === "ansi16" || baseRGB === null) {
+    return staticTwoWeight();
+  }
+  const ramp = gradientWaveFrame(baseRGB, chars.length, peakPos);
+  return chars.map((char, i) => ({
+    char,
+    color: opts.depth === "ansi256" ? rgbToAnsi256(ramp[i]!) : rgbToHex(ramp[i]!),
+    bold: false,
+  }));
+}
+
 /** The glyph set, with ASCII fallbacks when the locale is not UTF-8 (§4.9). */
 export interface Glyphs {
   /** `┃` user bar. */ userBar: string;

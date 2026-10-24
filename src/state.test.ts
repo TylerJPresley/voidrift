@@ -5,7 +5,7 @@
  * budget/threshold, model/branch, and the housekeeping notice.
  */
 import { describe, it, expect } from "vitest";
-import { reduce, pushUser, initialState, withWelcome, seedResume, blockLines, statusLine, fanoutRowStatus, fanoutTitle, seedFanoutRows } from "./state.js";
+import { reduce, pushUser, initialState, withWelcome, seedResume, blockLines, statusLine, fanoutRowStatus, fanoutTitle, seedFanoutRows, fanoutRowGenerating } from "./state.js";
 import type { Block, ViewState } from "./state.js";
 import { mapSessionEvent, mapHostEvent } from "./events/subscriptions.js";
 import type { EventEnvelope } from "@voidrift/core";
@@ -54,17 +54,27 @@ describe("event → effect mapping (§1.4)", () => {
     ).toEqual({ type: "worker_status", workerId: "f1-w1", status: "succeeded", agent: "researcher", taskId: "a" });
   });
 
-  it("drops a WORKER-scoped text/tool event from the orchestrator transcript (§4.4, §7.2)", () => {
-    // Worker prose and worker tool calls carry `scope.worker`; they are reachable
-    // only through the monitor (Ctrl+G / subagents.stream()), never merged into the
-    // orchestrator transcript. The mapper returns null so no transcript effect forms.
+  it("routes a WORKER-scoped text/tool event to a liveness heartbeat (never the orchestrator transcript) (§4.4, §7.2)", () => {
+    // §4.4 (liveness shimmer) — worker-scoped TOKEN_STREAM / REASONING_STREAM /
+    // TOOL_STARTED / TOOL_FINISHED are no longer dropped: they map to a
+    // `worker_heartbeat` carrying ONLY ids (no token, no reasoning, no tool
+    // name), so the worker's prose and tool calls still never merge into the
+    // orchestrator transcript — the event only times the row's liveness.
     const w = { session: "s1", worker: "f1-w1" };
-    expect(mapSessionEvent(env("TOKEN_STREAM", { token: "worker prose", done: false }, w))).toBeNull();
-    expect(mapSessionEvent(env("REASONING_STREAM", { token: "worker think", done: false }, w))).toBeNull();
-    expect(mapSessionEvent(env("TOOL_STARTED", { id: "wt1", name: "read_file", args: {} }, w))).toBeNull();
-    expect(
-      mapSessionEvent(env("TOOL_FINISHED", { id: "wt1", name: "read_file", status: "success", durationMs: 3, summary: "5 lines" }, w)),
-    ).toBeNull();
+    const tok = mapSessionEvent(env("TOKEN_STREAM", { token: "worker prose", done: false, taskId: "a" }, w));
+    expect(tok).toEqual({ type: "worker_heartbeat", workerId: "f1-w1", taskId: "a" });
+    const rsn = mapSessionEvent(env("REASONING_STREAM", { token: "worker think", done: false }, w));
+    expect(rsn).toEqual({ type: "worker_heartbeat", workerId: "f1-w1" });
+    const started = mapSessionEvent(env("TOOL_STARTED", { id: "wt1", name: "read_file", args: {} }, w));
+    expect(started).toEqual({ type: "worker_heartbeat", workerId: "f1-w1" });
+    const finished = mapSessionEvent(env("TOOL_FINISHED", { id: "wt1", name: "read_file", status: "success", durationMs: 3, summary: "5 lines" }, w));
+    expect(finished).toEqual({ type: "worker_heartbeat", workerId: "f1-w1" });
+    // None of the heartbeats carry the worker's prose or tool payload.
+    for (const e of [tok, rsn, started, finished]) {
+      expect(JSON.stringify(e)).not.toContain("worker prose");
+      expect(JSON.stringify(e)).not.toContain("worker think");
+      expect(JSON.stringify(e)).not.toContain("read_file");
+    }
   });
 
   it("keeps the ORCHESTRATOR's own text/tool events (no worker scope) in the transcript (§4.4)", () => {
@@ -1055,5 +1065,94 @@ describe("worker events through the real path do not pollute the orchestrator tr
     const allText = s.blocks.map((b) => (b as { text?: string }).text ?? "").join("\n");
     expect(allText).not.toContain("worker A thinking");
     expect(allText).not.toContain("worker B prose");
+  });
+});
+
+describe("fan-out liveness heartbeats stamp the matching row so it shimmers (§4.4, D1)", () => {
+  /** Real path: event envelope → the subscription mapper → the reducer. */
+  function apply(s: ViewState, ev: EventEnvelope): ViewState {
+    const effect = mapSessionEvent(ev);
+    return effect ? reduce(s, effect) : s;
+  }
+
+  /** Seed a 2-row batch fan-out from the orchestrator's own `task` call. */
+  function seedBatch(): ViewState {
+    let s = pushUser(initialState(5000), "orchestrate");
+    s = apply(s, env("TOOL_STARTED", {
+      id: "b1",
+      name: "task",
+      args: { tasks: [{ id: "a", worker: "researcher", task: "survey a" }, { id: "b", worker: "researcher", task: "survey b" }] },
+    }, { session: "s1" }));
+    expect(s.fanout?.rows).toHaveLength(2);
+    return s;
+  }
+
+  it("worker_status(running) then a heartbeat binds+stamps lastEventAt; a running row waves (the heartbeat does not gate it)", () => {
+    let s = seedBatch();
+    const w = { session: "s1", worker: "b1-w1" };
+    s = apply(s, env("WORKER_STATUS_CHANGED", { workerId: "b1-w1", status: "running", taskId: "a", agent: "researcher" }, w));
+    const before = Date.now();
+    s = apply(s, env("TOKEN_STREAM", { token: "worker prose", done: false, taskId: "a" }, w));
+    const row = s.fanout!.rows.find((r) => r.taskId === "a")!;
+    expect(row.status).toBe("running");
+    expect(row.lastEventAt).toBeDefined();
+    expect(row.lastEventAt!).toBeGreaterThanOrEqual(before);
+    // A running row always waves — the stamp is for binding only.
+    expect(fanoutRowGenerating(row)).toBe(true);
+    // The other row is still `dispatched` (never started), so it does not wave.
+    const other = s.fanout!.rows.find((r) => r.taskId === "b")!;
+    expect(other.status).not.toBe("running");
+    expect(fanoutRowGenerating(other)).toBe(false);
+  });
+
+  it("a heartbeat arriving BEFORE worker_status is not lost: the row shimmers once running", () => {
+    let s = seedBatch();
+    const w = { session: "s1", worker: "b1-w1" };
+    // The ONLY liveness signal is an early heartbeat (no taskId — the common
+    // worker-scoped TOKEN_STREAM case) that arrives BEFORE the running status.
+    // It must bind the first unbound row and stamp it so that, once the status
+    // flips to running, the row is GENERATING without needing a later heartbeat.
+    const before = Date.now();
+    s = apply(s, env("TOKEN_STREAM", { token: "early worker prose", done: false }, w));
+    s = apply(s, env("WORKER_STATUS_CHANGED", { workerId: "b1-w1", status: "running", agent: "researcher" }, w));
+    const bound = s.fanout!.rows.find((r) => (r as { workerId?: string }).workerId === "b1-w1")!;
+    expect(bound.status).toBe("running");
+    expect(bound.lastEventAt).toBeDefined();
+    expect(bound.lastEventAt!).toBeGreaterThanOrEqual(before);
+    expect(fanoutRowGenerating(bound)).toBe(true);
+  });
+
+  it("a heartbeat for an unknown worker (no bindable row) is a no-op (same state object)", () => {
+    let s = seedBatch();
+    // Bind both rows to real workers first so none is unbound.
+    s = apply(s, env("WORKER_STATUS_CHANGED", { workerId: "b1-w1", status: "running", taskId: "a", agent: "researcher" }, { session: "s1", worker: "b1-w1" }));
+    s = apply(s, env("WORKER_STATUS_CHANGED", { workerId: "b1-w2", status: "running", taskId: "b", agent: "researcher" }, { session: "s1", worker: "b1-w2" }));
+    const prev = s;
+    s = apply(s, env("TOKEN_STREAM", { token: "ghost", done: false }, { session: "s1", worker: "ghost-worker" }));
+    expect(s).toBe(prev);
+  });
+
+  it("a heartbeat for a terminal row is a no-op (a done row never shimmers)", () => {
+    let s = seedBatch();
+    const w = { session: "s1", worker: "b1-w1" };
+    s = apply(s, env("WORKER_STATUS_CHANGED", { workerId: "b1-w1", status: "running", taskId: "a", agent: "researcher" }, w));
+    s = apply(s, env("WORKER_STATUS_CHANGED", { workerId: "b1-w1", status: "merged", taskId: "a", agent: "researcher" }, w));
+    const prev = s;
+    s = apply(s, env("TOKEN_STREAM", { token: "late", done: false, taskId: "a" }, w));
+    expect(s).toBe(prev);
+    const row = s.fanout!.rows.find((r) => r.taskId === "a")!;
+    expect(fanoutRowGenerating(row)).toBe(false);
+  });
+
+  it("a running row keeps waving past the OLD ~1.5s window — the state gates the wave, not event recency (regression D1)", () => {
+    let s = seedBatch();
+    const w = { session: "s1", worker: "b1-w1" };
+    s = apply(s, env("WORKER_STATUS_CHANGED", { workerId: "b1-w1", status: "running", taskId: "a", agent: "researcher" }, w));
+    s = apply(s, env("TOKEN_STREAM", { token: "worker prose", done: false, taskId: "a" }, w));
+    const row = s.fanout!.rows.find((r) => r.taskId === "a")!;
+    // The old gate flipped this SILENT past ~1.5s; now a running row always
+    // waves, no matter how stale its lastEventAt (a slow single tool call).
+    expect(fanoutRowGenerating({ ...row, lastEventAt: row.lastEventAt! - 3000 })).toBe(true);
+    expect(fanoutRowGenerating({ ...row, lastEventAt: undefined })).toBe(true);
   });
 });

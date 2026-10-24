@@ -4,11 +4,11 @@
  */
 import { describe, it, expect } from "vitest";
 import { render } from "ink-testing-library";
-import { ToolGroup, ThoughtLine, ReasoningView, StatusLine, FanoutGroup, LiveFanout } from "./ToolGroup.js";
+import { ToolGroup, ThoughtLine, ReasoningView, StatusLine, FanoutGroup, LiveFanout, shimmerFrame, shimmerBandStart } from "./ToolGroup.js";
 import { OutputPane } from "./OutputPane.js";
 import { detectCapabilities } from "../terminal.js";
-import { resolveTheme, resolveGlyphs } from "../render/theme.js";
-import { reduce, pushUser, initialState, type ViewState, type ToolCall, type Block } from "../state.js";
+import { resolveTheme, resolveGlyphs, gradientWaveSpans, hexToRGB, waveFrame } from "../render/theme.js";
+import { reduce, pushUser, initialState, fanoutRowGenerating, type ViewState, type ToolCall, type Block, type FanoutRow } from "../state.js";
 import { mapSessionEvent } from "../events/subscriptions.js";
 import type { EventEnvelope } from "@voidrift/core";
 
@@ -370,9 +370,11 @@ describe("§4.4 live fan-out rows and sampled frames", () => {
   it("seeds header + 3 rows beneath the status line when the batch starts", () => {
     const s = startBatch();
     expect(s.fanout?.rows).toHaveLength(3);
-    const r = render(<LiveFanout state={s} theme={theme} glyphs={glyphs} columns={100} />);
+    const r = render(<LiveFanout state={s} theme={theme} glyphs={glyphs} columns={100} nowMs={0} />);
     const frame = r.lastFrame()!;
-    expect(frame).toContain("● Orchestrating (3 agents)");
+    // §4.4 — the LIVE header `●` animates as the half-circle `◐◓◑◒` while
+    // orchestrating (frame 0 → `◐`); the committed block alone uses the static `●`.
+    expect(frame).toMatch(/[◐◓◑◒] Orchestrating \(3 agents\)/);
     expect(frame).toContain("researcher");
     expect(frame).toContain("planner");
     expect(frame).toContain("implementer");
@@ -389,7 +391,7 @@ describe("§4.4 live fan-out rows and sampled frames", () => {
     let s = startBatch();
     const frames: string[] = [];
     const sample = (): void => {
-      const r = render(<LiveFanout state={s} theme={theme} glyphs={glyphs} columns={100} />);
+      const r = render(<LiveFanout state={s} theme={theme} glyphs={glyphs} columns={100} nowMs={0} />);
       frames.push(r.lastFrame()!);
       r.unmount();
     };
@@ -417,9 +419,10 @@ describe("§4.4 live fan-out rows and sampled frames", () => {
     s = reduce(s, { type: "worker_status", workerId: "b1-w3", status: "succeeded", taskId: "c", agent: "implementer" });
     expect(s.fanout).toBe(beforeDup); // same object → no repaint
     // A status-line tick (no worker event) must not change the rows: re-render
-    // the same state and confirm the frame is identical.
-    const r1 = render(<LiveFanout state={s} theme={theme} glyphs={glyphs} columns={100} />);
-    const r2 = render(<LiveFanout state={s} theme={theme} glyphs={glyphs} columns={100} />);
+    // the same state at the SAME animation frame and confirm it is identical
+    // (the half-circle glyph advances with the clock, so the frame is pinned).
+    const r1 = render(<LiveFanout state={s} theme={theme} glyphs={glyphs} columns={100} nowMs={0} />);
+    const r2 = render(<LiveFanout state={s} theme={theme} glyphs={glyphs} columns={100} nowMs={0} />);
     expect(r1.lastFrame()).toBe(r2.lastFrame());
     r1.unmount();
     r2.unmount();
@@ -562,5 +565,332 @@ describe("§4.4 live fan-out rows and sampled frames", () => {
       expect((row as { dependsOn?: string[] }).dependsOn).toBeUndefined();
       expect((row as { workerId?: string }).workerId).toBeUndefined();
     }
+  });
+});
+
+describe("§4.4 liveness wave — running gates the wave (not event recency)", () => {
+  /** Start a 2-worker batch and move both workers to `running`, so each row is a
+   * live WORKING row — a `running` row always waves. */
+  function runningBatch(): ViewState {
+    let s = pushUser(initialState(5000), "orchestrate");
+    s = reduce(s, {
+      type: "tool_started",
+      id: "b1",
+      name: "task",
+      args: {
+        tasks: [
+          { id: "a", worker: "researcher", task: "survey" },
+          { id: "b", worker: "planner", task: "plan" },
+        ],
+      },
+    });
+    s = reduce(s, { type: "worker_status", workerId: "w-a", status: "running", taskId: "a", agent: "researcher" });
+    s = reduce(s, { type: "worker_status", workerId: "w-b", status: "running", taskId: "b", agent: "planner" });
+    return s;
+  }
+
+  it("(a) EVERY running row waves — with a heartbeat, without one, and regardless of lastEventAt age", () => {
+    let s = runningBatch();
+    // One row gets a heartbeat, the other never does. BOTH are running.
+    s = reduce(s, { type: "worker_heartbeat", workerId: "w-a", taskId: "a" });
+    const rowA = s.fanout!.rows.find((r) => r.taskId === "a")!;
+    const rowB = s.fanout!.rows.find((r) => r.taskId === "b")!;
+    expect(rowA.lastEventAt).toBeTypeOf("number");
+    expect(rowB.lastEventAt).toBeUndefined();
+    // The running state alone gates the wave: both wave, the stamp is ignored.
+    expect(fanoutRowGenerating(rowA)).toBe(true);
+    expect(fanoutRowGenerating(rowB)).toBe(true);
+    // A very STALE stamp (the old recency gate would flip this SILENT) still waves.
+    expect(fanoutRowGenerating({ ...rowA, lastEventAt: rowA.lastEventAt! - 10_000 })).toBe(true);
+    // The band sweeps left→right: its start column advances between two frames
+    // one shimmer interval (~125 ms) apart.
+    const now = rowA.lastEventAt!;
+    const f0 = shimmerFrame(now);
+    const f1 = shimmerFrame(now + 125);
+    expect(f1).toBe(f0 + 1); // ~8 fps advances one frame per 125 ms
+    expect(shimmerBandStart(f1, 20)).not.toBe(shimmerBandStart(f0, 20));
+    const r = render(<LiveFanout state={s} theme={theme} glyphs={glyphs} columns={100} nowMs={now} />);
+    expect(r.lastFrame()!).toContain("researcher");
+    r.unmount();
+  });
+
+  it("(b) a terminal row and a waiting row never wave; a running row does", () => {
+    const run: FanoutRow = { worker: "researcher", title: "a", status: "running" };
+    const done: FanoutRow = { worker: "planner", title: "b", status: "done" };
+    const wait: FanoutRow = { worker: "editor", title: "c", status: "waiting", dependsOn: ["a"] };
+    const disp: FanoutRow = { worker: "editor", title: "d", status: "dispatched" };
+    expect(fanoutRowGenerating(run)).toBe(true);
+    expect(fanoutRowGenerating(done)).toBe(false);
+    expect(fanoutRowGenerating(wait)).toBe(false);
+    expect(fanoutRowGenerating(disp)).toBe(false);
+  });
+
+  it("(b2) a running row with NO further event keeps waving across frames (the slow-single-call regression)", () => {
+    const s = runningBatch(); // no heartbeat → both rows running, no event ever
+    expect(s.fanout?.rows.every((r) => r.lastEventAt === undefined)).toBe(true);
+    const now = Date.now();
+    // Sample across several seconds with NO new event: the old recency gate
+    // would have gone SILENT (static) after ~1.5s — the wave must still sweep.
+    const titleAt = (t: number): string => {
+      const r = render(<LiveFanout state={s} theme={theme} glyphs={glyphs} columns={100} nowMs={t} depth="truecolor" />);
+      const frame = r.lastFrame()!;
+      r.unmount();
+      return frame;
+    };
+    // Two frames ~2s apart (well past the old window) still differ (peak moved).
+    const f0 = titleAt(now + 2000);
+    const f1 = titleAt(now + 2000 + 125);
+    expect(f0).not.toBe(f1);
+  });
+
+  it("(c) under reduceMotion a running row is bold with no animated wave and the tick does not run", () => {
+    let s = runningBatch();
+    s = reduce(s, { type: "worker_heartbeat", workerId: "w-a", taskId: "a" });
+    const now = s.fanout!.rows.find((r) => r.taskId === "a")!.lastEventAt!;
+    // Static fallback: no wave animates, so successive frames are identical.
+    const f0 = render(<LiveFanout state={s} theme={theme} glyphs={glyphs} columns={100} reduceMotion nowMs={now} />);
+    const frame0 = f0.lastFrame()!;
+    f0.unmount();
+    const f1 = render(<LiveFanout state={s} theme={theme} glyphs={glyphs} columns={100} reduceMotion nowMs={now + 125} />);
+    const frame1 = f1.lastFrame()!;
+    f1.unmount();
+    expect(frame0).toBe(frame1); // no wave, no tick → no change
+    expect(frame0).toContain("researcher");
+  });
+
+  it("(d) the committed FanoutGroup never shimmers (no band, stable across clocks)", () => {
+    const block = fanoutBlock([
+      { worker: "researcher", title: "a", status: "done", startedAt: 0, finishedAt: 2000 },
+      { worker: "planner", title: "b", status: "done", startedAt: 0, finishedAt: 2000 },
+    ]);
+    // FanoutGroup takes no clock and no generating/band props — it cannot shimmer.
+    const r0 = render(<FanoutGroup block={block} glyphs={glyphs} theme={theme} columns={100} />);
+    const r1 = render(<FanoutGroup block={block} glyphs={glyphs} theme={theme} columns={100} />);
+    expect(r0.lastFrame()).toBe(r1.lastFrame());
+    expect(r0.lastFrame()!).toContain("Orchestrated");
+    r0.unmount();
+    r1.unmount();
+  });
+
+  it("(e) selected-row bold+underline still applies to a waving (running) row", () => {
+    let s = runningBatch();
+    s = reduce(s, { type: "worker_heartbeat", workerId: "w-a", taskId: "a" });
+    const now = s.fanout!.rows.find((r) => r.taskId === "a")!.lastEventAt!;
+    // Row 0 (researcher, taskId a) is selected by default AND running (waving):
+    // both styling inputs hold on the same row, so the wave and the selected
+    // bold+underline co-exist (neither suppresses the other).
+    expect(s.fanout!.selected).toBe(0);
+    const selectedRow = s.fanout!.rows[s.fanout!.selected]!;
+    expect(selectedRow.taskId).toBe("a");
+    expect(fanoutRowGenerating(selectedRow)).toBe(true);
+    // The selected waving row renders without error and shows its content.
+    const r = render(<LiveFanout state={s} theme={theme} glyphs={glyphs} columns={100} nowMs={now} />);
+    const frame = r.lastFrame()!;
+    expect(frame).toContain("researcher");
+    r.unmount();
+  });
+
+  it("subscriptions route a worker-scoped TOKEN_STREAM to a heartbeat (not dropped), carrying no token text", () => {
+    const envelope: EventEnvelope = {
+      type: "TOKEN_STREAM",
+      payload: { token: "secret worker prose", done: false, taskId: "a" },
+      scope: { session: "s1", worker: "w-a" },
+      at: new Date().toISOString(),
+    };
+    const effect = mapSessionEvent(envelope);
+    expect(effect).not.toBeNull();
+    expect(effect!.type).toBe("worker_heartbeat");
+    // The heartbeat carries only ids — never the worker's prose (out of scope).
+    expect(JSON.stringify(effect)).not.toContain("secret worker prose");
+    expect((effect as { workerId: string }).workerId).toBe("w-a");
+    expect((effect as { taskId?: string }).taskId).toBe("a");
+  });
+
+  it("a worker-scoped heartbeat never merges worker prose into the orchestrator transcript", () => {
+    let s = runningBatch();
+    const before = s.streaming;
+    s = reduce(s, { type: "worker_heartbeat", workerId: "w-a", taskId: "a" });
+    // The orchestrator's own streaming buffer is untouched by a worker heartbeat.
+    expect(s.streaming).toBe(before);
+  });
+
+  it("a committed fan-out row drops the live-only lastEventAt field", () => {
+    let s = runningBatch();
+    s = reduce(s, { type: "worker_heartbeat", workerId: "w-a", taskId: "a" });
+    s = reduce(s, { type: "worker_status", workerId: "w-a", status: "succeeded", taskId: "a", agent: "researcher" });
+    s = reduce(s, { type: "worker_status", workerId: "w-b", status: "succeeded", taskId: "b", agent: "planner" });
+    s = reduce(s, { type: "tool_finished", id: "b1", name: "task", status: "success", durationMs: 100, summary: "done" });
+    const block = s.blocks[s.blocks.length - 1] as Extract<Block, { kind: "fanout" }>;
+    for (const row of block.rows) {
+      expect((row as { lastEventAt?: number }).lastEventAt).toBeUndefined();
+    }
+  });
+});
+
+describe("§4.2/§4.4 gradient wave + half-circle WIRED into JSX render", () => {
+  /** A running 2-worker batch with a heartbeat on worker `a` so its row is
+   * GENERATING (the wave tier). */
+  function generatingBatch(): ViewState {
+    let s = pushUser(initialState(5000), "orchestrate");
+    s = reduce(s, {
+      type: "tool_started",
+      id: "b1",
+      name: "task",
+      args: { tasks: [{ id: "a", worker: "researcher", task: "survey" }, { id: "b", worker: "planner", task: "plan" }] },
+    });
+    s = reduce(s, { type: "worker_status", workerId: "w-a", status: "running", taskId: "a", agent: "researcher" });
+    s = reduce(s, { type: "worker_status", workerId: "w-b", status: "running", taskId: "b", agent: "planner" });
+    s = reduce(s, { type: "worker_heartbeat", workerId: "w-a", taskId: "a" });
+    return s;
+  }
+
+  it("StatusLine renders the VERB characters (waved) while the turn is active, and omits them under NO spinner wait", () => {
+    let s = pushUser(initialState(5000), "q");
+    s = reduce(s, { type: "token", token: "x", done: false });
+    const r = render(<StatusLine state={{ ...s, turnStartedAt: Date.now() - 1000 }} theme={theme} reduceMotion={false} depth="truecolor" nowMs={1_000} />);
+    const frame = r.lastFrame()!;
+    // The verb text is present in the dynamic region — the wave spans render the
+    // characters into JSX (one <Text> per char), not dropped.
+    expect(frame).toContain("Responding");
+    r.unmount();
+  });
+
+  it("StatusLine verb renders statically under reduceMotion (no spinner, verb still shown)", () => {
+    let s = pushUser(initialState(5000), "q");
+    s = reduce(s, { type: "token", token: "x", done: false });
+    const r = render(<StatusLine state={{ ...s, turnStartedAt: Date.now() - 1000 }} theme={theme} reduceMotion depth="truecolor" />);
+    const frame = r.lastFrame()!;
+    expect(frame).toContain("Responding");
+    expect(frame).not.toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/); // no animated spinner
+    r.unmount();
+  });
+
+  it("LiveFanout: a RUNNING row shows the animated HALF-CIRCLE glyph and the header half-circle advances across frames", () => {
+    const s = generatingBatch();
+    const now = s.fanout!.rows.find((r) => r.taskId === "a")!.lastEventAt!;
+    const f0 = render(<LiveFanout state={s} theme={theme} glyphs={glyphs} columns={100} nowMs={now} depth="truecolor" />);
+    const frame0 = f0.lastFrame()!;
+    f0.unmount();
+    // The header uses a half-circle frame, never the static full bullet, while
+    // orchestrating; a running row shows a half-circle too.
+    expect(frame0).toMatch(/[◐◓◑◒] Orchestrating \(2 agents\)/);
+    // The header glyph animates: a frame two steps later (~250ms) differs.
+    const f1 = render(<LiveFanout state={{ ...s, fanout: { ...s.fanout!, rows: s.fanout!.rows.map((r) => r.taskId === "a" ? { ...r, lastEventAt: now + 250 } : r) } }} theme={theme} glyphs={glyphs} columns={100} nowMs={now + 250} depth="truecolor" />);
+    const frame1 = f1.lastFrame()!;
+    f1.unmount();
+    const hdr = (f: string): string => f.match(/([◐◓◑◒]) Orchestrating/)![1]!;
+    expect(hdr(frame0)).not.toBe(hdr(frame1)); // half-circle cycled
+  });
+
+  it("LiveFanout: a done/terminal committed row shows the full ● coloured by state, never a half-circle", () => {
+    const block = fanoutBlock([
+      { worker: "researcher", title: "a", status: "done", startedAt: 0, finishedAt: 2000 },
+      { worker: "planner", title: "b", status: "failed", reason: "boom", startedAt: 0, finishedAt: 2000 },
+    ]);
+    const r = render(<FanoutGroup block={block} glyphs={glyphs} theme={theme} columns={100} />);
+    const frame = r.lastFrame()!;
+    // Committed block: static header ●, a done ● and a failed ✗ — no half-circle.
+    expect(frame).toContain("● Orchestrated (2 agents)");
+    expect(frame).not.toMatch(/[◐◓◑◒]/);
+    expect(frame).toContain("✗");
+    r.unmount();
+  });
+
+  it("LiveFanout: the GENERATING row title renders (wave spans) and the row frame changes across wave frames", () => {
+    const s = generatingBatch();
+    const now = s.fanout!.rows.find((r) => r.taskId === "a")!.lastEventAt!;
+    const f0 = render(<LiveFanout state={s} theme={theme} glyphs={glyphs} columns={100} nowMs={now} depth="truecolor" />);
+    const frame0 = f0.lastFrame()!;
+    f0.unmount();
+    // The generating worker's role still renders (the wave does not drop text).
+    expect(frame0).toContain("researcher");
+    // Frame advance: the running-row half-circle + wave peak move, so the
+    // dynamic frame differs one half-circle step later (glyph cycles even if
+    // colour is stripped by the test renderer).
+    const s1 = { ...s, fanout: { ...s.fanout!, rows: s.fanout!.rows.map((r) => r.taskId === "a" ? { ...r, lastEventAt: now + 125 } : r) } };
+    const f1 = render(<LiveFanout state={s1} theme={theme} glyphs={glyphs} columns={100} nowMs={now + 125} depth="truecolor" />);
+    const frame1 = f1.lastFrame()!;
+    f1.unmount();
+    expect(frame0).not.toBe(frame1);
+  });
+});
+
+describe("§4.2/§4.4 gradient wave uses REAL theme tokens (regression: invisible wave)", () => {
+  // These assert the wave against the ACTUAL resolved theme tokens — never a
+  // hand-fed hex — so a non-hex base (the old `theme.warning='yellow'` bug, or
+  // a 16-colour named token) is caught: it collapses to the static fallback.
+  const tcTheme = resolveTheme(caps(100)); // truecolor
+  const ansi16Theme = resolveTheme(
+    detectCapabilities({ TERM: "xterm-16color", LANG: "en_US.UTF-8" }, { columns: 100, rows: 40 }),
+  );
+  const noneTheme = resolveTheme(
+    detectCapabilities({ NO_COLOR: "1", LANG: "en_US.UTF-8" }, { columns: 100, rows: 40 }),
+  );
+
+  it("(a) the StatusLine verb wave base (theme.brand) is a PARSEABLE hex and produces per-character COLOR spans at truecolor", () => {
+    // The base StatusLine actually feeds the span builder: `hexToRGB(theme.brand)`.
+    const base = hexToRGB(tcTheme.brand);
+    expect(base).not.toBeNull(); // the OLD bug fed `theme.warning` ('yellow') => null
+    const peak = (waveFrame(1_000) / 8) % 1;
+    const spans = gradientWaveSpans("Thinking", base, peak, { depth: "truecolor", active: true });
+    // Every character carries its own defined colour — NOT the static-bold fallback.
+    expect(spans.every((s) => typeof s.color === "string")).toBe(true);
+    expect(spans.some((s) => s.bold)).toBe(false);
+    // More than one distinct hue (the brightness ramp) — a real wave, not a flat fill.
+    expect(new Set(spans.map((s) => s.color)).size).toBeGreaterThan(1);
+  });
+
+  it("(b) a REAL worker_heartbeat through the reducer flips generating true, and the row title then renders per-character COLOR spans", () => {
+    // Drive the ACTUAL subscription -> reducer path (no hand-set lastEventAt).
+    const ev = (type: string, payload: unknown, scope: Record<string, unknown> = {}): EventEnvelope =>
+      ({ type, payload, scope, at: new Date().toISOString() } as unknown as EventEnvelope);
+    const apply = (st: ViewState, e: EventEnvelope): ViewState => {
+      const eff = mapSessionEvent(e);
+      return eff ? reduce(st, eff as never) : st;
+    };
+    let s = pushUser(initialState(5000), "orchestrate");
+    s = apply(s, ev("TOOL_STARTED", { id: "b1", name: "task", args: { tasks: [
+      { id: "a", worker: "researcher", task: "survey" },
+      { id: "b", worker: "planner", task: "plan" },
+    ] } }));
+    s = apply(s, ev("WORKER_STATUS_CHANGED", { workerId: "w-a", status: "running", agent: "researcher", taskId: "a" }));
+    // A genuine WORKER-scoped TOKEN_STREAM (scope.worker) — maps to worker_heartbeat.
+    s = apply(s, ev("TOKEN_STREAM", { token: "worker prose", done: false, taskId: "a" }, { session: "s1", worker: "w-a" }));
+    const row = s.fanout!.rows.find((r) => r.taskId === "a")!;
+    // The reducer stamped lastEventAt (binding) and the row is running => it waves.
+    expect(row.lastEventAt).toBeTypeOf("number");
+    expect(fanoutRowGenerating(row)).toBe(true);
+    // The row title then waves: its colour (theme.accent) is a parseable hex and
+    // the title produces per-character colour spans at truecolor.
+    const rowColor = tcTheme.accent; // the running-row hue fed to the title wave
+    const spans = gradientWaveSpans(row.title, hexToRGB(rowColor), 0.3, { depth: "truecolor", active: true });
+    expect(spans.every((s) => typeof s.color === "string")).toBe(true);
+  });
+
+  it("(c) ansi16 and none collapse the verb wave to the static two-weight fallback (no colour, no crash)", () => {
+    const peak = 0.3;
+    // ansi16: theme.brand is the named colour 'blue' (non-hex) => static bold.
+    const a16 = gradientWaveSpans("Thinking", hexToRGB(ansi16Theme.brand), peak, { depth: "ansi16", active: true });
+    expect(a16.every((s) => s.color === undefined && s.bold === true)).toBe(true);
+    // none: no colour at all => static bold, no crash.
+    const none = gradientWaveSpans("Thinking", hexToRGB(noneTheme.brand), peak, { depth: "none", active: true });
+    expect(none.every((s) => s.color === undefined && s.bold === true)).toBe(true);
+  });
+
+  it("(c) the committed (Orchestrated) block never waves — no per-character colour spans", () => {
+    const block = fanoutBlock([
+      { worker: "researcher", title: "alpha", status: "done", startedAt: 0, finishedAt: 2000 },
+      { worker: "planner", title: "beta", status: "done", startedAt: 0, finishedAt: 2000 },
+    ]);
+    const r = render(<FanoutGroup block={block} glyphs={glyphs} theme={tcTheme} columns={100} />);
+    const frame = r.lastFrame()!;
+    r.unmount();
+    expect(frame).toContain("● Orchestrated (2 agents)");
+    // A truecolor per-character wave emits an SGR before EACH title character;
+    // the committed block paints the title in at most one colour, so no run of
+    // distinct per-character foregrounds appears.
+    // eslint-disable-next-line no-control-regex
+    const perChar = /(\x1b\[38;2;\d+;\d+;\d+m.){3,}/;
+    expect(perChar.test(frame)).toBe(false);
   });
 });

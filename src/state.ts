@@ -107,6 +107,21 @@ export interface FanoutRow {
   reason?: string;
   startedAt?: number;
   finishedAt?: number;
+  /** §4.4 (liveness wave) — wall-clock ms of the most recent worker-scoped
+   * heartbeat (`TOKEN_STREAM`/`REASONING_STREAM`/`TOOL_STARTED`/`TOOL_FINISHED`)
+   * for this worker. Recorded for row identity/binding (the D1 fix) but it no
+   * longer gates the wave — a `running` row always waves (`fanoutRowGenerating`).
+   * Transient, dropped from the committed block. */
+  lastEventAt?: number;
+}
+
+/** §4.4 (liveness wave) — a fan-out row waves whenever it is LIVE `running`
+ * (the state gates the wave, never an event-recency window): a slow single tool
+ * call holds the row `running` with no further event, and it keeps waving. A
+ * terminal, waiting or dispatched row never waves. Pure so the component and
+ * tests derive it the same way. */
+export function fanoutRowGenerating(row: FanoutRow): boolean {
+  return row.status === "running";
 }
 
 /** The active or just-finished fan-out orchestration (§4.4). Null when no
@@ -644,6 +659,7 @@ function finalizeRow(r: FanoutRow): FanoutRow {
   delete row.workerId;
   delete row.tool;
   delete row.dependsOn;
+  delete row.lastEventAt;
   // A `waiting`/`dispatched` row that never started folds to `cancelled` (the
   // live panel's non-terminal states are not a valid committed state).
   if (!isTerminalFanoutStatus(row.status)) row.status = "cancelled";
@@ -1224,6 +1240,39 @@ export function reduce(state: ViewState, effect: ViewEffect): ViewState {  switc
         fanout,
         runningTasks: workers.filter((w) => w.status === "running").length,
       };
+    }
+    case "worker_heartbeat": {
+      // §4.4 (liveness wave) — a worker-scoped heartbeat
+      // (TOKEN_STREAM/REASONING_STREAM/TOOL_STARTED/TOOL_FINISHED) binds the
+      // matching live fan-out row to its workerId and stamps `lastEventAt` (the
+      // D1 fix — it anchors row identity so an early heartbeat is not lost). The
+      // wave itself is gated by the `running` state, not this stamp. The
+      // heartbeat carries NO transcript text — worker reasoning/prose stays
+      // worker-scoped (§4.4). No fan-out, or no matching bound row, is a no-op
+      // that keeps the same state object so nothing churns.
+      const fanout = state.fanout;
+      if (!fanout || fanout.rows.length < 2) return state;
+      let idx = -1;
+      if (effect.taskId) idx = fanout.rows.findIndex((r) => r.taskId === effect.taskId);
+      if (idx < 0) {
+        // No taskId (or no match): find this worker's already-bound row, else
+        // bind the first still-unbound row — the heartbeat can arrive BEFORE the
+        // `worker_status` event binds the worker (same binding pattern as the
+        // `worker_status` reducer above), so an early heartbeat is not lost.
+        idx = fanout.rows.findIndex((r) => (r as FanoutRow & { workerId?: string }).workerId === effect.workerId);
+        if (idx < 0) idx = fanout.rows.findIndex((r) => (r as FanoutRow & { workerId?: string }).workerId === undefined);
+      }
+      if (idx < 0) return state;
+      const row = fanout.rows[idx]! as FanoutRow & { workerId?: string };
+      // A terminal row is never stamped: a late heartbeat for a done/failed/
+      // cancelled row changes nothing (keep the same state object so nothing
+      // churns). A live/seeded row IS bound + stamped so its workerId anchors
+      // identity; the `running` state alone gates whether it waves.
+      if (isTerminalFanoutStatus(row.status)) return state;
+      const rows = [...fanout.rows];
+      const nextRow: FanoutRow & { workerId?: string } = { ...row, workerId: row.workerId ?? effect.workerId, lastEventAt: Date.now() };
+      rows[idx] = nextRow;
+      return { ...state, fanout: { ...fanout, rows } };
     }
     case "fanout_select": {
       // §4.4 — Ctrl+D/Ctrl+U move the selected row (navigate only; resolves

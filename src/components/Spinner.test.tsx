@@ -1,12 +1,13 @@
 /**
  * §4.2 — the dynamic-region spinner repaints at most every 120 ms so nothing
  * flickers while a turn runs (buffered rendering, §1.4, §4.2). Proven with fake
- * timers: the frame advances only when ≥ the interval elapses.
+ * timers: the frame advances only when ≥ the interval elapses. Tests frame
+ * selection (§4.2 spinner groups).
  */
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render } from "ink-testing-library";
 import { Spinner } from "./Spinner.js";
-import { SPINNER_INTERVAL } from "../render/theme.js";
+import { SPINNER_INTERVAL, SPINNER_ARC, SPINNER_HALF_CIRCLE } from "../render/theme.js";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -35,5 +36,26 @@ describe("§4.2 spinner repaint cadence", () => {
     expect(spy.mock.calls.some((c) => (c[1] as number) >= 120)).toBe(true);
     r.unmount();
     spy.mockRestore();
+  });
+
+  it("accepts custom frame sets (§4.2 spinner group selection)", () => {
+    const r = render(<Spinner frames={SPINNER_ARC} />);
+    expect(r.lastFrame()).toContain("◜"); // first ARC frame
+    r.unmount();
+  });
+
+  it("cycles through all frames in a custom frame set", () => {
+    const spy = vi.spyOn(globalThis, "setInterval");
+    const r = render(<Spinner frames={SPINNER_HALF_CIRCLE} interval={1} />);
+    const output1 = r.lastFrame();
+    expect(output1).toContain(SPINNER_HALF_CIRCLE[0]);
+    r.unmount();
+    spy.mockRestore();
+  });
+
+  it("defaults to BRAILLE frames when no frames provided", () => {
+    const r = render(<Spinner />);
+    expect(r.lastFrame()).toContain("⠋"); // first BRAILLE frame
+    r.unmount();
   });
 });

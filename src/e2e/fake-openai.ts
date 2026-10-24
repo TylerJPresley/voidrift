@@ -26,11 +26,14 @@ import type { AddressInfo } from "node:net";
 
 /** A scripted reply: streamed text, a batch of tool calls, a tool call whose
  * raw `arguments` string is emitted verbatim (so a test can inject malformed
- * JSON), a mid-stream connection drop, or a non-2xx HTTP error response. */
+ * JSON), a mid-stream connection drop, or a non-2xx HTTP error response.
+ * `delayMs` (optional, on the streamed/JSON reply variants) holds the response
+ * that long before the first byte, so a dispatched worker stays `running` across
+ * the ~125 ms live-fan-out shimmer ticks (used only by the liveness capture). */
 export type ScriptedReply =
-  | { text: string }
-  | { toolCalls: Array<{ name: string; args: unknown }> }
-  | { rawToolCall: { name: string; rawArgs: string } }
+  | { text: string; delayMs?: number }
+  | { toolCalls: Array<{ name: string; args: unknown }>; delayMs?: number }
+  | { rawToolCall: { name: string; rawArgs: string }; delayMs?: number }
   | { dropAfterChunks: number }
   | { httpStatus: number; errorBody?: unknown };
 
@@ -302,47 +305,56 @@ export async function startFakeOpenAI(initial: ScriptedReply[] = []): Promise<Fa
         if (alwaysReply === null) consumed += 1;
         const model = typeof body.model === "string" ? body.model : "fake";
 
-        // Non-2xx HTTP error (H7): a JSON error body, no SSE stream.
-        if ("httpStatus" in reply) {
-          res.writeHead(reply.httpStatus, { "content-type": "application/json" });
-          res.end(JSON.stringify(reply.errorBody ?? { error: { message: `fake ${reply.httpStatus}` } }));
-          return;
-        }
-
-        // Non-streaming request (`stream !== true`): a REAL OpenAI-compatible
-        // server returns a single JSON completion, not SSE. A dispatched worker
-        // calls the model with `.invoke()` (stream:false), so the worker-gate
-        // path exercises this branch. `dropAfterChunks` is streaming-only.
-        if (body.stream !== true && !("dropAfterChunks" in reply)) {
-          res.writeHead(200, { "content-type": "application/json" });
-          res.end(JSON.stringify(jsonCompletion(reply, model)));
-          return;
-        }
-
-        res.writeHead(200, {
-          "content-type": "text/event-stream",
-          "cache-control": "no-cache",
-          connection: "keep-alive",
-        });
-
-        // Mid-stream connection drop (H6): write N content chunks then DESTROY
-        // the socket before `[DONE]`, so the client sees a truncated stream.
-        if ("dropAfterChunks" in reply) {
-          const n = Math.max(0, reply.dropAfterChunks);
-          const base = { id: "chatcmpl-fake", object: "chat.completion.chunk", created: 0, model };
-          res.write(sse({ ...base, choices: [{ index: 0, delta: { role: "assistant", content: "" }, finish_reason: null }] }));
-          for (let i = 0; i < n; i++) {
-            res.write(sse({ ...base, choices: [{ index: 0, delta: { content: `part${i} ` }, finish_reason: null }] }));
+        // Optionally hold the response before the first byte so a dispatched
+        // worker stays `running` across the live-fan-out shimmer ticks. Only the
+        // streamed/JSON reply variants carry `delayMs`; it never changes the
+        // bytes, only their timing. Default (no delay) runs synchronously.
+        const delayMs = "delayMs" in reply && typeof reply.delayMs === "number" ? Math.max(0, reply.delayMs) : 0;
+        const emit = (): void => {
+          // Non-2xx HTTP error (H7): a JSON error body, no SSE stream.
+          if ("httpStatus" in reply) {
+            res.writeHead(reply.httpStatus, { "content-type": "application/json" });
+            res.end(JSON.stringify(reply.errorBody ?? { error: { message: `fake ${reply.httpStatus}` } }));
+            return;
           }
-          // Destroy the underlying socket WITHOUT ending the stream or sending
-          // `[DONE]` — a hard mid-stream drop.
-          req.destroy();
-          res.destroy();
-          return;
-        }
 
-        for (const frame of framesFor(reply, model)) res.write(frame);
-        res.end();
+          // Non-streaming request (`stream !== true`): a REAL OpenAI-compatible
+          // server returns a single JSON completion, not SSE. A dispatched worker
+          // calls the model with `.invoke()` (stream:false), so the worker-gate
+          // path exercises this branch. `dropAfterChunks` is streaming-only.
+          if (body.stream !== true && !("dropAfterChunks" in reply)) {
+            res.writeHead(200, { "content-type": "application/json" });
+            res.end(JSON.stringify(jsonCompletion(reply, model)));
+            return;
+          }
+
+          res.writeHead(200, {
+            "content-type": "text/event-stream",
+            "cache-control": "no-cache",
+            connection: "keep-alive",
+          });
+
+          // Mid-stream connection drop (H6): write N content chunks then DESTROY
+          // the socket before `[DONE]`, so the client sees a truncated stream.
+          if ("dropAfterChunks" in reply) {
+            const n = Math.max(0, reply.dropAfterChunks);
+            const base = { id: "chatcmpl-fake", object: "chat.completion.chunk", created: 0, model };
+            res.write(sse({ ...base, choices: [{ index: 0, delta: { role: "assistant", content: "" }, finish_reason: null }] }));
+            for (let i = 0; i < n; i++) {
+              res.write(sse({ ...base, choices: [{ index: 0, delta: { content: `part${i} ` }, finish_reason: null }] }));
+            }
+            // Destroy the underlying socket WITHOUT ending the stream or sending
+            // `[DONE]` — a hard mid-stream drop.
+            req.destroy();
+            res.destroy();
+            return;
+          }
+
+          for (const frame of framesFor(reply, model)) res.write(frame);
+          res.end();
+        };
+        if (delayMs > 0) setTimeout(emit, delayMs);
+        else emit();
       });
       return;
     }

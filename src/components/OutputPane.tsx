@@ -266,7 +266,7 @@ export function OutputPane({
           {glyphs.retry} {sanitize(state.retrying)}
         </Text>
       ) : null}
-      {turnRunning ? <StatusLine state={state} theme={theme} reduceMotion={reduceMotion} /> : null}
+      {turnRunning ? <StatusLine state={state} theme={theme} reduceMotion={reduceMotion} depth={caps.colorDepth} /> : null}
       {/* §4.2/§4.4 — a fan-out of ≥ 2 workers REPLACES the single status line
           with this live panel: statusLine() returns null while the fan-out runs,
           so `StatusLine` above renders nothing and only `LiveFanout` owns the
@@ -274,7 +274,7 @@ export function OutputPane({
           built from live worker events and repaint only when a worker changes
           state (the reducer keeps row objects stable otherwise). Committed in
           one write when every worker finishes (the `fanout` block above). */}
-      {turnRunning ? <LiveFanout state={state} theme={theme} glyphs={glyphs} columns={columns ?? 80} {...(workerApprovals ? { workerApprovals } : {})} /> : null}
+      {turnRunning ? <LiveFanout state={state} theme={theme} glyphs={glyphs} columns={columns ?? 80} reduceMotion={reduceMotion || !caps.color} depth={caps.colorDepth} {...(workerApprovals ? { workerApprovals } : {})} /> : null}
       {/* §5.2 — exactly one blank row separates the output region from the input
           region. A committed block already ends with the `<Static>` item's
           bottom margin, so the idle prompt keeps its gap; the live dynamic

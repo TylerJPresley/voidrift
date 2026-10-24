@@ -361,8 +361,9 @@ describe("§4.2/§4.4 a fan-out REPLACES the status line with the live panel (no
       const glyphs = resolveGlyphs(caps(100));
       const r = render(<OutputPane state={s} theme={theme} glyphs={glyphs} caps={caps(100)} reduceMotion columns={100} />);
       const frame = r.lastFrame()!;
-      // The live panel's own header is present.
-      expect(frame).toContain(`● Orchestrating (${n} agents)`);
+      // The live panel's own header is present. Under reduceMotion the header
+      // half-circle is HELD at its first frame `◐` (no animation), §4.4.
+      expect(frame).toContain(`◐ Orchestrating (${n} agents)`);
       // The StatusLine verb is gone (statusLine() returns null during the panel),
       // so the bare `Orchestrating N agents` status row never appears...
       expect(frame).not.toContain(`Orchestrating ${n} agents`);

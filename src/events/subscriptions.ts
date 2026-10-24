@@ -42,6 +42,7 @@ export type ViewEffect =
   | { type: "by_reference"; kind: string; bytes: number }
   | { type: "model_changed"; name: string }
   | { type: "worker_status"; workerId: string; status: string; tool?: string; agent?: string; taskId?: string }
+  | { type: "worker_heartbeat"; workerId: string; taskId?: string }
   | { type: "fanout_select"; delta: number }
   | { type: "branch_changed"; branch: string | null }
   | { type: "permission_resolved"; requestId: string; resolver: string }
@@ -69,9 +70,16 @@ export function mapSessionEvent(ev: EventEnvelope, resolveEndpoint?: EndpointRes
   // (char-by-char interleaving) or its tool group (unattributed worker calls).
   // Worker lifecycle (WORKER_STATUS_CHANGED), usage roll-up (MODEL_USAGE,
   // core §10.14) and worker approvals stay — they are not transcript prose.
+  // §4.4 (liveness shimmer) — a worker-scoped TOKEN_STREAM / REASONING_STREAM /
+  // TOOL_STARTED / TOOL_FINISHED is NOT merged into the orchestrator transcript
+  // (its text/reasoning/tool rows stay worker-scoped), but its ARRIVAL times the
+  // worker's live fan-out row: it maps to a `worker_heartbeat` carrying only the
+  // worker id (and task id when present) — no token, no reasoning, no tool name.
   const fromWorker = ev.scope.worker !== undefined;
   if (fromWorker && (ev.type === "TOKEN_STREAM" || ev.type === "REASONING_STREAM" || ev.type === "TOOL_STARTED" || ev.type === "TOOL_FINISHED")) {
-    return null;
+    const wid = ev.scope.worker ?? "";
+    const taskId = typeof p["taskId"] === "string" ? (p["taskId"] as string) : undefined;
+    return { type: "worker_heartbeat", workerId: wid, ...(taskId !== undefined ? { taskId } : {}) };
   }
   switch (ev.type) {
     case "TOKEN_STREAM":
