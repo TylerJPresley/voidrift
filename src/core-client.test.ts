@@ -196,3 +196,56 @@ describe("§7.1 bindPanels against the real core", () => {
     expect(approve).toHaveBeenCalledWith("judge");
   });
 });
+
+describe("§7.3 bootCore registers the CLI commands manual", () => {
+  it("bootCore registers cli/commands manual that contains | /help | via renderCommandsDoc and register.manual", async () => {
+    const { bootCore } = await import("./core-client.js");
+    const { hermeticTmp } = await import("./test-hermetic.js");
+    const { InMemorySessionRepository } = await import("@voidrift/core");
+    const { fakeModel } = await import("@langchain/core/testing");
+    const { AIMessage } = await import("@langchain/core/messages");
+
+    // Boot a real core with bootCore in a hermetic temp workspace.
+    const workspaceRoot = hermeticTmp("bootCore-manual");
+    const factory = () => fakeModel().respond(new AIMessage("ok"));
+    const ready = await bootCore({
+      workspaceRoot,
+      configOverrides: {
+        models: { test: { model: "test-model", protocol: "openai", contextLimit: 32_000 } },
+        modelSelected: "test",
+      },
+      chatModelFactory: factory,
+      sessionRepository: new InMemorySessionRepository(),
+      installSignalHandlers: false,
+    });
+
+    // Verify the cli/commands manual is registered through the private deps backdoor
+    // (§12.8: manuals are internal; test uses cast to verify registration).
+    const manuals = ((ready.api as unknown) as { deps?: { manuals?: { get: (id: string) => unknown; getInternal: (id: string) => unknown } } }).deps?.manuals;
+    expect(manuals).toBeDefined();
+    const manual = manuals?.get("cli/commands");
+    expect(manual).toBeDefined();
+    if (manual) {
+      const m = manual as { id?: string; summary?: string; source?: string };
+      expect(m.id).toBe("cli/commands");
+      expect(m.summary).toBeTruthy();
+      expect(m.source).toBe("builtin");
+    }
+
+    // Verify the manual content has the expected | /help | row by checking the registered manual.
+    // Get the internal manual from deps to read its raw body.
+    const internalManual = manuals?.getInternal("cli/commands") as { body?: string } | undefined;
+    expect(internalManual).toBeDefined();
+    expect(internalManual?.body).toContain("| /help |");
+
+    // Verify that registering the same id a second time returns a CoreError (append-only).
+    const { renderCommandsDoc } = await import("./commands-doc.js");
+    const doc = renderCommandsDoc();
+    const dupErr = ready.api.register.manual(doc, "cli/commands");
+    expect(dupErr).toBeDefined(); // CoreError on duplicate
+    if (dupErr) {
+      const e = dupErr as { code?: string; message?: string };
+      expect(e.code || e.message).toBeTruthy();
+    }
+  });
+});

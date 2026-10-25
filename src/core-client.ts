@@ -30,6 +30,7 @@ import {
   type PanelColumn,
   type PanelDeclaration,
 } from "@voidrift/core";
+import { renderCommandsDoc } from "./commands-doc.js";
 
 export interface CoreClientOptions extends CoreOptions {
   /** The CLI's `output` callback (prints to the TUI output / headless stdout). */
@@ -46,7 +47,22 @@ export interface CoreClient {
 
 /** Construct the core with the CLI callbacks and signal ownership (§1.5 step 4). */
 export async function bootCore(opts: CoreClientOptions): Promise<CoreReady> {
-  return createCore({ ...opts, installSignalHandlers: false });
+  const ready = await createCore({ ...opts, installSignalHandlers: false });
+  
+  // Register the CLI commands manual. A failed registration is a non-fatal
+  // problem: log it if needed, but do not stop boot (§7.3, pin 3).
+  const doc = renderCommandsDoc();
+  const err = ready.api.register.manual(doc, "cli/commands");
+  if (err) {
+    // register.manual returns CoreError on failure; log it but continue.
+    // The core's error handling layer will surface non-fatal problems
+    // the same way it handles other registration issues.
+    if (opts.output) {
+      opts.output(`Warning: failed to register cli/commands manual: ${err.message ?? String(err)}`);
+    }
+  }
+  
+  return ready;
 }
 
 const rec = (x: unknown): Record<string, unknown> => (x ?? {}) as Record<string, unknown>;
