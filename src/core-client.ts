@@ -30,7 +30,6 @@ import {
   type PanelColumn,
   type PanelDeclaration,
 } from "@voidrift/core";
-import { renderCommandsDoc } from "./commands-doc.js";
 
 export interface CoreClientOptions extends CoreOptions {
   /** The CLI's `output` callback (prints to the TUI output / headless stdout). */
@@ -49,16 +48,17 @@ export interface CoreClient {
 export async function bootCore(opts: CoreClientOptions): Promise<CoreReady> {
   const ready = await createCore({ ...opts, installSignalHandlers: false });
   
-  // Register the CLI commands manual. A failed registration is a non-fatal
+  // Register the CLI commands docs directory. A failed registration is a non-fatal
   // problem: log it if needed, but do not stop boot (§7.3, pin 3).
-  const doc = renderCommandsDoc();
-  const err = ready.api.register.manual(doc, "cli/commands");
+  const { fileURLToPath } = await import("url");
+  const docsDir = fileURLToPath(new URL("../docs/", import.meta.url));
+  const err = await ready.api.register.docs(docsDir, "cli");
   if (err) {
-    // register.manual returns CoreError on failure; log it but continue.
+    // register.docs returns CoreError on failure; log it but continue.
     // The core's error handling layer will surface non-fatal problems
     // the same way it handles other registration issues.
     if (opts.output) {
-      opts.output(`Warning: failed to register cli/commands manual: ${err.message ?? String(err)}`);
+      opts.output(`Warning: failed to register cli docs: ${err.message ?? String(err)}`);
     }
   }
   

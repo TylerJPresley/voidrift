@@ -12,10 +12,12 @@
   },
   "files": [
     "dist",
+    "docs",
     "LICENSE"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "gen:docs": "npm run build && node scripts/gen-docs.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest --run",
     "coverage": "vitest --run --coverage",
