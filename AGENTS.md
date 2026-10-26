@@ -37,3 +37,5 @@ Run from this folder. Scripts:
 - Configuration files are JSON; prose is Markdown. Filename slugs are lowercase alphanumerics and hyphens.
 - Every rigid limit (size, count, time, ratio) is an entry in the one `limits` registry (`core-blueprint.md` §13.11); there are no hidden limits.
 - Ink is for the TUI only. Use `fakeModel()` from `@langchain/core/testing` for model tests.
+
+Follow `CONTRIBUTING.md` for this project's standards.
