@@ -17,5 +17,9 @@ npm run build
 npm test
 ```
 
+## Project setup
+
+The folder reference is the manual page `reference/voidrift-folder` (open it with the `read_manual` tool or find it in the `voidrift-core` repo under `docs/reference/`). Add `.voidrift/` to your `.gitignore` to keep working files out of version control.
+
 ## License
 Apache-2.0. See [LICENSE](LICENSE).
