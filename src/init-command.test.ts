@@ -21,6 +21,7 @@ function makeDeps(over: Partial<InitDeps> = {}): { deps: InitDeps; out: () => st
     stderr: { write: (s: string) => ((err += s), true) },
     cwd: "/work/project",
     isTty: false,
+      // yes passed to runInit, not makeDeps
     homeDir: "/home/u",
     configDir: () => "/home/u/.config/voidrift",
     resetNames: () => ["config", "research", "vibe", "researcher", "planner", "implementer", "reviewer"],
@@ -88,7 +89,7 @@ describe("runInit — plain run (§13.9.1)", () => {
         : { ok: true as const, value: { created: ["config.json"], repaired: [], leftAlone: ["agents/research/agent.json"] } };
     }) as unknown as NonNullable<InitDeps["init"]>;
     const { deps, out } = makeDeps({ init });
-    const code = await runInit({}, deps);
+    const code = await runInit({ yes: true }, deps);
     expect(code).toBe(EXIT.COMPLETED);
     expect(calls.map((c) => c.scope)).toEqual(["global", "project"]);
     expect(calls[1]!.dir).toBe("/work/project");
@@ -104,7 +105,7 @@ describe("runInit — plain run (§13.9.1)", () => {
       return { ok: true as const, value: EMPTY };
     }) as unknown as NonNullable<InitDeps["init"]>;
     const { deps, out } = makeDeps({ init, cwd: "/home/u" });
-    const code = await runInit({}, deps);
+    const code = await runInit({ yes: true }, deps);
     expect(code).toBe(EXIT.COMPLETED);
     expect(calls.map((c) => c.scope)).toEqual(["global"]); // no project call
     expect(out()).toContain("your home directory");
@@ -117,7 +118,7 @@ describe("runInit — plain run (§13.9.1)", () => {
       return { ok: true as const, value: EMPTY };
     }) as unknown as NonNullable<InitDeps["init"]>;
     const { deps, out } = makeDeps({ init, cwd: "/home/u/.config/voidrift" });
-    const code = await runInit({}, deps);
+    const code = await runInit({ yes: true }, deps);
     expect(code).toBe(EXIT.COMPLETED);
     expect(calls.map((c) => c.scope)).toEqual(["global"]);
     expect(out()).toContain("global config directory");
@@ -126,7 +127,7 @@ describe("runInit — plain run (§13.9.1)", () => {
   it("a global failure prints to stderr and exits 1", async () => {
     const init = (async () => ({ ok: false as const, error: { code: "INTERNAL", message: "disk full" } })) as unknown as NonNullable<InitDeps["init"]>;
     const { deps, err } = makeDeps({ init });
-    const code = await runInit({}, deps);
+    const code = await runInit({ yes: true }, deps);
     expect(code).toBe(EXIT.FAILED);
     expect(err()).toContain("disk full");
   });
@@ -343,3 +344,220 @@ describe("runInit --migrate (§13.1/§13.9.1)", () => {
   });
 });
 
+
+
+describe("runInit — plain run with plugin discovery (§13.9.1)", () => {
+  const mockDiscovery = (templates: { name: string }[] = []) =>
+    (async () => ({
+      ok: true as const,
+      value: {
+        templates: templates.map((t) => ({ name: t.name, agent: { role: "test" as const }, prompt: "test" })),
+        plugins: templates.length > 0 ? ["test-plugin"] : [],
+      },
+    })) as unknown as NonNullable<InitDeps["discover"]>;
+
+  it("TTY with templates: asks and copies on 'y'; prints seeded and plugin name", async () => {
+    const calls: { scope?: string; dir?: string; pluginAgents?: unknown }[] = [];
+    const init = (async (opts: { scope?: string; dir?: string; pluginAgents?: unknown } = {}) => {
+      calls.push(opts);
+      if (opts.scope === "project") {
+        return {
+          ok: true as const,
+          value: {
+            created: [],
+            repaired: [],
+            leftAlone: [],
+            seeded: ["planner", "researcher"],
+          },
+        };
+      }
+      return { ok: true as const, value: { created: [], repaired: [], leftAlone: [] } };
+    }) as unknown as NonNullable<InitDeps["init"]>;
+    const { deps, out, err } = makeDeps({
+      init,
+      discover: mockDiscovery([{ name: "planner" }, { name: "researcher" }]),
+      isTty: true,
+      readLine: async () => "y\n",
+    });
+    const code = await runInit({ yes: true }, deps);
+    expect(code).toBe(EXIT.COMPLETED);
+    expect(err()).toContain("voidrift: loaded plugin test-plugin");
+    expect(out()).toContain("seeded: planner, researcher");
+    expect(calls[1]?.pluginAgents).toHaveLength(2);
+  });
+
+
+
+  it("non-TTY with --yes: copies templates; prints seeded and plugin name", async () => {
+    let projectInitCalled = false;
+    let projectInitWithTemplates = false;
+    const init = (async (opts: { scope?: string; dir?: string; pluginAgents?: unknown } = {}) => {
+      if (opts.scope === "project") {
+        projectInitCalled = true;
+        if (opts.pluginAgents) {
+          projectInitWithTemplates = true;
+        }
+        return {
+          ok: true as const,
+          value: {
+            created: [],
+            repaired: [],
+            leftAlone: [],
+            seeded: ["planner"],
+          },
+        };
+      }
+      return { ok: true as const, value: { created: [], repaired: [], leftAlone: [] } };
+    }) as unknown as NonNullable<InitDeps["init"]>;
+    const { deps, out, err } = makeDeps({
+      init,
+      discover: mockDiscovery([{ name: "planner" }]),
+      isTty: false,
+      // yes passed to runInit, not makeDeps
+    });
+    const code = await runInit({ yes: true }, deps);
+    expect(code).toBe(EXIT.COMPLETED);
+    expect(projectInitCalled).toBe(true);
+    expect(projectInitWithTemplates).toBe(true);
+    expect(err()).toContain("voidrift: loaded plugin test-plugin");
+    expect(out()).toContain("seeded: planner");
+  });
+
+  it("second run with identical templates: prints no seeded (no-op)", async () => {
+    const calls: { scope?: string; dir?: string; pluginAgents?: unknown }[] = [];
+    const init = (async (opts: { scope?: string; dir?: string; pluginAgents?: unknown } = {}) => {
+      calls.push(opts);
+      if (opts.scope === "project") {
+        // Second run: seeded is absent (identical file, no-op)
+        return {
+          ok: true as const,
+          value: {
+            created: [],
+            repaired: [],
+            leftAlone: [],
+          },
+        };
+      }
+      return { ok: true as const, value: { created: [], repaired: [], leftAlone: [] } };
+    }) as unknown as NonNullable<InitDeps["init"]>;
+    const { deps, out, err } = makeDeps({
+      init,
+      discover: mockDiscovery([{ name: "planner" }]),
+      isTty: false,
+      // yes passed to runInit, not makeDeps
+    });
+    const code = await runInit({ yes: true }, deps);
+    expect(code).toBe(EXIT.COMPLETED);
+    expect(err()).toContain("voidrift: loaded plugin test-plugin");
+    expect(out()).not.toContain("seeded:");
+    expect(out()).not.toContain("kept:");
+  });
+
+  it("changed existing agent: prints kept with reason", async () => {
+    const calls: { scope?: string; dir?: string; pluginAgents?: unknown }[] = [];
+    const init = (async (opts: { scope?: string; dir?: string; pluginAgents?: unknown } = {}) => {
+      calls.push(opts);
+      if (opts.scope === "project") {
+        return {
+          ok: true as const,
+          value: {
+            created: [],
+            repaired: [],
+            leftAlone: [],
+            kept: [{ name: "planner", reason: "collision with a different existing agent" }],
+          },
+        };
+      }
+      return { ok: true as const, value: { created: [], repaired: [], leftAlone: [] } };
+    }) as unknown as NonNullable<InitDeps["init"]>;
+    const { deps, out, err } = makeDeps({
+      init,
+      discover: mockDiscovery([{ name: "planner" }]),
+      isTty: false,
+      // yes passed to runInit, not makeDeps
+    });
+    const code = await runInit({ yes: true }, deps);
+    expect(code).toBe(EXIT.COMPLETED);
+    expect(err()).toContain("voidrift: loaded plugin test-plugin");
+    expect(out()).toContain("kept: planner (collision with a different existing agent)");
+  });
+
+
+  it("discovery failure: logs warning and continues without templates", async () => {
+    const calls: { scope?: string; dir?: string; pluginAgents?: unknown }[] = [];
+    const init = (async (opts: { scope?: string; dir?: string; pluginAgents?: unknown } = {}) => {
+      calls.push(opts);
+      return { ok: true as const, value: { created: [], repaired: [], leftAlone: [] } };
+    }) as unknown as NonNullable<InitDeps["init"]>;
+    const discover = (async () => ({
+      ok: false as const,
+      error: { code: "INTERNAL" as const, message: "config error" },
+    })) as unknown as NonNullable<InitDeps["discover"]>;
+    const { deps, err, out } = makeDeps({
+      init,
+      discover,
+      isTty: true,
+    });
+    const code = await runInit({ yes: true }, deps);
+    expect(code).toBe(EXIT.COMPLETED);
+    expect(err()).toContain("voidrift: warning: could not discover plugin agent templates");
+    expect(out()).not.toContain("seeded:");
+    expect(calls[1]?.pluginAgents).toBeUndefined();
+  });
+
+  it("discovery has warnings: prints each one to stderr", async () => {
+    const calls: { scope?: string; dir?: string; pluginAgents?: unknown }[] = [];
+    const init = (async (opts: { scope?: string; dir?: string; pluginAgents?: unknown } = {}) => {
+      calls.push(opts);
+      if (opts.scope === "project") {
+        return {
+          ok: true as const,
+          value: {
+            created: [],
+            repaired: [],
+            leftAlone: [],
+            seeded: ["planner"],
+          },
+        };
+      }
+      return { ok: true as const, value: { created: [], repaired: [], leftAlone: [] } };
+    }) as unknown as NonNullable<InitDeps["init"]>;
+    const discover = (async () => ({
+      ok: true as const,
+      value: {
+        templates: [{ name: "planner", agent: { role: "test" as const }, prompt: "test" }],
+        plugins: ["test-plugin"],
+        warnings: [{ plugin: "bad-plugin", error: "license rejected" }],
+      },
+    })) as unknown as NonNullable<InitDeps["discover"]>;
+    const { deps, err, out } = makeDeps({
+      init,
+      discover,
+      isTty: false,
+      // yes passed to runInit, not makeDeps
+    });
+    const code = await runInit({ yes: true }, deps);
+    expect(code).toBe(EXIT.COMPLETED);
+    expect(err()).toContain("voidrift: loaded plugin test-plugin");
+    expect(err()).toContain("voidrift: warning: plugin bad-plugin: license rejected");
+    expect(out()).toContain("seeded: planner");
+  });
+
+  // === DEFENSIVE ASSERTIONS: test boundary conditions ===
+  it("no templates from discovery: doesn't ask or try to copy", async () => {
+    let askWasWrong = false;
+    const init = (async () => ({ ok: true as const, value: { created: [], repaired: [], leftAlone: [] } })) as unknown as NonNullable<InitDeps["init"]>;
+    const { deps } = makeDeps({
+      init,
+      discover: mockDiscovery([]),
+      isTty: true,
+      readLine: async () => {
+        askWasWrong = true;
+        return "y\n";
+      },
+    });
+    const code = await runInit({ yes: true }, deps);
+    expect(code).toBe(EXIT.COMPLETED);
+    expect(askWasWrong).toBe(false); // readLine was never called
+  });
+});

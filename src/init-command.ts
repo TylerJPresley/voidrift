@@ -34,7 +34,9 @@ import {
   sweepConfigHome,
   initResetNames,
   voidriftConfigDir,
+  discoverPluginAgentTemplates,
   type ConfigInitResult,
+  type PluginAgentTemplate,
 } from "@voidrift/core";
 import { migrateConfigHome } from "@voidrift/core";
 import { EXIT } from "./exit-codes.js";
@@ -57,6 +59,7 @@ export interface InitDeps {
   applyUpdate?: typeof applyInitUpdate;
   sweep?: typeof sweepConfigHome;
   migrate?: typeof migrateConfigHome;
+  discover?: typeof discoverPluginAgentTemplates;
   resetNames?: () => string[];
   configDir?: () => string;
 }
@@ -79,7 +82,9 @@ export function displayPath(abs: string, homeDir: string): string {
  * project `.voidrift` for the skeleton), so a reader sees where each change
  * landed. A repaired agent/skill/prompt's old content is set aside under
  * `<root>/backups/<timestamp>/` (an invalid `config.json` keeps its
- * `config.json.rejected` sibling, §13.3).
+ * `config.json.rejected` sibling, §13.3). The `seeded` and `kept` groups
+ * (plugin agent templates, project init only) are appended after the standard
+ * groups when present.
  */
 export function formatSummary(result: ConfigInitResult, rootLabel: string): string[] {
   const lines: string[] = [];
@@ -89,6 +94,14 @@ export function formatSummary(result: ConfigInitResult, rootLabel: string): stri
     lines.push(`repaired: ${join(result.repaired)} (the replaced copy is kept under ${rootLabel}/backups/)`);
   }
   if (result.leftAlone.length > 0) lines.push(`left alone: ${result.leftAlone.length} files`);
+  if (result.seeded && result.seeded.length > 0) {
+    lines.push(`seeded: ${result.seeded.join(", ")}`);
+  }
+  if (result.kept && result.kept.length > 0) {
+    for (const k of result.kept) {
+      lines.push(`kept: ${k.name} (${k.reason})`);
+    }
+  }
   return lines;
 }
 
@@ -226,7 +239,57 @@ export async function runInit(
     );
     return EXIT.COMPLETED;
   }
-  const project = await init({ scope: "project", dir: deps.cwd });
+
+  // Discover enabled plugins' agent templates and ask for confirmation if present (§13.9.1).
+  const discover = deps.discover ?? discoverPluginAgentTemplates;
+  let pluginAgents: PluginAgentTemplate[] | undefined;
+  pluginAgents = undefined;
+  const discovered = await discover({ workspaceRoot: deps.cwd });
+  if (discovered.ok) {
+    const { templates, plugins, warnings } = discovered.value;
+
+    // Print plugin load messages to stderr (§13.9.1).
+    for (const plugin of plugins) {
+      deps.stderr.write(`voidrift: loaded plugin ${plugin} to read its agent templates\n`);
+    }
+
+    // Print any warnings (e.g., license rejects, resolve failures).
+    if (warnings) {
+      for (const w of warnings) {
+        deps.stderr.write(`voidrift: warning: plugin ${w.plugin}: ${w.error}\n`);
+      }
+    }
+
+    // If templates are present, ask for confirmation (TTY) or check --yes.
+    if (templates.length > 0) {
+      const names = templates.map((t) => t.name);
+      const templateList = names.join(", ");
+
+      let copyTemplates = opts.yes === true;
+      if (!copyTemplates && deps.isTty) {
+        deps.stdout.write(`Copy ${templates.length} plugin agent template${templates.length === 1 ? "" : "s"} into .voidrift/agents? [${templateList}] [y/N] `);
+        const answer = ((await deps.readLine?.()) ?? "").trim().toLowerCase();
+        copyTemplates = answer === "y" || answer === "yes";
+      }
+
+      if (copyTemplates) {
+        pluginAgents = templates;
+      }
+    }
+  } else {
+    // Discovery failure (e.g., can't load config) — log the error but continue.
+    deps.stderr.write(`voidrift: warning: could not discover plugin agent templates: ${discovered.error.message}\n`);
+  }
+
+  const project = await init(
+    pluginAgents !== undefined
+      ? {
+          scope: "project" as const,
+          dir: deps.cwd,
+          pluginAgents,
+        }
+      : { scope: "project" as const, dir: deps.cwd },
+  );
   if (!project.ok) {
     deps.stderr.write(`Error: ${project.error.message}\n`);
     return EXIT.FAILED;

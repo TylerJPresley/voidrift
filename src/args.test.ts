@@ -206,10 +206,19 @@ describe("§2.1 init command (CLI §2.1, core §13.9.1)", () => {
     if (!r.ok) expect(r.error).toContain('"--reset" requires a <name>');
   });
 
-  it("`--yes` without `--reset` is a usage error (exit 2)", () => {
+  it("parses `init --yes` (confirms plugin-template copy in headless init)", () => {
     const r = parseArgs(["init", "--yes"]);
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.error).toContain('"--yes" is valid only with "--reset');
+    expect(r.ok && r.mode.kind).toBe("init");
+    expect(r.ok && (r.mode as { yes?: boolean }).yes).toBe(true);
+  });
+
+  it("`--yes` with `--sweep` or `--migrate` is a usage error (exit 2)", () => {
+    const sweep = parseArgs(["init", "--sweep", "--yes"]);
+    expect(sweep.ok).toBe(false);
+    if (!sweep.ok) expect(sweep.error).toContain('"--yes" is valid only');
+    const migrate = parseArgs(["init", "--migrate", "--yes"]);
+    expect(migrate.ok).toBe(false);
+    if (!migrate.ok) expect(migrate.error).toContain('"--yes" is valid only');
   });
 
   it("`init` with an unrelated flag is a usage error (exit 2)", () => {
@@ -285,7 +294,8 @@ describe("§2.1 init command (CLI §2.1, core §13.9.1)", () => {
   it("help lists init under a Maintenance group with --reset/--yes", () => {
     const text = helpText();
     expect(text).toContain("Maintenance:");
-    expect(text).toContain("seed or repair ~/.config/voidrift and create .voidrift/ in this directory");
+    expect(text).toContain("Seed or repair ~/.config/voidrift and create .voidrift/ in this directory");
+    expect(text).toContain("if enabled plugins have agent templates");
     expect(text).toContain("--reset <name>");
     expect(text).toContain("--yes");
     expect(text).toContain("voidrift init --update");

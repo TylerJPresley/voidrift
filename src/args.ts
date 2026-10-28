@@ -82,10 +82,11 @@ export function parseArgs(argv: readonly string[]): ParseResult {
     if (exclusive > 1) {
       return { ok: false, error: '"--update", "--reset", "--sweep", and "--migrate" may not be combined' };
     }
-    // `--yes` confirms a reset OR an update non-interactively (§13.9.1); `--sweep`
-    // and `--migrate` act directly and take no confirmation.
-    if (yes && reset === undefined && !update) {
-      return { ok: false, error: '"--yes" is valid only with "--reset <name>" or "--update"' };
+    // `--yes` confirms a reset, plain init (plugin-template copy), or an update
+    // non-interactively (§13.9.1); `--sweep` and `--migrate` act directly and take
+    // no confirmation.
+    if (yes && reset === undefined && !update && (sweep || migrate)) {
+      return { ok: false, error: '"--yes" is valid only with "--reset <name>", "--update", or a plain "init" (without --sweep/--migrate)' };
     }
     const mode: ParsedMode = { kind: "init" };
     if (reset !== undefined) (mode as { reset?: string }).reset = reset;
@@ -334,7 +335,8 @@ export function helpText(): string {
     "                                       rules, Warden and guardrails still apply.",
     "",
     "Maintenance:",
-    "  voidrift init                     seed or repair ~/.config/voidrift and create .voidrift/ in this directory",
+    "  voidrift init                     Seed or repair ~/.config/voidrift and create .voidrift/ in this directory; if enabled plugins have agent templates, offer to copy them (TTY: prompt; headless: copy only with --yes)",
+    "  voidrift init --yes               Confirm the plugin-template copy non-interactively (headless only; use --reset/--update/--sweep/--migrate with --yes to confirm those separately)",
     "  voidrift init --reset <name>      Restore one seeded default (an agent name, or 'config') after a confirmed diff",
     "  voidrift init --reset <name> --yes  Confirm the reset non-interactively (valid only with --reset)",
     "  voidrift init --update            Bring seeded agents, skills, and allow rules up to the current shipped set",
