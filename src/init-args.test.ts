@@ -1,7 +1,6 @@
 /**
- * End-to-end tests for `voidrift init` plugin-template copy (§2.1, core §13.9.1).
- * Tests real CLI invocations through parseArgs → runInit pipeline with fixtures.
- * Validates: TTY/non-TTY boundaries, --yes gate, stderr plugin naming, seeded:/kept: output.
+ * Argument-parsing tests for `voidrift init` flags: `--yes` is accepted with plain init,
+ * `--reset` and `--update`, and rejected with `--sweep` and `--migrate` (cli §2.1).
  */
 import { describe, it, expect } from "vitest";
 import { parseArgs, helpText } from "./args.js";
