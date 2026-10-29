@@ -35,10 +35,11 @@ import {
   initResetNames,
   voidriftConfigDir,
   discoverPluginAgentTemplates,
+  classifyPluginAgentTemplates,
+  migrateConfigHome,
   type ConfigInitResult,
   type PluginAgentTemplate,
 } from "@voidrift/core";
-import { migrateConfigHome } from "@voidrift/core";
 import { EXIT } from "./exit-codes.js";
 
 /** The streams/process surface `init` touches, injected so tests drive it. */
@@ -60,6 +61,7 @@ export interface InitDeps {
   sweep?: typeof sweepConfigHome;
   migrate?: typeof migrateConfigHome;
   discover?: typeof discoverPluginAgentTemplates;
+  classifyPluginAgents?: typeof classifyPluginAgentTemplates;
   resetNames?: () => string[];
   configDir?: () => string;
 }
@@ -243,6 +245,7 @@ export async function runInit(
   // Discover enabled plugins' agent templates and ask for confirmation if present (§13.9.1).
   const discover = deps.discover ?? discoverPluginAgentTemplates;
   let pluginAgents: PluginAgentTemplate[] | undefined;
+  let keptEntries: { name: string; reason: string }[] = [];
   pluginAgents = undefined;
   const discovered = await discover({ workspaceRoot: deps.cwd });
   if (discovered.ok) {
@@ -260,20 +263,27 @@ export async function runInit(
       }
     }
 
-    // If templates are present, ask for confirmation (TTY) or check --yes.
-    if (templates.length > 0) {
-      const names = templates.map((t) => t.name);
+    // Classify the templates: which should be copied, which are identical, which are kept
+    const classify = deps.classifyPluginAgents ?? classifyPluginAgentTemplates;
+    const classified = await classify(templates, deps.cwd);
+
+    // Store kept entries to print later (even if user declines to copy)
+    keptEntries = classified.kept;
+
+    // Ask to copy ONLY if at least one template would be newly copied (toCopy is non-empty)
+    if (classified.toCopy.length > 0) {
+      const names = classified.toCopy.map((t) => t.name);
       const templateList = names.join(", ");
 
       let copyTemplates = opts.yes === true;
       if (!copyTemplates && deps.isTty) {
-        deps.stdout.write(`Copy ${templates.length} plugin agent template${templates.length === 1 ? "" : "s"} into .voidrift/agents? [${templateList}] [y/N] `);
+        deps.stdout.write(`Copy ${classified.toCopy.length} plugin agent template${classified.toCopy.length === 1 ? "" : "s"} into .voidrift/agents? [${templateList}] [y/N] `);
         const answer = ((await deps.readLine?.()) ?? "").trim().toLowerCase();
         copyTemplates = answer === "y" || answer === "yes";
       }
 
       if (copyTemplates) {
-        pluginAgents = templates;
+        pluginAgents = classified.toCopy; // Pass ONLY new templates to copy
       }
     }
   } else {
@@ -296,6 +306,12 @@ export async function runInit(
   }
   const projectLabel = displayPath(path.join(deps.cwd, ".voidrift"), homeDir);
   for (const line of formatSummary(project.value, projectLabel)) deps.stdout.write(`${line}\n`);
+  
+  // Print the kept entries separately (those from the classification that we didn't pass to init)
+  for (const k of keptEntries) {
+    deps.stdout.write(`kept: ${k.name} (${k.reason})\n`);
+  }
+  
   return EXIT.COMPLETED;
 }
 

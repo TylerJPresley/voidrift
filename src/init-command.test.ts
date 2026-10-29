@@ -356,6 +356,13 @@ describe("runInit — plain run with plugin discovery (§13.9.1)", () => {
       },
     })) as unknown as NonNullable<InitDeps["discover"]>;
 
+  const mockClassify = (templates: { name: string }[] = []) =>
+    (async () => ({
+      toCopy: templates.map((t) => ({ name: t.name, agent: { role: "test" as const }, prompt: "test" })),
+      identical: [],
+      kept: [],
+    })) as unknown as NonNullable<InitDeps["classifyPluginAgents"]>;
+
   it("TTY with templates: asks and copies on 'y'; prints seeded and plugin name", async () => {
     const calls: { scope?: string; dir?: string; pluginAgents?: unknown }[] = [];
     const init = (async (opts: { scope?: string; dir?: string; pluginAgents?: unknown } = {}) => {
@@ -376,6 +383,7 @@ describe("runInit — plain run with plugin discovery (§13.9.1)", () => {
     const { deps, out, err } = makeDeps({
       init,
       discover: mockDiscovery([{ name: "planner" }, { name: "researcher" }]),
+      classifyPluginAgents: mockClassify([{ name: "planner" }, { name: "researcher" }]),
       isTty: true,
       readLine: async () => "y\n",
     });
@@ -412,6 +420,7 @@ describe("runInit — plain run with plugin discovery (§13.9.1)", () => {
     const { deps, out, err } = makeDeps({
       init,
       discover: mockDiscovery([{ name: "planner" }]),
+      classifyPluginAgents: mockClassify([{ name: "planner" }]),
       isTty: false,
       // yes passed to runInit, not makeDeps
     });
@@ -443,6 +452,11 @@ describe("runInit — plain run with plugin discovery (§13.9.1)", () => {
     const { deps, out, err } = makeDeps({
       init,
       discover: mockDiscovery([{ name: "planner" }]),
+      classifyPluginAgents: (async () => ({
+        toCopy: [],
+        identical: ["planner"],
+        kept: [],
+      })) as unknown as NonNullable<InitDeps["classifyPluginAgents"]>,
       isTty: false,
       // yes passed to runInit, not makeDeps
     });
@@ -473,6 +487,11 @@ describe("runInit — plain run with plugin discovery (§13.9.1)", () => {
     const { deps, out, err } = makeDeps({
       init,
       discover: mockDiscovery([{ name: "planner" }]),
+      classifyPluginAgents: (async () => ({
+        toCopy: [],
+        identical: [],
+        kept: [{ name: "planner", reason: "collision with a different existing agent" }],
+      })) as unknown as NonNullable<InitDeps["classifyPluginAgents"]>,
       isTty: false,
       // yes passed to runInit, not makeDeps
     });
@@ -533,6 +552,7 @@ describe("runInit — plain run with plugin discovery (§13.9.1)", () => {
     const { deps, err, out } = makeDeps({
       init,
       discover,
+      classifyPluginAgents: mockClassify([{ name: "planner" }]),
       isTty: false,
       // yes passed to runInit, not makeDeps
     });

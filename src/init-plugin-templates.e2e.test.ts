@@ -353,4 +353,188 @@ describe("init-plugin-templates (§13.9.1) — real plugin discovery and templat
     );
     expect(markerExists).toBe(false);
   });
+
+  it("(h) all templates already identical → ask NEVER called on a TTY and no seeded/kept lines", async () => {
+    await setupFixturePlugin(projectDir);
+
+    // Pre-seed the template (identical content)
+    const agentJsonPath = path.join(projectDir, ".voidrift", "agents", "planner", "agent.json");
+    await fs.mkdir(path.dirname(agentJsonPath), { recursive: true });
+    const plannerAgentJson = JSON.stringify(
+      {
+        name: "planner",
+        description: "Turns an intent into ordered steps, each with a brief and success checks. Reads and plans — it changes nothing.",
+        kind: "worker",
+        tools: [
+          "read_file",
+          "glob_files",
+          "search_contents",
+          "workspace_map",
+          "list_skills",
+          "load_skill",
+          "read_manual",
+        ],
+      },
+      null,
+      2,
+    );
+    const plannerPrompt =
+      "You are a planner. You turn an intent into an ordered set of steps that carry it to completion. You read and plan; you never make changes yourself.\n\nFirst understand the intent and read enough of the surrounding material to ground the plan in what is actually there. Then break the intent into ordered steps. For each step write a brief that states what must be true before the step can run, and success checks that state what must be true after it is done. Make a step small enough that one doer can carry it out and one observer can confirm it.\n\nVerification is itself work: where confirming an outcome takes its own action, emit it as its own step with its own success checks. Prefer a check that can be observed over one that must be taken on trust.\n\nReturn the plan as a goal, ordered steps, and per-step briefs and success checks. Do not carry out the steps.";
+    await fs.writeFile(agentJsonPath, plannerAgentJson);
+    await fs.writeFile(path.dirname(agentJsonPath) + "/prompt.md", plannerPrompt);
+
+    let readLineCalled = false;
+    let stdout = "";
+    let _stderr = "";
+    const deps: InitDeps = {
+      stdout: { write: (s) => ((stdout += s), true) },
+      stderr: { write: (s) => ((_stderr += s), true) },
+      cwd: projectDir,
+      isTty: true, // TTY!
+      readLine: async () => {
+        readLineCalled = true;
+        return "y\n";
+      },
+      homeDir: tmpHome,
+      discover: discoverPluginAgentTemplates,
+      init: initConfigHome,
+    };
+
+    const code = await runInit({}, deps);
+    expect(code).toBe(EXIT.COMPLETED);
+
+    // readLine should NOT have been called (no question asked)
+    expect(readLineCalled).toBe(false);
+    // No seeded or kept lines (both should be absent)
+    expect(stdout).not.toContain("seeded:");
+    expect(stdout).not.toContain("kept:");
+  });
+
+  it("(i) only a colliding different agent → ask never called, `kept: planner (...)` printed", async () => {
+    await setupFixturePlugin(projectDir);
+
+    // Pre-create a DIFFERENT agent.json (collision)
+    const agentJsonPath = path.join(projectDir, ".voidrift", "agents", "planner", "agent.json");
+    await fs.mkdir(path.dirname(agentJsonPath), { recursive: true });
+    const differentContent = JSON.stringify({ name: "planner", description: "Different", kind: "custom" }, null, 2);
+    await fs.writeFile(agentJsonPath, differentContent);
+    await fs.writeFile(path.dirname(agentJsonPath) + "/prompt.md", "Different prompt\n");
+
+    let readLineCalled = false;
+    let stdout = "";
+    let _stderr = "";
+    const deps: InitDeps = {
+      stdout: { write: (s) => ((stdout += s), true) },
+      stderr: { write: (s) => ((_stderr += s), true) },
+      cwd: projectDir,
+      isTty: true, // TTY!
+      readLine: async () => {
+        readLineCalled = true;
+        return "y\n";
+      },
+      homeDir: tmpHome,
+      discover: discoverPluginAgentTemplates,
+      init: initConfigHome,
+    };
+
+    const code = await runInit({}, deps);
+    expect(code).toBe(EXIT.COMPLETED);
+
+    // readLine should NOT have been called (no question asked — collision, not a new template)
+    expect(readLineCalled).toBe(false);
+    // `kept:` line should be printed
+    expect(stdout).toMatch(/^kept: planner \(/m);
+    // No seeded line
+    expect(stdout).not.toContain("seeded:");
+  });
+
+  it("(j) one new + one identical → ask called listing ONLY the new one", async () => {
+    // Create a fixture plugin with TWO agents: one new, one identical
+    const pluginDir = await writePkg(
+      projectDir,
+      "fx-plugin-two",
+      {
+        name: "fx-plugin-two",
+        version: "1.0.0",
+        license: "MIT",
+        type: "module",
+        main: "index.js",
+        voidrift: { kind: "plugin", plugin: true },
+      },
+      `export async function register(core) {
+  await 0;
+  core.register.agents('./agents');
+}`,
+    );
+
+    // Agent 1: new (not pre-existing)
+    const newAgentDir = path.join(pluginDir, "agents", "new-agent");
+    await fs.mkdir(newAgentDir, { recursive: true });
+    await fs.writeFile(
+      path.join(newAgentDir, "agent.json"),
+      JSON.stringify({ name: "new-agent", description: "New", kind: "worker", tools: [] }, null, 2),
+    );
+    await fs.writeFile(path.join(newAgentDir, "prompt.md"), "New agent prompt\n");
+
+    // Agent 2: identical (pre-existing with same content)
+    const idAgentJson = JSON.stringify({ name: "identical-agent", description: "Identical", kind: "worker", tools: [] }, null, 2);
+    const idAgentDir = path.join(pluginDir, "agents", "identical-agent");
+    await fs.mkdir(idAgentDir, { recursive: true });
+    await fs.writeFile(path.join(idAgentDir, "agent.json"), idAgentJson);
+    await fs.writeFile(path.join(idAgentDir, "prompt.md"), "Identical agent prompt\n");
+
+    // Pre-create the identical agent in .voidrift/agents
+    const projectIdAgentDir = path.join(projectDir, ".voidrift", "agents", "identical-agent");
+    await fs.mkdir(projectIdAgentDir, { recursive: true });
+    await fs.writeFile(path.join(projectIdAgentDir, "agent.json"), idAgentJson);
+    await fs.writeFile(path.join(projectIdAgentDir, "prompt.md"), "Identical agent prompt\n");
+
+    // Create project .voidrift/config.json enabling the plugin
+    const voidriftDir = path.join(projectDir, ".voidrift");
+    await fs.mkdir(voidriftDir, { recursive: true });
+    await fs.writeFile(
+      path.join(voidriftDir, "config.json"),
+      JSON.stringify(
+        {
+          plugins: {
+            "fx-plugin-two": { enabled: true, path: pluginDir },
+          },
+        },
+        null,
+        2,
+      ),
+    );
+
+    let askedAbout: string | null = null;
+    let stdout = "";
+    let _stderr = "";
+    const deps: InitDeps = {
+      stdout: { write: (s) => ((stdout += s), true) },
+      stderr: { write: (s) => ((_stderr += s), true) },
+      cwd: projectDir,
+      isTty: true, // TTY!
+      readLine: async () => {
+        // Capture what was asked
+        askedAbout = stdout.slice(stdout.lastIndexOf("Copy"));
+        return "n\n"; // decline
+      },
+      homeDir: tmpHome,
+      discover: discoverPluginAgentTemplates,
+      init: initConfigHome,
+    };
+
+    const code = await runInit({}, deps);
+    expect(code).toBe(EXIT.COMPLETED);
+
+    // readLine SHOULD have been called (one new template to ask about)
+    expect(askedAbout).not.toBeNull();
+    // The question should mention ONLY the new one (1 template), not the identical one
+    expect(askedAbout!).toContain("Copy 1 plugin agent template");
+    expect(askedAbout!).toContain("new-agent");
+    expect(askedAbout!).not.toContain("identical-agent"); // not mentioned in the question
+    // No seeded (user said no)
+    expect(stdout).not.toContain("seeded:");
+    // No kept
+    expect(stdout).not.toContain("kept:");
+  });
 });
