@@ -994,6 +994,8 @@ describe("§4.4 fan-out reducer helpers", () => {
     expect(fanoutRowStatus("succeeded")).toBe("done");
     expect(fanoutRowStatus("merged")).toBe("done");
     expect(fanoutRowStatus("reviewed")).toBe("done");
+    // §3.3/§7.2 (CLI §6.3) — a worker that reached its tool-round budget is done.
+    expect(fanoutRowStatus("limit_reached")).toBe("done");
     expect(fanoutRowStatus("failed")).toBe("failed");
     expect(fanoutRowStatus("skipped")).toBe("skipped");
     expect(fanoutRowStatus("aborted")).toBe("cancelled");

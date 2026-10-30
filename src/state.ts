@@ -644,6 +644,9 @@ export function fanoutRowStatus(coreStatus: string): "running" | "done" | "faile
     case "succeeded":
     case "merged":
     case "reviewed":
+    // §3.3/§7.2 (CLI §6.3) — a worker that reached its tool-round budget is a
+    // COMPLETED worker (its result is non-empty), not an error: render it done.
+    case "limit_reached":
       return "done";
     case "failed":
       return "failed";
