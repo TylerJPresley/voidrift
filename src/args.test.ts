@@ -275,6 +275,24 @@ describe("§2.1 init command (CLI §2.1, core §13.9.1)", () => {
     if (!r.ok) expect(r.error).toContain("may not be combined");
   });
 
+  it("parses `init --vacuum`", () => {
+    const r = parseArgs(["init", "--vacuum"]);
+    expect(r.ok && r.mode.kind).toBe("init");
+    expect(r.ok && (r.mode as { vacuum?: boolean }).vacuum).toBe(true);
+  });
+
+  it("`init --vacuum --migrate` is a usage error (not combinable)", () => {
+    const r = parseArgs(["init", "--vacuum", "--migrate"]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toContain("may not be combined");
+  });
+
+  it("`--yes` with `--vacuum` is a usage error (exit 2)", () => {
+    const r = parseArgs(["init", "--vacuum", "--yes"]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toContain('"--yes" is valid only');
+  });
+
   it("`--yes` with `--update` alone is valid", () => {
     const r = parseArgs(["init", "--update", "--yes"]);
     expect(r.ok).toBe(true);

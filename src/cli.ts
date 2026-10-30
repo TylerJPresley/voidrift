@@ -127,6 +127,7 @@ export async function main(argv: readonly string[], proc: NodeJS.Process = proce
           ...(mode.update ? { update: mode.update } : {}),
           ...(mode.sweep ? { sweep: mode.sweep } : {}),
           ...(mode.migrate ? { migrate: mode.migrate } : {}),
+          ...(mode.vacuum ? { vacuum: mode.vacuum } : {}),
           ...(mode.yes ? { yes: mode.yes } : {}),
         },
         {

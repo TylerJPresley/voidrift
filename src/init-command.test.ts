@@ -344,6 +344,49 @@ describe("runInit --migrate (§13.1/§13.9.1)", () => {
   });
 });
 
+describe("runInit --vacuum (§13.9.1, §5.2)", () => {
+  it("prints the size report and the backup path, exit 0", async () => {
+    let passedDir: string | undefined = "UNSET";
+    const vacuum = (async (dir?: string) => {
+      passedDir = dir;
+      return {
+        ok: true as const,
+        value: { nothingToDo: false, sizeBefore: 2 * 1024 * 1024, sizeAfter: 1024 * 1024, backup: "/work/project/.voidrift/checkpoint.db.bak-20261030T120000Z" },
+      };
+    }) as unknown as NonNullable<InitDeps["vacuum"]>;
+    const { deps, out } = makeDeps({ vacuum });
+    const code = await runInit({ vacuum: true }, deps);
+    expect(code).toBe(EXIT.COMPLETED);
+    expect(passedDir).toBe("/work/project"); // the vacuum runs against the cwd workspace
+    expect(out()).toContain("vacuumed: checkpoint store 2.0 MB → 1.0 MB (auto_vacuum=INCREMENTAL)");
+    expect(out()).toContain("backed up to: /work/project/.voidrift/checkpoint.db.bak-20261030T120000Z");
+  });
+
+  it("already incremental → 'nothing to do', no backup line, exit 0", async () => {
+    const vacuum = (async () => ({
+      ok: true as const,
+      value: { nothingToDo: true, sizeBefore: 1024, sizeAfter: 1024, backup: null },
+    })) as unknown as NonNullable<InitDeps["vacuum"]>;
+    const { deps, out } = makeDeps({ vacuum });
+    const code = await runInit({ vacuum: true }, deps);
+    expect(code).toBe(EXIT.COMPLETED);
+    expect(out()).toContain("nothing to do");
+    expect(out()).not.toContain("backed up to:");
+  });
+
+  it("a refusal (locked/insufficient disk/verify failure) prints the error to stderr and exits 1", async () => {
+    const vacuum = (async () => ({
+      ok: false as const,
+      error: { code: "INVALID_INPUT", message: "checkpoint store is locked by another process" },
+    })) as unknown as NonNullable<InitDeps["vacuum"]>;
+    const { deps, out, err } = makeDeps({ vacuum });
+    const code = await runInit({ vacuum: true }, deps);
+    expect(code).toBe(EXIT.FAILED);
+    expect(err()).toContain("Error: checkpoint store is locked by another process");
+    expect(out()).toBe("");
+  });
+});
+
 
 
 describe("runInit — plain run with plugin discovery (§13.9.1)", () => {

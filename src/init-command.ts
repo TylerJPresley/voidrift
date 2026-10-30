@@ -37,6 +37,7 @@ import {
   discoverPluginAgentTemplates,
   classifyPluginAgentTemplates,
   migrateConfigHome,
+  vacuumConfigHome,
   type ConfigInitResult,
   type PluginAgentTemplate,
 } from "@voidrift/core";
@@ -60,6 +61,7 @@ export interface InitDeps {
   applyUpdate?: typeof applyInitUpdate;
   sweep?: typeof sweepConfigHome;
   migrate?: typeof migrateConfigHome;
+  vacuum?: typeof vacuumConfigHome;
   discover?: typeof discoverPluginAgentTemplates;
   classifyPluginAgents?: typeof classifyPluginAgentTemplates;
   resetNames?: () => string[];
@@ -156,7 +158,7 @@ function skipProject(cwd: string, configDir: string, homeDir: string): boolean {
 
 /** Run `voidrift init` and return the process exit code (§2.1, §13.9.1). */
 export async function runInit(
-  opts: { reset?: string; update?: boolean; sweep?: boolean; migrate?: boolean; yes?: boolean },
+  opts: { reset?: string; update?: boolean; sweep?: boolean; migrate?: boolean; vacuum?: boolean; yes?: boolean },
   deps: InitDeps,
 ): Promise<number> {
   const init = deps.init ?? initConfigHome;
@@ -173,6 +175,11 @@ export async function runInit(
   // ── `--migrate` — persist the in-memory retired-key rename (§13.1, §13.9.1) ──
   if (opts.migrate === true) {
     return runMigrate(deps);
+  }
+
+  // ── `--vacuum` — convert the checkpoint store to incremental auto-vacuum (§13.9.1, §5.2) ──
+  if (opts.vacuum === true) {
+    return runVacuum(deps);
   }
 
   // ── `--update` — refresh seeded defaults to the current shipped set (§13.9.1) ──
@@ -464,6 +471,51 @@ async function runMigrate(deps: InitDeps): Promise<number> {
   deps.stdout.write(`migrated: ${lines}\n`);
   if (r.value.backupSet) {
     deps.stdout.write(`backed up to: ${displayPath(r.value.backupSet, homeDir)}/\n`);
+  }
+  return EXIT.COMPLETED;
+}
+
+/** Format a byte count as a short human string (e.g. `1.2 MB`), for the vacuum
+ * size report. KiB-based like the rest of the storage reporting. */
+function humanBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let v = n / 1024;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  return `${v.toFixed(1)} ${units[i]}`;
+}
+
+/**
+ * `voidrift init --vacuum` — convert the workspace checkpoint store from the
+ * legacy `auto_vacuum=0` (NONE) to `INCREMENTAL` so it reclaims freed space
+ * (§13.9.1, §5.2). Host-level: the core owns the SQLite conversion; this prints
+ * the report. It is idempotent (a store already INCREMENTAL reports "nothing to
+ * do"); it refuses on a locked store or insufficient disk and on any
+ * conversion/verification failure, printing the error to STDERR and exiting
+ * non-zero with the original store untouched. On success it names the backup it
+ * wrote and the store size before and after. Its own invocation.
+ */
+async function runVacuum(deps: InitDeps): Promise<number> {
+  const vacuum = deps.vacuum ?? vacuumConfigHome;
+  const homeDir = deps.homeDir ?? os.homedir();
+  const r = await vacuum(deps.cwd);
+  if (!r.ok) {
+    deps.stderr.write(`Error: ${r.error.message}\n`);
+    return EXIT.FAILED;
+  }
+  if (r.value.nothingToDo) {
+    deps.stdout.write("nothing to do: the checkpoint store already reclaims freed space (auto_vacuum=INCREMENTAL)\n");
+    return EXIT.COMPLETED;
+  }
+  deps.stdout.write(
+    `vacuumed: checkpoint store ${humanBytes(r.value.sizeBefore)} → ${humanBytes(r.value.sizeAfter)} (auto_vacuum=INCREMENTAL)\n`,
+  );
+  if (r.value.backup) {
+    deps.stdout.write(`backed up to: ${displayPath(r.value.backup, homeDir)} (safe to delete once you confirm the conversion worked)\n`);
   }
   return EXIT.COMPLETED;
 }

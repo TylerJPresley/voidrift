@@ -18,7 +18,7 @@ export type ParsedMode =
   | { kind: "prompt"; arg: string; enableWrite?: boolean }
   | { kind: "routine"; id: string; enableWrite?: boolean }
   | { kind: "routine-list" }
-  | { kind: "init"; reset?: string; update?: boolean; sweep?: boolean; migrate?: boolean; yes?: boolean }
+  | { kind: "init"; reset?: string; update?: boolean; sweep?: boolean; migrate?: boolean; vacuum?: boolean; yes?: boolean }
   | { kind: "doctor"; offline?: boolean; json?: boolean }
   | { kind: "access"; enableWrite?: boolean }
   | { kind: "export"; id: string; format?: "md" | "json"; out?: string; noToolResults?: boolean }
@@ -52,6 +52,7 @@ export function parseArgs(argv: readonly string[]): ParseResult {
     let update = false;
     let sweep = false;
     let migrate = false;
+    let vacuum = false;
     let yes = false;
     for (let i = 0; i < rest.length; i++) {
       const a = rest[i]!;
@@ -68,6 +69,8 @@ export function parseArgs(argv: readonly string[]): ParseResult {
         sweep = true;
       } else if (a === "--migrate") {
         migrate = true;
+      } else if (a === "--vacuum") {
+        vacuum = true;
       } else if (a === "--yes" || a === "-y") {
         yes = true;
       } else if (a.startsWith("-")) {
@@ -76,23 +79,24 @@ export function parseArgs(argv: readonly string[]): ParseResult {
         return { ok: false, error: `unexpected argument "${a}"` };
       }
     }
-    // `--update`, `--reset`, `--sweep`, and `--migrate` are each their own
-    // invocation (§13.9.1).
-    const exclusive = [update, reset !== undefined, sweep, migrate].filter(Boolean).length;
+    // `--update`, `--reset`, `--sweep`, `--migrate`, and `--vacuum` are each
+    // their own invocation (§13.9.1).
+    const exclusive = [update, reset !== undefined, sweep, migrate, vacuum].filter(Boolean).length;
     if (exclusive > 1) {
-      return { ok: false, error: '"--update", "--reset", "--sweep", and "--migrate" may not be combined' };
+      return { ok: false, error: '"--update", "--reset", "--sweep", "--migrate", and "--vacuum" may not be combined' };
     }
     // `--yes` confirms a reset, plain init (plugin-template copy), or an update
-    // non-interactively (§13.9.1); `--sweep` and `--migrate` act directly and take
-    // no confirmation.
-    if (yes && reset === undefined && !update && (sweep || migrate)) {
-      return { ok: false, error: '"--yes" is valid only with "--reset <name>", "--update", or a plain "init" (without --sweep/--migrate)' };
+    // non-interactively (§13.9.1); `--sweep`, `--migrate`, and `--vacuum` act
+    // directly and take no confirmation.
+    if (yes && reset === undefined && !update && (sweep || migrate || vacuum)) {
+      return { ok: false, error: '"--yes" is valid only with "--reset <name>", "--update", or a plain "init" (without --sweep/--migrate/--vacuum)' };
     }
     const mode: ParsedMode = { kind: "init" };
     if (reset !== undefined) (mode as { reset?: string }).reset = reset;
     if (update) (mode as { update?: boolean }).update = update;
     if (sweep) (mode as { sweep?: boolean }).sweep = sweep;
     if (migrate) (mode as { migrate?: boolean }).migrate = migrate;
+    if (vacuum) (mode as { vacuum?: boolean }).vacuum = vacuum;
     if (yes) (mode as { yes?: boolean }).yes = yes;
     return { ok: true, mode };
   }
@@ -336,13 +340,14 @@ export function helpText(): string {
     "",
     "Maintenance:",
     "  voidrift init                     Seed or repair ~/.config/voidrift and create .voidrift/ in this directory; if enabled plugins have agent templates, offer to copy them (TTY: prompt; headless: copy only with --yes)",
-    "  voidrift init --yes               Confirm the plugin-template copy non-interactively (headless only; use --reset/--update/--sweep/--migrate with --yes to confirm those separately)",
+    "  voidrift init --yes               Confirm the plugin-template copy non-interactively (headless only; use --reset/--update/--sweep/--migrate/--vacuum as separate invocations)",
     "  voidrift init --reset <name>      Restore one seeded default (an agent name, or 'config') after a confirmed diff",
     "  voidrift init --reset <name> --yes  Confirm the reset non-interactively (valid only with --reset)",
     "  voidrift init --update            Bring seeded agents, skills, and allow rules up to the current shipped set",
     "  voidrift init --update --yes      Confirm the update batch non-interactively",
     "  voidrift init --sweep             Move backup/editor leftovers out of the live directories into a backup set",
     "  voidrift init --migrate           Rewrite config files that name a retired key to its current name (backed up first)",
+    "  voidrift init --vacuum            Convert the workspace checkpoint store to reclaim freed space (auto_vacuum=INCREMENTAL; backed up first)",
     "  voidrift doctor                   Validate every resource and its configuration (read-only)",
     "  voidrift doctor --offline         Validate without any network check (CI/offline)",
     "  voidrift doctor --json            Emit findings as machine-readable JSON",
