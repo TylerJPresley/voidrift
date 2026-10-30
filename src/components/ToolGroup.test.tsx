@@ -2,7 +2,7 @@
  * §4.4/§4.6 tool-call grouping, collapse, truncation, reasoning summary and the
  * delegation collapse (cli-blueprint.md §4.1, §4.4, §4.6).
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { render } from "ink-testing-library";
 import { ToolGroup, ThoughtLine, ReasoningView, StatusLine, FanoutGroup, LiveFanout, shimmerFrame, shimmerBandStart } from "./ToolGroup.js";
 import { OutputPane } from "./OutputPane.js";
@@ -892,5 +892,88 @@ describe("§4.2/§4.4 gradient wave uses REAL theme tokens (regression: invisibl
     // eslint-disable-next-line no-control-regex
     const perChar = /(\x1b\[38;2;\d+;\d+;\d+m.){3,}/;
     expect(perChar.test(frame)).toBe(false);
+  });
+});
+
+describe("§4.2 StatusLine owns its repaint tick (verb wave + elapsed advance on their own)", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** A running turn with a FIXED state (no prop/state change, constant token
+   * count) so any frame change must come from StatusLine's OWN tick, not a
+   * parent re-render. `turnStartedAt` is a truthy epoch (1 ms) so the elapsed
+   * counter is live; `nowMs` is NOT passed so StatusLine reads `Date.now()`,
+   * which the fake clock drives. */
+  function runningState(): ViewState {
+    let s = pushUser(initialState(5000), "q");
+    s = reduce(s, { type: "token", token: "x", done: false });
+    return { ...s, turnStartedAt: 1, tokenCount: 42, tokenCountEstimated: false };
+  }
+
+  it("(a) the verb wave + elapsed advance across 125 ms steps with NO state/prop change", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    const s = runningState();
+    const r = render(<StatusLine state={s} theme={theme} reduceMotion={false} depth="truecolor" />);
+    // Strip the child spinner's own glyph (BRAILLE for `Responding`): the spinner
+    // has its OWN interval, so its glyph change must NOT be mistaken for the fix.
+    // What remains — the verb text and the elapsed clock — is computed by
+    // StatusLine itself and only repaints when StatusLine does. (ink-testing's
+    // frame carries no ANSI colour, so the verb's colour wave is asserted via
+    // `gradientWaveSpans` in the §4.2 wave suite; here the elapsed counter is the
+    // observable that the status line repaints on its own tick.)
+    const strip = (f: string): string => f.replace(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/g, "");
+    const frames: string[] = [strip(r.lastFrame()!)];
+    for (let i = 0; i < 4; i += 1) {
+      await vi.advanceTimersByTimeAsync(250);
+      frames.push(strip(r.lastFrame()!));
+    }
+    r.unmount();
+    // The elapsed clock advanced across frames — proof the line repaints on its
+    // OWN tick, not only when a prop (e.g. the token counter) moves.
+    expect(new Set(frames).size).toBeGreaterThan(1);
+    expect(frames[frames.length - 1]!).not.toBe(frames[0]!);
+  });
+
+  it("(b) under reduceMotion the output is identical across time and NO interval is armed", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    const s = runningState();
+    const r = render(<StatusLine state={s} theme={theme} reduceMotion depth="truecolor" />);
+    // The tick is not armed under reduceMotion: no timer pending.
+    expect(vi.getTimerCount()).toBe(0);
+    const first = r.lastFrame()!;
+    vi.advanceTimersByTime(1000);
+    expect(r.lastFrame()!).toBe(first); // no wave, no ticking clock
+    r.unmount();
+  });
+
+  it("(c) with approvalPending the line stays frozen (no wave, elapsed frozen) and no interval is armed", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(40_000);
+    let s = pushUser(initialState(5000), "q");
+    s = reduce(s, { type: "tool_started", id: "t1", name: "execute_command", args: { command: "x" } });
+    s = reduce(s, { type: "approval_pending", pending: true });
+    const frozen = { ...s, turnStartedAt: 0, approvalStartedAt: 2_000 };
+    const r = render(<StatusLine state={frozen} theme={theme} reduceMotion={false} depth="truecolor" />);
+    // No tick while an approval is pending (frozen line).
+    expect(vi.getTimerCount()).toBe(0);
+    const first = r.lastFrame()!;
+    expect(first).toContain("Waiting for approval");
+    vi.advanceTimersByTime(5000);
+    expect(r.lastFrame()!).toBe(first); // frozen: no wave, elapsed does not tick
+    r.unmount();
+  });
+
+  it("(d) unmount clears the interval — no timers left running", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    const s = runningState();
+    const r = render(<StatusLine state={s} theme={theme} reduceMotion={false} depth="truecolor" />);
+    // The shimmer tick is armed (alongside the child spinner's own interval).
+    expect(vi.getTimerCount()).toBeGreaterThanOrEqual(1);
+    r.unmount();
+    expect(vi.getTimerCount()).toBe(0); // every effect cleanup cleared its timer
   });
 });

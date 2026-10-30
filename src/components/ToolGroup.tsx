@@ -125,6 +125,15 @@ export function StatusLine({
    * defaults to `truecolor` so a test needn't thread it. */
   depth?: ColorDepth | undefined;
 }): React.ReactElement | null {
+  // §4.2 — the status line owns its OWN repaint tick (the child spinner's
+  // interval only re-renders the spinner, not this parent), so the verb
+  // gradient wave and the elapsed clock advance at ~8 fps while the turn
+  // generates even when no other prop (e.g. the token counter) changes. The
+  // tick is armed only while the line is animating — not under reduceMotion/
+  // NO_COLOR and not while an approval is pending (frozen line) — and
+  // StatusLine mounts only while a turn runs, so there is no idle repaint. The
+  // hook runs before any early return (Rules of Hooks).
+  useShimmerTick(!reduceMotion && !state.approvalPending);
   const status = statusLine(state);
   if (!status) return null;
   const now = nowMs ?? Date.now();
