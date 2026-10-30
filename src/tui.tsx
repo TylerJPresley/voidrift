@@ -19,6 +19,7 @@ import { App } from "./components/App.js";
 import { EXIT } from "./exit-codes.js";
 import { CLI_VERSION } from "./version.js";
 import { writeConfigNotice } from "./config-notice.js";
+import { installResizeClear, type ResizeStdout } from "./resize-clear.js";
 
 /**
  * Whether a worker ask may join the batched fan-out prompt (§6.2, cli §6.2).
@@ -41,7 +42,7 @@ export interface TuiOptions {
   caps?: Capabilities;
   proc?: NodeJS.Process;
   /** Inject the Ink renderer (tests pass ink-testing-library's render). */
-  renderImpl?: (element: React.ReactElement) => { unmount: () => void };
+  renderImpl?: (element: React.ReactElement) => { unmount: () => void; clear?: () => void };
 }
 
 /** Pick the session at start per the command and resumeOnStart (§2.5). */
@@ -240,6 +241,7 @@ export async function runTui(opts: TuiOptions): Promise<number> {
   const autoDenySeconds = await readAutoDenySeconds(api);
 
   return await new Promise<number>((resolveExit) => {
+    let disposeResizeClearRef: () => void = () => {};
     // The Ink suspend/restore hooks a terminal editor drives around (§3.8): the
     // live region is cleared so the editor owns the TTY, and on return the
     // cursor is re-hidden so Ink's inverse cursor is the only one shown.
@@ -280,6 +282,7 @@ export async function runTui(opts: TuiOptions): Promise<number> {
           onQuit={(exitCode) => {
             terminal.restore();
             terminal.dispose();
+            disposeResizeClearRef();
             instance.unmount();
             resolveExit(exitCode ?? EXIT.COMPLETED);
           }}
@@ -295,6 +298,16 @@ export async function runTui(opts: TuiOptions): Promise<number> {
       opts.renderImpl ??
       ((element: React.ReactElement) =>
         render(element, { stdout: proc.stdout as NodeJS.WriteStream, exitOnCtrlC: false }));
+    // §5.2 — install the width-decrease frame clear BEFORE render() so its
+    // stdout `resize` listener is registered ahead of Ink's own `resized`
+    // (listeners fire in registration order): on a narrower resize it erases the
+    // rewrapped previous frame's excess physical rows BEFORE Ink repaints, so no
+    // stale spinner/rule rows are left behind. Width increase and height-only
+    // changes are untouched.
+    let resetInk = (): void => {};
+    const disposeResizeClear = installResizeClear(proc.stdout as unknown as ResizeStdout, () => resetInk());
     const instance = renderImpl(<AppWithApproval />);
+    resetInk = () => (instance as { clear?: () => void }).clear?.();
+    disposeResizeClearRef = disposeResizeClear;
   });
 }
