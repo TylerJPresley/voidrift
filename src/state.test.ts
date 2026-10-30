@@ -285,6 +285,102 @@ describe("footer context levels (§5.3)", () => {
   });
 });
 
+describe("§4.2.1/§14.6 — head threshold crossing shows one transcript ⚠ info line", () => {
+  const lastBlock = (s: ViewState) => s.blocks[s.blocks.length - 1] as { glyph: string; text: string; kind: string };
+
+  it("maps a `head` CONTEXT_THRESHOLD_CROSSED carrying components, largest first", () => {
+    expect(
+      mapSessionEvent(
+        env("CONTEXT_THRESHOLD_CROSSED", {
+          level: "head",
+          percentage: 38,
+          components: [
+            { name: "AGENTS.md", tokens: 2200 },
+            { name: "tool schemas", tokens: 1400 },
+            { name: "skills", tokens: 200 },
+          ],
+        }),
+      ),
+    ).toEqual({
+      type: "context_threshold",
+      level: "head",
+      percentage: 38,
+      components: [
+        { name: "AGENTS.md", tokens: 2200 },
+        { name: "tool schemas", tokens: 1400 },
+        { name: "skills", tokens: 200 },
+      ],
+    });
+  });
+
+  it("an occupancy-level crossing carries no components and only updates contextLevel (unchanged)", () => {
+    expect(mapSessionEvent(env("CONTEXT_THRESHOLD_CROSSED", { level: "compaction", percentage: 42 }))).toEqual({
+      type: "context_threshold",
+      level: "compaction",
+      percentage: 42,
+    });
+  });
+
+  it("renders the exact warn line from the head crossing, deriving each component's window share", () => {
+    const before = initialState(5000);
+    const s = reduce(before, {
+      type: "context_threshold",
+      level: "head",
+      percentage: 38,
+      components: [
+        { name: "AGENTS.md", tokens: 2200 },
+        { name: "tool schemas", tokens: 1400 },
+        { name: "skills", tokens: 200 },
+      ],
+    });
+    const b = lastBlock(s);
+    expect(b.kind).toBe("info");
+    expect(b.glyph).toBe("warn");
+    expect(b.text).toBe(
+      "Fixed context is 38% of the window: AGENTS.md 22%, tool schemas 14%, skills 2%. Prune AGENTS.md, memory or plans to reduce it.",
+    );
+    // The warn glyph renders `⚠` in front of the text (§4.7).
+    expect(blockLines(s.blocks)).toContain(
+      "⚠ Fixed context is 38% of the window: AGENTS.md 22%, tool schemas 14%, skills 2%. Prune AGENTS.md, memory or plans to reduce it.",
+    );
+    // §4.2.1 — the head axis never touches the occupancy level.
+    expect(s.contextLevel).toBe(before.contextLevel);
+  });
+
+  it("names only the top three components when more are present", () => {
+    const s = reduce(initialState(5000), {
+      type: "context_threshold",
+      level: "head",
+      percentage: 40,
+      components: [
+        { name: "AGENTS.md", tokens: 2000 },
+        { name: "tool schemas", tokens: 1000 },
+        { name: "skills", tokens: 500 },
+        { name: "memory index", tokens: 300 },
+      ],
+    });
+    const text = (s.blocks[s.blocks.length - 1] as { text: string }).text;
+    expect(text).toContain("AGENTS.md");
+    expect(text).toContain("tool schemas");
+    expect(text).toContain("skills");
+    expect(text).not.toContain("memory index");
+  });
+
+  it("an occupancy-level crossing adds no block and still sets contextLevel", () => {
+    const before = initialState(5000);
+    const s = reduce(before, { type: "context_threshold", level: "compaction", percentage: 42 });
+    expect(s.blocks).toHaveLength(before.blocks.length);
+    expect(s.contextLevel).toBe("compaction");
+  });
+
+  it("a head crossing with no components adds no line (nothing truthful to say)", () => {
+    const before = initialState(5000);
+    const s = reduce(before, { type: "context_threshold", level: "head", percentage: 38 });
+    expect(s.blocks).toHaveLength(before.blocks.length);
+    expect(s.contextLevel).toBe(before.contextLevel);
+  });
+});
+
 describe("scrollback cap (§1.4)", () => {
   it("drops the oldest committed block past the cap", () => {
     let s = initialState(3);

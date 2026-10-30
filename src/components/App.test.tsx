@@ -177,6 +177,32 @@ describe("§5.6 welcome, footer event mapping, context levels", () => {
     expect(app.lastFrame()).toContain("3 sessions idle over 30 days");
     app.unmount();
   });
+
+  it("a `head` CONTEXT_THRESHOLD_CROSSED renders one ⚠ transcript line naming the biggest fixed-context sources (§4.2.1/§14.6)", async () => {
+    const harness = await makeHarness();
+    const sid = await newSession(harness);
+    const app = await mountApp(harness, sid);
+    harness.emit(
+      "CONTEXT_THRESHOLD_CROSSED",
+      {
+        level: "head",
+        percentage: 38,
+        components: [
+          { name: "AGENTS.md", tokens: 2200 },
+          { name: "tool schemas", tokens: 1400 },
+          { name: "skills", tokens: 200 },
+        ],
+      },
+      sid,
+    );
+    await new Promise((r) => setTimeout(r, 10));
+    const frame = app.lastFrame()!;
+    expect(frame).toContain("Fixed context is 38% of the window");
+    expect(frame).toContain("AGENTS.md 22%");
+    expect(frame).toContain("tool schemas 14%");
+    expect(frame).toContain("skills 2%");
+    app.unmount();
+  });
 });
 
 describe("§4.4/§5.2 auto-approve surfaces (data-driven)", () => {

@@ -615,6 +615,27 @@ function genericWarningText(category: string): string {
   return category ? `A ${category} warning was raised.` : "A warning was raised.";
 }
 
+/**
+ * §4.2.1/§4.8/§14.6 — build the one transcript line for a `head` threshold
+ * crossing: the fixed context (the protected head plus the bound tool schemas)
+ * has grown past `contextHeadWarnPct` of the window, so the user can prune it.
+ * `percentage` is the fixed context's share of the WINDOW (an integer percent).
+ * The payload carries no window, so each component's window share is derived
+ * truthfully from the one exact relation it does carry: the components ARE the
+ * fixed context, so `component% = round(tokens / Σcomponents × percentage)` —
+ * each item's share of the window, consistent with the head percentage. Shows
+ * the top three components (the payload lists them largest first). Returns null
+ * when there are no components to name (nothing truthful to say).
+ */
+function headWarningLine(percentage: number, components?: { name: string; tokens: number }[]): string | null {
+  if (!components || components.length === 0) return null;
+  const total = components.reduce((sum, c) => sum + c.tokens, 0);
+  if (total <= 0) return null;
+  const top = components.slice(0, 3);
+  const parts = top.map((c) => `${c.name} ${Math.round((c.tokens / total) * percentage)}%`);
+  return `Fixed context is ${percentage}% of the window: ${parts.join(", ")}. Prune AGENTS.md, memory or plans to reduce it.`;
+}
+
 /** §4.4 — map a core worker status to the fan-out row's display status. The
  * live states (`running`, `needs_review`) stay `running` (a static marker, no
  * spinner); terminal states fold to `done`/`failed`/`skipped`/`cancelled`. */
@@ -1100,8 +1121,23 @@ export function reduce(state: ViewState, effect: ViewEffect): ViewState {  switc
     }
     case "context_budget":
       return { ...state, contextPercentage: effect.percentage };
-    case "context_threshold":
+    case "context_threshold": {
+      // §4.8 — the occupancy levels (compaction/safety_net/overflow/notice) only
+      // update `contextLevel`; their display (the meter colour/hint) is unchanged.
+      // §4.2.1/§14.6 — a `head` crossing is a SEPARATE axis (fixed context vs the
+      // window): it adds ONE transcript `⚠` info line naming the biggest
+      // fixed-context sources, once per crossing (the core re-arms), without
+      // touching the occupancy level or meter.
+      if (effect.level === "head") {
+        const text = headWarningLine(effect.percentage, effect.components);
+        if (text === null) return state;
+        return {
+          ...state,
+          blocks: cap([...state.blocks, { kind: "info", glyph: "warn", text }], state.scrollbackLines),
+        };
+      }
       return { ...state, contextLevel: effect.level };
+    }
     case "context_compacted":
       return {
         ...state,

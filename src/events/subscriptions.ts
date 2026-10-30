@@ -33,7 +33,7 @@ export type ViewEffect =
       modelId?: string | undefined;
     }
   | { type: "context_budget"; percentage: number }
-  | { type: "context_threshold"; level: string; percentage: number }
+  | { type: "context_threshold"; level: string; percentage: number; components?: { name: string; tokens: number }[] }
   | { type: "context_compacted"; turnsFolded: number }
   | { type: "context_overflow"; message: string }
   | { type: "warning"; category: string; message: string | undefined }
@@ -183,8 +183,30 @@ export function mapSessionEvent(ev: EventEnvelope, resolveEndpoint?: EndpointRes
     }
     case "CONTEXT_BUDGET_UPDATED":
       return { type: "context_budget", percentage: Number(p["percentage"] ?? 0) };
-    case "CONTEXT_THRESHOLD_CROSSED":
-      return { type: "context_threshold", level: String(p["level"] ?? "notice"), percentage: Number(p["percentage"] ?? 0) };
+    case "CONTEXT_THRESHOLD_CROSSED": {
+      // §4.8/§14.6 — `components` (largest head items + bound tool schemas, with
+      // their token sizes, largest first) rides ONLY a `head` crossing; it lets
+      // the reducer show one transcript info line naming the biggest fixed-context
+      // sources. Other levels carry no components and keep only {level, percentage}.
+      const level = String(p["level"] ?? "notice");
+      const components = Array.isArray(p["components"])
+        ? (p["components"] as unknown[])
+            .filter(
+              (c): c is { name: string; tokens: number } =>
+                typeof c === "object" &&
+                c !== null &&
+                typeof (c as { name?: unknown }).name === "string" &&
+                typeof (c as { tokens?: unknown }).tokens === "number",
+            )
+            .map((c) => ({ name: c.name, tokens: c.tokens }))
+        : undefined;
+      return {
+        type: "context_threshold",
+        level,
+        percentage: Number(p["percentage"] ?? 0),
+        ...(components !== undefined ? { components } : {}),
+      };
+    }
     case "CONTEXT_COMPACTED":
       return { type: "context_compacted", turnsFolded: Number(p["turnsFolded"] ?? 0) };
     case "CONTEXT_OVERFLOW":
