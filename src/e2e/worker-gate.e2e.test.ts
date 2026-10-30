@@ -111,9 +111,9 @@ describe("worker decision-point gate (e2e)", () => {
 
     const core = await hostCore(env);
     cores.push(core);
-    const started: string[] = [];
+    const finished: Array<{ name: string; status: string }> = [];
     const denied: { reason?: string }[] = [];
-    core.api.events.subscribe("TOOL_STARTED", (e) => started.push((e as { payload: { name: string } }).payload.name));
+    core.api.events.subscribe("TOOL_FINISHED", (e) => finished.push((e as { payload: { name: string; status: string } }).payload));
     core.api.events.subscribe("PERMISSION_DENIED", (e) => denied.push((e as { payload: { reason?: string } }).payload));
     core.api.register.agent(coder);
     const created = await core.api.session.create({});
@@ -122,8 +122,14 @@ describe("worker decision-point gate (e2e)", () => {
     const res = await core.api.subagents.dispatch([{ agent: "coder", task: "push" }]);
     expect(res.ok).toBe(true);
 
-    // The force-ask resolved to reject (fail fast) and execute_command never ran.
+    // The force-ask resolved to reject (fail fast). §8.1/§9.1: the call is still
+    // BRACKETED — one TOOL_STARTED and one TOOL_FINISHED {status:"error"} — yet
+    // it NEVER executes: the finish carries `error`, not `success`, and the
+    // rejection rides alongside.
     expect(denied.some((p) => (p.reason ?? "") === "rejected")).toBe(true);
-    expect(started).not.toContain("execute_command");
+    const execFinishes = finished.filter((f) => f.name === "execute_command");
+    expect(execFinishes).toHaveLength(1);
+    expect(execFinishes[0]!.status).toBe("error");
+    expect(execFinishes.some((f) => f.status === "success")).toBe(false);
   }, 60_000);
 });

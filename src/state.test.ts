@@ -131,6 +131,34 @@ describe("mode + auto_approve view state (§4.4, §5.2)", () => {
     const last = s.blocks[s.blocks.length - 1];
     expect((last as { calls: unknown[] }).calls[0]).not.toHaveProperty("autoApprove");
   });
+
+  it("a denied call renders a TOOL_FINISHED error row with its one-line summary (existing error style, no new row kind, §4/§8.1)", () => {
+    // The pipeline now brackets EVERY call, denied included: TOOL_STARTED then
+    // TOOL_FINISHED {status:"error"} carrying the denial guidance as `summary`.
+    // The CLI commits it as an ordinary `toolgroup` row with `status: "error"` —
+    // the existing error style, no new row kind.
+    let s = initialState(5000);
+    s = reduce(s, { type: "tool_started", id: "d1", name: "execute_command", args: { command: "cat x" } });
+    s = reduce(s, {
+      type: "tool_finished",
+      id: "d1",
+      name: "execute_command",
+      status: "error",
+      durationMs: 0,
+      summary: "permission denied: use read_file instead of cat",
+    });
+    const last = s.blocks[s.blocks.length - 1];
+    expect(last).toMatchObject({ kind: "toolgroup" });
+    const call = (last as unknown as { calls: Array<Record<string, unknown>> }).calls[0]!;
+    expect(call).toMatchObject({
+      id: "d1",
+      name: "execute_command",
+      status: "error",
+      summary: "permission denied: use read_file instead of cat",
+    });
+    // The denied row keeps the call args captured at TOOL_STARTED (paired id).
+    expect(call["args"]).toMatchObject({ command: "cat x" });
+  });
 });
 
 describe("stream and turn commit (§4.2)", () => {
