@@ -15,7 +15,7 @@ export type ViewEffect =
   | { type: "token"; token: string; done: boolean }
   | { type: "reasoning"; token: string; done: boolean }
   | { type: "tool_started"; id: string; name: string; args: Record<string, unknown> }
-  | { type: "tool_finished"; id: string; name: string; status: string; durationMs: number; summary: string; diff?: string }
+  | { type: "tool_finished"; id: string; name: string; status: string; durationMs: number; summary: string; diff?: string; lines?: number; truncated?: boolean; entries?: { files: number; dirs: number } }
   | { type: "turn_complete"; status: string; text: string; notice?: string; usage: { promptTokens: number; completionTokens: number; totalMs: number } }
   | { type: "model_usage"; promptTokens: number; inputSum: number; completionTokens: number; cacheReadTokens: number; genMs: number; estimated: boolean }
   | { type: "model_price"; price: { costPer1kInput?: number; costPer1kOutput?: number } | null }
@@ -53,6 +53,16 @@ export type ViewEffect =
   | { type: "housekeeping"; idleSessions: number; idleDays: number };
 
 type P = Record<string, unknown>;
+
+/** §14.6 — a well-formed `{ files, dirs }` entries object on the payload. */
+function isEntries(v: unknown): v is { files: number; dirs: number } {
+  return (
+    typeof v === "object" &&
+    v !== null &&
+    typeof (v as { files?: unknown }).files === "number" &&
+    typeof (v as { dirs?: unknown }).dirs === "number"
+  );
+}
 
 /** Resolve an endpoint name to its `baseUrl`/`modelId` for legible model-error
  * lines (§10.1). Backed by `models.list()`, snapshotted once at wiring time so
@@ -102,6 +112,12 @@ export function mapSessionEvent(ev: EventEnvelope, resolveEndpoint?: EndpointRes
         durationMs: Number(p["durationMs"] ?? 0),
         summary: String(p["summary"] ?? ""),
         ...(typeof p["diff"] === "string" ? { diff: p["diff"] as string } : {}),
+        // §14.6 — honest counts from the FULL result (not the capped summary);
+        // additive and optional, so an older core without them falls back to
+        // counting the summary.
+        ...(typeof p["lines"] === "number" ? { lines: p["lines"] as number } : {}),
+        ...(typeof p["truncated"] === "boolean" ? { truncated: p["truncated"] as boolean } : {}),
+        ...(isEntries(p["entries"]) ? { entries: p["entries"] as { files: number; dirs: number } } : {}),
       };
     case "TURN_COMPLETE":
       return {

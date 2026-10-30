@@ -217,7 +217,13 @@ function CallRow({
   const glyphColor = ok ? color : theme.error;
   const label = toolDisplayName(call.name);
   const arg = showDetails ? fullArgs(call.args) : shortenArg(call.name, call.args);
-  const detail = ok ? summarizeResult(call.name, call.summary) : firstLine(call.summary);
+  const detail = ok
+    ? summarizeResult(call.name, call.summary, 60, {
+        ...(typeof call.lines === "number" ? { lines: call.lines } : {}),
+        ...(typeof call.truncated === "boolean" ? { truncated: call.truncated } : {}),
+        ...(call.entries ? { entries: call.entries } : {}),
+      })
+    : firstLine(call.summary);
   // The row budget is the content width (`columns - 4`: a 2-column left margin
   // — the group's one-space indent plus one more under the header, §4.4 — and a
   // 2-column right padding) less the glyph + its trailing space (`● `) and the

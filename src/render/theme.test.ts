@@ -112,6 +112,33 @@ describe("§4.4 tool display", () => {
     expect(summarizeResult("workspace_map", "(empty)")).toBe("(empty)");
   });
 
+  it("§14.6 uses the core's honest counts over the truncated summary", () => {
+    // Given — a glob summary capped to ~500 chars that lists only part of the
+    // real result, but the core carries the FULL line count (50).
+    const capped = Array.from({ length: 20 }, (_, i) => `f${i}.txt`).join("\n");
+    // When / Then — the row shows the true 50, not the 20 visible in the summary.
+    // MUTATION: counting the summary instead of `counts.lines` yields "20 matches".
+    expect(summarizeResult("glob_files", capped, 60, { lines: 50, truncated: true })).toBe("50 matches");
+    // Map uses the honest files/dirs split (36 files, 14 dirs) from the core,
+    // not the truncated summary (which dropped the 14 child dirs — the bug).
+    // MUTATION: dropping `entries` falls back to counting the summary and loses dirs.
+    expect(
+      summarizeResult("workspace_map", "a.ts\nb.ts", 60, { lines: 50, entries: { files: 36, dirs: 14 } }),
+    ).toBe("36 files, 14 dirs");
+  });
+
+  it("§14.6 falls back to the summary count when no fields are present", () => {
+    // No counts → identical to the pre-fix behavior.
+    expect(summarizeResult("glob_files", "a.ts\nb.ts\nc.ts")).toBe("3 matches");
+    expect(summarizeResult("workspace_map", "src/\nREADME.md")).toBe("1 file, 1 dir");
+  });
+
+  it("§14.6 marks a truncated summary with `+` when no count is available", () => {
+    // A truncated summary with no `lines`: the row is honest about undercounting.
+    expect(summarizeResult("glob_files", "a.ts\nb.ts\nc.ts", 60, { truncated: true })).toBe("3+ matches");
+    expect(summarizeResult("workspace_map", "a/\nb.ts", 60, { truncated: true })).toBe("1+ file, 1+ dir");
+  });
+
   it("§4.4 unmapped / MCP tool: first line to width, or `<n> lines` when multi-line", () => {
     // Single-line → truncated to width.
     expect(summarizeResult("mcp_x_y", "ok")).toBe("ok");

@@ -671,12 +671,29 @@ export function fullArgs(args: Record<string, unknown>, width = 60): string {
  * `width` caps the single-line form for an unmapped or MCP tool: its first line
  * is truncated to `width`, or shown as `<n> lines` when the result is
  * multi-line (§4.4).
+ *
+ * `counts` carries the core's honest `TOOL_FINISHED` figures computed from the
+ * FULL result before it was capped to ~500 chars (core §14.6): `lines` (and,
+ * for Map, `entries` files/dirs). When present they are authoritative, so a big
+ * result is never undercounted from the truncated summary (the "33 matches" for
+ * 50 files bug). When absent the count falls back to the summary; and when the
+ * summary was truncated with no usable count, the figure is marked `<n>+` so the
+ * row never states a false exact count.
  */
-export function summarizeResult(name: string, result: string | undefined, width = 60): string {
+export interface ResultCounts {
+  lines?: number;
+  truncated?: boolean;
+  entries?: { files: number; dirs: number };
+}
+
+export function summarizeResult(name: string, result: string | undefined, width = 60, counts?: ResultCounts): string {
   if (!result) return "";
   const r = result.trim();
   if (!r) return "";
   const lineCount = r.split("\n").length;
+  // `+` suffix when the summary was truncated and no authoritative count is
+  // available (honest "at least" form, §4.4).
+  const plus = counts?.truncated ? "+" : "";
   switch (name) {
     case "read_file": {
       const m = r.match(/\((\d+)\s+lines?\)/);
@@ -686,23 +703,41 @@ export function summarizeResult(name: string, result: string | undefined, width 
       // The core returns a newline list where directory lines end in `/` and
       // file lines do not (`backend.ls`), or `(empty)` for an empty directory.
       if (/^\(empty\)/.test(r) || /^(Empty directory|No )/.test(r)) return r.split("\n")[0] ?? "";
-      let dirs = 0;
-      let files = 0;
-      for (const line of r.split("\n")) {
-        const t = line.trim();
-        if (!t) continue;
-        if (t.endsWith("/")) dirs++;
-        else files++;
+      // Prefer the core's honest files/dirs split (computed from the FULL result
+      // with the same trailing-`/` rule) so a truncated summary never drops dirs.
+      let files: number;
+      let dirs: number;
+      let approx = false;
+      if (counts?.entries) {
+        files = counts.entries.files;
+        dirs = counts.entries.dirs;
+      } else {
+        files = 0;
+        dirs = 0;
+        for (const line of r.split("\n")) {
+          const t = line.trim();
+          if (!t) continue;
+          if (t.endsWith("/")) dirs++;
+          else files++;
+        }
+        approx = counts?.truncated === true;
       }
+      const suffix = approx ? "+" : "";
       const parts: string[] = [];
-      if (files) parts.push(`${files} file${files === 1 ? "" : "s"}`);
-      if (dirs) parts.push(`${dirs} dir${dirs === 1 ? "" : "s"}`);
-      return parts.join(", ") || `${lineCount} items`;
+      if (files) parts.push(`${files}${suffix} file${files === 1 ? "" : "s"}`);
+      if (dirs) parts.push(`${dirs}${suffix} dir${dirs === 1 ? "" : "s"}`);
+      return parts.join(", ") || `${lineCount}${suffix} items`;
     }
     case "glob_files": {
       if (/^No files/.test(r)) return "no matches";
+      // Prefer the core's full-result line count; fall back to counting the
+      // (possibly truncated) summary, marked `+` when it was truncated.
+      if (typeof counts?.lines === "number") {
+        const n = counts.lines;
+        return `${n} match${n === 1 ? "" : "es"}`;
+      }
       const n = r.split("\n").filter(Boolean).length;
-      return `${n} match${n === 1 ? "" : "es"}`;
+      return `${n}${plus} match${n === 1 && !plus ? "" : "es"}`;
     }
     case "search_contents":
       return ""; // suppressed (§4.4)

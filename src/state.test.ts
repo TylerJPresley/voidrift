@@ -245,6 +245,33 @@ describe("tool rows (§4.4)", () => {
     const groups = s.blocks.filter((b) => b.kind === "toolgroup");
     expect(groups).toHaveLength(2);
   });
+
+  it("§14.6 carries the core's count fields onto the committed tool call", () => {
+    let s = pushUser(initialState(5000), "hi");
+    s = reduce(s, { type: "tool_started", id: "g1", name: "glob_files", args: { pattern: "*" } });
+    s = reduce(s, {
+      type: "tool_finished",
+      id: "g1",
+      name: "glob_files",
+      status: "success",
+      durationMs: 5,
+      summary: "f0.txt\nf1.txt",
+      lines: 50,
+      truncated: true,
+    });
+    const group = s.blocks[s.blocks.length - 1] as Extract<Block, { kind: "toolgroup" }>;
+    expect(group.calls[0]).toMatchObject({ name: "glob_files", lines: 50, truncated: true });
+  });
+
+  it("§14.6 TOOL_FINISHED maps lines/entries; absent fields stay unset (fallback)", () => {
+    const withCounts = mapSessionEvent(
+      env("TOOL_FINISHED", { id: "g1", name: "workspace_map", status: "success", durationMs: 2, summary: "a/\nb.ts", lines: 50, entries: { files: 36, dirs: 14 } }, { session: "s1" }),
+    );
+    expect(withCounts).toMatchObject({ type: "tool_finished", lines: 50, entries: { files: 36, dirs: 14 } });
+    const plain = mapSessionEvent(env("TOOL_FINISHED", { id: "g2", name: "read_file", status: "success", durationMs: 1, summary: "5 lines" }, { session: "s1" }));
+    expect(plain).not.toHaveProperty("lines");
+    expect(plain).not.toHaveProperty("entries");
+  });
 });
 
 describe("footer context levels (§5.3)", () => {
@@ -266,6 +293,38 @@ describe("scrollback cap (§1.4)", () => {
     expect((s.blocks[0] as { text: string }).text).toBe("w2");
   });
 });
+
+describe("read-lane dedupe across warning and LIMIT_HIT (§4.7, 2-CLI)", () => {
+  const info = (s: ViewState): string[] => s.blocks.filter((b) => b.kind === "info").map((b) => (b as { text: string }).text);
+
+  it("a lane.* LIMIT_HIT adds NO second ℹ line when a read-lane warning already showed this turn", () => {
+    let s = reduce(initialState(5000), { type: "warning", category: "read-lane", message: "Heavy direct reading detected." });
+    s = reduce(s, { type: "limit_hit", key: "lane.readCallsPerTurn", notice: "read-lane nudge (limits.lane.readCallsPerTurn = 8). Raise it in config." });
+    expect(info(s)).toHaveLength(1);
+    expect(info(s)[0]).toBe("Heavy direct reading detected.");
+  });
+
+  it("a read-lane warning adds NO second ℹ line when a lane.* LIMIT_HIT already showed this turn", () => {
+    let s = reduce(initialState(5000), { type: "limit_hit", key: "lane.readCallsPerTurn", notice: "read-lane nudge (limits.lane.readCallsPerTurn = 8)." });
+    s = reduce(s, { type: "warning", category: "read-lane", message: "Heavy direct reading detected." });
+    expect(info(s)).toHaveLength(1);
+    expect(info(s)[0]).toContain("read-lane nudge");
+  });
+
+  it("a non-lane LIMIT_HIT is unaffected by a read-lane warning", () => {
+    let s = reduce(initialState(5000), { type: "warning", category: "read-lane", message: "Heavy direct reading detected." });
+    s = reduce(s, { type: "limit_hit", key: "ingest.fitFraction", notice: "limit reached (limits.ingest.fitFraction)" });
+    expect(info(s)).toHaveLength(2);
+  });
+
+  it("the dedupe resets at the turn boundary (pushUser)", () => {
+    let s = reduce(initialState(5000), { type: "warning", category: "read-lane", message: "Heavy direct reading detected." });
+    s = pushUser(s, "next");
+    s = reduce(s, { type: "limit_hit", key: "lane.readCallsPerTurn", notice: "read-lane nudge again." });
+    expect(info(s).some((t) => t === "read-lane nudge again.")).toBe(true);
+  });
+});
+
 
 describe("additional reducer branches (§4.6, §4.7, §5.3, §6.3)", () => {
   it("model_error sets a legible retry line that a token clears", () => {

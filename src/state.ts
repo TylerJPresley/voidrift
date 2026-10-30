@@ -30,6 +30,12 @@ export interface ToolCall {
   summary: string;
   diff?: string;
   autoApprove?: boolean;
+  /** §14.6 — the core's honest counts from the FULL result (not the capped
+   * summary), used by `summarizeResult` so a big result renders its true count.
+   * Optional: an older core without them falls back to counting the summary. */
+  lines?: number;
+  truncated?: boolean;
+  entries?: { files: number; dirs: number };
 }
 
 /** A committed scrollback block (§4.1). */
@@ -856,6 +862,9 @@ export function reduce(state: ViewState, effect: ViewEffect): ViewState {  switc
         summary: effect.summary,
         ...(effect.diff ? { diff: effect.diff } : {}),
         ...(autoApprove ? { autoApprove: true } : {}),
+        ...(typeof effect.lines === "number" ? { lines: effect.lines } : {}),
+        ...(typeof effect.truncated === "boolean" ? { truncated: effect.truncated } : {}),
+        ...(effect.entries ? { entries: effect.entries } : {}),
       };
       // §4.2/§4.4 — buffer the finished call; no row is drawn while the round
       // runs. When the LAST call of the round finishes (no tool left in flight)
@@ -1138,11 +1147,21 @@ export function reduce(state: ViewState, effect: ViewEffect): ViewState {  switc
     case "limit_hit": {
       // §13.11/§14.6 — one dim `ℹ` line per key per turn, buffered with the turn.
       if (state.noticedLimitKeys.has(effect.key)) return state;
+      // §4.7 (read-lane, 2-CLI defence in depth) — a read-lane event can reach
+      // the CLI as BOTH a `read-lane` session warning and a `lane.*` LIMIT_HIT
+      // for the same turn. The core merges them at source into one line; the CLI
+      // dedups again so a `lane.*` LIMIT_HIT never adds a SECOND `ℹ` line when a
+      // `read-lane` warning already showed this turn, and marks `read-lane` as
+      // noticed so a later warning cannot double it either.
+      const isLane = effect.key.startsWith("lane.");
+      if (isLane && state.noticedCategories.has("read-lane")) return state;
       const noticed = new Set(state.noticedLimitKeys);
       noticed.add(effect.key);
+      const noticedCategories = isLane ? new Set(state.noticedCategories).add("read-lane") : state.noticedCategories;
       return {
         ...state,
         noticedLimitKeys: noticed,
+        noticedCategories,
         blocks: cap([...state.blocks, { kind: "info", glyph: "info", text: effect.notice }], state.scrollbackLines),
       };
     }

@@ -7,10 +7,16 @@
 import { hermeticTmp } from "./test-hermetic.js";
 import { describe, it, expect } from "vitest";
 import { EventEmitter } from "node:events";
+import fs from "node:fs";
 import { main } from "./cli.js";
 import { EXIT } from "./exit-codes.js";
 
 const WS = hermeticTmp("cli-entry");
+
+/** The version from this package's own package.json, read at test time (no
+ * hardcoded literal) so the assertion tracks the real version and proves the
+ * CLI derives it rather than hardcoding (cli-blueprint.md §2.1). */
+const PKG_VERSION = (JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string }).version;
 
 function fakeProc(cwd = WS): NodeJS.Process & { out: () => string; err: () => string } {
   let out = "";
@@ -39,7 +45,10 @@ describe("§2 cli entry", () => {
     const proc = fakeProc();
     const code = await main(["--version"], proc);
     expect(code).toBe(EXIT.COMPLETED);
-    expect(proc.out().trim()).toBe("0.0.0");
+    expect(proc.out().trim()).toBe(PKG_VERSION);
+    // Guards the regression: the version is derived from package.json, never the
+    // old hardcoded 0.0.0 placeholder.
+    expect(proc.out().trim()).not.toBe("0.0.0");
   });
 
   it("an unknown flag prints to stderr and exits 2", async () => {
