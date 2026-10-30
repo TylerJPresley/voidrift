@@ -962,25 +962,25 @@ describe("§13.11 — LIMIT_HIT renders one dim ℹ line per key per turn", () =
 
   it("renders one dim ℹ info line naming the key", () => {
     let s = pushUser(initialState(5000), "hi");
-    s = reduce(s, { type: "limit_hit", key: "memory.projectChars", notice: "project instructions truncated (limits.memory.projectChars = 50). Raise it in config: limits.memory.projectChars" });
+    s = reduce(s, { type: "limit_hit", key: "tools.commandOutputMaxBytes", notice: "command output truncated (limits.tools.commandOutputMaxBytes = 100000). Raise it in config: limits.tools.commandOutputMaxBytes" });
     const b = lastBlock(s);
     expect(b.glyph).toBe("info");
-    expect(b.text).toContain("limits.memory.projectChars");
+    expect(b.text).toContain("limits.tools.commandOutputMaxBytes");
   });
 
   it("shows at most one line per key per turn, re-arms next turn", () => {
     let s = pushUser(initialState(5000), "hi");
     const before = s.blocks.length;
-    s = reduce(s, { type: "limit_hit", key: "memory.projectChars", notice: "first" });
-    s = reduce(s, { type: "limit_hit", key: "memory.projectChars", notice: "second (suppressed)" });
+    s = reduce(s, { type: "limit_hit", key: "tools.commandOutputMaxBytes", notice: "first" });
+    s = reduce(s, { type: "limit_hit", key: "tools.commandOutputMaxBytes", notice: "second (suppressed)" });
     expect(s.blocks.length).toBe(before + 1);
     expect(lastBlock(s).text).toBe("first");
     // A different key this turn still shows once.
-    s = reduce(s, { type: "limit_hit", key: "tools.commandOutputMaxBytes", notice: "other key" });
+    s = reduce(s, { type: "limit_hit", key: "context.excerptLineMaxChars", notice: "other key" });
     expect(lastBlock(s).text).toBe("other key");
     // A new turn re-arms the per-key line.
     s = pushUser(s, "again");
-    s = reduce(s, { type: "limit_hit", key: "memory.projectChars", notice: "next turn" });
+    s = reduce(s, { type: "limit_hit", key: "tools.commandOutputMaxBytes", notice: "next turn" });
     expect(lastBlock(s).text).toBe("next turn");
   });
 });
